@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import { AskJack } from "./components/AskJack";
+import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { Bot, LogOut, Settings, Database } from "lucide-react";
 
 const queryClient = new QueryClient();
@@ -33,9 +34,13 @@ function JackApp() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden text-foreground selection:bg-primary/30">
+    <>
+      {/* First layer: Jack's living knowledge graph, growing with every memory */}
+      <KnowledgeGraph />
+
+      <div className="relative z-10 flex h-screen w-full overflow-hidden text-foreground selection:bg-primary/30">
       {/* Sidebar / Navigation (Mini) */}
-      <div className="w-16 bg-sidebar border-r border-border flex flex-col items-center py-4 z-10 relative">
+      <div className="w-16 bg-sidebar/80 backdrop-blur-md border-r border-border flex flex-col items-center py-4 z-10 relative">
         <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-[0_0_15px_rgba(255,100,0,0.4)] mb-8 cursor-pointer" onClick={() => setSelectedVideoId(null)}>
           <span className="font-black text-xl tracking-tighter">J</span>
         </div>
@@ -77,7 +82,8 @@ function JackApp() {
         initialContext={chatContext}
         onCitationClick={handleCitationClick}
       />
-    </div>
+      </div>
+    </>
   );
 }
 
