@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "DSVDbGaYiwY4xH_DGr6nt"
+uri = "file://JACK_CONSTITUTION.md"
+type = "text"
+title = "Jack Constitution"
