@@ -22,4 +22,3 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
-SUPABASE_DB_URL = "postgresql://postgres:[eastvanG87.]@db.mdqdswhzkocglbnxvxth.supabase.co:5432/postgres"
