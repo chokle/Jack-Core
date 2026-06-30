@@ -1,0 +1,1 @@
+- [Idempotent background jobs](idempotent-background-jobs.md) — transcribe/analyze must acquire their slot with one conditional UPDATE (not read-then-write), or concurrent requests double-spend on OpenAI.

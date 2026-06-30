@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { openai } from "../lib/openai.js";
+import { createEmbedding } from "../lib/openai.js";
 import { SemanticSearchBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -12,11 +12,7 @@ router.post("/search", async (req, res) => {
 
     const { query, trade, limit = 10 } = parsed.data;
 
-    const embeddingRes = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: query,
-    });
-    const embedding = embeddingRes.data[0]?.embedding;
+    const embedding = await createEmbedding(query);
 
     const { data: segments, error } = await supabase.rpc("match_transcript_segments", {
       query_embedding: embedding,

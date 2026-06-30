@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { openai } from "../lib/openai.js";
+import { openai, createEmbedding, MODELS } from "../lib/openai.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -206,7 +206,42 @@ router.post("/videos/:id/transcribe", async (req, res) => {
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
     const videoId = parsed.data.id;
 
-    await supabase.from("videos").update({ status: "transcribing" }).eq("id", videoId);
+    // Atomically acquire the transcription slot. This UPDATE only matches a row
+    // with no transcript that isn't already transcribing, so concurrent
+    // requests can never launch duplicate Whisper jobs (Postgres row-locks the
+    // UPDATE and re-checks the WHERE clause for the loser).
+    const { data: acquired } = await supabase
+      .from("videos")
+      .update({ status: "transcribing" })
+      .eq("id", videoId)
+      .is("transcript", null)
+      .neq("status", "transcribing")
+      .select("id")
+      .maybeSingle();
+
+    if (!acquired) {
+      const { data: existing } = await supabase
+        .from("videos")
+        .select("status, transcript")
+        .eq("id", videoId)
+        .maybeSingle();
+
+      if (!existing) return res.status(404).json({ error: "Video not found" });
+      if (existing.transcript) {
+        return res.status(200).json({
+          jobId: `cached-${videoId}`,
+          status: "ready",
+          videoId,
+          message: "Transcript already cached — skipped re-transcription",
+        });
+      }
+      return res.status(202).json({
+        jobId: `transcribe-${videoId}`,
+        status: "processing",
+        videoId,
+        message: "Transcription already in progress",
+      });
+    }
 
     const jobId = `transcribe-${videoId}-${Date.now()}`;
 
@@ -229,7 +264,7 @@ router.post("/videos/:id/transcribe", async (req, res) => {
 
         const transcription = await openai.audio.transcriptions.create({
           file,
-          model: "whisper-1",
+          model: MODELS.transcription,
           response_format: "verbose_json",
           timestamp_granularities: ["segment"],
         });
@@ -249,11 +284,10 @@ router.post("/videos/:id/transcribe", async (req, res) => {
 
         const fullTranscript = transcription.text;
 
-        const embeddingRes = await openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: fullTranscript.slice(0, 8000),
+        const embeddingVec = await createEmbedding(fullTranscript.slice(0, 8000), {
+          cache: false,
         });
-        const embedding = embeddingRes.data[0]?.embedding ?? null;
+        const embedding = embeddingVec.length > 0 ? embeddingVec : null;
 
         await supabase
           .from("videos")
@@ -282,7 +316,45 @@ router.post("/videos/:id/analyze", async (req, res) => {
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
     const videoId = parsed.data.id;
 
-    await supabase.from("videos").update({ status: "analyzing" }).eq("id", videoId);
+    // Atomically acquire the analysis slot. This UPDATE only matches a row that
+    // has a transcript, no cached analysis, and isn't already analyzing, so
+    // concurrent requests can never launch duplicate GPT analysis jobs.
+    const { data: acquired } = await supabase
+      .from("videos")
+      .update({ status: "analyzing" })
+      .eq("id", videoId)
+      .not("transcript", "is", null)
+      .is("analysis", null)
+      .neq("status", "analyzing")
+      .select("id")
+      .maybeSingle();
+
+    if (!acquired) {
+      const { data: existing } = await supabase
+        .from("videos")
+        .select("status, analysis, transcript")
+        .eq("id", videoId)
+        .maybeSingle();
+
+      if (!existing) return res.status(404).json({ error: "Video not found" });
+      if (existing.analysis) {
+        return res.status(200).json({
+          jobId: `cached-${videoId}`,
+          status: "ready",
+          videoId,
+          message: "Analysis already cached — skipped re-analysis",
+        });
+      }
+      if (!existing.transcript) {
+        return res.status(400).json({ error: "Video must be transcribed before analysis" });
+      }
+      return res.status(202).json({
+        jobId: `analyze-${videoId}`,
+        status: "processing",
+        videoId,
+        message: "Analysis already in progress",
+      });
+    }
 
     const jobId = `analyze-${videoId}-${Date.now()}`;
 
@@ -306,7 +378,7 @@ router.post("/videos/:id/analyze", async (req, res) => {
           .join("\n");
 
         const completion = await openai.chat.completions.create({
-          model: "gpt-4o",
+          model: MODELS.analysis,
           messages: [
             {
               role: "system",

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { openai } from "../lib/openai.js";
+import { openai, createEmbedding, MODELS } from "../lib/openai.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 
@@ -14,11 +14,7 @@ router.post("/chat", async (req, res) => {
     const { message, sessionId } = parsed.data;
     const session = sessionId ?? randomUUID();
 
-    const embeddingRes = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: message,
-    });
-    const embedding = embeddingRes.data[0]?.embedding;
+    const embedding = await createEmbedding(message);
 
     const { data: segments } = await supabase.rpc("match_transcript_segments", {
       query_embedding: embedding,
@@ -73,7 +69,7 @@ ${usedInternalKnowledge ? `Relevant content from the internal knowledge library:
     ];
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: MODELS.chat,
       messages,
       max_tokens: 1024,
     });
