@@ -16,12 +16,19 @@ router.post("/chat", async (req, res) => {
 
     const embedding = await createEmbedding(message);
 
-    const { data: segments } = await supabase.rpc("match_transcript_segments", {
+    const { data: segments, error: rpcError } = await supabase.rpc("match_transcript_segments", {
       query_embedding: embedding,
       match_threshold: 0.5,
       match_count: 8,
       filter_trade: null,
     });
+    // Don't silently swallow a vector-search failure as "no internal knowledge" —
+    // that would mask a broken RAG path (missing pgvector fn, schema drift) and
+    // strip every citation. Log loudly; the request continues with general
+    // knowledge so the user still gets an answer.
+    if (rpcError) {
+      req.log.error({ err: rpcError }, "match_transcript_segments RPC failed");
+    }
 
     const citations: Array<{
       videoId: string;

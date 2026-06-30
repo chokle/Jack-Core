@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { openai, createEmbedding, MODELS } from "../lib/openai.js";
+import { openai, createEmbedding, createEmbeddings, MODELS } from "../lib/openai.js";
 import { logger } from "../lib/logger.js";
 import { transcribeFromUrl } from "../lib/transcription.js";
 import {
@@ -18,6 +18,96 @@ import {
 } from "@workspace/api-zod";
 
 const router = Router();
+
+/**
+ * Run GPT analysis for a transcribed video: summarize it, extract key points,
+ * and map it to Red Seal competency codes. Shared by the POST /analyze route
+ * and the transcription pipeline (which chains analysis automatically).
+ *
+ * Analysis is a value-add on top of an already-usable transcript, so a failure
+ * here never downgrades a successfully transcribed video to "error".
+ */
+async function runAnalysis(videoId: string): Promise<void> {
+  try {
+    const { data: video } = await supabase
+      .from("videos")
+      .select("transcript, title, trade")
+      .eq("id", videoId)
+      .single();
+
+    if (!video?.transcript) {
+      await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
+      return;
+    }
+
+    const { data: competencies } = await supabase
+      .from("competencies")
+      .select("code, name, trade");
+
+    const competencyContext = (competencies ?? [])
+      .map((c: Record<string, string>) => `${c["code"]}: ${c["name"]} (${c["trade"]})`)
+      .join("\n");
+
+    const completion = await openai.chat.completions.create({
+      model: MODELS.analysis,
+      messages: [
+        {
+          role: "system",
+          content: `You are Jack — an AI assistant specialized in skilled trades training and Red Seal certification. Analyze training video transcripts and map them to Red Seal competencies.\n\nAvailable Red Seal competencies:\n${competencyContext}`,
+        },
+        {
+          role: "user",
+          content: `Analyze this training video transcript for "${video.title}" (trade: ${video.trade ?? "general"}).\n\nTranscript:\n${video.transcript.slice(0, 6000)}\n\nRespond with a JSON object:\n{\n  "analysis": "2-3 paragraph summary of what this video teaches",\n  "keyPoints": ["point 1", "point 2", "point 3", "point 4", "point 5"],\n  "competencyCodes": ["CODE1", "CODE2"]\n}`,
+        },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
+      analysis?: unknown;
+      keyPoints?: unknown;
+      competencyCodes?: unknown;
+    };
+
+    // Normalize GPT output before writing — a malformed keyPoints/competencyCodes
+    // value would otherwise fail the text[] column write and (since Supabase
+    // returns the error instead of throwing) silently leave the row "analyzing".
+    const analysisText = typeof result.analysis === "string" ? result.analysis : null;
+    const keyPoints = Array.isArray(result.keyPoints)
+      ? result.keyPoints.filter((p): p is string => typeof p === "string")
+      : [];
+    const competencyCodes = Array.isArray(result.competencyCodes)
+      ? result.competencyCodes.filter((c): c is string => typeof c === "string")
+      : [];
+
+    const { error: readyErr } = await supabase
+      .from("videos")
+      .update({
+        status: "ready",
+        analysis: analysisText,
+        key_points: keyPoints,
+        competency_codes: competencyCodes,
+      })
+      .eq("id", videoId);
+    // Surface a failed final write into the catch so the video still reaches a
+    // terminal state instead of being stuck in "analyzing" forever.
+    if (readyErr) throw readyErr;
+  } catch (bgErr) {
+    logger.error({ err: bgErr, videoId }, "Analysis failed");
+    // Keep a successfully-transcribed video usable even if analysis failed —
+    // only the optional competency mapping/summary is missing. This is a checked
+    // write so we can fall back to "error" if even this terminal update fails.
+    const { error: fallbackErr } = await supabase
+      .from("videos")
+      .update({ status: "ready" })
+      .eq("id", videoId)
+      .not("transcript", "is", null);
+    if (fallbackErr) {
+      logger.error({ err: fallbackErr, videoId }, "Analysis fallback status write failed");
+      await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
+    }
+  }
+}
 
 router.get("/videos", async (req, res) => {
   try {
@@ -271,16 +361,28 @@ router.post("/videos/:id/transcribe", async (req, res) => {
           start_time: s.start,
           end_time: s.end,
           text: s.text,
-          confidence: null,
+          confidence: null as number | null,
+          embedding: null as string | null,
         }));
+
+        // Embed every segment so semantic search and Ask Jack RAG can match on
+        // specific moments — this is what powers the timestamp citations. The
+        // embeddings call is batched to keep cost and round-trips low.
+        if (segments.length > 0) {
+          const vectors = await createEmbeddings(segments.map((s) => s.text || " "));
+          segments.forEach((seg, i) => {
+            const vec = vectors[i];
+            seg.embedding = vec && vec.length > 0 ? JSON.stringify(vec) : null;
+          });
+        }
 
         // Clear any prior segments first so a retry that yields fewer (or zero)
         // segments never leaves stale rows behind.
         await supabase.from("transcript_segments").delete().eq("video_id", videoId);
         if (segments.length > 0) {
-          // Insert in batches so long videos (thousands of segments) stay well
-          // within Supabase's request size limits.
-          const BATCH = 500;
+          // Insert in modest batches — each row now carries a 1536-dim embedding,
+          // so keep request bodies well within Supabase's limits.
+          const BATCH = 100;
           for (let i = 0; i < segments.length; i += BATCH) {
             const { error: insertErr } = await supabase
               .from("transcript_segments")
@@ -289,19 +391,48 @@ router.post("/videos/:id/transcribe", async (req, res) => {
           }
         }
 
-        const embeddingVec = await createEmbedding(fullTranscript.slice(0, 8000), {
-          cache: false,
-        });
+        const trimmed = fullTranscript.trim();
+        const embeddingVec =
+          trimmed.length > 0
+            ? await createEmbedding(trimmed.slice(0, 8000), { cache: false })
+            : [];
         const embedding = embeddingVec.length > 0 ? embeddingVec : null;
 
+        // Persist the transcript + whole-video embedding. Status stays
+        // "transcribing" here so the chained analysis below carries the video
+        // forward in a single pass: transcribing -> analyzing -> ready.
         await supabase
           .from("videos")
           .update({
-            status: "ready",
             transcript: fullTranscript,
             embedding: embedding ? JSON.stringify(embedding) : null,
           })
           .eq("id", videoId);
+
+        // Auto-chain analysis so one upload yields a transcript AND competency
+        // tags + summary with no extra clicks (the 5-minute demo flow). Reuse
+        // the same idempotent slot guard the /analyze route uses.
+        const { data: analyzeSlot } = await supabase
+          .from("videos")
+          .update({ status: "analyzing" })
+          .eq("id", videoId)
+          .not("transcript", "is", null)
+          .is("analysis", null)
+          .neq("status", "analyzing")
+          .select("id")
+          .maybeSingle();
+
+        if (analyzeSlot) {
+          await runAnalysis(videoId);
+        } else {
+          // Already analyzed (or being analyzed elsewhere) — just make sure the
+          // video reaches a ready state without overriding an in-flight analyze.
+          await supabase
+            .from("videos")
+            .update({ status: "ready" })
+            .eq("id", videoId)
+            .neq("status", "analyzing");
+        }
       } catch (bgErr) {
         logger.error({ err: bgErr, videoId }, "Transcription failed");
         await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
@@ -363,59 +494,8 @@ router.post("/videos/:id/analyze", async (req, res) => {
 
     const jobId = `analyze-${videoId}-${Date.now()}`;
 
-    setImmediate(async () => {
-      try {
-        const { data: video } = await supabase
-          .from("videos")
-          .select("transcript, title, trade")
-          .eq("id", videoId)
-          .single();
-
-        if (!video?.transcript) {
-          await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
-          return;
-        }
-
-        const { data: competencies } = await supabase.from("competencies").select("code, name, trade");
-
-        const competencyContext = (competencies ?? [])
-          .map((c: Record<string, string>) => `${c["code"]}: ${c["name"]} (${c["trade"]})`)
-          .join("\n");
-
-        const completion = await openai.chat.completions.create({
-          model: MODELS.analysis,
-          messages: [
-            {
-              role: "system",
-              content: `You are Jack — an AI assistant specialized in skilled trades training and Red Seal certification. Analyze training video transcripts and map them to Red Seal competencies.\n\nAvailable Red Seal competencies:\n${competencyContext}`,
-            },
-            {
-              role: "user",
-              content: `Analyze this training video transcript for "${video.title}" (trade: ${video.trade ?? "general"}).\n\nTranscript:\n${video.transcript.slice(0, 6000)}\n\nRespond with a JSON object:\n{\n  "analysis": "2-3 paragraph summary of what this video teaches",\n  "keyPoints": ["point 1", "point 2", "point 3", "point 4", "point 5"],\n  "competencyCodes": ["CODE1", "CODE2"]\n}`,
-            },
-          ],
-          response_format: { type: "json_object" },
-        });
-
-        const result = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as {
-          analysis?: string;
-          keyPoints?: string[];
-          competencyCodes?: string[];
-        };
-
-        await supabase
-          .from("videos")
-          .update({
-            status: "ready",
-            analysis: result.analysis ?? null,
-            key_points: result.keyPoints ?? [],
-            competency_codes: result.competencyCodes ?? [],
-          })
-          .eq("id", videoId);
-      } catch (bgErr) {
-        console.error("Analysis failed:", bgErr);
-        await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
-      }
+    setImmediate(() => {
+      void runAnalysis(videoId);
     });
 
     return res.status(202).json({ jobId, status: "processing", videoId, message: "Analysis started" });

@@ -79,3 +79,29 @@ export async function createEmbedding(
     inFlight.delete(key);
   }
 }
+
+/**
+ * Create embeddings for many inputs in one pass. The embeddings API accepts an
+ * array input, so we batch (default 96 per request) to minimize round-trips and
+ * cost when indexing all of a transcript's segments. Returns one vector per
+ * input, in the same order. Not cached — segment text is one-time index input.
+ */
+export async function createEmbeddings(
+  inputs: string[],
+  opts: { model?: string; batchSize?: number } = {}
+): Promise<number[][]> {
+  const model = opts.model ?? MODELS.embedding;
+  const batchSize = opts.batchSize ?? 96;
+  const out: number[][] = [];
+
+  for (let i = 0; i < inputs.length; i += batchSize) {
+    const batch = inputs.slice(i, i + batchSize);
+    const res = await openai.embeddings.create({ model, input: batch });
+    // The API may return items out of order — sort by `index` to realign them
+    // with the inputs before appending.
+    const ordered = [...res.data].sort((a, b) => a.index - b.index);
+    for (const d of ordered) out.push(d.embedding ?? []);
+  }
+
+  return out;
+}

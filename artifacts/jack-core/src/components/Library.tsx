@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Search, Filter, Upload, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useListVideos, useGetVideoStats, useGetRecentVideos, useListCompetencies } from "@workspace/api-client-react";
+import { useListVideos, useGetVideoStats, useGetRecentVideos, useListCompetencies, getListVideosQueryKey } from "@workspace/api-client-react";
 import { VideoCard } from "./VideoCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
@@ -17,11 +17,25 @@ export function Library({ onSelectVideo }: LibraryProps) {
   const [selectedTrade, setSelectedTrade] = useState<string | undefined>();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
+  // Poll the list while any video is still being processed so cards advance
+  // to "ready" on their own (no manual refresh during the demo flow).
+  const { data: videoList, isLoading } = useListVideos(
+    { trade: selectedTrade },
+    {
+      query: {
+        queryKey: getListVideosQueryKey({ trade: selectedTrade }),
+        refetchInterval: (query) => {
+          const videos = (query.state.data as { videos?: Array<{ status?: string }> } | undefined)?.videos ?? [];
+          const processing = videos.some(
+            (v) => v.status === "pending" || v.status === "transcribing" || v.status === "analyzing",
+          );
+          return processing ? 4000 : false;
+        },
+      },
+    },
+  );
   const { data: stats } = useGetVideoStats();
   const { data: recentVideos } = useGetRecentVideos();
-  const { data: videoList, isLoading } = useListVideos({
-    trade: selectedTrade,
-  });
 
   return (
     <div className="flex-1 overflow-y-auto pb-24">

@@ -13,15 +13,23 @@ function JackApp() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
+  // A monotonically-increasing token so clicking the *same* citation twice still
+  // re-triggers a seek; `time` is the target position in seconds.
+  const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
 
   const handleOpenChat = (context?: string) => {
     setChatContext(context);
     setIsChatOpen(true);
   };
 
+  const handleSelectVideo = (videoId: string) => {
+    setSeek(undefined);
+    setSelectedVideoId(videoId);
+  };
+
   const handleCitationClick = (videoId: string, startTime: number) => {
     setSelectedVideoId(videoId);
-    // In a full implementation, we'd also seek the video to startTime
+    setSeek({ time: startTime, token: Date.now() });
   };
 
   return (
@@ -55,9 +63,10 @@ function JackApp() {
             videoId={selectedVideoId} 
             onBack={() => setSelectedVideoId(null)} 
             onOpenChat={handleOpenChat}
+            seek={seek}
           />
         ) : (
-          <Library onSelectVideo={setSelectedVideoId} />
+          <Library onSelectVideo={handleSelectVideo} />
         )}
       </main>
 

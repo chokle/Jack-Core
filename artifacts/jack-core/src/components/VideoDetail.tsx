@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,19 +11,58 @@ interface VideoDetailProps {
   videoId: string;
   onBack: () => void;
   onOpenChat: (context?: string) => void;
+  seek?: { time: number; token: number };
 }
 
-export function VideoDetail({ videoId, onBack, onOpenChat }: VideoDetailProps) {
+export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailProps) {
   const [activeTab, setActiveTab] = useState<"transcript" | "analysis">("analysis");
-  
-  // @ts-ignore - assuming getGetVideoQueryKey exists
-  const { data: video, isLoading } = useGetVideo(videoId, { query: { enabled: !!videoId, queryKey: ['video', videoId] } });
-  
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const { data: video, isLoading } = useGetVideo(videoId, {
+    query: {
+      enabled: !!videoId,
+      queryKey: ['video', videoId],
+      // Poll while the pipeline is running so the UI advances
+      // pending -> transcribing -> analyzing -> ready without a manual refresh.
+      refetchInterval: (query) => {
+        const status = (query.state.data as { status?: string } | undefined)?.status;
+        return status === "pending" || status === "transcribing" || status === "analyzing"
+          ? 4000
+          : false;
+      },
+    },
+  });
+
   // @ts-ignore
   const { data: relatedVideos } = useFetchRelatedVideos?.(videoId, { query: { enabled: !!videoId, queryKey: ['related', videoId] } }) ?? { data: null };
 
   const transcribeMutation = useTranscribeVideo();
   const analyzeMutation = useAnalyzeVideo();
+
+  const seekVideo = (time: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.currentTime = time;
+    void el.play().catch(() => {});
+  };
+
+  // Jump the player to a cited timestamp. Keyed on the seek token so clicking
+  // the same citation again still re-seeks; waits for metadata if needed.
+  useEffect(() => {
+    if (!seek || !video?.videoUrl) return;
+    const el = videoRef.current;
+    if (!el) return;
+    const apply = () => {
+      el.currentTime = seek.time;
+      void el.play().catch(() => {});
+    };
+    if (el.readyState >= 1) {
+      apply();
+      return;
+    }
+    el.addEventListener("loadedmetadata", apply, { once: true });
+    return () => el.removeEventListener("loadedmetadata", apply);
+  }, [seek?.token, video?.videoUrl]);
 
   if (isLoading) {
     return (
@@ -79,7 +118,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat }: VideoDetailProps) {
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className="aspect-video bg-black rounded-xl overflow-hidden relative border border-border">
             {video.videoUrl ? (
-              <video src={video.videoUrl} controls className="w-full h-full object-contain" />
+              <video ref={videoRef} src={video.videoUrl} controls className="w-full h-full object-contain" />
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
                 <Play className="h-16 w-16 mb-4 opacity-20" />
@@ -156,7 +195,11 @@ export function VideoDetail({ videoId, onBack, onOpenChat }: VideoDetailProps) {
                 <div className="space-y-4">
                   {video.segments && video.segments.length > 0 ? (
                     video.segments.map((segment, i) => (
-                      <div key={i} className="group flex gap-3 hover:bg-muted/50 p-2 -mx-2 rounded-lg cursor-pointer transition-colors">
+                      <div
+                        key={i}
+                        onClick={() => seekVideo(segment.startTime)}
+                        className="group flex gap-3 hover:bg-muted/50 p-2 -mx-2 rounded-lg cursor-pointer transition-colors"
+                      >
                         <div className="font-mono text-xs text-primary pt-0.5">
                           {Math.floor(segment.startTime / 60)}:{(segment.startTime % 60).toString().padStart(2, '0')}
                         </div>
