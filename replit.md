@@ -6,6 +6,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
 - `pnpm --filter @workspace/jack-core run dev` — run the frontend (port 22659)
+- `pnpm --filter @workspace/scripts run setup:supabase` — apply the Supabase schema (tables, functions, seed data, storage bucket)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 
@@ -50,7 +51,16 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 
 ## Required Setup — Supabase Schema
 
-**CRITICAL: Run this SQL in Supabase Dashboard → SQL Editor before the app will work:**
+The schema (tables, pgvector functions, seed data, and the `jack-videos` storage bucket) lives in one canonical file: `scripts/src/supabase-schema.sql`.
+
+**Recommended — apply it automatically:**
+
+1. Add a `SUPABASE_DB_URL` secret: the Supabase Postgres connection string from Dashboard → Project Settings → Database → Connection string. Use the **Session pooler** (or direct) URI, **not** the transaction pooler — DDL needs a session connection. Remember to fill in your database password.
+2. Run `pnpm --filter @workspace/scripts run setup:supabase`.
+
+The script is idempotent, so it is safe to re-run. If `SUPABASE_DB_URL` is not set (or the connection fails), the script prints the SQL with instructions instead of crashing.
+
+**Manual fallback — run this SQL in Supabase Dashboard → SQL Editor:**
 
 ```sql
 -- Enable pgvector
@@ -179,13 +189,19 @@ INSERT INTO competencies (code, name, trade) VALUES
   ('HV-1','Occupational Skills','HVAC/R Technician'),('HV-2','Refrigeration Systems','HVAC/R Technician'),
   ('HV-3','Air Conditioning Systems','HVAC/R Technician'),('HV-4','Heating Systems','HVAC/R Technician')
 ON CONFLICT (code) DO NOTHING;
+
+-- Create the public storage bucket for video uploads
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('jack-videos', 'jack-videos', true)
+ON CONFLICT (id) DO NOTHING;
 ```
 
-Also create a Storage bucket named **`jack-videos`** (set to Public) in Supabase Dashboard → Storage.
+The SQL above also creates the public **`jack-videos`** storage bucket. (If you prefer, you can instead create it manually in Supabase Dashboard → Storage and set it to Public.)
 
 ## Gotchas
 
-- Run the Supabase SQL schema before the app will work — tables don't exist until you do
+- Apply the Supabase schema before the app will work — run `pnpm --filter @workspace/scripts run setup:supabase` (with `SUPABASE_DB_URL` set) or paste the SQL manually; tables don't exist until you do
+- The Supabase JS/REST client cannot run DDL — schema setup needs a direct Postgres connection (`SUPABASE_DB_URL`). `DATABASE_URL`/`PG*` point at Replit's built-in Postgres, not Supabase
 - After any OpenAPI spec change, run `pnpm --filter @workspace/api-spec run codegen` before starting the server
 - Transcription/analysis are async background jobs — poll the video `status` field (pending → transcribing → analyzing → ready)
 - The `embedding` column stores JSON-serialized float arrays (vector(1536)) — Supabase's pgvector extension must be enabled first
