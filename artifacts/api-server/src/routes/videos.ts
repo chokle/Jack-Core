@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { openai, createEmbedding, MODELS } from "../lib/openai.js";
+import { logger } from "../lib/logger.js";
+import { transcribeFromUrl } from "../lib/transcription.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -258,31 +260,34 @@ router.post("/videos/:id/transcribe", async (req, res) => {
           return;
         }
 
-        const response = await fetch(video.video_url);
-        const buffer = await response.arrayBuffer();
-        const file = new File([buffer], "audio.mp4", { type: "audio/mp4" });
+        // Extract compact speech audio and transcribe (auto-chunking large
+        // videos under Whisper's 25 MB upload limit, with continuous timestamps).
+        const { text: fullTranscript, segments: rawSegments } = await transcribeFromUrl(
+          video.video_url,
+        );
 
-        const transcription = await openai.audio.transcriptions.create({
-          file,
-          model: MODELS.transcription,
-          response_format: "verbose_json",
-          timestamp_granularities: ["segment"],
-        });
-
-        const segments = (transcription.segments ?? []).map((s) => ({
+        const segments = rawSegments.map((s) => ({
           video_id: videoId,
           start_time: s.start,
           end_time: s.end,
-          text: s.text.trim(),
+          text: s.text,
           confidence: null,
         }));
 
+        // Clear any prior segments first so a retry that yields fewer (or zero)
+        // segments never leaves stale rows behind.
+        await supabase.from("transcript_segments").delete().eq("video_id", videoId);
         if (segments.length > 0) {
-          await supabase.from("transcript_segments").delete().eq("video_id", videoId);
-          await supabase.from("transcript_segments").insert(segments);
+          // Insert in batches so long videos (thousands of segments) stay well
+          // within Supabase's request size limits.
+          const BATCH = 500;
+          for (let i = 0; i < segments.length; i += BATCH) {
+            const { error: insertErr } = await supabase
+              .from("transcript_segments")
+              .insert(segments.slice(i, i + BATCH));
+            if (insertErr) throw insertErr;
+          }
         }
-
-        const fullTranscript = transcription.text;
 
         const embeddingVec = await createEmbedding(fullTranscript.slice(0, 8000), {
           cache: false,
@@ -298,7 +303,7 @@ router.post("/videos/:id/transcribe", async (req, res) => {
           })
           .eq("id", videoId);
       } catch (bgErr) {
-        console.error("Transcription failed:", bgErr);
+        logger.error({ err: bgErr, videoId }, "Transcription failed");
         await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
       }
     });

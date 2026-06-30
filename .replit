@@ -22,3 +22,6 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
+
+[nix]
+channel = "stable-25_05"
