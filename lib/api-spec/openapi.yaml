@@ -3,20 +3,28 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Jack — AI Trade Intelligence Engine API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: videos
+    description: Video library operations
+  - name: search
+    description: Semantic search operations
+  - name: chat
+    description: Ask Jack conversational AI
+  - name: competencies
+    description: Red Seal competency mapping
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,317 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /videos:
+    get:
+      operationId: listVideos
+      tags: [videos]
+      summary: List all videos in the knowledge library
+      parameters:
+        - name: trade
+          in: query
+          schema:
+            type: string
+          description: Filter by trade category
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, transcribing, analyzing, ready, error]
+          description: Filter by processing status
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of videos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoList"
+    post:
+      operationId: createVideo
+      tags: [videos]
+      summary: Register a new video upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+
+  /videos/stats:
+    get:
+      operationId: getVideoStats
+      tags: [videos]
+      summary: Get library statistics (total videos, by trade, by status)
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoStats"
+
+  /videos/recent:
+    get:
+      operationId: getRecentVideos
+      tags: [videos]
+      summary: Get recently added or analyzed videos
+      responses:
+        "200":
+          description: Recent videos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Video"
+
+  /videos/{id}:
+    get:
+      operationId: getVideo
+      tags: [videos]
+      summary: Get a single video with its transcript and analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Video detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoDetail"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateVideo
+      tags: [videos]
+      summary: Update video metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoUpdate"
+      responses:
+        "200":
+          description: Updated video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+    delete:
+      operationId: deleteVideo
+      tags: [videos]
+      summary: Delete a video and all its data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /videos/{id}/transcribe:
+    post:
+      operationId: transcribeVideo
+      tags: [videos]
+      summary: Trigger AI transcription via Whisper
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Transcription queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+
+  /videos/{id}/analyze:
+    post:
+      operationId: analyzeVideo
+      tags: [videos]
+      summary: Trigger GPT-4 analysis and Red Seal competency mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Analysis queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+
+  /videos/{id}/related:
+    get:
+      operationId: fetchRelatedVideos
+      tags: [videos]
+      summary: Get semantically related videos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Related videos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Video"
+
+  /videos/{id}/upload-url:
+    post:
+      operationId: getUploadUrl
+      tags: [videos]
+      summary: Get a signed Supabase Storage upload URL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Signed upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+
+  /search:
+    post:
+      operationId: semanticSearch
+      tags: [search]
+      summary: Semantic search across the knowledge library using RAG
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchInput"
+      responses:
+        "200":
+          description: Search results with timestamp citations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+
+  /chat:
+    post:
+      operationId: askJack
+      tags: [chat]
+      summary: Ask Jack a question — searches internal library first, then answers with citations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatInput"
+      responses:
+        "200":
+          description: Jack's answer with citations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+
+  /chat/history:
+    get:
+      operationId: getChatHistory
+      tags: [chat]
+      summary: Get recent chat history
+      responses:
+        "200":
+          description: Chat history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+
+  /competencies:
+    get:
+      operationId: listCompetencies
+      tags: [competencies]
+      summary: List all Red Seal competency categories
+      responses:
+        "200":
+          description: Competencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Competency"
+
+  /competencies/{code}/videos:
+    get:
+      operationId: getVideosByCompetency
+      tags: [competencies]
+      summary: Get all videos mapped to a Red Seal competency code
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Videos for competency
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Video"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +350,316 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    Video:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        trade:
+          type: ["string", "null"]
+        thumbnailUrl:
+          type: ["string", "null"]
+        videoUrl:
+          type: ["string", "null"]
+        duration:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [pending, transcribing, analyzing, ready, error]
+        competencyCodes:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+
+    VideoDetail:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        trade:
+          type: ["string", "null"]
+        thumbnailUrl:
+          type: ["string", "null"]
+        videoUrl:
+          type: ["string", "null"]
+        duration:
+          type: ["number", "null"]
+        status:
+          type: string
+          enum: [pending, transcribing, analyzing, ready, error]
+        competencyCodes:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        transcript:
+          type: ["string", "null"]
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+        analysis:
+          type: ["string", "null"]
+        keyPoints:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+
+    VideoList:
+      type: object
+      required: [videos, total]
+      properties:
+        videos:
+          type: array
+          items:
+            $ref: "#/components/schemas/Video"
+        total:
+          type: integer
+
+    VideoInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        trade:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    VideoUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        trade:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [pending, transcribing, analyzing, ready, error]
+
+    VideoStats:
+      type: object
+      required: [total, byStatus, byTrade]
+      properties:
+        total:
+          type: integer
+        byStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        byTrade:
+          type: object
+          additionalProperties:
+            type: integer
+        totalDuration:
+          type: ["number", "null"]
+
+    TranscriptSegment:
+      type: object
+      required: [id, startTime, endTime, text]
+      properties:
+        id:
+          type: string
+        startTime:
+          type: number
+        endTime:
+          type: number
+        text:
+          type: string
+        confidence:
+          type: ["number", "null"]
+
+    JobStatus:
+      type: object
+      required: [jobId, status, videoId]
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+        videoId:
+          type: string
+        message:
+          type: ["string", "null"]
+
+    SearchInput:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+        trade:
+          type: ["string", "null"]
+        limit:
+          type: integer
+          default: 10
+
+    SearchResults:
+      type: object
+      required: [results, query]
+      properties:
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+
+    SearchResult:
+      type: object
+      required: [videoId, videoTitle, text, startTime, endTime, score]
+      properties:
+        videoId:
+          type: string
+        videoTitle:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        text:
+          type: string
+        startTime:
+          type: number
+        endTime:
+          type: number
+        score:
+          type: number
+        trade:
+          type: ["string", "null"]
+
+    ChatInput:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        sessionId:
+          type: ["string", "null"]
+
+    ChatResponse:
+      type: object
+      required: [answer, citations, sessionId]
+      properties:
+        answer:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
+        sessionId:
+          type: string
+        usedInternalKnowledge:
+          type: boolean
+
+    Citation:
+      type: object
+      required: [videoId, videoTitle, startTime, endTime, text]
+      properties:
+        videoId:
+          type: string
+        videoTitle:
+          type: string
+        startTime:
+          type: number
+        endTime:
+          type: number
+        text:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+
+    ChatMessage:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
+        createdAt:
+          type: string
+
+    Competency:
+      type: object
+      required: [code, name, trade]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        trade:
+          type: string
+        description:
+          type: ["string", "null"]
+        videoCount:
+          type: integer
+
+    UploadUrlRequest:
+      type: object
+      required: [filename, contentType]
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadUrl, path]
+      properties:
+        uploadUrl:
+          type: string
+        path:
+          type: string
+        token:
+          type: ["string", "null"]

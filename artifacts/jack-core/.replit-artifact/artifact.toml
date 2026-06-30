@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Jack — AI Trade Intelligence Engine"
+version = "1.0.0"
+id = "artifacts/jack-core"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22659
+
+[services.development]
+run = "pnpm --filter @workspace/jack-core run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/jack-core", "run", "build" ]
+publicDir = "artifacts/jack-core/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22659"
+BASE_PATH = "/"
