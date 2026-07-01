@@ -25,8 +25,8 @@ Production security review should focus on `artifacts/api-server/` and the SPA i
 ## Scan Anchors
 
 - Production API entry points: `artifacts/api-server/src/app.ts`, `artifacts/api-server/src/routes/*.ts`
-- Highest-risk server code: `artifacts/api-server/src/routes/videos.ts`, `artifacts/api-server/src/routes/chat.ts`, `artifacts/api-server/src/lib/supabase.ts`, `artifacts/api-server/src/lib/transcription.ts`
-- Highest-risk client code: `artifacts/jack-core/src/components/AskJack.tsx`, `artifacts/jack-core/src/components/VideoDetail.tsx`, upload/chat flows in `artifacts/jack-core/src/components/UploadModal.tsx`
+- Highest-risk server code: `artifacts/api-server/src/routes/videos.ts`, `artifacts/api-server/src/routes/chat.ts`, `artifacts/api-server/src/routes/search.ts`, `artifacts/api-server/src/lib/supabase.ts`, `artifacts/api-server/src/lib/transcription.ts`
+- Highest-risk client code: `artifacts/jack-core/src/components/AskJack.tsx`, `artifacts/jack-core/src/components/VideoDetail.tsx`, upload/chat flows in `artifacts/jack-core/src/components/UploadModal.tsx`, and any `dangerouslySetInnerHTML` sink that renders server- or model-derived content
 - Public surfaces: all `/api/*` routes are currently public; there is no server-enforced authenticated/admin surface
 - Dev-only areas to usually skip: `artifacts/mockup-sandbox/`, `scripts/`
 
