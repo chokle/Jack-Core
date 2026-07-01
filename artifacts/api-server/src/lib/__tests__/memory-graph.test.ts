@@ -20,6 +20,7 @@ import {
   rebuildGraph,
   knowledgeNodeId,
   setNodeVerification,
+  GRAPH_CORE_ID,
 } from "../memory-graph.js";
 
 const TRADE = "Welder";
@@ -438,6 +439,71 @@ describe("removeVideoGraph — embedding-merged concepts reconverge on removal",
     // The concept's hub edges cascade away with the node.
     expect(hubEdge(canonicalId, topicId(TRADE))).toBeUndefined();
     expect(hubEdge(canonicalId, compId("W-2"))).toBeUndefined();
+  });
+});
+
+describe("rebuildGraph — reconverges merged concepts from provenance", () => {
+  it("recomputes correct trust for an embedding-merged concept after aggregates are blanked", async () => {
+    const [v1, v2] = ["vid-rebuild1", "vid-rebuild2"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // Force the two differently-worded titles to embed identically so they merge
+    // via cosine similarity rather than exact/normalized-label reuse.
+    const shared = defaultEmbed("__preheat_cluster__");
+    embedRegistry.set("Preheat", shared);
+    embedRegistry.set("Pre-Heating", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Preheat");
+    const wordedId = knowledgeNodeId("concept", "Pre-Heating");
+
+    // Two differently-worded videos merge onto one canonical node — the same
+    // fixture as a fresh ingestion, so its aggregates are the ground truth.
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+    ]);
+
+    expect(nodeById(canonicalId)).toBeDefined();
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(2);
+
+    // Simulate a DB seeded before the Graph Intelligence layer (or corruption):
+    // blank the derived confidence + meta on the node and the hub-edge weights,
+    // leaving only the provenance edges intact as the source of truth.
+    const node = nodeById(canonicalId)!;
+    node["confidence"] = null;
+    node["meta"] = {};
+    hubEdge(canonicalId, topicId(TRADE))!["weight"] = 0;
+    hubEdge(canonicalId, compId("W-2"))!["weight"] = 0;
+
+    await rebuildGraph();
+
+    // Confidence is re-derived as the noisy-OR of both videos' extraction
+    // confidences: 1 - (1-0.5)(1-0.4) = 0.7 — identical to a fresh ingestion.
+    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(0.7, 10);
+
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    // Timestamp union is de-duplicated (30 appears in both) and sorted ascending.
+    expect(meta["timestamps"]).toEqual([10, 20, 30]);
+    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect(meta["sourceCount"]).toBe(2);
+
+    // Hub-edge weights are recomputed to the distinct corroborating video count.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(2);
+
+    // Scaffold and video nodes survive the rebuild intact.
+    expect(nodeById(GRAPH_CORE_ID)).toBeDefined();
+    expect(nodeById(topicId(TRADE))).toBeDefined();
+    expect(nodeById(compId("W-2"))).toBeDefined();
+    expect(nodeById(`video:${v1}`)).toBeDefined();
+    expect(nodeById(`video:${v2}`)).toBeDefined();
+    // The merge is not undone — still one canonical concept node, no duplicate.
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(nodes().filter((n) => n["kind"] === "concept")).toHaveLength(1);
   });
 });
 
