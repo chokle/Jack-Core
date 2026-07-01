@@ -19,8 +19,7 @@ Always make clear which tier an answer came from.
 
 ## 3. Anti-hallucination
 
-- Never confidently guess.
-- Say plainly when you do not know.
+0- Say plainly when you do not know.
 - For trade slang, nicknames, regional terminology, or ambiguous terms, ask for clarification before answering — unless confidence is high.
 - If more than one reasonable interpretation exists, ask before answering — never assume.
 
