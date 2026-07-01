@@ -351,6 +351,95 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
   });
 });
 
+describe("removeVideoGraph — embedding-merged concepts reconverge on removal", () => {
+  it("a merged concept drops to the surviving video's trust when one contributor is removed", async () => {
+    const [v1, v2] = ["vid-unmerge1", "vid-unmerge2"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // Force the two differently-worded titles to embed identically so they merge
+    // via cosine similarity rather than exact/normalized-label reuse.
+    const shared = defaultEmbed("__preheat_cluster__");
+    embedRegistry.set("Preheat", shared);
+    embedRegistry.set("Pre-Heating", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Preheat");
+    const wordedId = knowledgeNodeId("concept", "Pre-Heating");
+
+    // v1 mints the canonical node; v2's differently-worded item merges onto it.
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+    ]);
+
+    // Both videos funnel onto one canonical node before removal.
+    expect(nodeById(canonicalId)).toBeDefined();
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(2);
+    expect((nodeById(canonicalId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(2);
+
+    // Remove v1 — the node's original minter — and reconverge on v2 alone.
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v1);
+    await removeVideoGraph(v1);
+
+    // The merged node survives on v2's provenance (still one source).
+    expect(nodeById(canonicalId)).toBeDefined();
+    expect(provTo(canonicalId)).toHaveLength(1);
+
+    // Confidence collapses to v2's own extraction confidence (noisy-OR of one source).
+    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(0.4, 10);
+
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    // Timestamps and sources reflect only the survivor now.
+    expect(meta["timestamps"]).toEqual([20, 30]);
+    expect(meta["sourceVideoIds"]).toEqual([v2]);
+    expect(meta["sourceCount"]).toBe(1);
+
+    // Hub-edge weights fall back to a single corroborating video.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(1);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(1);
+  });
+
+  it("prunes the merged node entirely once both contributing videos are removed", async () => {
+    const [v1, v2] = ["vid-unmerge-all1", "vid-unmerge-all2"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    const shared = defaultEmbed("__interpass_cluster__");
+    embedRegistry.set("Interpass Temperature", shared);
+    embedRegistry.set("Inter-Pass Temp", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Interpass Temperature");
+
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Interpass Temperature", { confidence: 0.5, competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Inter-Pass Temp", { confidence: 0.4, competencyCode: "W-2" }),
+    ]);
+
+    expect(nodeById(canonicalId)).toBeDefined();
+    expect(provTo(canonicalId)).toHaveLength(2);
+
+    // Remove the first contributor — node survives on the second's provenance.
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v1);
+    await removeVideoGraph(v1);
+    expect(nodeById(canonicalId)).toBeDefined();
+
+    // Remove the last contributor — the node is orphaned and pruned entirely.
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v2);
+    await removeVideoGraph(v2);
+
+    expect(nodeById(canonicalId)).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(0);
+    // The concept's hub edges cascade away with the node.
+    expect(hubEdge(canonicalId, topicId(TRADE))).toBeUndefined();
+    expect(hubEdge(canonicalId, compId("W-2"))).toBeUndefined();
+  });
+});
+
 describe("removeVideoGraph — orphan pruning", () => {
   it("prunes concepts left with zero source videos but keeps shared ones", async () => {
     const v1 = "vid-x";
