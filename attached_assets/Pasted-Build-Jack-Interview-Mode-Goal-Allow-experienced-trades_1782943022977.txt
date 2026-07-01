@@ -1,0 +1,95 @@
+Build Jack Interview Mode.
+
+Goal:
+Allow experienced tradespeople to talk directly to Jack so Jack can extract field knowledge through guided interviews.
+
+Core flow:
+1. Mentor selects trade:
+   - Welding
+   - Heavy Equipment Operator
+   - Electrical
+   - Plumbing
+   - Carpentry
+   - HVAC/R
+   - Other
+
+2. Mentor enters profile:
+   - name
+   - years experience
+   - trade
+   - specialties
+   - region
+   - union/non-union/background notes
+
+3. Jack starts a guided interview.
+
+Interview behavior:
+- Ask one question at a time.
+- Keep questions plainspoken.
+- Follow up when the mentor says something useful.
+- Ask for examples, stories, mistakes, safety lessons, and field tips.
+- Do not sound corporate.
+- Do not rush.
+- Let the mentor skip questions.
+
+Interview categories:
+- Career background
+- First lessons
+- Common beginner mistakes
+- Tools/equipment
+- Safety
+- Troubleshooting
+- Production tips
+- Jobsite culture
+- Trade slang
+- Near misses / lessons learned
+- Advice to apprentices
+- Machine-specific or process-specific knowledge
+
+For Heavy Equipment Operator interviews, include:
+- excavator
+- dozer
+- grader
+- loader
+- haul truck
+- compactor
+- ground conditions
+- blind spots
+- spotters
+- production rhythm
+- working around people/equipment
+- cold weather operation
+- mine/oil sands site practices
+
+Output:
+After each answer, Jack should:
+- save the raw transcript
+- extract candidate knowledge objects
+- tag trade/category/topic
+- link knowledge to mentor profile
+- assign confidence
+- mark verification_status as "mentor_supplied"
+- add timestamps if audio/video is recorded
+
+UI:
+Add an Interview Mode page.
+Show:
+- current question
+- mentor answer box
+- skip button
+- save answer button
+- extracted knowledge preview
+- session progress
+- finish interview button
+
+Important:
+This is not a public chat mode.
+This is a knowledge capture mode.
+
+Do not build audio recording yet unless existing infrastructure already supports it.
+Start with typed answers.
+Design the data model so audio/video answers can be added later.
+
+Do not send emails.
+Do not add payment.
+Do not redesign unrelated pages.
