@@ -3,6 +3,9 @@ import { supabase } from "../lib/supabase.js";
 import { openai, createEmbedding, MODELS } from "../lib/openai.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
+import { aiQueryLimiter } from "../lib/rate-limit.js";
+
+const MAX_MESSAGE_LENGTH = 2000;
 
 const router = Router();
 
@@ -34,12 +37,16 @@ function resolveSession(req: Parameters<Parameters<ReturnType<typeof Router>["po
   return fresh;
 }
 
-router.post("/chat", async (req, res) => {
+router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
 
     const { message } = parsed.data;
+
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({ error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.` });
+    }
     // Session identity is owned by the server via an HttpOnly cookie.
     // Any sessionId the client may have included in the body is ignored.
     const session = resolveSession(req, res);

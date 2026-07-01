@@ -4,6 +4,7 @@ import { openai, createEmbedding, createEmbeddings, MODELS } from "../lib/openai
 import { logger } from "../lib/logger.js";
 import { transcribeFromUrl } from "../lib/transcription.js";
 import { syncVideoGraph, removeVideoGraph } from "../lib/memory-graph.js";
+import { aiPipelineLimiter } from "../lib/rate-limit.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -165,7 +166,7 @@ router.get("/videos", async (req, res) => {
   }
 });
 
-router.post("/videos", async (req, res) => {
+router.post("/videos", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = CreateVideoBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -313,7 +314,7 @@ router.patch("/videos/:id", async (req, res) => {
   }
 });
 
-router.delete("/videos/:id", async (req, res) => {
+router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = DeleteVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -330,7 +331,7 @@ router.delete("/videos/:id", async (req, res) => {
   }
 });
 
-router.post("/videos/:id/transcribe", async (req, res) => {
+router.post("/videos/:id/transcribe", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = TranscribeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -489,7 +490,7 @@ router.post("/videos/:id/transcribe", async (req, res) => {
   }
 });
 
-router.post("/videos/:id/analyze", async (req, res) => {
+router.post("/videos/:id/analyze", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = AnalyzeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -594,7 +595,18 @@ router.get("/videos/:id/related", async (req, res) => {
   }
 });
 
-router.post("/videos/:id/upload-url", async (req, res) => {
+const ALLOWED_VIDEO_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/3gpp",
+  "video/3gpp2",
+]);
+
+router.post("/videos/:id/upload-url", aiPipelineLimiter, async (req, res) => {
   try {
     const paramsParsed = GetUploadUrlParams.safeParse(req.params);
     if (!paramsParsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -602,7 +614,11 @@ router.post("/videos/:id/upload-url", async (req, res) => {
     const bodyParsed = GetUploadUrlBody.safeParse(req.body);
     if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
 
-    const { filename } = bodyParsed.data;
+    const { filename, contentType } = bodyParsed.data;
+
+    if (!ALLOWED_VIDEO_TYPES.has(contentType)) {
+      return res.status(400).json({ error: "Unsupported file type. Only video files are accepted." });
+    }
     const path = `videos/${paramsParsed.data.id}/${filename}`;
 
     const { data, error } = await supabase.storage

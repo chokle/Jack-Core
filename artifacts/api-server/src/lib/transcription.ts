@@ -29,6 +29,20 @@ const SINGLE_PASS_MAX_BYTES = 24 * 1024 * 1024;
 const CHUNK_TARGET_BYTES = 20 * 1024 * 1024;
 
 /**
+ * Hard cap on source video file size. Requests to transcribe videos larger than
+ * this are rejected before any download, ffmpeg, or OpenAI work is started.
+ * 500 MB is a generous upper bound for training clips; it keeps per-request
+ * bandwidth, CPU, and OpenAI spend bounded for anonymous callers.
+ */
+export const MAX_SOURCE_VIDEO_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Maximum number of Whisper API calls allowed per transcription job. Caps the
+ * OpenAI cost for a single (possibly very long) video regardless of its size.
+ */
+const MAX_WHISPER_CHUNKS = 10;
+
+/**
  * Mono, 16 kHz, low-bitrate AAC — plenty for speech recognition and an order of
  * magnitude smaller than the source video. AAC uses ffmpeg's built-in encoder,
  * so it works with any ffmpeg build (no external codec libraries required).
@@ -49,6 +63,25 @@ function run(cmd: string, args: string[]): Promise<void> {
       else reject(new Error(`${cmd} exited with code ${code}: ${stderr.trim()}`));
     });
   });
+}
+
+/**
+ * Check the declared Content-Length of a URL via HEAD request and throw if it
+ * exceeds the configured limit. Prevents downloading large files before we know
+ * they are within the workload budget. Servers that omit Content-Length are not
+ * blocked here — they are bounded by the disk quota at download time.
+ */
+async function assertSourceSize(url: string, maxBytes: number): Promise<void> {
+  const head = await fetch(url, { method: "HEAD" });
+  const contentLength = head.headers.get("content-length");
+  if (contentLength !== null) {
+    const bytes = parseInt(contentLength, 10);
+    if (Number.isFinite(bytes) && bytes > maxBytes) {
+      throw new Error(
+        `Source video is too large: ${bytes} bytes exceeds the ${maxBytes}-byte limit`,
+      );
+    }
+  }
 }
 
 async function downloadToFile(url: string, dest: string): Promise<void> {
@@ -133,6 +166,9 @@ async function transcribeFile(path: string): Promise<TranscriptionResult> {
  * transcript timeline is continuous. All temp files are removed before return.
  */
 export async function transcribeFromUrl(videoUrl: string): Promise<TranscriptionResult> {
+  // Reject oversized sources before any download or ffmpeg work starts.
+  await assertSourceSize(videoUrl, MAX_SOURCE_VIDEO_BYTES);
+
   const dir = await mkdtemp(join(tmpdir(), "jack-transcribe-"));
   try {
     const source = join(dir, "source");
@@ -147,10 +183,11 @@ export async function transcribeFromUrl(videoUrl: string): Promise<Transcription
     }
 
     const duration = await probeDurationSeconds(audio);
-    const numChunks = Math.ceil(size / CHUNK_TARGET_BYTES);
+    const rawChunks = Math.ceil(size / CHUNK_TARGET_BYTES);
+    const numChunks = Math.min(rawChunks, MAX_WHISPER_CHUNKS);
     const chunkDuration = Math.ceil(duration / numChunks);
     logger.info(
-      { audioBytes: size, duration, numChunks, chunkDuration },
+      { audioBytes: size, duration, numChunks, rawChunks, chunkDuration },
       "transcribe: chunking large audio",
     );
 

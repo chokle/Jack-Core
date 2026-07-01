@@ -2,15 +2,24 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { createEmbedding } from "../lib/openai.js";
 import { SemanticSearchBody } from "@workspace/api-zod";
+import { aiQueryLimiter } from "../lib/rate-limit.js";
 
 const router = Router();
 
-router.post("/search", async (req, res) => {
+const MAX_QUERY_LENGTH = 500;
+const MAX_SEARCH_LIMIT = 50;
+
+router.post("/search", aiQueryLimiter, async (req, res) => {
   try {
     const parsed = SemanticSearchBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
 
-    const { query, trade, limit = 10 } = parsed.data;
+    const { query, trade } = parsed.data;
+    const limit = Math.min(parsed.data.limit ?? 10, MAX_SEARCH_LIMIT);
+
+    if (query.length > MAX_QUERY_LENGTH) {
+      return res.status(400).json({ error: `Query must be ${MAX_QUERY_LENGTH} characters or fewer.` });
+    }
 
     const embedding = await createEmbedding(query);
 
