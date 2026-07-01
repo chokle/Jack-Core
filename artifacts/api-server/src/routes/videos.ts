@@ -22,6 +22,17 @@ import {
 const router = Router();
 
 /**
+ * Strip HTML tags from a string so that prompt-injected markup in LLM output
+ * is never stored in the database, regardless of how the value is later rendered.
+ * This is a defense-in-depth measure: the client already uses safe React text
+ * interpolation, but sanitizing at write-time prevents stored-XSS if any future
+ * code path ever renders the value as HTML.
+ */
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, "").trim();
+}
+
+/**
  * Best-effort mirror of a video into the persisted knowledge graph. The graph is
  * a derived view, so a sync failure must never fail (or roll back) the underlying
  * video operation — we log and move on; GET /graph self-heals from source tables.
@@ -96,9 +107,12 @@ async function runAnalysis(videoId: string): Promise<void> {
     // Normalize GPT output before writing — a malformed keyPoints/competencyCodes
     // value would otherwise fail the text[] column write and (since Supabase
     // returns the error instead of throwing) silently leave the row "analyzing".
-    const analysisText = typeof result.analysis === "string" ? result.analysis : null;
+    const analysisText =
+      typeof result.analysis === "string" ? stripHtml(result.analysis) : null;
     const keyPoints = Array.isArray(result.keyPoints)
-      ? result.keyPoints.filter((p): p is string => typeof p === "string")
+      ? result.keyPoints
+          .filter((p): p is string => typeof p === "string")
+          .map(stripHtml)
       : [];
     const competencyCodes = Array.isArray(result.competencyCodes)
       ? result.competencyCodes.filter((c): c is string => typeof c === "string")
