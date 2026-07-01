@@ -418,10 +418,28 @@ async function pruneOrphanKnowledge(): Promise<void> {
   }
 }
 
+/** A concept identity that collapsed onto a canonical node — a recorded merge. */
+export interface MergedConceptRef {
+  id: string;
+  label: string;
+  category: string;
+}
+
 /** Clamp a number into [0,1]; non-finite inputs collapse to 0. */
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * Provenance history arrays (confidence over time, verification decisions,
+ * rejected evidence) are append-on-change audit logs — they only grow on genuine
+ * events, but cap the retained tail so pathological churn can never bloat a
+ * node's meta unbounded.
+ */
+const HISTORY_CAP = 50;
+function capHistory<T>(entries: T[]): T[] {
+  return entries.length > HISTORY_CAP ? entries.slice(entries.length - HISTORY_CAP) : entries;
 }
 
 /**
@@ -479,6 +497,8 @@ interface ResolvedConcept {
   confidence: number;
   competencyCode: string | null;
   embeddingJson: string | null;
+  /** Other concept identities that merged onto this canonical node in this batch. */
+  mergedFrom: MergedConceptRef[];
 }
 
 /**
@@ -534,6 +554,14 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
 
     const embeddingJson = ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
 
+    // A differently-identified concept collapsing onto another canonical node is a
+    // recorded merge. An exact normalized-label match (item.id === canonicalId) is
+    // the same concept re-extracted — identity, not a merge — so it is not recorded.
+    const mergeRef: MergedConceptRef | null =
+      item.id !== canonicalId
+        ? { id: item.id, label: item.title, category: item.category }
+        : null;
+
     const prev = byCanonical.get(canonicalId);
     if (prev) {
       const ts = new Set([...prev.timestamps, ...item.timestamps]);
@@ -542,6 +570,9 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       if (item.description.length > prev.description.length) prev.description = item.description;
       if (!prev.competencyCode && item.competencyCode) prev.competencyCode = item.competencyCode;
       if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
+      if (mergeRef && !prev.mergedFrom.some((m) => m.id === mergeRef.id)) {
+        prev.mergedFrom.push(mergeRef);
+      }
       continue;
     }
 
@@ -555,6 +586,7 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       confidence: item.confidence,
       competencyCode: item.competencyCode,
       embeddingJson,
+      mergedFrom: mergeRef ? [mergeRef] : [],
     });
   }
 
@@ -580,6 +612,7 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
 async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void> {
   const ids = [...new Set(conceptIds)].filter((id) => id.startsWith("k:"));
   if (ids.length === 0) return;
+  const nowIso = new Date().toISOString();
 
   const [nodesRes, provRes, hubRes] = await Promise.all([
     supabase.from("knowledge_nodes").select("id, kind, label, trade, meta").in("id", ids),
@@ -624,7 +657,10 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
     const prov = provByConcept.get(id) ?? [];
 
     // Per-source provenance, de-duplicated by video (a concept links a video once).
-    const sourceMap = new Map<string, { timestamps: number[]; confidence: number }>();
+    const sourceMap = new Map<
+      string,
+      { timestamps: number[]; confidence: number; model: string | null; extractedAt: string | null }
+    >();
     const topicCounts = new Map<string, number>();
     const compCounts = new Map<string, number>();
     for (const e of prov) {
@@ -634,7 +670,13 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
         ? (meta["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
         : [];
       const confidence = typeof meta["confidence"] === "number" ? (meta["confidence"] as number) : 0.5;
-      sourceMap.set(videoId, { timestamps, confidence });
+      // Extraction provenance — the model + date that distilled this contribution.
+      // Pre-feature edges lack these; keep them null rather than fabricating a
+      // default so the derived models[] and firstExtractedAt stay honest.
+      const model = typeof meta["model"] === "string" ? (meta["model"] as string) : null;
+      const extractedAt =
+        typeof meta["extractedAt"] === "string" ? (meta["extractedAt"] as string) : null;
+      sourceMap.set(videoId, { timestamps, confidence, model, extractedAt });
       const t = typeof meta["trade"] === "string" ? (meta["trade"] as string) : null;
       if (t) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
       const code =
@@ -646,11 +688,44 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
       videoId,
       timestamps: s.timestamps,
       confidence: s.confidence,
+      model: s.model,
+      extractedAt: s.extractedAt,
     }));
+    const sourceVideoIds = sources.map((s) => s.videoId);
     const allTimestamps = [...new Set(sources.flatMap((s) => s.timestamps))].sort((a, b) => a - b);
     const confidence = noisyOrConfidence(sources.map((s) => s.confidence));
 
     const prevMeta = (node["meta"] as Record<string, unknown>) ?? {};
+
+    // Extraction provenance aggregates: distinct models + first/last extraction.
+    const models = [...new Set(sources.map((s) => s.model).filter((m): m is string => !!m))];
+    const extractDates = sources
+      .map((s) => s.extractedAt)
+      .filter((d): d is string => !!d)
+      .sort();
+    const firstExtractedAt = extractDates[0] ?? null;
+    const lastExtractedAt = extractDates[extractDates.length - 1] ?? null;
+
+    // Confidence history: append a point only when the derived confidence actually
+    // changes, so idempotent replays and full rebuilds never grow the log.
+    const prevConfHistory = Array.isArray(prevMeta["confidenceHistory"])
+      ? (prevMeta["confidenceHistory"] as Array<Record<string, unknown>>)
+      : [];
+    const lastConf = prevConfHistory[prevConfHistory.length - 1]?.["confidence"];
+    const confidenceHistory =
+      lastConf === confidence
+        ? prevConfHistory
+        : capHistory([...prevConfHistory, { confidence, sourceCount: sources.length, at: nowIso }]);
+
+    // Rejected evidence stays derived-consistent: drop any recorded rejection for a
+    // video that currently corroborates this concept again (drop-then-reteach).
+    const prevRejected = Array.isArray(prevMeta["rejectedEvidence"])
+      ? (prevMeta["rejectedEvidence"] as Array<Record<string, unknown>>)
+      : [];
+    const rejectedEvidence = capHistory(
+      prevRejected.filter((r) => !sourceVideoIds.includes(r["videoId"] as string)),
+    );
+
     nodeUpserts.push({
       id,
       kind: node["kind"] as string,
@@ -659,10 +734,15 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
       confidence,
       meta: {
         ...prevMeta,
-        sourceVideoIds: sources.map((s) => s.videoId),
+        sourceVideoIds,
         sourceCount: sources.length,
         timestamps: allTimestamps,
         sources,
+        models,
+        firstExtractedAt,
+        lastExtractedAt,
+        confidenceHistory,
+        rejectedEvidence,
       },
     });
 
@@ -714,8 +794,14 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
 export async function syncVideoKnowledge(
   videoId: string,
   items: AtomicKnowledge[],
+  opts: { model?: string | null; extractedAt?: string } = {},
 ): Promise<void> {
   const vNode = videoNodeId(videoId);
+  // Extraction provenance for this run: which model distilled it and when. Default
+  // model to null (honest "unknown") rather than fabricating one; the distillation
+  // pipeline passes the real analysis model.
+  const model = opts.model ?? null;
+  const extractedAt = opts.extractedAt ?? new Date().toISOString();
 
   const { data: video, error: vErr } = await supabase
     .from("videos")
@@ -751,7 +837,7 @@ export async function syncVideoKnowledge(
   if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
-      .select("id, label, trade, description, confidence, verification_status")
+      .select("id, label, trade, description, confidence, verification_status, meta")
       .in("id", canonicalIds);
     if (error) throw error;
     for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
@@ -765,6 +851,27 @@ export async function syncVideoKnowledge(
     const prevDesc = (prev?.["description"] as string | null) ?? "";
     // Keep the most complete description across all contributing videos.
     const description = c.description.length > prevDesc.length ? c.description : prevDesc || c.description;
+
+    // Preserve the node's existing meta (confidence/verification history, prior
+    // merge and rejected-evidence records) — recomputeKnowledgeAggregates below
+    // re-derives the corroboration fields on top of it. Overwriting meta with just
+    // {category} here would wipe the entire provenance audit trail on every
+    // re-processing of any corroborating video.
+    const prevMeta = (prev?.["meta"] as Record<string, unknown>) ?? {};
+    const prevMerged = Array.isArray(prevMeta["mergedFrom"])
+      ? (prevMeta["mergedFrom"] as Array<Record<string, unknown>>)
+      : [];
+    const mergedById = new Map<string, Record<string, unknown>>();
+    for (const m of prevMerged) {
+      if (typeof m["id"] === "string") mergedById.set(m["id"] as string, m);
+    }
+    // Record newly merged-in concept identities; the first-seen timestamp wins so
+    // replays never rewrite an existing merge record.
+    for (const m of c.mergedFrom) {
+      if (!mergedById.has(m.id)) mergedById.set(m.id, { ...m, at: extractedAt });
+    }
+    const mergedFrom = [...mergedById.values()];
+
     const node: NodeUpsert = {
       id: c.id,
       kind: c.category,
@@ -780,7 +887,7 @@ export async function syncVideoKnowledge(
       // Preserve a human verification decision; default new nodes to unverified.
       verification_status:
         prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified",
-      meta: { category: c.category },
+      meta: { ...prevMeta, category: c.category, mergedFrom },
     };
     // Only (re)write the embedding when this concept owns the canonical id — never
     // clobber the embedding of a node this item merely merged onto.
@@ -814,6 +921,9 @@ export async function syncVideoKnowledge(
       confidence: c.confidence,
       trade,
       competencyCode: c.competencyCode,
+      // Extraction provenance: the model + date that distilled this contribution.
+      model,
+      extractedAt,
     },
   }));
 
@@ -842,6 +952,38 @@ export async function syncVideoKnowledge(
 
   await upsertEdges([...provenanceEdges, ...hubEdges]);
   await pruneOrphanKnowledge();
+
+  // Rejected evidence: concepts this video used to corroborate but no longer does
+  // (this re-processing withdrew the evidence). Record it on the surviving dropped
+  // nodes only — any that lost their last source were pruned above — keyed by video
+  // so replays never duplicate. This runs AFTER prune (so we don't write to a
+  // deleted node) and BEFORE recompute (whose {...prevMeta} spread then preserves
+  // it, and which reconciles the entry away if a later run re-teaches the concept).
+  const droppedIds = priorTargets.filter((t) => !canonicalIds.includes(t));
+  if (droppedIds.length > 0) {
+    const { data: droppedRows, error: dropErr } = await supabase
+      .from("knowledge_nodes")
+      .select("id, meta")
+      .in("id", droppedIds);
+    if (dropErr) throw dropErr;
+    for (const row of droppedRows ?? []) {
+      const r = row as Record<string, unknown>;
+      const meta = (r["meta"] as Record<string, unknown>) ?? {};
+      const prevRejected = Array.isArray(meta["rejectedEvidence"])
+        ? (meta["rejectedEvidence"] as Array<Record<string, unknown>>)
+        : [];
+      if (prevRejected.some((e) => e["videoId"] === videoId)) continue;
+      const rejectedEvidence = capHistory([
+        ...prevRejected,
+        { videoId, at: extractedAt, reason: "no-longer-extracted" },
+      ]);
+      const { error: updErr } = await supabase
+        .from("knowledge_nodes")
+        .update({ meta: { ...meta, rejectedEvidence }, updated_at: new Date().toISOString() })
+        .eq("id", r["id"] as string);
+      if (updErr) throw updErr;
+    }
+  }
 
   // Reconverge every concept this run touched — the ones it now corroborates and
   // any it dropped — so confidence, provenance, and edge weights stay in sync.
@@ -943,18 +1085,40 @@ export async function setNodeVerification(
 ): Promise<GraphNode | null> {
   const { data: existing, error: readErr } = await supabase
     .from("knowledge_nodes")
-    .select("kind")
+    .select("kind, verification_status, meta")
     .eq("id", nodeId)
     .maybeSingle();
   if (readErr) throw readErr;
   if (!existing) return null;
 
-  const kind = (existing as Record<string, unknown>)["kind"] as string;
+  const ex = existing as Record<string, unknown>;
+  const kind = ex["kind"] as string;
   if (!KNOWLEDGE_NODE_KINDS.includes(kind as KnowledgeNodeKind)) return null;
+
+  // Verification history: append a transition only when the decision actually
+  // changes, so re-affirming the same status never grows the log. Reviewer
+  // identity is intentionally omitted — that belongs to a separate signed-in
+  // reviewer feature; here we record only what changed and when.
+  const prevStatus = ((ex["verification_status"] as string | null) ?? "unverified") as VerificationStatus;
+  const prevMeta = (ex["meta"] as Record<string, unknown>) ?? {};
+  const prevHistory = Array.isArray(prevMeta["verificationHistory"])
+    ? (prevMeta["verificationHistory"] as Array<Record<string, unknown>>)
+    : [];
+  const verificationHistory =
+    prevStatus === status
+      ? prevHistory
+      : capHistory([
+          ...prevHistory,
+          { from: prevStatus, to: status, at: new Date().toISOString() },
+        ]);
 
   const { data: updated, error: updErr } = await supabase
     .from("knowledge_nodes")
-    .update({ verification_status: status, updated_at: new Date().toISOString() })
+    .update({
+      verification_status: status,
+      meta: { ...prevMeta, verificationHistory },
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", nodeId)
     .select("*")
     .single();

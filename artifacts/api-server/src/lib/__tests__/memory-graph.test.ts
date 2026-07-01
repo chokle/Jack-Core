@@ -11,12 +11,13 @@ vi.mock("../openai.js", async () => {
   return { createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
 });
 
-import { fake, embedRegistry, defaultEmbed, resetMocks } from "./mocks.js";
+import { fake, embedRegistry, defaultEmbed, resetMocks, MODELS } from "./mocks.js";
 import {
   ensureBaseGraph,
   syncVideoGraph,
   syncVideoKnowledge,
   removeVideoGraph,
+  rebuildGraph,
   knowledgeNodeId,
   setNodeVerification,
 } from "../memory-graph.js";
@@ -520,5 +521,232 @@ describe("setNodeVerification — reviewer decisions", () => {
     // Re-distilling the same video must preserve the human decision.
     await syncVideoKnowledge(v, items);
     expect(nodeById(id)!["verification_status"]).toBe("verified");
+  });
+});
+
+describe("Knowledge Provenance Engine — every knowledge object remembers WHY it exists", () => {
+  const meta = (id: string) => nodeById(id)!["meta"] as Record<string, unknown>;
+
+  describe("extraction provenance (model + date)", () => {
+    it("records the extracting model + date on provenance edges and derives them on the node", async () => {
+      const v = "vid-prov";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Duty Cycle");
+      const at = "2026-06-01T00:00:00.000Z";
+      await syncVideoKnowledge(v, [makeItem("concept", "Duty Cycle")], {
+        model: MODELS.analysis,
+        extractedAt: at,
+      });
+
+      // The provenance edge carries the extracting model + date verbatim.
+      const edgeMeta = provFrom(v)[0]!["meta"] as Record<string, unknown>;
+      expect(edgeMeta["model"]).toBe(MODELS.analysis);
+      expect(edgeMeta["extractedAt"]).toBe(at);
+
+      // The node derives distinct models + first/last extraction from its edges.
+      const m = meta(id);
+      expect(m["models"]).toEqual([MODELS.analysis]);
+      expect(m["firstExtractedAt"]).toBe(at);
+      expect(m["lastExtractedAt"]).toBe(at);
+      const sources = m["sources"] as Array<Record<string, unknown>>;
+      expect(sources[0]!["model"]).toBe(MODELS.analysis);
+      expect(sources[0]!["extractedAt"]).toBe(at);
+    });
+
+    it("aggregates distinct models and the earliest/latest extraction across videos", async () => {
+      const [v1, v2] = ["vid-mm1", "vid-mm2"];
+      await seedVideo(v1);
+      await seedVideo(v2);
+      const id = knowledgeNodeId("concept", "Purge Gas");
+      await syncVideoKnowledge(v1, [makeItem("concept", "Purge Gas")], {
+        model: "gpt-4o-mini",
+        extractedAt: "2026-05-01T00:00:00.000Z",
+      });
+      await syncVideoKnowledge(v2, [makeItem("concept", "Purge Gas")], {
+        model: "gpt-4o",
+        extractedAt: "2026-05-10T00:00:00.000Z",
+      });
+
+      const m = meta(id);
+      expect((m["models"] as string[]).slice().sort()).toEqual(["gpt-4o", "gpt-4o-mini"]);
+      expect(m["firstExtractedAt"]).toBe("2026-05-01T00:00:00.000Z");
+      expect(m["lastExtractedAt"]).toBe("2026-05-10T00:00:00.000Z");
+    });
+
+    it("derives null extraction provenance for pre-feature edges (back-compat)", async () => {
+      const v = "vid-legacy";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Slag Inclusion");
+      await syncVideoKnowledge(v, [makeItem("concept", "Slag Inclusion")], {
+        model: MODELS.analysis,
+      });
+
+      // Simulate an edge written before the provenance feature existed.
+      const em = provFrom(v)[0]!["meta"] as Record<string, unknown>;
+      delete em["model"];
+      delete em["extractedAt"];
+
+      await rebuildGraph();
+
+      const m = meta(id);
+      expect(m["models"]).toEqual([]);
+      expect(m["firstExtractedAt"]).toBeNull();
+      expect(m["lastExtractedAt"]).toBeNull();
+    });
+  });
+
+  describe("confidence history", () => {
+    it("appends a point only when the derived confidence changes", async () => {
+      const [v1, v2] = ["vid-ch1", "vid-ch2"];
+      await seedVideo(v1);
+      await seedVideo(v2);
+      const id = knowledgeNodeId("concept", "Wire Feed Speed");
+
+      await syncVideoKnowledge(v1, [makeItem("concept", "Wire Feed Speed", { confidence: 0.6 })]);
+      let history = meta(id)["confidenceHistory"] as Array<Record<string, unknown>>;
+      expect(history).toHaveLength(1);
+      expect(history[0]!["confidence"]).toBeCloseTo(0.6, 10);
+
+      // A second corroborating video raises the noisy-OR confidence → new point.
+      await syncVideoKnowledge(v2, [makeItem("concept", "Wire Feed Speed", { confidence: 0.6 })]);
+      history = meta(id)["confidenceHistory"] as Array<Record<string, unknown>>;
+      expect(history).toHaveLength(2);
+      expect(history[1]!["confidence"] as number).toBeGreaterThan(0.6);
+      expect(history[1]!["sourceCount"]).toBe(2);
+    });
+
+    it("does not grow the confidence log on idempotent replays", async () => {
+      const v = "vid-ch-replay";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Stringer Bead");
+      const items = [makeItem("concept", "Stringer Bead", { confidence: 0.7 })];
+
+      await syncVideoKnowledge(v, items);
+      await syncVideoKnowledge(v, items);
+      await syncVideoKnowledge(v, items);
+
+      expect(meta(id)["confidenceHistory"]).toHaveLength(1);
+    });
+
+    it("a full rebuild appends nothing to the confidence log", async () => {
+      const v = "vid-ch-rebuild";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Tack Weld");
+      await syncVideoKnowledge(v, [makeItem("concept", "Tack Weld", { confidence: 0.55 })]);
+      expect(meta(id)["confidenceHistory"]).toHaveLength(1);
+
+      await rebuildGraph();
+      await rebuildGraph();
+
+      expect(meta(id)["confidenceHistory"]).toHaveLength(1);
+    });
+  });
+
+  describe("verification history", () => {
+    it("appends a transition only when the decision changes (no reviewer identity)", async () => {
+      const v = "vid-vh";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Fusion");
+      await syncVideoKnowledge(v, [makeItem("concept", "Fusion")]);
+
+      await setNodeVerification(id, "verified");
+      await setNodeVerification(id, "verified"); // re-affirm — no new entry
+      await setNodeVerification(id, "rejected");
+
+      const history = meta(id)["verificationHistory"] as Array<Record<string, unknown>>;
+      expect(history).toHaveLength(2);
+      expect(history[0]).toMatchObject({ from: "unverified", to: "verified" });
+      expect(history[1]).toMatchObject({ from: "verified", to: "rejected" });
+      // Reviewer identity is intentionally never recorded here.
+      expect(history[0]!["reviewer"]).toBeUndefined();
+      expect(history[0]!["at"]).toEqual(expect.any(String));
+    });
+
+    it("preserves verification history across re-processing of the source video", async () => {
+      const v = "vid-vh-persist";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Spatter");
+      const items = [makeItem("concept", "Spatter")];
+      await syncVideoKnowledge(v, items);
+
+      await setNodeVerification(id, "verified");
+      expect(meta(id)["verificationHistory"]).toHaveLength(1);
+
+      await syncVideoKnowledge(v, items);
+      await rebuildGraph();
+
+      expect(nodeById(id)!["verification_status"]).toBe("verified");
+      expect(meta(id)["verificationHistory"]).toHaveLength(1);
+    });
+  });
+
+  describe("merged-concept records", () => {
+    it("records the merged-in identity when a differently-worded concept collapses onto a node", async () => {
+      const [v1, v2] = ["vid-mf1", "vid-mf2"];
+      await seedVideo(v1);
+      await seedVideo(v2);
+
+      const shared = defaultEmbed("__travel_angle_cluster__");
+      embedRegistry.set("Travel Angle", shared);
+      embedRegistry.set("Drag Angle", shared);
+
+      const canonicalId = knowledgeNodeId("concept", "Travel Angle");
+      const mergedId = knowledgeNodeId("concept", "Drag Angle");
+
+      await syncVideoKnowledge(v1, [makeItem("concept", "Travel Angle")]);
+      await syncVideoKnowledge(v2, [makeItem("concept", "Drag Angle")], {
+        extractedAt: "2026-06-02T00:00:00.000Z",
+      });
+
+      const mergedFrom = meta(canonicalId)["mergedFrom"] as Array<Record<string, unknown>>;
+      expect(mergedFrom).toHaveLength(1);
+      expect(mergedFrom[0]).toMatchObject({ id: mergedId, label: "Drag Angle", category: "concept" });
+      expect(mergedFrom[0]!["at"]).toBe("2026-06-02T00:00:00.000Z");
+    });
+
+    it("does not record a merge when the same concept is simply re-extracted (identity, not merge)", async () => {
+      const v = "vid-noomerge";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Keyhole");
+      await syncVideoKnowledge(v, [makeItem("concept", "Keyhole")]);
+
+      expect(meta(id)["mergedFrom"]).toEqual([]);
+    });
+  });
+
+  describe("rejected evidence", () => {
+    it("records withdrawn corroboration on a surviving node, once, and clears it on re-teach", async () => {
+      const [v1, v2] = ["vid-re1", "vid-re2"];
+      await seedVideo(v1);
+      await seedVideo(v2);
+      const conceptB = knowledgeNodeId("concept", "Whip Motion");
+
+      // Both videos teach concept B; v1 also teaches an unrelated concept A.
+      await syncVideoKnowledge(v1, [
+        makeItem("concept", "Whip Motion"),
+        makeItem("concept", "Weave Width"),
+      ]);
+      await syncVideoKnowledge(v2, [makeItem("concept", "Whip Motion")]);
+      expect(meta(conceptB)["rejectedEvidence"]).toEqual([]);
+
+      // v1 is re-processed and no longer extracts B; B survives on v2's provenance.
+      await syncVideoKnowledge(v1, [makeItem("concept", "Weave Width")], {
+        extractedAt: "2026-06-03T00:00:00.000Z",
+      });
+      let rejected = meta(conceptB)["rejectedEvidence"] as Array<Record<string, unknown>>;
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]).toMatchObject({ videoId: "vid-re1", reason: "no-longer-extracted" });
+
+      // Replaying the same reduced distillation must not duplicate the rejection.
+      await syncVideoKnowledge(v1, [makeItem("concept", "Weave Width")]);
+      expect(meta(conceptB)["rejectedEvidence"]).toHaveLength(1);
+
+      // Re-teaching B from v1 reconciles the rejection away (evidence restored).
+      await syncVideoKnowledge(v1, [
+        makeItem("concept", "Whip Motion"),
+        makeItem("concept", "Weave Width"),
+      ]);
+      expect(meta(conceptB)["rejectedEvidence"]).toEqual([]);
+    });
   });
 });

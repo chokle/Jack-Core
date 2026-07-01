@@ -63,7 +63,7 @@ async function removeGraphSafe(videoId: string): Promise<void> {
  * log and move on. Runs after the video node + competency edges are already
  * mirrored, so the video→knowledge provenance edges attach to an existing node.
  */
-async function distillGraphSafe(videoId: string): Promise<void> {
+export async function distillGraphSafe(videoId: string): Promise<void> {
   try {
     await runDistillation(videoId);
   } catch (err) {
@@ -79,7 +79,7 @@ async function distillGraphSafe(videoId: string): Promise<void> {
  * Analysis is a value-add on top of an already-usable transcript, so a failure
  * here never downgrades a successfully transcribed video to "error".
  */
-async function runAnalysis(videoId: string): Promise<void> {
+export async function runAnalysis(videoId: string): Promise<void> {
   try {
     const { data: video } = await supabase
       .from("videos")

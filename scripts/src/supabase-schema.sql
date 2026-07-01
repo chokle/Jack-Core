@@ -163,6 +163,30 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
   -- Graph Intelligence layer to detect differently-worded duplicates of the same
   -- concept and collapse them onto one canonical node. NULL for scaffold nodes.
   embedding vector(1536),
+  -- meta (atomic-knowledge nodes) is the Knowledge Provenance ledger — every field
+  -- is DERIVED from the node's provenance edges on each sync/rebuild (so it is
+  -- fully idempotent), except the human-owned verificationHistory. It answers WHY
+  -- a concept exists:
+  --   category            the atomic-knowledge kind (mirrors `kind`)
+  --   sourceVideoIds/[]   the distinct videos corroborating this concept
+  --   sourceCount         count of the above
+  --   timestamps[]        de-duplicated union of every source video's timestamps
+  --   sources[]           per-video record: {videoId, timestamps, confidence,
+  --                       model, extractedAt} — model/extractedAt are null for
+  --                       edges written before the provenance feature existed
+  --   models[]            distinct extracting models seen across sources
+  --   firstExtractedAt /  earliest / latest extraction date across sources (null
+  --   lastExtractedAt     when no source carries an extraction date)
+  --   confidenceHistory[] append-on-change log {confidence, sourceCount, at}
+  --   mergedFrom[]        other concept identities that collapsed onto this node
+  --                       {id, label, category, at} (first-seen wins)
+  --   rejectedEvidence[]  videos that USED to corroborate this concept but no
+  --                       longer do {videoId, at, reason} — reconciled away if the
+  --                       video re-teaches the concept
+  --   verificationHistory[] human decision transitions {from, to, at} — NO
+  --                       reviewer identity (that is a separate signed-in feature);
+  --                       this is the one meta field NOT derived from edges
+  -- All history arrays are tail-capped (last 50) so churn cannot bloat meta.
   meta JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -170,8 +194,11 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
 
 -- Edge kinds mirror the node relationships. 'knowledge' is the video -> atomic
 -- knowledge provenance link (many-to-many): one video contributes many concepts,
--- and one concept accumulates many source videos over time. Per-video timestamps
--- and the per-extraction confidence for that link live in the edge `meta`.
+-- and one concept accumulates many source videos over time. The edge `meta` is the
+-- single source of truth the node aggregates are derived from — it holds this
+-- link's {timestamps, confidence, trade, competencyCode, model, extractedAt}
+-- (model/extractedAt = the model + date that distilled this contribution; null on
+-- pre-provenance-feature edges).
 CREATE TABLE IF NOT EXISTS knowledge_edges (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,

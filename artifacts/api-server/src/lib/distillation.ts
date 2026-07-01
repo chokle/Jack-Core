@@ -302,6 +302,6 @@ export async function runDistillation(videoId: string): Promise<void> {
     competencies,
   });
 
-  await syncVideoKnowledge(videoId, items);
+  await syncVideoKnowledge(videoId, items, { model: MODELS.analysis });
   logger.info({ videoId, count: items.length }, "distilled atomic knowledge");
 }
