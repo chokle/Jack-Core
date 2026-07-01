@@ -177,6 +177,120 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
   });
 });
 
+describe("syncVideoKnowledge — alias-index matching (re-uploads can't split concepts)", () => {
+  it("a video wording matching a recorded alias collapses onto the existing node", async () => {
+    const v1 = "vid-al1";
+    const v2 = "vid-al2";
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    const canonicalId = knowledgeNodeId("concept", "Root Pass");
+    await syncVideoKnowledge(v1, [makeItem("concept", "Root Pass")]);
+
+    // A mentor (or reviewer) already recorded an alternate wording as an alias.
+    const node = nodeById(canonicalId)!;
+    node["meta"] = { ...(node["meta"] as Record<string, unknown>), aliases: ["First Pass Bead"] };
+
+    // A second video teaches the same concept using the alias wording. Default
+    // hash embeddings are dissimilar, so only the alias index can match this.
+    await syncVideoKnowledge(v2, [makeItem("concept", "First Pass Bead")]);
+
+    expect(nodeById(knowledgeNodeId("concept", "First Pass Bead"))).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(2);
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    expect(meta["sourceCount"]).toBe(2);
+  });
+
+  it("a video wording matching another node's LABEL (cross-category) collapses without flipping kind", async () => {
+    const v1 = "vid-al3";
+    const v2 = "vid-al4";
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // "Stick Welding" exists as a procedure node...
+    const canonicalId = knowledgeNodeId("procedure", "Stick Welding");
+    await syncVideoKnowledge(v1, [makeItem("procedure", "Stick Welding")]);
+
+    // ...and another video's distillation categorizes the same wording as a concept.
+    await syncVideoKnowledge(v2, [makeItem("concept", "Stick Welding")]);
+
+    expect(nodeById(knowledgeNodeId("concept", "Stick Welding"))).toBeUndefined();
+    expect(nodeById(canonicalId)!["kind"]).toBe("procedure");
+    expect(provTo(canonicalId)).toHaveLength(2);
+  });
+
+  it("a semantic merge records the video's wording as an alias, so later uploads match without embeddings", async () => {
+    const [v1, v2, v3] = ["vid-al5", "vid-al6", "vid-al7"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+    await seedVideo(v3);
+
+    // First merge happens semantically: identical embeddings above threshold.
+    const shared = defaultEmbed("__undercut_cluster__");
+    embedRegistry.set("Undercut", shared);
+    embedRegistry.set("Undercutting", shared);
+
+    const canonicalId = knowledgeNodeId("hazard", "Undercut");
+    await syncVideoKnowledge(v1, [makeItem("hazard", "Undercut")]);
+    await syncVideoKnowledge(v2, [makeItem("hazard", "Undercutting")]);
+
+    // The merged-in wording is now a recorded alias on the canonical node.
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    expect(meta["aliases"]).toEqual(["Undercutting"]);
+
+    // A third upload uses the same wording but embeds differently (e.g. a new
+    // embedding model) — the alias index still collapses it onto the same node.
+    embedRegistry.set("Undercutting", defaultEmbed("__totally_different__"));
+    await syncVideoKnowledge(v3, [makeItem("hazard", "Undercutting")]);
+
+    expect(nodeById(knowledgeNodeId("hazard", "Undercutting"))).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(3);
+    expect(nodes().filter((n) => n["kind"] === "hazard")).toHaveLength(1);
+  });
+
+  it("replaying an alias-merged video never duplicates aliases or provenance", async () => {
+    const v1 = "vid-al8";
+    const v2 = "vid-al9";
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    const shared = defaultEmbed("__spatter_cluster__");
+    embedRegistry.set("Spatter", shared);
+    embedRegistry.set("Weld Spatter", shared);
+
+    const canonicalId = knowledgeNodeId("hazard", "Spatter");
+    await syncVideoKnowledge(v1, [makeItem("hazard", "Spatter")]);
+    await syncVideoKnowledge(v2, [makeItem("hazard", "Weld Spatter")]);
+    await syncVideoKnowledge(v2, [makeItem("hazard", "Weld Spatter")]);
+
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    expect(meta["aliases"]).toEqual(["Weld Spatter"]);
+    expect(provTo(canonicalId)).toHaveLength(2);
+    expect(meta["sourceCount"]).toBe(2);
+  });
+
+  it("a middle-band video concept still CREATES a new node (no queue for videos)", async () => {
+    const v1 = "vid-al10";
+    const v2 = "vid-al11";
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // Similarity ~0.78 — inside the mentor queue band, below the merge threshold.
+    const base = [1, ...Array(15).fill(0)] as number[];
+    const mid = [0.78, Math.sqrt(1 - 0.78 * 0.78), ...Array(14).fill(0)] as number[];
+    embedRegistry.set("Heat Input", base);
+    embedRegistry.set("Thermal Energy Applied", mid);
+
+    await syncVideoKnowledge(v1, [makeItem("concept", "Heat Input")]);
+    await syncVideoKnowledge(v2, [makeItem("concept", "Thermal Energy Applied")]);
+
+    // Both nodes exist — the ambiguous wording was NOT queued or merged.
+    expect(nodeById(knowledgeNodeId("concept", "Heat Input"))).toBeDefined();
+    expect(nodeById(knowledgeNodeId("concept", "Thermal Energy Applied"))).toBeDefined();
+    expect(fake.tables["knowledge_candidates"] ?? []).toHaveLength(0);
+  });
+});
+
 describe("recomputeKnowledgeAggregates — corroboration math & hub weights", () => {
   it("confidence equals the noisy-OR of each source video's extraction confidence", async () => {
     const [v1, v2, v3] = ["vid-n1", "vid-n2", "vid-n3"];

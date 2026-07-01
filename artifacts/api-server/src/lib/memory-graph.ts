@@ -43,7 +43,9 @@ const KNOWLEDGE_MATCH_COUNT = 1;
  *     graph (never auto-create) so a human can review it later;
  *   - below MENTOR_NOVELTY_THRESHOLD against every signal → confidently novel:
  *     create a new node.
- * The video ingestion path is deliberately untouched by these bands.
+ * The video path shares the exact-id, alias-index, and ≥ threshold semantic
+ * signals, but deliberately keeps CREATE for the middle band (see
+ * resolveCanonicalItems) — video knowledge must land in the graph immediately.
  */
 const MENTOR_REINFORCE_THRESHOLD = KNOWLEDGE_MATCH_THRESHOLD;
 const MENTOR_NOVELTY_THRESHOLD = 0.7;
@@ -527,18 +529,86 @@ interface ResolvedConcept {
   embeddingJson: string | null;
   /** Other concept identities that merged onto this canonical node in this batch. */
   mergedFrom: MergedConceptRef[];
+  /** New alternate wordings to record on the canonical node's alias list. */
+  newAliases: string[];
+}
+
+/** Read the alias list (alternate wordings) recorded on a node's meta. */
+function metaAliases(meta: Record<string, unknown> | null | undefined): string[] {
+  const raw = meta?.["aliases"];
+  return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === "string") : [];
 }
 
 /**
- * Duplicate detection + merge resolution. For each distilled item, decide the
- * canonical node it belongs to:
+ * Build the normalized label + recorded-alias index across every knowledge
+ * category (first writer wins on collisions — deterministic and stable). Shared
+ * by BOTH the video path (resolveCanonicalItems) and the mentor path
+ * (resolveMentorConcepts), so a wording a mentor taught as an alias also stops
+ * a re-uploaded or differently-worded video from minting a duplicate node.
+ */
+async function buildKnowledgeAliasIndex(): Promise<Map<string, { id: string; label: string }>> {
+  const aliasIndex = new Map<string, { id: string; label: string }>();
+  const { data, error } = await supabase
+    .from("knowledge_nodes")
+    .select("id, kind, label, meta")
+    .in("kind", [...KNOWLEDGE_NODE_KINDS]);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>;
+    const id = r["id"] as string;
+    const label = (r["label"] as string) ?? "";
+    const entry = { id, label };
+    const normLabel = normalizeConcept(label);
+    if (normLabel && !aliasIndex.has(normLabel)) aliasIndex.set(normLabel, entry);
+    for (const alias of metaAliases(r["meta"] as Record<string, unknown>)) {
+      const normAlias = normalizeConcept(alias);
+      if (normAlias && !aliasIndex.has(normAlias)) aliasIndex.set(normAlias, entry);
+    }
+  }
+  return aliasIndex;
+}
+
+/**
+ * Merge grown alias wordings into a node's existing alias list — deduped by
+ * normalized form against the label and prior aliases, capped at ALIAS_CAP.
+ * Used by both persist paths so alias growth behaves identically for video-
+ * and mentor-sourced wordings.
+ */
+function growAliases(label: string, prevMeta: Record<string, unknown>, newAliases: string[]): string[] {
+  const prevAliases = metaAliases(prevMeta);
+  const seenNorms = new Set([normalizeConcept(label), ...prevAliases.map(normalizeConcept)]);
+  const aliases = [...prevAliases];
+  for (const a of newAliases) {
+    const norm = normalizeConcept(a);
+    if (!norm || seenNorms.has(norm)) continue;
+    seenNorms.add(norm);
+    aliases.push(a);
+  }
+  return aliases.slice(-ALIAS_CAP);
+}
+
+/**
+ * Duplicate detection + merge resolution for video-distilled items. For each
+ * distilled item, decide the canonical node it belongs to:
  *   1. exact normalized-label node already exists → reuse it (always collapse);
- *   2. else a same-category node is embedding-similar above threshold → merge onto
+ *   2. else its normalized title equals an existing node's label or a recorded
+ *      alias/alternate wording — across ALL knowledge categories, so a wording
+ *      mentors already taught as an alias collapses onto the same node instead
+ *      of splitting the concept on re-upload;
+ *   3. else a same-category node is embedding-similar above threshold → merge onto
  *      that canonical node (differently-worded duplicate);
- *   3. else mint a new node from this item.
- * Items resolving to the same canonical id are merged (union timestamps, max
- * confidence, most-complete description, first competency). Nothing is written
- * here — the caller persists the deduped set.
+ *   4. else mint a new node from this item.
+ * Deliberate divergence from the mentor path: there is NO queue band for videos.
+ * A middle-band (0.70–0.85) video concept CREATES a new node rather than being
+ * held as a pending candidate, because video provenance edges must exist
+ * immediately (citations/search reference them) and each re-sync reconciles the
+ * video's full edge set — a queued concept would silently drop the video's
+ * knowledge until a reviewer acted.
+ * When a differently-worded item collapses onto an existing node, the video's
+ * wording is recorded as an alias so future matches (video OR mentor) hit the
+ * alias index directly. Items resolving to the same canonical id are merged
+ * (union timestamps, max confidence, most-complete description, first
+ * competency). Nothing is written here — the caller persists the deduped set.
  */
 async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<ResolvedConcept[]> {
   if (items.length === 0) return [];
@@ -553,30 +623,43 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
     for (const r of data ?? []) existing.add((r as Record<string, unknown>)["id"] as string);
   }
 
+  const aliasIndex = await buildKnowledgeAliasIndex();
+
   const byCanonical = new Map<string, ResolvedConcept>();
   const claimed: string[] = []; // canonical ids already assigned in this batch
 
   for (const item of items) {
+    const normTitle = normalizeConcept(item.title);
     const embedding = await createEmbedding(conceptEmbeddingText(item.title, item.description));
 
     let canonicalId = item.id;
     let ownsId = true;
+    let matchedLabel: string | null = null;
 
-    if (!existing.has(item.id) && embedding.length > 0) {
-      // No exact node yet — look for a differently-worded duplicate of the same
-      // category to merge onto instead of minting a near-duplicate.
-      const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
-        query_embedding: embedding,
-        filter_category: item.category,
-        match_threshold: KNOWLEDGE_MATCH_THRESHOLD,
-        match_count: KNOWLEDGE_MATCH_COUNT,
-        exclude_ids: [item.id, ...claimed],
-      });
-      if (error) throw error;
-      const hit = ((matches ?? []) as Array<{ id?: string }>)[0];
-      if (hit?.id) {
-        canonicalId = hit.id;
+    if (!existing.has(item.id)) {
+      const aliasHit = aliasIndex.get(normTitle);
+      if (aliasHit && aliasHit.id !== item.id) {
+        // The wording already names an existing node (label or recorded alias).
+        canonicalId = aliasHit.id;
         ownsId = false;
+        matchedLabel = aliasHit.label;
+      } else if (embedding.length > 0) {
+        // No exact node yet — look for a differently-worded duplicate of the same
+        // category to merge onto instead of minting a near-duplicate.
+        const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
+          query_embedding: embedding,
+          filter_category: item.category,
+          match_threshold: KNOWLEDGE_MATCH_THRESHOLD,
+          match_count: KNOWLEDGE_MATCH_COUNT,
+          exclude_ids: [item.id, ...claimed],
+        });
+        if (error) throw error;
+        const hit = ((matches ?? []) as Array<{ id?: string; label?: string }>)[0];
+        if (hit?.id) {
+          canonicalId = hit.id;
+          ownsId = false;
+          matchedLabel = hit.label ?? null;
+        }
       }
     }
 
@@ -590,6 +673,17 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
         ? { id: item.id, label: item.title, category: item.category }
         : null;
 
+    // Record this video's wording as an alias when it collapsed onto a
+    // differently-labelled node, so the next differently-worded upload (or a
+    // mentor using the same wording) hits the alias index directly.
+    const newAlias =
+      !ownsId && matchedLabel !== null && normalizeConcept(matchedLabel) !== normTitle
+        ? item.title
+        : null;
+    if (newAlias && !aliasIndex.has(normTitle)) {
+      aliasIndex.set(normTitle, { id: canonicalId, label: matchedLabel ?? item.title });
+    }
+
     const prev = byCanonical.get(canonicalId);
     if (prev) {
       const ts = new Set([...prev.timestamps, ...item.timestamps]);
@@ -600,6 +694,9 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
       if (mergeRef && !prev.mergedFrom.some((m) => m.id === mergeRef.id)) {
         prev.mergedFrom.push(mergeRef);
+      }
+      if (newAlias && !prev.newAliases.some((a) => normalizeConcept(a) === normTitle)) {
+        prev.newAliases.push(newAlias);
       }
       continue;
     }
@@ -615,6 +712,7 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       competencyCode: item.competencyCode,
       embeddingJson,
       mergedFrom: mergeRef ? [mergeRef] : [],
+      newAliases: newAlias ? [newAlias] : [],
     });
   }
 
@@ -655,20 +753,14 @@ interface MentorResolvedConcept extends ResolvedConcept {
   /** True when this collapses onto a node that already existed in the graph. */
   reinforced: boolean;
   matchedLabel: string | null;
-  /** New alternate wordings to record on the canonical node's alias list. */
-  newAliases: string[];
-}
-
-/** Read the alias list (alternate wordings) recorded on a node's meta. */
-function metaAliases(meta: Record<string, unknown> | null | undefined): string[] {
-  const raw = meta?.["aliases"];
-  return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === "string") : [];
 }
 
 /**
  * Reinforcement-first resolution for mentor-distilled concepts (Interview Mode
- * only — the video path keeps resolveCanonicalItems). Each item is matched
- * against multiple signals, in order of confidence:
+ * only — the video path uses resolveCanonicalItems, which shares the exact-id,
+ * alias-index, and high-similarity signals but creates instead of queuing in
+ * the middle band). Each item is matched against multiple signals, in order of
+ * confidence:
  *   1. its own deterministic id already exists (canonical title match);
  *   2. its normalized title equals an existing node's label or a recorded
  *      alias/alternate wording — across ALL knowledge categories, so a slang or
@@ -698,27 +790,8 @@ async function resolveMentorConcepts(items: AtomicKnowledge[]): Promise<{
   }
 
   // Signal 2: normalized label + recorded alias index across every knowledge
-  // category (first writer wins on collisions — deterministic and stable).
-  const aliasIndex = new Map<string, { id: string; label: string }>();
-  {
-    const { data, error } = await supabase
-      .from("knowledge_nodes")
-      .select("id, kind, label, meta")
-      .in("kind", [...KNOWLEDGE_NODE_KINDS]);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      const r = row as Record<string, unknown>;
-      const id = r["id"] as string;
-      const label = (r["label"] as string) ?? "";
-      const entry = { id, label };
-      const normLabel = normalizeConcept(label);
-      if (normLabel && !aliasIndex.has(normLabel)) aliasIndex.set(normLabel, entry);
-      for (const alias of metaAliases(r["meta"] as Record<string, unknown>)) {
-        const normAlias = normalizeConcept(alias);
-        if (normAlias && !aliasIndex.has(normAlias)) aliasIndex.set(normAlias, entry);
-      }
-    }
-  }
+  // category (shared with the video path).
+  const aliasIndex = await buildKnowledgeAliasIndex();
 
   const byCanonical = new Map<string, MentorResolvedConcept>();
   const queuedById = new Map<string, QueuedMentorConcept>();
@@ -1122,7 +1195,7 @@ export async function syncVideoKnowledge(
   if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
-      .select("id, label, trade, description, confidence, verification_status, meta")
+      .select("id, kind, label, trade, description, confidence, verification_status, meta")
       .in("id", canonicalIds);
     if (error) throw error;
     for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
@@ -1157,12 +1230,21 @@ export async function syncVideoKnowledge(
     }
     const mergedFrom = [...mergedById.values()];
 
+    // Grow the node's alias list with this video's alternate wordings (deduped
+    // against the label and prior aliases, capped) so future differently-worded
+    // uploads and mentor answers match directly via the alias index.
+    const label = (prev?.["label"] as string) || c.title;
+    const aliases = growAliases(label, prevMeta, c.newAliases);
+
     const node: NodeUpsert = {
       id: c.id,
-      kind: c.category,
+      // Preserve the node's existing kind: an alias-index match may collapse a
+      // differently-categorized wording onto a node of another category, and the
+      // canonical node's identity must not flip on merge.
+      kind: (prev?.["kind"] as string) || c.category,
       // First writer wins for the display label/trade so the shared node stays
       // stable; later videos still append provenance via the edge.
-      label: (prev?.["label"] as string) || c.title,
+      label,
       trade: (prev?.["trade"] as string | null) ?? trade,
       ref_id: c.id,
       description: description || null,
@@ -1177,7 +1259,12 @@ export async function syncVideoKnowledge(
         prevStatus === "verified" || prevStatus === "rejected" || prevStatus === "mentor_supplied"
           ? prevStatus
           : "unverified",
-      meta: { ...prevMeta, category: c.category, mergedFrom },
+      meta: {
+        ...prevMeta,
+        category: (prevMeta["category"] as string) || c.category,
+        mergedFrom,
+        aliases,
+      },
     };
     // Only (re)write the embedding when this concept owns the canonical id — never
     // clobber the embedding of a node this item merely merged onto.
@@ -1444,7 +1531,7 @@ async function persistMentorResolvedConcepts(
   if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
-      .select("id, label, trade, description, confidence, verification_status, meta")
+      .select("id, kind, label, trade, description, confidence, verification_status, meta")
       .in("id", canonicalIds);
     if (error) throw error;
     for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
@@ -1478,20 +1565,13 @@ async function persistMentorResolvedConcepts(
     // normalized form against the label and existing aliases, capped) so future
     // mentor wordings match directly.
     const label = (prev?.["label"] as string) || c.title;
-    const prevAliases = metaAliases(prevMeta);
-    const seenNorms = new Set([normalizeConcept(label), ...prevAliases.map(normalizeConcept)]);
-    const aliases = [...prevAliases];
-    for (const a of c.newAliases) {
-      const norm = normalizeConcept(a);
-      if (!norm || seenNorms.has(norm)) continue;
-      seenNorms.add(norm);
-      aliases.push(a);
-    }
-    const cappedAliases = aliases.slice(-ALIAS_CAP);
+    const cappedAliases = growAliases(label, prevMeta, c.newAliases);
 
     const node: NodeUpsert = {
       id: c.id,
-      kind: c.category,
+      // Preserve the node's existing kind — a cross-category alias match must
+      // not flip the canonical node's identity on merge.
+      kind: (prev?.["kind"] as string) || c.category,
       // First writer wins for the display label/trade so a node videos already
       // created keeps its identity; the mentor still appends provenance.
       label,
@@ -1501,7 +1581,12 @@ async function persistMentorResolvedConcepts(
       // Interim value; recomputeKnowledgeAggregates overwrites it below.
       confidence: Math.max(prevConfidence ?? 0, c.confidence),
       verification_status: mentorVerification(prevStatus),
-      meta: { ...prevMeta, category: c.category, mergedFrom, aliases: cappedAliases },
+      meta: {
+        ...prevMeta,
+        category: (prevMeta["category"] as string) || c.category,
+        mergedFrom,
+        aliases: cappedAliases,
+      },
     };
     if (c.embeddingJson !== null) node.embedding = c.embeddingJson;
     return node;
