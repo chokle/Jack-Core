@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../supabase.js", async () => {
   const m = await import("./mocks.js");
@@ -12,12 +12,29 @@ vi.mock("../openai.js", async () => {
 
 import {
   normalizeItems,
+  distillTranscript,
   MAX_KNOWLEDGE_ITEMS,
   KNOWLEDGE_CATEGORIES,
 } from "../distillation.js";
 import { knowledgeNodeId } from "../memory-graph.js";
+import { openai } from "./mocks.js";
 
 const NO_CODES = new Set<string>();
+
+/**
+ * The shared mock `openai` singleton is an empty object; give it a spyable
+ * `chat.completions.create` so distillTranscript tests can control (and assert
+ * on) the model response without any network access.
+ */
+const createCompletion = vi.fn();
+(openai as { chat: { completions: { create: typeof createCompletion } } }).chat = {
+  completions: { create: createCompletion },
+};
+
+/** Build a chat-completions-shaped response wrapping the given message content. */
+function completionWith(content: string | null | undefined) {
+  return { choices: [{ message: { content } }] };
+}
 
 describe("normalizeItems", () => {
   it("returns an empty list for non-array / garbage input", () => {
@@ -240,5 +257,93 @@ describe("normalizeItems", () => {
     }));
     const items = normalizeItems(raw, NO_CODES);
     expect(items).toHaveLength(KNOWLEDGE_CATEGORIES.length);
+  });
+});
+
+describe("distillTranscript", () => {
+  beforeEach(() => {
+    createCompletion.mockReset();
+  });
+
+  const baseInput = {
+    title: "GTAW Root Pass",
+    trade: "Welder",
+    transcript: "Some real transcript text about welding technique.",
+    segments: [] as { start: number; text: string }[],
+    competencies: [] as { code: string; name: string; trade: string }[],
+  };
+
+  it("returns [] for an empty transcript without calling the model", async () => {
+    const result = await distillTranscript({ ...baseInput, transcript: "" });
+    expect(result).toEqual([]);
+    expect(createCompletion).not.toHaveBeenCalled();
+  });
+
+  it("returns [] for a whitespace-only transcript without calling the model", async () => {
+    const result = await distillTranscript({ ...baseInput, transcript: "   \n\t  " });
+    expect(result).toEqual([]);
+    expect(createCompletion).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when segments contain only blank text and there is no transcript", async () => {
+    const result = await distillTranscript({
+      ...baseInput,
+      transcript: "",
+      segments: [
+        { start: 0, text: "   " },
+        { start: 1, text: "" },
+      ],
+    });
+    expect(result).toEqual([]);
+    expect(createCompletion).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when the model returns non-JSON content (JSON.parse failure)", async () => {
+    createCompletion.mockResolvedValue(completionWith("this is not json {{{"));
+    const result = await distillTranscript(baseInput);
+    expect(result).toEqual([]);
+    expect(createCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns [] when the model returns null/empty content", async () => {
+    createCompletion.mockResolvedValue(completionWith(null));
+    const result = await distillTranscript(baseInput);
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] when the parsed object has no 'knowledge' array", async () => {
+    createCompletion.mockResolvedValue(completionWith(JSON.stringify({ notKnowledge: [] })));
+    const result = await distillTranscript(baseInput);
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] when 'knowledge' is present but not an array", async () => {
+    createCompletion.mockResolvedValue(
+      completionWith(JSON.stringify({ knowledge: "oops, a string" })),
+    );
+    const result = await distillTranscript(baseInput);
+    expect(result).toEqual([]);
+  });
+
+  it("passes only valid competency codes through to normalizeItems", async () => {
+    createCompletion.mockResolvedValue(
+      completionWith(
+        JSON.stringify({
+          knowledge: [
+            { title: "Root Opening", category: "concept", competencyCode: "W-3" },
+            { title: "Travel Speed", category: "concept", competencyCode: "Z-99" },
+            { title: "Arc Blow", category: "hazard", competencyCode: "  W-3  " },
+          ],
+        }),
+      ),
+    );
+    const result = await distillTranscript({
+      ...baseInput,
+      competencies: [{ code: "W-3", name: "Gas Metal Arc Welding", trade: "Welder" }],
+    });
+    const byTitle = Object.fromEntries(result.map((i) => [i.title, i.competencyCode]));
+    expect(byTitle["Root Opening"]).toBe("W-3");
+    expect(byTitle["Travel Speed"]).toBeNull();
+    expect(byTitle["Arc Blow"]).toBe("W-3");
   });
 });
