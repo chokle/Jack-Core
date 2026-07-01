@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
+import { InterviewMode } from "./components/InterviewMode";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
@@ -74,6 +75,8 @@ function JackApp() {
             onOpenVideo={handleSelectVideo}
             onJumpToTimestamp={handleCitationClick}
           />
+        ) : view === "interview" ? (
+          <InterviewMode />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}

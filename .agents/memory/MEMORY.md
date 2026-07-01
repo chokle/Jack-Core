@@ -1,3 +1,5 @@
 - [Chat privacy without auth](chat-session-privacy.md) — Jack is intentionally no-auth; chat history must always filter by a client-owned sessionId, never return global rows.
 - [Untrusted content rendering](untrusted-content-rendering.md) — video analysis + chat content come from public uploads; render as text, never via dangerouslySetInnerHTML.
 - [Atomic knowledge graph provenance](knowledge-graph-provenance.md) — distilled concepts share one canonical node; provenance is edge-owned (kind='knowledge'); invariants that keep re-processing idempotent.
+- [express-rate-limit IPv6](express-rate-limit-ipv6.md) — custom keyGenerator must wrap req.ip with ipKeyGenerator or v8 throws ERR_ERL_KEY_GEN_IPV6 and IPv6 clients evade limits.
+- [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.

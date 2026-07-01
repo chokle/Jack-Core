@@ -1,4 +1,10 @@
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
+
+/** Normalize the client IP into a rate-limit key. `ipKeyGenerator` collapses an
+ *  IPv6 address to its /64 subnet so a single client can't cycle low-order bits
+ *  to evade the limit; a missing IP falls back to a shared bucket. */
+const keyGenerator = (req: { ip?: string }): string =>
+  ipKeyGenerator(req.ip ?? "unknown");
 
 /**
  * Rate limiter for expensive AI/media pipeline endpoints:
@@ -15,7 +21,7 @@ export const aiPipelineLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { error: "Too many requests — please try again later." },
-  keyGenerator: (req) => req.ip ?? "unknown",
+  keyGenerator,
 });
 
 /**
@@ -30,5 +36,21 @@ export const aiQueryLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { error: "Too many requests — please slow down." },
-  keyGenerator: (req) => req.ip ?? "unknown",
+  keyGenerator,
+});
+
+/**
+ * Rate limiter for Interview Mode endpoints. Starting a session, submitting an
+ * answer, and skipping each call the chat model (next-question generation) and,
+ * for answers, the distillation model — all paid. A conversational interview is
+ * inherently many small turns, so this is more generous than the pipeline limiter
+ * (120 requests per 15 minutes per IP) while still capping automated abuse.
+ */
+export const aiInterviewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many interview requests — please slow down." },
+  keyGenerator,
 });

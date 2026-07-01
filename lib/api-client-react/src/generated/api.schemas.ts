@@ -246,6 +246,7 @@ export const KnowledgeNodeKind = {
   topic: 'topic',
   competency: 'competency',
   video: 'video',
+  mentor: 'mentor',
   concept: 'concept',
   tool: 'tool',
   equipment: 'equipment',
@@ -303,6 +304,103 @@ export interface KnowledgeGraph {
   edges: KnowledgeEdge[];
   counts: KnowledgeGraphCounts;
   generatedAt: string;
+}
+
+export interface MentorProfile {
+  id: string;
+  name: string;
+  /** @nullable */
+  trade?: string | null;
+  /** @nullable */
+  tradeInput?: string | null;
+  /** @nullable */
+  yearsExperience?: number | null;
+  specialties?: string[];
+  /** @nullable */
+  region?: string | null;
+  /** @nullable */
+  background?: string | null;
+  createdAt: string;
+}
+
+export interface StartInterviewInput {
+  /** The mentor's name */
+  name: string;
+  /** Selected trade (e.g. Welding, Heavy Equipment Operator, Other) */
+  trade: string;
+  /**
+     * Free-text trade when "Other" is selected
+     * @nullable
+     */
+  tradeInput?: string | null;
+  /** @nullable */
+  yearsExperience?: number | null;
+  specialties?: string[];
+  /** @nullable */
+  region?: string | null;
+  /** @nullable */
+  background?: string | null;
+}
+
+export interface SubmitAnswerInput {
+  /** The mentor's verbatim answer to the current question */
+  answer: string;
+}
+
+export type InterviewSessionStatus = typeof InterviewSessionStatus[keyof typeof InterviewSessionStatus];
+
+
+export const InterviewSessionStatus = {
+  active: 'active',
+  completed: 'completed',
+} as const;
+
+export interface InterviewSession {
+  id: string;
+  mentorProfileId: string;
+  mentorName: string;
+  /** @nullable */
+  trade?: string | null;
+  status: InterviewSessionStatus;
+  /** @nullable */
+  currentQuestion?: string | null;
+  /** @nullable */
+  currentCategory?: string | null;
+  /** @nullable */
+  currentTopic?: string | null;
+  questionCount: number;
+  /** True when there are no further questions (interview finished) */
+  complete: boolean;
+  createdAt: string;
+}
+
+export interface InterviewAnswer {
+  id: string;
+  question: string;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  topic?: string | null;
+  /** @nullable */
+  answerText?: string | null;
+  skipped: boolean;
+  createdAt: string;
+}
+
+export interface ExtractedKnowledgeItem {
+  id: string;
+  title: string;
+  description?: string;
+  category: string;
+  confidence: number;
+  /** @nullable */
+  competencyCode?: string | null;
+}
+
+export interface InterviewTurnResult {
+  session: InterviewSession;
+  answer: InterviewAnswer;
+  extractedKnowledge: ExtractedKnowledgeItem[];
 }
 
 export type ListVideosParams = {

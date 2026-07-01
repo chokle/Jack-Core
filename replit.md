@@ -32,6 +32,9 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `scripts/src/setup-supabase.ts` — Supabase schema setup script/reference
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
+- `artifacts/api-server/src/routes/interview.ts` — Interview Mode endpoints (start session, get, submit/skip answer, finish)
+- `artifacts/api-server/src/lib/interview.ts` — interview trades/categories + next-question engine (GPT-4o with deterministic fallback)
+- `artifacts/jack-core/src/components/InterviewMode.tsx` — Interview Mode UI (intake → conversation → completion)
 - `artifacts/jack-core/src/lib/memory-graph.ts` — client graph model (`buildGraphModelFromServer` + client-derived fallback)
 
 ## Architecture decisions
@@ -42,6 +45,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - Transcription and analysis are async (background jobs via setImmediate) — status polling via the `status` field on Video
 - Jack always searches the internal library (pgvector RAG) before answering — `usedInternalKnowledge` flag in responses
 - Red Seal competency codes are seeded from a canonical list and mapped by GPT-4o during analysis
+- Interview Mode reuses the video distillation + graph pipeline: mentor answers are distilled into the SAME canonical concept nodes (provenance is edge-owned via `mentor:<uuid>` → concept edges, deduped by answer id) with `verification_status="mentor_supplied"`, so mentor input corroborates rather than fragments the graph. Interview trade labels are normalized to the seeded Red Seal trades (e.g. "Welding" → "Welder") so mentor concepts hang off existing topic hubs
 - The knowledge graph is persisted in Supabase (`knowledge_nodes`/`knowledge_edges`) as a deterministic-ID mirror (core `__jack__`, `topic:<trade>`, `comp:<code>`, `video:<uuid>`) synced through the video pipeline, so re-processing/merging collapses onto the same node instead of duplicating. `GET /graph` self-heals when empty; there is **no** public rebuild endpoint (the API uses the service-role key and has no auth), and the frontend falls back to deriving the graph client-side if the persisted graph is unavailable
 
 ## Product
@@ -52,6 +56,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - **Semantic Search** — RAG over transcript segments with pgvector; falls back to text search if no embeddings
 - **Ask Jack** — Conversational AI that searches the internal library first, answers with timestamp citations
 - **Related Videos** — Vector similarity to surface related content after watching
+- **Interview Mode** — Jack conversationally interviews experienced tradespeople one plainspoken question at a time (skippable); answers are saved verbatim, distilled with the same engine as videos, and reinforce the SAME shared knowledge graph as `mentor_supplied` corroboration
 
 ## Required Setup — Supabase Schema
 

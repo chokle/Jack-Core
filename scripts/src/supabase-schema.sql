@@ -148,7 +148,7 @@ ON CONFLICT (code) DO NOTHING;
 CREATE TABLE IF NOT EXISTS knowledge_nodes (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN (
-    'core','topic','competency','video',
+    'core','topic','competency','video','mentor',
     'concept','tool','equipment','material','procedure',
     'hazard','slang','certification','standard','regional_term'
   )),
@@ -157,8 +157,11 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
   ref_id TEXT,
   description TEXT,
   confidence FLOAT,
+  -- 'mentor_supplied' marks a concept corroborated by an interviewed mentor
+  -- (Interview Mode). It is a system-set trust level above raw 'unverified' but
+  -- below a human 'verified'/'rejected' decision, which always win.
   verification_status TEXT NOT NULL DEFAULT 'unverified'
-    CHECK (verification_status IN ('unverified','verified','rejected')),
+    CHECK (verification_status IN ('unverified','verified','rejected','mentor_supplied')),
   -- Embedding of an atomic-knowledge concept (title + description), used by the
   -- Graph Intelligence layer to detect differently-worded duplicates of the same
   -- concept and collapse them onto one canonical node. NULL for scaffold nodes.
@@ -204,7 +207,7 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
   source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN (
-    'core','topic','competency','video','knowledge'
+    'core','topic','competency','video','mentor','knowledge'
   )),
   weight FLOAT NOT NULL DEFAULT 1,
   meta JSONB NOT NULL DEFAULT '{}',
@@ -223,18 +226,18 @@ ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS verification_status TEXT
 ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS embedding vector(1536);
 ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_kind_check;
 ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_kind_check CHECK (kind IN (
-  'core','topic','competency','video',
+  'core','topic','competency','video','mentor',
   'concept','tool','equipment','material','procedure',
   'hazard','slang','certification','standard','regional_term'
 ));
 ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_verification_status_check;
 ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_verification_status_check
-  CHECK (verification_status IN ('unverified','verified','rejected'));
+  CHECK (verification_status IN ('unverified','verified','rejected','mentor_supplied'));
 
 ALTER TABLE knowledge_edges ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE knowledge_edges DROP CONSTRAINT IF EXISTS knowledge_edges_kind_check;
 ALTER TABLE knowledge_edges ADD CONSTRAINT knowledge_edges_kind_check CHECK (kind IN (
-  'core','topic','competency','video','knowledge'
+  'core','topic','competency','video','mentor','knowledge'
 ));
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_kind ON knowledge_nodes(kind);
@@ -306,3 +309,74 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('jack-videos', 'jack-videos', true)
 ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================================
+-- Interview Mode — mentor profiles, interview sessions, and verbatim answers.
+--
+-- An experienced tradesperson ("mentor") is interviewed conversationally by
+-- Jack (one plainspoken question at a time). Every answer is stored VERBATIM,
+-- distilled into candidate atomic knowledge (reusing the video distillation
+-- engine), and mirrored into the SAME shared knowledge graph as a `mentor:<id>`
+-- source node whose provenance edges reinforce canonical concept nodes with
+-- verification_status = 'mentor_supplied'.
+-- ============================================================================
+
+-- One interviewed mentor. `trade` is the normalized (Red Seal-aligned) trade
+-- used across the graph; `trade_input` preserves whatever the mentor typed
+-- (esp. for the "Other" free-text trade).
+CREATE TABLE IF NOT EXISTS mentor_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  trade TEXT,
+  trade_input TEXT,
+  years_experience INT,
+  specialties TEXT[] DEFAULT '{}',
+  region TEXT,
+  background TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- A single interview conversation. The server is authoritative for the pending
+-- question: `current_question`/`current_category`/`current_topic` hold the
+-- question the mentor is answering next (null once the interview is complete).
+CREATE TABLE IF NOT EXISTS interview_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  mentor_profile_id UUID NOT NULL REFERENCES mentor_profiles(id) ON DELETE CASCADE,
+  trade TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+  current_question TEXT,
+  current_category TEXT,
+  current_topic TEXT,
+  asked_categories TEXT[] DEFAULT '{}',
+  question_count INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+-- Every question put to the mentor and their verbatim answer. `skipped` answers
+-- carry no text and no distilled knowledge. The nullable media_ref +
+-- media_start_time/media_end_time columns are reserved for a future audio/video
+-- answer mode (this build stores typed answers only). `extracted_knowledge` is a
+-- convenience snapshot of what this answer distilled into (the graph remains the
+-- source of truth).
+CREATE TABLE IF NOT EXISTS interview_answers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES interview_sessions(id) ON DELETE CASCADE,
+  mentor_profile_id UUID NOT NULL REFERENCES mentor_profiles(id) ON DELETE CASCADE,
+  question TEXT NOT NULL,
+  category TEXT,
+  topic TEXT,
+  answer_text TEXT,
+  skipped BOOLEAN NOT NULL DEFAULT false,
+  media_ref TEXT,
+  media_start_time FLOAT,
+  media_end_time FLOAT,
+  extracted_knowledge JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_sessions_mentor ON interview_sessions(mentor_profile_id);
+CREATE INDEX IF NOT EXISTS idx_interview_answers_session ON interview_answers(session_id);
+CREATE INDEX IF NOT EXISTS idx_interview_answers_mentor ON interview_answers(mentor_profile_id);

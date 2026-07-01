@@ -22,7 +22,7 @@
 import { openai, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
-import { knowledgeNodeId, syncVideoKnowledge } from "./memory-graph.js";
+import { knowledgeNodeId, syncVideoKnowledge, syncMentorAnswerKnowledge } from "./memory-graph.js";
 
 /**
  * The reusable atomic knowledge categories. `competency` already exists as a
@@ -304,4 +304,142 @@ export async function runDistillation(videoId: string): Promise<void> {
 
   await syncVideoKnowledge(videoId, items, { model: MODELS.analysis });
   logger.info({ videoId, count: items.length }, "distilled atomic knowledge");
+}
+
+/**
+ * Distill a single interview Q&A pair into a bounded set of reusable atomic
+ * knowledge objects — the SAME shape the video distiller produces, so mentor
+ * knowledge collapses onto the very same canonical concept nodes. Interview
+ * answers have no media timeline yet, so `timestamps` is always empty. Returns a
+ * validated, de-duplicated, bounded list — never raw model output.
+ */
+export async function distillAnswer(input: {
+  trade: string | null;
+  category: string | null;
+  topic: string | null;
+  question: string;
+  answer: string;
+  competencies: { code: string; name: string; trade: string }[];
+}): Promise<AtomicKnowledge[]> {
+  const { trade, category, topic, question, answer, competencies } = input;
+  if (!answer.trim()) return [];
+
+  const competencyContext =
+    competencies.length > 0
+      ? competencies.map((c) => `${c.code}: ${c.name} (${c.trade})`).join("\n")
+      : "(none)";
+
+  const topicLine = [category, topic].filter(Boolean).join(" / ") || "general";
+
+  const completion = await openai.chat.completions.create({
+    model: MODELS.analysis,
+    messages: [
+      {
+        role: "system",
+        content: `You are Jack's Knowledge Distillation Engine for skilled trades. You are distilling an answer an EXPERIENCED tradesperson gave in a spoken-style interview into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across a whole trade, not a retelling of this one person's story.
+
+Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Arc Blow, Porosity, WPS, Preheat, Lockout-Tagout, Grade Staking, Track Tension, Two-Block.
+
+Rules:
+- Return ONLY durable, reusable trade knowledge — a concept, tool, hazard, procedure, standard, or piece of trade slang another expert in this trade would recognize. Ignore purely personal anecdote, names, dates, and small talk.
+- If the answer contains no reusable trade knowledge (e.g. it was chit-chat or a personal story with no transferable lesson), return an EMPTY list. Do not invent concepts.
+- Return AT MOST ${MAX_KNOWLEDGE_ITEMS} objects. Fewer is better.
+- Each object's "category" MUST be one of: ${KNOWLEDGE_CATEGORIES.join(", ")}.
+  concept = a technique/principle; tool = a hand/power tool; equipment = larger machinery/gear; material = a consumable/stock; procedure = a repeatable process; hazard = a safety risk; slang = trade terminology/jargon; certification = a credential; standard = a code/spec; regional_term = a location-specific term.
+- Do NOT output "timestamps" — interview answers have no timeline.
+- "confidence" is your confidence in [0,1] that this is a real, reusable concept.
+- "competencyCode" is OPTIONAL — set it to a Red Seal code from the list below ONLY if this concept clearly maps to one, else omit or null.
+
+Available Red Seal competencies:
+${competencyContext}`,
+      },
+      {
+        role: "user",
+        content: `Trade: ${trade ?? "general"}
+Interview topic: ${topicLine}
+Question asked: ${question}
+
+Mentor's answer:
+${answer.slice(0, MAX_TRANSCRIPT_CHARS)}
+
+Respond with a JSON object of the exact shape:
+{
+  "knowledge": [
+    {
+      "title": "Short concept name",
+      "description": "1-2 sentence explanation of the concept",
+      "category": "concept",
+      "confidence": 0.9,
+      "competencyCode": "W-3"
+    }
+  ]
+}`,
+      },
+    ],
+    response_format: { type: "json_object" },
+  });
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(completion.choices[0]?.message?.content ?? "{}");
+  } catch {
+    return [];
+  }
+
+  const knowledge =
+    typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)["knowledge"]
+      : undefined;
+
+  const validCodes = new Set(competencies.map((c) => c.code));
+  return normalizeItems(knowledge, validCodes);
+}
+
+/**
+ * Interview pipeline step: distill one mentor answer's reusable knowledge and
+ * persist it into the shared graph as mentor-sourced corroboration. Returns the
+ * distilled items so the caller can snapshot them onto the answer row and preview
+ * them to the mentor. Throws on failure; callers wrap this best-effort so a
+ * distillation failure never loses the verbatim answer.
+ */
+export async function runMentorAnswerDistillation(input: {
+  mentorProfileId: string;
+  mentorName: string;
+  answerId: string;
+  trade: string | null;
+  category: string | null;
+  topic: string | null;
+  question: string;
+  answer: string;
+}): Promise<AtomicKnowledge[]> {
+  const { data: comps, error: cErr } = await supabase
+    .from("competencies")
+    .select("code, name, trade");
+  if (cErr) throw cErr;
+  const competencies = (comps ?? []).map((c: Record<string, unknown>) => ({
+    code: String(c["code"] ?? ""),
+    name: String(c["name"] ?? ""),
+    trade: String(c["trade"] ?? ""),
+  }));
+
+  const items = await distillAnswer({
+    trade: input.trade,
+    category: input.category,
+    topic: input.topic,
+    question: input.question,
+    answer: input.answer,
+    competencies,
+  });
+
+  await syncMentorAnswerKnowledge(input.mentorProfileId, input.mentorName, items, {
+    answerId: input.answerId,
+    trade: input.trade,
+    model: MODELS.analysis,
+  });
+
+  logger.info(
+    { mentorProfileId: input.mentorProfileId, answerId: input.answerId, count: items.length },
+    "distilled mentor answer knowledge",
+  );
+  return items;
 }

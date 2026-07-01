@@ -18,6 +18,8 @@ tags:
     description: Ask Jack conversational AI
   - name: competencies
     description: Red Seal competency mapping
+  - name: interview
+    description: Jack Interview Mode — conversational knowledge capture from mentors
 
 paths:
   /healthz:
@@ -381,6 +383,115 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeNode"
 
+  /interview/sessions:
+    post:
+      operationId: startInterview
+      tags: [interview]
+      summary: Create a mentor profile and start an interview session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartInterviewInput"
+      responses:
+        "201":
+          description: Interview session started with the first question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewSession"
+
+  /interview/sessions/{id}:
+    get:
+      operationId: getInterviewSession
+      tags: [interview]
+      summary: Get the current state of an interview session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The interview session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewSession"
+        "404":
+          description: Session not found
+
+  /interview/sessions/{id}/answers:
+    post:
+      operationId: submitInterviewAnswer
+      tags: [interview]
+      summary: Submit the mentor's answer to the current question and get the next one
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAnswerInput"
+      responses:
+        "200":
+          description: The saved answer, distilled knowledge, and the updated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewTurnResult"
+        "404":
+          description: Session not found
+
+  /interview/sessions/{id}/skip:
+    post:
+      operationId: skipInterviewQuestion
+      tags: [interview]
+      summary: Skip the current question and get the next one
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The skipped answer record and the updated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewTurnResult"
+        "404":
+          description: Session not found
+
+  /interview/sessions/{id}/finish:
+    post:
+      operationId: finishInterview
+      tags: [interview]
+      summary: End the interview session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The completed interview session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewSession"
+        "404":
+          description: Session not found
+
 components:
   schemas:
     HealthStatus:
@@ -719,6 +830,7 @@ components:
               topic,
               competency,
               video,
+              mentor,
               concept,
               tool,
               equipment,
@@ -798,3 +910,139 @@ components:
               type: integer
         generatedAt:
           type: string
+
+    MentorProfile:
+      type: object
+      required: [id, name, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        trade:
+          type: ["string", "null"]
+        tradeInput:
+          type: ["string", "null"]
+        yearsExperience:
+          type: ["integer", "null"]
+        specialties:
+          type: array
+          items:
+            type: string
+        region:
+          type: ["string", "null"]
+        background:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    StartInterviewInput:
+      type: object
+      required: [name, trade]
+      properties:
+        name:
+          type: string
+          description: The mentor's name
+        trade:
+          type: string
+          description: Selected trade (e.g. Welding, Heavy Equipment Operator, Other)
+        tradeInput:
+          type: ["string", "null"]
+          description: Free-text trade when "Other" is selected
+        yearsExperience:
+          type: ["integer", "null"]
+        specialties:
+          type: array
+          items:
+            type: string
+        region:
+          type: ["string", "null"]
+        background:
+          type: ["string", "null"]
+
+    SubmitAnswerInput:
+      type: object
+      required: [answer]
+      properties:
+        answer:
+          type: string
+          description: The mentor's verbatim answer to the current question
+
+    InterviewSession:
+      type: object
+      required:
+        [id, mentorProfileId, mentorName, status, questionCount, complete, createdAt]
+      properties:
+        id:
+          type: string
+        mentorProfileId:
+          type: string
+        mentorName:
+          type: string
+        trade:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [active, completed]
+        currentQuestion:
+          type: ["string", "null"]
+        currentCategory:
+          type: ["string", "null"]
+        currentTopic:
+          type: ["string", "null"]
+        questionCount:
+          type: integer
+        complete:
+          type: boolean
+          description: True when there are no further questions (interview finished)
+        createdAt:
+          type: string
+
+    InterviewAnswer:
+      type: object
+      required: [id, question, skipped, createdAt]
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        category:
+          type: ["string", "null"]
+        topic:
+          type: ["string", "null"]
+        answerText:
+          type: ["string", "null"]
+        skipped:
+          type: boolean
+        createdAt:
+          type: string
+
+    ExtractedKnowledgeItem:
+      type: object
+      required: [id, title, category, confidence]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        confidence:
+          type: number
+        competencyCode:
+          type: ["string", "null"]
+
+    InterviewTurnResult:
+      type: object
+      required: [session, answer, extractedKnowledge]
+      properties:
+        session:
+          $ref: "#/components/schemas/InterviewSession"
+        answer:
+          $ref: "#/components/schemas/InterviewAnswer"
+        extractedKnowledge:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedKnowledgeItem"

@@ -33,6 +33,7 @@ const KNOWLEDGE_MATCH_COUNT = 1;
 const topicNodeId = (trade: string) => `topic:${trade}`;
 const compNodeId = (code: string) => `comp:${code}`;
 const videoNodeId = (id: string) => `video:${id}`;
+const mentorNodeId = (id: string) => `mentor:${id}`;
 const edgeKey = (source: string, target: string) => `e:${source}->${target}`;
 
 /**
@@ -78,7 +79,7 @@ export type KnowledgeNodeKind = (typeof KNOWLEDGE_NODE_KINDS)[number];
 
 export interface GraphNode {
   id: string;
-  kind: "core" | "topic" | "competency" | "video" | KnowledgeNodeKind;
+  kind: "core" | "topic" | "competency" | "video" | "mentor" | KnowledgeNodeKind;
   label: string;
   trade: string | null;
   refId: string | null;
@@ -357,17 +358,22 @@ async function deleteVideoNode(videoId: string): Promise<void> {
  * away with it, so the persisted graph never drifts from the source tables.
  */
 async function pruneOrphanTopics(): Promise<void> {
-  const [comps, vids, topics] = await Promise.all([
+  const [comps, vids, mentors, topics] = await Promise.all([
     supabase.from("competencies").select("trade"),
     supabase.from("videos").select("trade"),
+    // Mentor source nodes (Interview Mode) also anchor a topic hub — a trade with
+    // only interviewed mentors (e.g. Heavy Equipment Operator, which has no seeded
+    // competencies) must keep its hub even when no video references it.
+    supabase.from("knowledge_nodes").select("trade").eq("kind", "mentor"),
     supabase.from("knowledge_nodes").select("id, trade").eq("kind", "topic"),
   ]);
   if (comps.error) throw comps.error;
   if (vids.error) throw vids.error;
+  if (mentors.error) throw mentors.error;
   if (topics.error) throw topics.error;
 
   const keep = new Set<string>();
-  for (const r of [...(comps.data ?? []), ...(vids.data ?? [])]) {
+  for (const r of [...(comps.data ?? []), ...(vids.data ?? []), ...(mentors.data ?? [])]) {
     const t = (r as Record<string, unknown>)["trade"];
     if (typeof t === "string" && t) keep.add(t);
   }
@@ -884,9 +890,14 @@ export async function syncVideoKnowledge(
       // Interim value; recomputeKnowledgeAggregates overwrites it with the
       // corroboration-based confidence once provenance edges are written.
       confidence: Math.max(prevConfidence ?? 0, c.confidence),
-      // Preserve a human verification decision; default new nodes to unverified.
+      // Preserve any elevated status: a human decision (verified/rejected) always
+      // wins, and a concept a mentor already corroborated stays 'mentor_supplied'
+      // — re-processing a video that also teaches it must never downgrade it.
+      // Video-only concepts default to unverified.
       verification_status:
-        prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified",
+        prevStatus === "verified" || prevStatus === "rejected" || prevStatus === "mentor_supplied"
+          ? prevStatus
+          : "unverified",
       meta: { ...prevMeta, category: c.category, mergedFrom },
     };
     // Only (re)write the embedding when this concept owns the canonical id — never
@@ -988,6 +999,225 @@ export async function syncVideoKnowledge(
   // Reconverge every concept this run touched — the ones it now corroborates and
   // any it dropped — so confidence, provenance, and edge weights stay in sync.
   await recomputeKnowledgeAggregates([...canonicalIds, ...priorTargets]);
+}
+
+/**
+ * The verification status to set on a concept a mentor corroborates: a human
+ * decision (verified/rejected) always wins; otherwise the concept is at least
+ * 'mentor_supplied' (an already-mentor_supplied node simply stays put).
+ */
+function mentorVerification(prevStatus: string | undefined): string {
+  if (prevStatus === "verified" || prevStatus === "rejected") return prevStatus;
+  return "mentor_supplied";
+}
+
+/**
+ * Ensure a mentor source node exists and is linked under its trade topic hub (or
+ * the core when the trade is unknown), mirroring how a video node hangs off its
+ * topic. Idempotent; safe to call before every answer sync.
+ */
+async function ensureMentorNode(
+  profileId: string,
+  name: string,
+  trade: string | null,
+): Promise<void> {
+  const mNode = mentorNodeId(profileId);
+  const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
+  const edges: EdgeUpsert[] = [];
+
+  if (trade) {
+    nodes.push({ id: topicNodeId(trade), kind: "topic", label: trade, trade });
+    edges.push({
+      id: edgeKey(GRAPH_CORE_ID, topicNodeId(trade)),
+      source_id: GRAPH_CORE_ID,
+      target_id: topicNodeId(trade),
+      kind: "topic",
+    });
+  }
+
+  nodes.push({
+    id: mNode,
+    kind: "mentor",
+    label: name,
+    trade,
+    ref_id: profileId,
+    meta: { mentorProfileId: profileId, trade: trade ?? undefined },
+  });
+
+  const parent = trade ? topicNodeId(trade) : GRAPH_CORE_ID;
+  edges.push({ id: edgeKey(parent, mNode), source_id: parent, target_id: mNode, kind: "mentor" });
+
+  await upsertNodes(nodes);
+  await upsertEdges(edges);
+}
+
+/**
+ * Persist one interviewed mentor's distilled answer knowledge into the SAME
+ * shared graph the video pipeline feeds. The mentor is a source node
+ * (`mentor:<profileId>`), exactly parallel to a video node: its provenance edges
+ * (kind='knowledge') reinforce canonical concept nodes, so a concept an expert
+ * confirms gains an extra corroborating source in the noisy-OR confidence —
+ * collapsing onto the very nodes videos already teach rather than duplicating
+ * them. Concepts a mentor corroborates are marked 'mentor_supplied' unless a
+ * human already decided verified/rejected.
+ *
+ * Unlike the video path (which reconciles a video's whole edge set by
+ * delete-then-reinsert on every re-analysis), a mentor accumulates knowledge one
+ * answer at a time, so this is ADDITIVE: each concept's mentor→concept edge is
+ * upserted with merged meta (union of contributing answerIds, max confidence).
+ * Replaying the same answer is therefore idempotent — the deterministic edge id
+ * plus answerId de-dup keeps the corroboration count stable.
+ */
+export async function syncMentorAnswerKnowledge(
+  mentorProfileId: string,
+  mentorName: string,
+  items: AtomicKnowledge[],
+  opts: { answerId: string; trade?: string | null; model?: string | null; extractedAt?: string },
+): Promise<void> {
+  const mNode = mentorNodeId(mentorProfileId);
+  const trade = opts.trade ?? null;
+  const model = opts.model ?? null;
+  const extractedAt = opts.extractedAt ?? new Date().toISOString();
+  const { answerId } = opts;
+
+  // Always ensure the mentor source node exists and is wired into the graph, even
+  // if this particular answer distilled nothing.
+  await ensureMentorNode(mentorProfileId, mentorName, trade);
+  if (items.length === 0) return;
+
+  // Duplicate detection + merge: collapse each item onto its canonical node.
+  const resolved = await resolveCanonicalItems(items);
+  const canonicalIds = resolved.map((c) => c.id);
+
+  const existingById = new Map<string, Record<string, unknown>>();
+  if (canonicalIds.length > 0) {
+    const { data: rows, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id, label, trade, description, confidence, verification_status, meta")
+      .in("id", canonicalIds);
+    if (error) throw error;
+    for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
+  }
+
+  const nodes: NodeUpsert[] = resolved.map((c) => {
+    const prev = existingById.get(c.id);
+    const prevStatus = prev?.["verification_status"] as string | undefined;
+    const prevConfidence =
+      typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : null;
+    const prevDesc = (prev?.["description"] as string | null) ?? "";
+    const description =
+      c.description.length > prevDesc.length ? c.description : prevDesc || c.description;
+
+    // Preserve the node's meta ledger (recompute re-derives corroboration on top)
+    // and append any newly merged-in concept identities (first-seen wins).
+    const prevMeta = (prev?.["meta"] as Record<string, unknown>) ?? {};
+    const prevMerged = Array.isArray(prevMeta["mergedFrom"])
+      ? (prevMeta["mergedFrom"] as Array<Record<string, unknown>>)
+      : [];
+    const mergedById = new Map<string, Record<string, unknown>>();
+    for (const m of prevMerged) {
+      if (typeof m["id"] === "string") mergedById.set(m["id"] as string, m);
+    }
+    for (const m of c.mergedFrom) {
+      if (!mergedById.has(m.id)) mergedById.set(m.id, { ...m, at: extractedAt });
+    }
+    const mergedFrom = [...mergedById.values()];
+
+    const node: NodeUpsert = {
+      id: c.id,
+      kind: c.category,
+      // First writer wins for the display label/trade so a node videos already
+      // created keeps its identity; the mentor still appends provenance.
+      label: (prev?.["label"] as string) || c.title,
+      trade: (prev?.["trade"] as string | null) ?? trade,
+      ref_id: c.id,
+      description: description || null,
+      // Interim value; recomputeKnowledgeAggregates overwrites it below.
+      confidence: Math.max(prevConfidence ?? 0, c.confidence),
+      verification_status: mentorVerification(prevStatus),
+      meta: { ...prevMeta, category: c.category, mergedFrom },
+    };
+    if (c.embeddingJson !== null) node.embedding = c.embeddingJson;
+    return node;
+  });
+
+  const codes = [...new Set(resolved.map((c) => c.competencyCode).filter((c): c is string => !!c))];
+  await ensureCompetencyNodes(codes);
+  await upsertNodes(nodes);
+
+  // Additive provenance: merge this answer's contribution into any existing
+  // mentor→concept edge (union answerIds, max confidence) rather than replacing
+  // the mentor's prior edges. Reading the existing edges first makes replaying
+  // the same answerId a no-op.
+  const edgeIds = resolved.map((c) => edgeKey(mNode, c.id));
+  const existingEdges = new Map<string, Record<string, unknown>>();
+  if (edgeIds.length > 0) {
+    const { data: rows, error } = await supabase
+      .from("knowledge_edges")
+      .select("id, meta")
+      .in("id", edgeIds);
+    if (error) throw error;
+    for (const r of rows ?? []) existingEdges.set((r as Record<string, unknown>)["id"] as string, r);
+  }
+
+  const provenanceEdges: EdgeUpsert[] = resolved.map((c) => {
+    const id = edgeKey(mNode, c.id);
+    const prevMeta = (existingEdges.get(id)?.["meta"] as Record<string, unknown>) ?? {};
+    const prevAnswerIds = Array.isArray(prevMeta["answerIds"])
+      ? (prevMeta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      : [];
+    const answerIds = prevAnswerIds.includes(answerId)
+      ? prevAnswerIds
+      : [...prevAnswerIds, answerId];
+    const prevConf =
+      typeof prevMeta["confidence"] === "number" ? (prevMeta["confidence"] as number) : 0;
+    return {
+      id,
+      source_id: mNode,
+      target_id: c.id,
+      kind: "knowledge",
+      // Repeated corroboration across a mentor's answers strengthens the link.
+      weight: answerIds.length,
+      meta: {
+        ...prevMeta,
+        sourceType: "mentor",
+        mentorProfileId,
+        // Typed answers have no media timeline yet (reserved for audio/video).
+        timestamps: [],
+        confidence: Math.max(prevConf, c.confidence),
+        trade,
+        competencyCode: c.competencyCode,
+        answerIds,
+        model,
+        extractedAt,
+      },
+    };
+  });
+
+  // Additive hub edges: connect each concept to its trade topic and any mapped
+  // competency (weights re-derived by recomputeKnowledgeAggregates below).
+  const hubEdges: EdgeUpsert[] = [];
+  for (const c of resolved) {
+    if (trade) {
+      hubEdges.push({
+        id: edgeKey(c.id, topicNodeId(trade)),
+        source_id: c.id,
+        target_id: topicNodeId(trade),
+        kind: "topic",
+      });
+    }
+    if (c.competencyCode) {
+      hubEdges.push({
+        id: edgeKey(c.id, compNodeId(c.competencyCode)),
+        source_id: c.id,
+        target_id: compNodeId(c.competencyCode),
+        kind: "competency",
+      });
+    }
+  }
+
+  await upsertEdges([...provenanceEdges, ...hubEdges]);
+  await recomputeKnowledgeAggregates(canonicalIds);
 }
 
 /**

@@ -372,7 +372,7 @@ export const GetVideosByCompetencyResponse = zod.array(GetVideosByCompetencyResp
 export const GetGraphResponse = zod.object({
   "nodes": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
   "label": zod.string(),
   "trade": zod.string().nullish(),
   "refId": zod.string().nullish(),
@@ -416,7 +416,7 @@ export const SetNodeVerificationBody = zod.object({
 
 export const SetNodeVerificationResponse = zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
   "label": zod.string(),
   "trade": zod.string().nullish(),
   "refId": zod.string().nullish(),
@@ -426,6 +426,164 @@ export const SetNodeVerificationResponse = zod.object({
   "meta": zod.record(zod.string(), zod.unknown()),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Create a mentor profile and start an interview session
+ */
+export const StartInterviewBody = zod.object({
+  "name": zod.string().describe('The mentor\'s name'),
+  "trade": zod.string().describe('Selected trade (e.g. Welding, Heavy Equipment Operator, Other)'),
+  "tradeInput": zod.string().nullish().describe('Free-text trade when \"Other\" is selected'),
+  "yearsExperience": zod.number().nullish(),
+  "specialties": zod.array(zod.string()).optional(),
+  "region": zod.string().nullish(),
+  "background": zod.string().nullish()
+})
+
+export const StartInterviewResponse = zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Get the current state of an interview session
+ */
+export const GetInterviewSessionParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetInterviewSessionResponse = zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Submit the mentor's answer to the current question and get the next one
+ */
+export const SubmitInterviewAnswerParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const SubmitInterviewAnswerBody = zod.object({
+  "answer": zod.string().describe('The mentor\'s verbatim answer to the current question')
+})
+
+export const SubmitInterviewAnswerResponse = zod.object({
+  "session": zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
+}),
+  "answer": zod.object({
+  "id": zod.string(),
+  "question": zod.string(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "answerText": zod.string().nullish(),
+  "skipped": zod.boolean(),
+  "createdAt": zod.string()
+}),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Skip the current question and get the next one
+ */
+export const SkipInterviewQuestionParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const SkipInterviewQuestionResponse = zod.object({
+  "session": zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
+}),
+  "answer": zod.object({
+  "id": zod.string(),
+  "question": zod.string(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "answerText": zod.string().nullish(),
+  "skipped": zod.boolean(),
+  "createdAt": zod.string()
+}),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary End the interview session
+ */
+export const FinishInterviewParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const FinishInterviewResponse = zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
 })
 
 

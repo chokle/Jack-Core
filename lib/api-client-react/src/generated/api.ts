@@ -25,12 +25,16 @@ import type {
   ChatResponse,
   Competency,
   HealthStatus,
+  InterviewSession,
+  InterviewTurnResult,
   JobStatus,
   KnowledgeGraph,
   KnowledgeNode,
   ListVideosParams,
   SearchInput,
   SearchResults,
+  StartInterviewInput,
+  SubmitAnswerInput,
   UploadUrlRequest,
   UploadUrlResponse,
   VerificationUpdate,
@@ -1477,5 +1481,363 @@ export const useSetNodeVerification = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSetNodeVerificationMutationOptions(options));
+    }
+
+export const getStartInterviewUrl = () => {
+
+
+
+
+  return `/api/interview/sessions`
+}
+
+/**
+ * @summary Create a mentor profile and start an interview session
+ */
+export const startInterview = async (startInterviewInput: StartInterviewInput, options?: RequestInit): Promise<InterviewSession> => {
+
+  return customFetch<InterviewSession>(getStartInterviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(startInterviewInput)
+  }
+);}
+
+
+
+
+export const getStartInterviewMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInterview>>, TError,{data: BodyType<StartInterviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startInterview>>, TError,{data: BodyType<StartInterviewInput>}, TContext> => {
+
+const mutationKey = ['startInterview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startInterview>>, {data: BodyType<StartInterviewInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  startInterview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartInterviewMutationResult = NonNullable<Awaited<ReturnType<typeof startInterview>>>
+    export type StartInterviewMutationBody = BodyType<StartInterviewInput>
+    export type StartInterviewMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a mentor profile and start an interview session
+ */
+export const useStartInterview = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInterview>>, TError,{data: BodyType<StartInterviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startInterview>>,
+        TError,
+        {data: BodyType<StartInterviewInput>},
+        TContext
+      > => {
+      return useMutation(getStartInterviewMutationOptions(options));
+    }
+
+export const getGetInterviewSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/sessions/${id}`
+}
+
+/**
+ * @summary Get the current state of an interview session
+ */
+export const getInterviewSession = async (id: string, options?: RequestInit): Promise<InterviewSession> => {
+
+  return customFetch<InterviewSession>(getGetInterviewSessionUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInterviewSessionQueryKey = (id: string,) => {
+    return [
+    `/api/interview/sessions/${id}`
+    ] as const;
+    }
+
+
+export const getGetInterviewSessionQueryOptions = <TData = Awaited<ReturnType<typeof getInterviewSession>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInterviewSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInterviewSessionQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInterviewSession>>> = ({ signal }) => getInterviewSession(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInterviewSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInterviewSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getInterviewSession>>>
+export type GetInterviewSessionQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the current state of an interview session
+ */
+
+export function useGetInterviewSession<TData = Awaited<ReturnType<typeof getInterviewSession>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInterviewSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInterviewSessionQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSubmitInterviewAnswerUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/sessions/${id}/answers`
+}
+
+/**
+ * @summary Submit the mentor's answer to the current question and get the next one
+ */
+export const submitInterviewAnswer = async (id: string,
+    submitAnswerInput: SubmitAnswerInput, options?: RequestInit): Promise<InterviewTurnResult> => {
+
+  return customFetch<InterviewTurnResult>(getSubmitInterviewAnswerUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(submitAnswerInput)
+  }
+);}
+
+
+
+
+export const getSubmitInterviewAnswerMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitInterviewAnswer>>, TError,{id: string;data: BodyType<SubmitAnswerInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitInterviewAnswer>>, TError,{id: string;data: BodyType<SubmitAnswerInput>}, TContext> => {
+
+const mutationKey = ['submitInterviewAnswer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitInterviewAnswer>>, {id: string;data: BodyType<SubmitAnswerInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  submitInterviewAnswer(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitInterviewAnswerMutationResult = NonNullable<Awaited<ReturnType<typeof submitInterviewAnswer>>>
+    export type SubmitInterviewAnswerMutationBody = BodyType<SubmitAnswerInput>
+    export type SubmitInterviewAnswerMutationError = ErrorType<void>
+
+    /**
+ * @summary Submit the mentor's answer to the current question and get the next one
+ */
+export const useSubmitInterviewAnswer = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitInterviewAnswer>>, TError,{id: string;data: BodyType<SubmitAnswerInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitInterviewAnswer>>,
+        TError,
+        {id: string;data: BodyType<SubmitAnswerInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitInterviewAnswerMutationOptions(options));
+    }
+
+export const getSkipInterviewQuestionUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/sessions/${id}/skip`
+}
+
+/**
+ * @summary Skip the current question and get the next one
+ */
+export const skipInterviewQuestion = async (id: string, options?: RequestInit): Promise<InterviewTurnResult> => {
+
+  return customFetch<InterviewTurnResult>(getSkipInterviewQuestionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getSkipInterviewQuestionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipInterviewQuestion>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof skipInterviewQuestion>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['skipInterviewQuestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof skipInterviewQuestion>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  skipInterviewQuestion(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SkipInterviewQuestionMutationResult = NonNullable<Awaited<ReturnType<typeof skipInterviewQuestion>>>
+
+    export type SkipInterviewQuestionMutationError = ErrorType<void>
+
+    /**
+ * @summary Skip the current question and get the next one
+ */
+export const useSkipInterviewQuestion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skipInterviewQuestion>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof skipInterviewQuestion>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getSkipInterviewQuestionMutationOptions(options));
+    }
+
+export const getFinishInterviewUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/sessions/${id}/finish`
+}
+
+/**
+ * @summary End the interview session
+ */
+export const finishInterview = async (id: string, options?: RequestInit): Promise<InterviewSession> => {
+
+  return customFetch<InterviewSession>(getFinishInterviewUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getFinishInterviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishInterview>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof finishInterview>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['finishInterview'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof finishInterview>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  finishInterview(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FinishInterviewMutationResult = NonNullable<Awaited<ReturnType<typeof finishInterview>>>
+
+    export type FinishInterviewMutationError = ErrorType<void>
+
+    /**
+ * @summary End the interview session
+ */
+export const useFinishInterview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finishInterview>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof finishInterview>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getFinishInterviewMutationOptions(options));
     }
 

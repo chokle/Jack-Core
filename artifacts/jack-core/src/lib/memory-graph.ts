@@ -54,7 +54,17 @@ export const KNOWLEDGE_KINDS = [
 
 export type KnowledgeKind = (typeof KNOWLEDGE_KINDS)[number];
 
-export type NodeKind = "core" | "topic" | "video" | "competency" | KnowledgeKind;
+export type NodeKind =
+  | "core"
+  | "topic"
+  | "video"
+  | "competency"
+  | "mentor"
+  | KnowledgeKind;
+
+/** Signature color for mentor (human-sourced) nodes, distinct from the video and
+ *  atomic-knowledge strata so mentor-supplied corroboration reads at a glance. */
+export const MENTOR_COLOR: RGB = [255, 205, 120];
 
 const KNOWLEDGE_KIND_SET = new Set<string>(KNOWLEDGE_KINDS);
 
@@ -128,7 +138,8 @@ export function kindLabel(kind: NodeKind): string {
   if (kind === "topic") return "Topic Hub";
   if (kind === "competency") return "Red Seal Competency";
   if (kind === "video") return "Video";
-  return KNOWLEDGE_KIND_META[kind]?.label ?? "Knowledge";
+  if (kind === "mentor") return "Mentor";
+  return KNOWLEDGE_KIND_META[kind as KnowledgeKind]?.label ?? "Knowledge";
 }
 
 export interface Topic {
@@ -490,6 +501,21 @@ export function buildGraphModelFromServer(graph: {
           createdAt: n.createdAt ?? metaStr(n.meta, "createdAt"),
           updatedAt: n.updatedAt ?? metaStr(n.meta, "updatedAt"),
           competencyCodes: codes,
+        },
+      };
+    }
+    if (n.kind === "mentor") {
+      return {
+        id: n.id,
+        kind: "mentor",
+        label: n.label,
+        topicId: trade ? topicIdForTrade(trade) : undefined,
+        color: MENTOR_COLOR,
+        meta: {
+          trade,
+          description: n.description ?? metaStr(n.meta, "description"),
+          createdAt: n.createdAt ?? metaStr(n.meta, "createdAt"),
+          updatedAt: n.updatedAt ?? metaStr(n.meta, "updatedAt"),
         },
       };
     }

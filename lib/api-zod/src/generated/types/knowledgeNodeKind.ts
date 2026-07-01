@@ -14,6 +14,7 @@ export const KnowledgeNodeKind = {
   topic: 'topic',
   competency: 'competency',
   video: 'video',
+  mentor: 'mentor',
   concept: 'concept',
   tool: 'tool',
   equipment: 'equipment',

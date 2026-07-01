@@ -6,13 +6,14 @@ import {
   LayoutDashboard,
   GraduationCap,
   Lightbulb,
+  Mic,
   Settings,
   Menu,
   X,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 
-export type JackView = "graph" | "library";
+export type JackView = "graph" | "library" | "interview";
 
 interface JackShellProps {
   active: JackView;
@@ -140,6 +141,12 @@ export function JackShell({
             label="Library"
             active={active === "library"}
             onClick={() => go("library")}
+          />
+          <NavItem
+            icon={<Mic className="h-4 w-4" />}
+            label="Interview"
+            active={active === "interview"}
+            onClick={() => go("interview")}
           />
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
           <NavItem icon={<GraduationCap className="h-4 w-4" />} label="Competencies" soon />
