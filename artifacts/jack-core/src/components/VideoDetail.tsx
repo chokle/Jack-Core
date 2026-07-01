@@ -162,7 +162,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                 <div className="space-y-6">
                   {video.analysis ? (
                     <div className="prose prose-invert max-w-none text-sm">
-                      <div dangerouslySetInnerHTML={{ __html: video.analysis }} />
+                      <div className="whitespace-pre-wrap break-words">{video.analysis}</div>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground border border-dashed border-border rounded-lg">

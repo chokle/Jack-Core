@@ -1,4 +1,2 @@
-- [Idempotent background jobs](idempotent-background-jobs.md) — transcribe/analyze must acquire their slot with one conditional UPDATE (not read-then-write), or concurrent requests double-spend on OpenAI.
-- [Supabase connectivity from Replit](supabase-connectivity.md) — direct DB host is IPv6-only here; reach Supabase via the IPv4 session pooler, never the direct host.
-- [OpenAI key audio scope](openai-key-scope.md) — whisper transcription 401s here; the project key lacks the api.model.audio.request scope (environment, not code).
-- [Supabase silent write errors](supabase-silent-write-errors.md) — supabase-js returns errors, never throws; unchecked writes/RPCs strand rows in non-terminal status and drop RAG citations.
+- [Chat privacy without auth](chat-session-privacy.md) — Jack is intentionally no-auth; chat history must always filter by a client-owned sessionId, never return global rows.
+- [Untrusted content rendering](untrusted-content-rendering.md) — video analysis + chat content come from public uploads; render as text, never via dangerouslySetInnerHTML.

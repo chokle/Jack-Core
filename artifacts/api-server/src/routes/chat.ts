@@ -97,11 +97,20 @@ ${usedInternalKnowledge ? `Relevant content from the internal knowledge library:
 
 router.get("/chat/history", async (req, res) => {
   try {
+    // Chat history is private to a single session. Require the caller to name a
+    // session and scope the query to it — without this filter the endpoint
+    // returned every user's recent messages, leaking conversations across
+    // sessions. No session id => no messages (never a global dump).
+    const rawSession = req.query["sessionId"];
+    const sessionId = typeof rawSession === "string" ? rawSession.trim() : "";
+    if (!sessionId) return res.json([]);
+
     const { data, error } = await supabase
       .from("chat_messages")
       .select("*")
-      .order("created_at", { ascending: false })
-      .limit(20);
+      .eq("session_id", sessionId)
+      .order("created_at", { ascending: true })
+      .limit(50);
 
     if (error) throw error;
     return res.json(

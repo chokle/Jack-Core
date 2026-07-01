@@ -253,3 +253,11 @@ export const ListVideosStatus = {
   error: 'error',
 } as const;
 
+export type GetChatHistoryParams = {
+/**
+ * Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.
+ * @minLength 1
+ */
+sessionId: string;
+};
+

@@ -312,8 +312,15 @@ export const AskJackResponse = zod.object({
 
 
 /**
- * @summary Get recent chat history
+ * @summary Get recent chat history for a single session
  */
+
+
+
+export const GetChatHistoryQueryParams = zod.object({
+  "sessionId": zod.coerce.string().min(1).describe('Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.')
+})
+
 export const GetChatHistoryResponseItem = zod.object({
   "id": zod.string(),
   "sessionId": zod.string().optional(),

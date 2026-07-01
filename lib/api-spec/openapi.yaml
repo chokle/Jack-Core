@@ -296,7 +296,15 @@ paths:
     get:
       operationId: getChatHistory
       tags: [chat]
-      summary: Get recent chat history
+      summary: Get recent chat history for a single session
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          description: Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.
+          schema:
+            type: string
+            minLength: 1
       responses:
         "200":
           description: Chat history

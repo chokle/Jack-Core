@@ -6,6 +6,22 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAskJack, useGetChatHistory, ChatMessage } from "@workspace/api-client-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+// Chat history is private to a session. With no auth, the session id is a
+// client-owned, unguessable token kept in localStorage — it is never rendered
+// or shared, so one browser cannot read another's conversation.
+function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return "";
+  const KEY = "jack_session_id";
+  let sid = window.localStorage.getItem(KEY);
+  if (!sid) {
+    sid =
+      window.crypto?.randomUUID?.() ??
+      `s_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(KEY, sid);
+  }
+  return sid;
+}
+
 interface AskJackProps {
   isOpen: boolean;
   onClose: () => void;
@@ -15,11 +31,13 @@ interface AskJackProps {
 
 export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId] = useState<string>(() => getOrCreateSessionId());
   const scrollRef = useRef<HTMLDivElement>(null);
-  
-  // @ts-ignore
-  const { data: history } = useGetChatHistory?.({ query: { queryKey: ['chatHistory'] } }) ?? { data: [] };
+
+  const { data: history } = useGetChatHistory(
+    { sessionId },
+    { query: { queryKey: ['chatHistory', sessionId] } }
+  );
   // @ts-ignore
   const askJack = useAskJack?.();
   
@@ -28,7 +46,6 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
   useEffect(() => {
     if (history && history.length > 0 && messages.length === 0) {
       setMessages(history);
-      setSessionId(history[0].sessionId || null);
     }
   }, [history]);
 
@@ -72,9 +89,6 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
               createdAt: new Date().toISOString()
             };
             setMessages(prev => [...prev, assistantMessage]);
-            if (data.sessionId && !sessionId) {
-              setSessionId(data.sessionId);
-            }
           }
         }
       );
@@ -129,7 +143,7 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
                     
                     <div className={`flex flex-col gap-2 max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"}`}>
                       <div className={`p-3 rounded-xl text-sm ${msg.role === "user" ? "bg-secondary text-secondary-foreground" : "bg-card border border-card-border"}`}>
-                        <div dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>') }} />
+                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                       </div>
                       
                       {msg.citations && msg.citations.length > 0 && (
