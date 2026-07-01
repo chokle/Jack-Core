@@ -351,6 +351,19 @@ paths:
                 items:
                   $ref: "#/components/schemas/Video"
 
+  /graph:
+    get:
+      operationId: getGraph
+      tags: [graph]
+      summary: Get the persisted Living Memory knowledge graph
+      responses:
+        "200":
+          description: Knowledge graph
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeGraph"
+
 components:
   schemas:
     HealthStatus:
@@ -671,3 +684,70 @@ components:
           type: string
         token:
           type: ["string", "null"]
+
+    KnowledgeNode:
+      type: object
+      required: [id, kind, label, meta, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [core, topic, competency, video]
+        label:
+          type: string
+        trade:
+          type: ["string", "null"]
+        refId:
+          type: ["string", "null"]
+        meta:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    KnowledgeEdge:
+      type: object
+      required: [id, source, target, kind]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        kind:
+          type: string
+        weight:
+          type: number
+
+    KnowledgeGraph:
+      type: object
+      required: [nodes, edges, counts, generatedAt]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeEdge"
+        counts:
+          type: object
+          required: [nodes, edges, topics, competencies, videos]
+          properties:
+            nodes:
+              type: integer
+            edges:
+              type: integer
+            topics:
+              type: integer
+            competencies:
+              type: integer
+            videos:
+              type: integer
+        generatedAt:
+          type: string

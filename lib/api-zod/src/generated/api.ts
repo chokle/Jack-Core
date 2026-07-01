@@ -376,3 +376,35 @@ export const GetVideosByCompetencyResponseItem = zod.object({
 export const GetVideosByCompetencyResponse = zod.array(GetVideosByCompetencyResponseItem)
 
 
+/**
+ * @summary Get the persisted Living Memory knowledge graph
+ */
+export const GetGraphResponse = zod.object({
+  "nodes": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video']),
+  "label": zod.string(),
+  "trade": zod.string().nullish(),
+  "refId": zod.string().nullish(),
+  "meta": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.string(),
+  "target": zod.string(),
+  "kind": zod.string(),
+  "weight": zod.number().optional()
+})),
+  "counts": zod.object({
+  "nodes": zod.number(),
+  "edges": zod.number(),
+  "topics": zod.number(),
+  "competencies": zod.number(),
+  "videos": zod.number()
+}),
+  "generatedAt": zod.string()
+})
+
+

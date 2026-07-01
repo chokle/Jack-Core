@@ -4,6 +4,7 @@ import videosRouter from "./videos.js";
 import searchRouter from "./search.js";
 import chatRouter from "./chat.js";
 import competenciesRouter from "./competencies.js";
+import graphRouter from "./graph.js";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(videosRouter);
 router.use(searchRouter);
 router.use(chatRouter);
 router.use(competenciesRouter);
+router.use(graphRouter);
 
 export default router;

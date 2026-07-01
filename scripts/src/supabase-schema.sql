@@ -131,6 +131,69 @@ INSERT INTO competencies (code, name, trade) VALUES
   ('HV-3','Air Conditioning Systems','HVAC/R Technician'),('HV-4','Heating Systems','HVAC/R Technician')
 ON CONFLICT (code) DO NOTHING;
 
+-- ============================================================================
+-- Living Memory knowledge graph — persistent nodes & edges
+-- ============================================================================
+-- A persisted mirror of what Jack knows: a central core, one topic hub per
+-- trade, the seeded Red Seal competencies, and one node per ingested video.
+-- IDs are deterministic ('__jack__', 'topic:<trade>', 'comp:<code>',
+-- 'video:<uuid>') so every write is an idempotent upsert — re-processing or
+-- "merging" knowledge collapses onto the same node instead of duplicating it.
+
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  label TEXT NOT NULL,
+  trade TEXT,
+  ref_id TEXT,
+  meta JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_edges (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  weight FLOAT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source_id, target_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_kind ON knowledge_nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_trade ON knowledge_nodes(trade);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id);
+
+-- Seed the base graph from the seeded competencies (idempotent). Video nodes
+-- and their edges are added at runtime by the API as videos are processed.
+INSERT INTO knowledge_nodes (id, kind, label)
+VALUES ('__jack__', 'core', 'JACK')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_nodes (id, kind, label, trade)
+SELECT 'topic:' || t.trade, 'topic', t.trade, t.trade
+FROM (SELECT DISTINCT trade FROM competencies) t
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_nodes (id, kind, label, trade, ref_id, meta)
+SELECT 'comp:' || c.code, 'competency', c.code, c.trade, c.code,
+  jsonb_build_object('code', c.code, 'trade', c.trade,
+    'description', COALESCE(c.description, c.name))
+FROM competencies c
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_edges (id, source_id, target_id, kind)
+SELECT 'e:__jack__->topic:' || t.trade, '__jack__', 'topic:' || t.trade, 'topic'
+FROM (SELECT DISTINCT trade FROM competencies) t
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_edges (id, source_id, target_id, kind)
+SELECT 'e:topic:' || c.trade || '->comp:' || c.code, 'topic:' || c.trade, 'comp:' || c.code, 'competency'
+FROM competencies c
+ON CONFLICT (id) DO NOTHING;
+
 -- Create the public storage bucket for video uploads
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('jack-videos', 'jack-videos', true)

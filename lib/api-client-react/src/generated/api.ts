@@ -27,6 +27,7 @@ import type {
   GetChatHistoryParams,
   HealthStatus,
   JobStatus,
+  KnowledgeGraph,
   ListVideosParams,
   SearchInput,
   SearchResults,
@@ -1324,6 +1325,83 @@ export function useGetVideosByCompetency<TData = Awaited<ReturnType<typeof getVi
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetVideosByCompetencyQueryOptions(code,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetGraphUrl = () => {
+
+
+
+
+  return `/api/graph`
+}
+
+/**
+ * @summary Get the persisted Living Memory knowledge graph
+ */
+export const getGraph = async ( options?: RequestInit): Promise<KnowledgeGraph> => {
+
+  return customFetch<KnowledgeGraph>(getGetGraphUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGraphQueryKey = () => {
+    return [
+    `/api/graph`
+    ] as const;
+    }
+
+
+export const getGetGraphQueryOptions = <TData = Awaited<ReturnType<typeof getGraph>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGraph>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGraphQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGraph>>> = ({ signal }) => getGraph({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGraph>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGraphQueryResult = NonNullable<Awaited<ReturnType<typeof getGraph>>>
+export type GetGraphQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the persisted Living Memory knowledge graph
+ */
+
+export function useGetGraph<TData = Awaited<ReturnType<typeof getGraph>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGraph>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGraphQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

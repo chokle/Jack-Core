@@ -229,6 +229,54 @@ export interface UploadUrlResponse {
   token?: string | null;
 }
 
+export type KnowledgeNodeKind = typeof KnowledgeNodeKind[keyof typeof KnowledgeNodeKind];
+
+
+export const KnowledgeNodeKind = {
+  core: 'core',
+  topic: 'topic',
+  competency: 'competency',
+  video: 'video',
+} as const;
+
+export type KnowledgeNodeMeta = { [key: string]: unknown };
+
+export interface KnowledgeNode {
+  id: string;
+  kind: KnowledgeNodeKind;
+  label: string;
+  /** @nullable */
+  trade?: string | null;
+  /** @nullable */
+  refId?: string | null;
+  meta: KnowledgeNodeMeta;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: string;
+  weight?: number;
+}
+
+export type KnowledgeGraphCounts = {
+  nodes: number;
+  edges: number;
+  topics: number;
+  competencies: number;
+  videos: number;
+};
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeNode[];
+  edges: KnowledgeEdge[];
+  counts: KnowledgeGraphCounts;
+  generatedAt: string;
+}
+
 export type ListVideosParams = {
 /**
  * Filter by trade category

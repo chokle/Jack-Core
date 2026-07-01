@@ -30,6 +30,9 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/lib/supabase.ts` — Supabase client
 - `artifacts/api-server/src/lib/openai.ts` — OpenAI client
 - `scripts/src/setup-supabase.ts` — Supabase schema setup script/reference
+- `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
+- `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
+- `artifacts/jack-core/src/lib/memory-graph.ts` — client graph model (`buildGraphModelFromServer` + client-derived fallback)
 
 ## Architecture decisions
 
@@ -39,6 +42,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - Transcription and analysis are async (background jobs via setImmediate) — status polling via the `status` field on Video
 - Jack always searches the internal library (pgvector RAG) before answering — `usedInternalKnowledge` flag in responses
 - Red Seal competency codes are seeded from a canonical list and mapped by GPT-4o during analysis
+- The knowledge graph is persisted in Supabase (`knowledge_nodes`/`knowledge_edges`) as a deterministic-ID mirror (core `__jack__`, `topic:<trade>`, `comp:<code>`, `video:<uuid>`) synced through the video pipeline, so re-processing/merging collapses onto the same node instead of duplicating. `GET /graph` self-heals when empty; there is **no** public rebuild endpoint (the API uses the service-role key and has no auth), and the frontend falls back to deriving the graph client-side if the persisted graph is unavailable
 
 ## Product
 
@@ -190,6 +194,61 @@ INSERT INTO competencies (code, name, trade) VALUES
   ('HV-3','Air Conditioning Systems','HVAC/R Technician'),('HV-4','Heating Systems','HVAC/R Technician')
 ON CONFLICT (code) DO NOTHING;
 
+-- Living Memory knowledge graph — persistent nodes & edges
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  label TEXT NOT NULL,
+  trade TEXT,
+  ref_id TEXT,
+  meta JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_edges (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  weight FLOAT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source_id, target_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_kind ON knowledge_nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_trade ON knowledge_nodes(trade);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id);
+
+-- Seed the base graph from the seeded competencies (idempotent). Video nodes
+-- and their edges are added at runtime by the API as videos are processed.
+INSERT INTO knowledge_nodes (id, kind, label)
+VALUES ('__jack__', 'core', 'JACK')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_nodes (id, kind, label, trade)
+SELECT 'topic:' || t.trade, 'topic', t.trade, t.trade
+FROM (SELECT DISTINCT trade FROM competencies) t
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_nodes (id, kind, label, trade, ref_id, meta)
+SELECT 'comp:' || c.code, 'competency', c.code, c.trade, c.code,
+  jsonb_build_object('code', c.code, 'trade', c.trade,
+    'description', COALESCE(c.description, c.name))
+FROM competencies c
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_edges (id, source_id, target_id, kind)
+SELECT 'e:__jack__->topic:' || t.trade, '__jack__', 'topic:' || t.trade, 'topic'
+FROM (SELECT DISTINCT trade FROM competencies) t
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO knowledge_edges (id, source_id, target_id, kind)
+SELECT 'e:topic:' || c.trade || '->comp:' || c.code, 'topic:' || c.trade, 'comp:' || c.code, 'competency'
+FROM competencies c
+ON CONFLICT (id) DO NOTHING;
+
 -- Create the public storage bucket for video uploads
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('jack-videos', 'jack-videos', true)
@@ -208,6 +267,7 @@ The SQL above also creates the public **`jack-videos`** storage bucket. (If you 
 - Transcription/analysis are async background jobs — poll the video `status` field (pending → transcribing → analyzing → ready)
 - The `embedding` column stores JSON-serialized float arrays (vector(1536)) — Supabase's pgvector extension must be enabled first
 - Jack's RAG always searches internally first; `usedInternalKnowledge: false` in chat responses means no matching segments were found
+- The knowledge graph needs the `knowledge_nodes`/`knowledge_edges` tables applied too (they are part of the canonical schema) — until then `GET /graph` returns 500 and the frontend silently falls back to a client-derived graph
 
 ## User preferences
 

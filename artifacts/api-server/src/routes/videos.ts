@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase.js";
 import { openai, createEmbedding, createEmbeddings, MODELS } from "../lib/openai.js";
 import { logger } from "../lib/logger.js";
 import { transcribeFromUrl } from "../lib/transcription.js";
+import { syncVideoGraph, removeVideoGraph } from "../lib/memory-graph.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -18,6 +19,27 @@ import {
 } from "@workspace/api-zod";
 
 const router = Router();
+
+/**
+ * Best-effort mirror of a video into the persisted knowledge graph. The graph is
+ * a derived view, so a sync failure must never fail (or roll back) the underlying
+ * video operation — we log and move on; GET /graph self-heals from source tables.
+ */
+async function syncGraphSafe(videoId: string): Promise<void> {
+  try {
+    await syncVideoGraph(videoId);
+  } catch (err) {
+    logger.error({ err, videoId }, "knowledge graph sync failed");
+  }
+}
+
+async function removeGraphSafe(videoId: string): Promise<void> {
+  try {
+    await removeVideoGraph(videoId);
+  } catch (err) {
+    logger.error({ err, videoId }, "knowledge graph node removal failed");
+  }
+}
 
 /**
  * Run GPT analysis for a transcribed video: summarize it, extract key points,
@@ -37,6 +59,7 @@ async function runAnalysis(videoId: string): Promise<void> {
 
     if (!video?.transcript) {
       await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
+      await syncGraphSafe(videoId);
       return;
     }
 
@@ -92,6 +115,10 @@ async function runAnalysis(videoId: string): Promise<void> {
     // Surface a failed final write into the catch so the video still reaches a
     // terminal state instead of being stuck in "analyzing" forever.
     if (readyErr) throw readyErr;
+
+    // Video reached "ready" with competency mappings — mirror it into the graph
+    // so the new node and its competency edges appear on the next poll.
+    await syncGraphSafe(videoId);
   } catch (bgErr) {
     logger.error({ err: bgErr, videoId }, "Analysis failed");
     // Keep a successfully-transcribed video usable even if analysis failed —
@@ -106,6 +133,8 @@ async function runAnalysis(videoId: string): Promise<void> {
       logger.error({ err: fallbackErr, videoId }, "Analysis fallback status write failed");
       await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
     }
+    // Still surface the (transcribed) video as a node even when analysis failed.
+    await syncGraphSafe(videoId);
   }
 }
 
@@ -156,6 +185,9 @@ router.post("/videos", async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Surface the new (pending) video as a node right away.
+    await syncGraphSafe(data.id);
     return res.status(201).json(data);
   } catch (err) {
     req.log.error({ err }, "createVideo error");
@@ -271,6 +303,9 @@ router.patch("/videos/:id", async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Reconcile the node (title/status/meta) and re-home it if the trade changed.
+    await syncGraphSafe(paramsParsed.data.id);
     return res.json(data);
   } catch (err) {
     req.log.error({ err }, "updateVideo error");
@@ -285,6 +320,9 @@ router.delete("/videos/:id", async (req, res) => {
 
     const { error } = await supabase.from("videos").delete().eq("id", parsed.data.id);
     if (error) throw error;
+
+    // Drop the video node; its edges cascade away with it.
+    await removeGraphSafe(parsed.data.id);
     return res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "deleteVideo error");
@@ -347,6 +385,7 @@ router.post("/videos/:id/transcribe", async (req, res) => {
 
         if (!video?.video_url) {
           await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
+          await syncGraphSafe(videoId);
           return;
         }
 
@@ -433,9 +472,13 @@ router.post("/videos/:id/transcribe", async (req, res) => {
             .eq("id", videoId)
             .neq("status", "analyzing");
         }
+
+        // Mirror the finished video into the knowledge graph whichever branch ran.
+        await syncGraphSafe(videoId);
       } catch (bgErr) {
         logger.error({ err: bgErr, videoId }, "Transcription failed");
         await supabase.from("videos").update({ status: "error" }).eq("id", videoId);
+        await syncGraphSafe(videoId);
       }
     });
 

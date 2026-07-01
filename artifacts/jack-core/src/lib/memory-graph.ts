@@ -264,3 +264,134 @@ export function buildGraphModel(
     },
   };
 }
+
+/** Minimal shape of a node/edge returned by GET /graph (server-persisted). */
+export interface ServerGraphNode {
+  id: string;
+  kind: string;
+  label: string;
+  trade?: string | null;
+  refId?: string | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface ServerGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: string;
+  weight?: number;
+}
+
+function metaStr(
+  meta: Record<string, unknown> | null | undefined,
+  key: string,
+): string | undefined {
+  const val = meta?.[key];
+  return typeof val === "string" ? val : undefined;
+}
+
+/**
+ * Build the graph model from the server-persisted knowledge graph (GET /graph).
+ * Colors and topic ordering stay client-side (a pure visual concern) so the
+ * canvas renderer is identical whether the model comes from here or from
+ * buildGraphModel(). IDs already match the client scheme, so edges map directly.
+ */
+export function buildGraphModelFromServer(graph: {
+  nodes: ServerGraphNode[];
+  edges: ServerGraphEdge[];
+}): GraphModel {
+  const topicNodes = graph.nodes
+    .filter((n) => n.kind === "topic")
+    .sort((a, b) => (a.trade ?? a.label).localeCompare(b.trade ?? b.label));
+
+  const topics: Topic[] = topicNodes.map((n, i) => ({
+    id: n.id,
+    trade: n.trade ?? n.label,
+    label: n.label,
+    color: TOPIC_PALETTE[i % TOPIC_PALETTE.length]!,
+  }));
+  const colorByTopicId = new Map(topics.map((t) => [t.id, t.color]));
+  const colorByTrade = new Map(topics.map((t) => [t.trade, t.color]));
+
+  const nodes: MemoryNode[] = graph.nodes.map((n) => {
+    const trade = n.trade ?? undefined;
+    const topicColor = (trade ? colorByTrade.get(trade) : undefined) ?? CORE_COLOR;
+
+    if (n.kind === "core") {
+      return { id: n.id, kind: "core", label: n.label, color: CORE_COLOR, meta: {} };
+    }
+    if (n.kind === "topic") {
+      return {
+        id: n.id,
+        kind: "topic",
+        label: n.label,
+        topicId: n.id,
+        color: colorByTopicId.get(n.id) ?? CORE_COLOR,
+        meta: { trade },
+      };
+    }
+    if (n.kind === "competency") {
+      return {
+        id: n.id,
+        kind: "competency",
+        label: n.label,
+        topicId: trade ? topicIdForTrade(trade) : undefined,
+        color: tint(topicColor, 0.45),
+        meta: {
+          trade,
+          code: metaStr(n.meta, "code") ?? n.label,
+          description: metaStr(n.meta, "description"),
+        },
+      };
+    }
+    // video
+    const codes = Array.isArray(n.meta?.["competencyCodes"])
+      ? (n.meta!["competencyCodes"] as unknown[]).filter(
+          (c): c is string => typeof c === "string",
+        )
+      : [];
+    return {
+      id: n.id,
+      kind: "video",
+      label: n.label,
+      topicId: trade ? topicIdForTrade(trade) : undefined,
+      color: topicColor,
+      status: metaStr(n.meta, "status"),
+      meta: {
+        trade,
+        description: metaStr(n.meta, "description"),
+        createdAt: metaStr(n.meta, "createdAt"),
+        updatedAt: metaStr(n.meta, "updatedAt"),
+        competencyCodes: codes,
+      },
+    };
+  });
+
+  const edges: MemoryEdge[] = graph.edges.map((e) => ({
+    a: e.source,
+    b: e.target,
+    kind: (e.kind as NodeKind) ?? "video",
+  }));
+
+  const degree: Record<string, number> = {};
+  for (const e of edges) {
+    degree[e.a] = (degree[e.a] ?? 0) + 1;
+    degree[e.b] = (degree[e.b] ?? 0) + 1;
+  }
+
+  const videos = nodes.filter((n) => n.kind === "video").length;
+
+  return {
+    topics,
+    nodes,
+    edges,
+    degree,
+    counts: {
+      nodes: nodes.length,
+      connections: edges.length,
+      topics: topics.length,
+      videos,
+    },
+  };
+}
