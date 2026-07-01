@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Bot,
   Network,
@@ -7,6 +7,8 @@ import {
   GraduationCap,
   Lightbulb,
   Settings,
+  Menu,
+  X,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 
@@ -35,6 +37,18 @@ export function JackShell({
   lastUpdatedLabel,
   children,
 }: JackShellProps) {
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+
+  const go = (v: JackView) => {
+    onNavigate(v);
+    setIsPanelOpen(false);
+  };
+
+  const openChat = () => {
+    onOpenChat();
+    setIsPanelOpen(false);
+  };
+
   const stats: { label: string; value: string; accent?: boolean }[] = [
     { label: "Total Nodes", value: fmt(model.counts.nodes), accent: true },
     { label: "Connections", value: fmt(model.counts.connections), accent: true },
@@ -43,11 +57,51 @@ export function JackShell({
   ];
 
   return (
-    <div className="relative z-10 flex h-screen w-full overflow-hidden text-foreground selection:bg-primary/30">
-      <aside className="hidden md:flex w-60 flex-col border-r border-sidebar-border bg-sidebar/85 backdrop-blur-md">
+    <div className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row">
+      <header className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar/85 px-4 py-3 backdrop-blur-md md:hidden">
+        <button onClick={() => go("graph")} className="flex items-baseline gap-1.5">
+          <span className="text-lg font-extrabold tracking-tight">JACK</span>
+          <span className="text-lg font-extrabold tracking-tight text-primary">CORE</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsPanelOpen(true)}
+          aria-label="Open menu"
+          aria-expanded={isPanelOpen}
+          className="flex min-h-11 items-center gap-2 rounded-lg border border-sidebar-border bg-card/60 px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted/60"
+        >
+          <Menu className="h-4 w-4 text-primary" />
+          Menu
+        </button>
+      </header>
+
+      {isPanelOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={() => setIsPanelOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] transform flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar backdrop-blur-md transition-transform duration-300 ease-out md:static md:z-auto md:w-60 md:max-w-none md:translate-x-0 md:bg-sidebar/85 md:transition-none ${
+          isPanelOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-end px-3 pt-3 md:hidden">
+          <button
+            type="button"
+            onClick={() => setIsPanelOpen(false)}
+            aria-label="Close menu"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
         {/* Brand */}
         <button
-          onClick={() => onNavigate("graph")}
+          onClick={() => go("graph")}
           className="flex flex-col items-start gap-0.5 px-5 py-5 text-left"
         >
           <div className="flex items-baseline gap-1.5">
@@ -72,19 +126,19 @@ export function JackShell({
           <NavItem
             icon={<Bot className="h-4 w-4" />}
             label="Ask Jack"
-            onClick={onOpenChat}
+            onClick={openChat}
           />
           <NavItem
             icon={<Network className="h-4 w-4" />}
             label="Memory Graph"
             active={active === "graph"}
-            onClick={() => onNavigate("graph")}
+            onClick={() => go("graph")}
           />
           <NavItem
             icon={<LayoutGrid className="h-4 w-4" />}
             label="Library"
             active={active === "library"}
-            onClick={() => onNavigate("library")}
+            onClick={() => go("library")}
           />
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
           <NavItem icon={<GraduationCap className="h-4 w-4" />} label="Competencies" soon />
