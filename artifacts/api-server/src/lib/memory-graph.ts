@@ -12,9 +12,23 @@
  * A brief poll-visible inconsistency is acceptable for a derived view.
  */
 import { supabase } from "./supabase.js";
+import { createEmbedding } from "./openai.js";
 import type { AtomicKnowledge, KnowledgeCategory } from "./distillation.js";
 
 export const GRAPH_CORE_ID = "__jack__";
+
+/**
+ * Graph Intelligence tuning.
+ *
+ * KNOWLEDGE_MATCH_THRESHOLD is the minimum cosine similarity for two same-category
+ * concepts to be treated as the SAME knowledge (and merged onto one canonical
+ * node). It is deliberately conservative: merging two genuinely distinct concepts
+ * loses information irreversibly, whereas failing to merge a rare near-duplicate
+ * only leaves a slightly denser graph. Exact/normalized-label matches bypass this
+ * entirely (they always collapse), so this only governs differently-worded dups.
+ */
+const KNOWLEDGE_MATCH_THRESHOLD = 0.85;
+const KNOWLEDGE_MATCH_COUNT = 1;
 
 const topicNodeId = (trade: string) => `topic:${trade}`;
 const compNodeId = (code: string) => `comp:${code}`;
@@ -108,6 +122,8 @@ interface NodeUpsert {
   description?: string | null;
   confidence?: number | null;
   verification_status?: string;
+  /** JSON-serialized 1536-dim vector (like videos.embedding). Omit for scaffold nodes. */
+  embedding?: string | null;
   meta?: Record<string, unknown>;
 }
 
@@ -116,6 +132,7 @@ interface EdgeUpsert {
   source_id: string;
   target_id: string;
   kind: string;
+  weight?: number;
   meta?: Record<string, unknown>;
 }
 
@@ -138,6 +155,7 @@ async function upsertNodes(nodes: NodeUpsert[]): Promise<void> {
     if (n.description !== undefined) row["description"] = n.description;
     if (n.confidence !== undefined) row["confidence"] = n.confidence;
     if (n.verification_status !== undefined) row["verification_status"] = n.verification_status;
+    if (n.embedding !== undefined) row["embedding"] = n.embedding;
     return row;
   });
   const { error } = await supabase.from("knowledge_nodes").upsert(rows, { onConflict: "id" });
@@ -174,6 +192,7 @@ async function upsertEdges(edges: EdgeUpsert[]): Promise<void> {
       target_id: e.target_id,
       kind: e.kind,
     };
+    if (e.weight !== undefined) row["weight"] = e.weight;
     if (e.meta !== undefined) row["meta"] = e.meta;
     return row;
   });
@@ -399,14 +418,296 @@ async function pruneOrphanKnowledge(): Promise<void> {
   }
 }
 
+/** Clamp a number into [0,1]; non-finite inputs collapse to 0. */
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
 /**
- * Distill a video's atomic knowledge into the graph. For each reusable concept,
- * upsert the shared canonical node (merging with any prior extraction rather than
- * clobbering it), then reconcile ONLY this video's provenance edges — so the
- * concept's source-video list grows across videos and re-processing never
- * duplicates or drops another video's contribution. Knowledge→topic and
- * knowledge→competency edges are additive (a growing many-to-many); orphaned
- * concepts (no remaining source video) are pruned at the end.
+ * Corroboration-based confidence: combine each independent source's per-extraction
+ * confidence with a noisy-OR (1 - ∏(1 - cᵢ)). One weak source stays weak; many
+ * independent sources reinforce each other toward (but never past) 1. This makes a
+ * concept taught in many videos quantifiably more trustworthy than a one-off.
+ */
+function noisyOrConfidence(confidences: number[]): number {
+  if (confidences.length === 0) return 0;
+  let product = 1;
+  for (const c of confidences) product *= 1 - clamp01(c);
+  return clamp01(1 - product);
+}
+
+/** Strip the `video:` node-id prefix back to the raw video UUID. */
+function stripVideoPrefix(nodeId: string): string {
+  return nodeId.startsWith("video:") ? nodeId.slice("video:".length) : nodeId;
+}
+
+/** The concept ids a given video currently corroborates (its provenance targets). */
+async function provenanceTargetsForVideo(vNode: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("knowledge_edges")
+    .select("target_id")
+    .eq("source_id", vNode)
+    .eq("kind", "knowledge");
+  if (error) throw error;
+  return (data ?? [])
+    .map((r: Record<string, unknown>) => r["target_id"])
+    .filter((t): t is string => typeof t === "string");
+}
+
+/** Text embedded for a concept — title carries the identity, description disambiguates. */
+function conceptEmbeddingText(title: string, description: string): string {
+  const t = title.trim();
+  const d = description.trim();
+  return d ? `${t}. ${d}` : t;
+}
+
+/**
+ * One distilled item resolved to a canonical node id. `id` is the node the item
+ * collapses onto: its own deterministic id (exact/normalized-label match, or a new
+ * node) or an existing differently-worded node of the same category found by
+ * embedding similarity. `embeddingJson` is set only when the canonical id came
+ * from this concept's own text, so we may (re)write the node's embedding; it is
+ * null when the item merged onto another node whose embedding must be left intact.
+ */
+interface ResolvedConcept {
+  id: string;
+  category: KnowledgeCategory;
+  title: string;
+  description: string;
+  timestamps: number[];
+  confidence: number;
+  competencyCode: string | null;
+  embeddingJson: string | null;
+}
+
+/**
+ * Duplicate detection + merge resolution. For each distilled item, decide the
+ * canonical node it belongs to:
+ *   1. exact normalized-label node already exists → reuse it (always collapse);
+ *   2. else a same-category node is embedding-similar above threshold → merge onto
+ *      that canonical node (differently-worded duplicate);
+ *   3. else mint a new node from this item.
+ * Items resolving to the same canonical id are merged (union timestamps, max
+ * confidence, most-complete description, first competency). Nothing is written
+ * here — the caller persists the deduped set.
+ */
+async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<ResolvedConcept[]> {
+  if (items.length === 0) return [];
+
+  // Which of the items' own deterministic ids already exist? Exact normalized-label
+  // matches always collapse without needing an embedding comparison.
+  const exactIds = [...new Set(items.map((i) => i.id))];
+  const existing = new Set<string>();
+  {
+    const { data, error } = await supabase.from("knowledge_nodes").select("id").in("id", exactIds);
+    if (error) throw error;
+    for (const r of data ?? []) existing.add((r as Record<string, unknown>)["id"] as string);
+  }
+
+  const byCanonical = new Map<string, ResolvedConcept>();
+  const claimed: string[] = []; // canonical ids already assigned in this batch
+
+  for (const item of items) {
+    const embedding = await createEmbedding(conceptEmbeddingText(item.title, item.description));
+
+    let canonicalId = item.id;
+    let ownsId = true;
+
+    if (!existing.has(item.id) && embedding.length > 0) {
+      // No exact node yet — look for a differently-worded duplicate of the same
+      // category to merge onto instead of minting a near-duplicate.
+      const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
+        query_embedding: embedding,
+        filter_category: item.category,
+        match_threshold: KNOWLEDGE_MATCH_THRESHOLD,
+        match_count: KNOWLEDGE_MATCH_COUNT,
+        exclude_ids: [item.id, ...claimed],
+      });
+      if (error) throw error;
+      const hit = ((matches ?? []) as Array<{ id?: string }>)[0];
+      if (hit?.id) {
+        canonicalId = hit.id;
+        ownsId = false;
+      }
+    }
+
+    const embeddingJson = ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
+
+    const prev = byCanonical.get(canonicalId);
+    if (prev) {
+      const ts = new Set([...prev.timestamps, ...item.timestamps]);
+      prev.timestamps = [...ts].sort((a, b) => a - b);
+      prev.confidence = Math.max(prev.confidence, item.confidence);
+      if (item.description.length > prev.description.length) prev.description = item.description;
+      if (!prev.competencyCode && item.competencyCode) prev.competencyCode = item.competencyCode;
+      if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
+      continue;
+    }
+
+    claimed.push(canonicalId);
+    byCanonical.set(canonicalId, {
+      id: canonicalId,
+      category: item.category,
+      title: item.title,
+      description: item.description,
+      timestamps: [...item.timestamps].sort((a, b) => a - b),
+      confidence: item.confidence,
+      competencyCode: item.competencyCode,
+      embeddingJson,
+    });
+  }
+
+  return [...byCanonical.values()];
+}
+
+/**
+ * Recompute the corroboration-derived fields for a set of atomic-knowledge nodes
+ * from their provenance edges (the single source of truth), so every ingestion,
+ * merge, or removal converges to the same values regardless of order or replays:
+ *
+ *  - **confidence** — noisy-OR over each source video's extraction confidence.
+ *  - **source & timestamp tracking** — node.meta records the full list of source
+ *    videos (with per-video timestamps + confidence), the flattened timestamp
+ *    union, and the distinct source count.
+ *  - **relationship strength** — each concept→topic / concept→competency hub edge
+ *    weight is set to the number of distinct source videos corroborating it; a hub
+ *    edge no longer corroborated by any video (weight 0) is deleted.
+ *
+ * Because everything is derived (not incremented), this is fully idempotent and
+ * never double-counts a replayed video.
+ */
+async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void> {
+  const ids = [...new Set(conceptIds)].filter((id) => id.startsWith("k:"));
+  if (ids.length === 0) return;
+
+  const [nodesRes, provRes, hubRes] = await Promise.all([
+    supabase.from("knowledge_nodes").select("id, kind, label, trade, meta").in("id", ids),
+    supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id, meta")
+      .eq("kind", "knowledge")
+      .in("target_id", ids),
+    supabase
+      .from("knowledge_edges")
+      .select("id, source_id, target_id, kind")
+      .in("source_id", ids)
+      .in("kind", ["topic", "competency"]),
+  ]);
+  if (nodesRes.error) throw nodesRes.error;
+  if (provRes.error) throw provRes.error;
+  if (hubRes.error) throw hubRes.error;
+
+  // Group provenance edges by concept.
+  const provByConcept = new Map<string, Array<Record<string, unknown>>>();
+  for (const e of provRes.data ?? []) {
+    const target = (e as Record<string, unknown>)["target_id"] as string;
+    (provByConcept.get(target) ?? provByConcept.set(target, []).get(target)!).push(
+      e as Record<string, unknown>,
+    );
+  }
+  const hubByConcept = new Map<string, Array<Record<string, unknown>>>();
+  for (const e of hubRes.data ?? []) {
+    const source = (e as Record<string, unknown>)["source_id"] as string;
+    (hubByConcept.get(source) ?? hubByConcept.set(source, []).get(source)!).push(
+      e as Record<string, unknown>,
+    );
+  }
+
+  const nodeUpserts: NodeUpsert[] = [];
+  const edgeUpserts: EdgeUpsert[] = [];
+  const edgeDeleteIds: string[] = [];
+
+  for (const row of nodesRes.data ?? []) {
+    const node = row as Record<string, unknown>;
+    const id = node["id"] as string;
+    const prov = provByConcept.get(id) ?? [];
+
+    // Per-source provenance, de-duplicated by video (a concept links a video once).
+    const sourceMap = new Map<string, { timestamps: number[]; confidence: number }>();
+    const topicCounts = new Map<string, number>();
+    const compCounts = new Map<string, number>();
+    for (const e of prov) {
+      const videoId = stripVideoPrefix(e["source_id"] as string);
+      const meta = (e["meta"] as Record<string, unknown>) ?? {};
+      const timestamps = Array.isArray(meta["timestamps"])
+        ? (meta["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
+        : [];
+      const confidence = typeof meta["confidence"] === "number" ? (meta["confidence"] as number) : 0.5;
+      sourceMap.set(videoId, { timestamps, confidence });
+      const t = typeof meta["trade"] === "string" ? (meta["trade"] as string) : null;
+      if (t) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
+      const code =
+        typeof meta["competencyCode"] === "string" ? (meta["competencyCode"] as string) : null;
+      if (code) compCounts.set(code, (compCounts.get(code) ?? 0) + 1);
+    }
+
+    const sources = [...sourceMap.entries()].map(([videoId, s]) => ({
+      videoId,
+      timestamps: s.timestamps,
+      confidence: s.confidence,
+    }));
+    const allTimestamps = [...new Set(sources.flatMap((s) => s.timestamps))].sort((a, b) => a - b);
+    const confidence = noisyOrConfidence(sources.map((s) => s.confidence));
+
+    const prevMeta = (node["meta"] as Record<string, unknown>) ?? {};
+    nodeUpserts.push({
+      id,
+      kind: node["kind"] as string,
+      label: node["label"] as string,
+      trade: (node["trade"] as string | null) ?? null,
+      confidence,
+      meta: {
+        ...prevMeta,
+        sourceVideoIds: sources.map((s) => s.videoId),
+        sourceCount: sources.length,
+        timestamps: allTimestamps,
+        sources,
+      },
+    });
+
+    // Relationship strength: hub-edge weight = distinct corroborating source count.
+    for (const edge of hubByConcept.get(id) ?? []) {
+      const kind = edge["kind"] as string;
+      const targetId = edge["target_id"] as string;
+      let weight = 0;
+      if (kind === "topic" && targetId.startsWith("topic:")) {
+        weight = topicCounts.get(targetId.slice("topic:".length)) ?? 0;
+      } else if (kind === "competency" && targetId.startsWith("comp:")) {
+        weight = compCounts.get(targetId.slice("comp:".length)) ?? 0;
+      }
+      if (weight > 0) {
+        edgeUpserts.push({
+          id: edge["id"] as string,
+          source_id: edge["source_id"] as string,
+          target_id: targetId,
+          kind,
+          weight,
+        });
+      } else {
+        edgeDeleteIds.push(edge["id"] as string);
+      }
+    }
+  }
+
+  await upsertNodes(nodeUpserts);
+  await upsertEdges(edgeUpserts);
+  if (edgeDeleteIds.length > 0) {
+    const { error } = await supabase.from("knowledge_edges").delete().in("id", edgeDeleteIds);
+    if (error) throw error;
+  }
+}
+
+/**
+ * Distill a video's atomic knowledge into the graph with the Graph Intelligence
+ * layer applied. Each distilled item is first resolved to a canonical node —
+ * collapsing exact- and embedding-duplicate concepts onto one shared node
+ * (merge). We then upsert those canonical nodes and reconcile ONLY this video's
+ * provenance edges, whose meta carries this video's timestamps, confidence,
+ * trade, and mapped competency. Finally we recompute every affected concept's
+ * corroboration-derived fields (confidence, source/timestamp lists, hub-edge
+ * weights) from the provenance edges, so the graph converges rather than
+ * duplicating and every replay is idempotent.
  *
  * Internal to the pipeline: there is no public route that mutates the graph.
  */
@@ -422,56 +723,79 @@ export async function syncVideoKnowledge(
     .eq("id", videoId)
     .maybeSingle();
   if (vErr) throw vErr;
+
+  // Concepts this video corroborated before this run — recomputed at the end even
+  // if this re-processing no longer extracts them, so their aggregates shrink back.
+  const priorTargets = await provenanceTargetsForVideo(vNode);
+
   // If the video vanished between distillation and persistence, clear any stale
-  // provenance it left behind and stop.
+  // provenance it left behind, prune, and reconverge the concepts it touched.
   if (!video) {
-    await supabase.from("knowledge_edges").delete().eq("source_id", vNode).eq("kind", "knowledge");
+    const del = await supabase
+      .from("knowledge_edges")
+      .delete()
+      .eq("source_id", vNode)
+      .eq("kind", "knowledge");
+    if (del.error) throw del.error;
     await pruneOrphanKnowledge();
+    await recomputeKnowledgeAggregates(priorTargets);
     return;
   }
   const trade = (video.trade as string | null) ?? null;
 
-  const ids = items.map((i) => i.id);
+  // Duplicate detection + merge: collapse each item onto its canonical node.
+  const resolved = await resolveCanonicalItems(items);
+  const canonicalIds = resolved.map((c) => c.id);
+
   const existingById = new Map<string, Record<string, unknown>>();
-  if (ids.length > 0) {
+  if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
       .select("id, label, trade, description, confidence, verification_status")
-      .in("id", ids);
+      .in("id", canonicalIds);
     if (error) throw error;
     for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
   }
 
-  const nodes: NodeUpsert[] = items.map((item) => {
-    const prev = existingById.get(item.id);
+  const nodes: NodeUpsert[] = resolved.map((c) => {
+    const prev = existingById.get(c.id);
     const prevStatus = prev?.["verification_status"] as string | undefined;
     const prevConfidence =
       typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : null;
-    return {
-      id: item.id,
-      kind: item.category,
+    const prevDesc = (prev?.["description"] as string | null) ?? "";
+    // Keep the most complete description across all contributing videos.
+    const description = c.description.length > prevDesc.length ? c.description : prevDesc || c.description;
+    const node: NodeUpsert = {
+      id: c.id,
+      kind: c.category,
       // First writer wins for the display label/trade so the shared node stays
       // stable; later videos still append provenance via the edge.
-      label: (prev?.["label"] as string) || item.title,
+      label: (prev?.["label"] as string) || c.title,
       trade: (prev?.["trade"] as string | null) ?? trade,
-      ref_id: item.id,
-      description: item.description || ((prev?.["description"] as string | null) ?? null),
-      // Sensible monotonic init only — corroboration-based recomputation is the
-      // Graph Intelligence task's job, not this one.
-      confidence: Math.max(prevConfidence ?? 0, item.confidence),
+      ref_id: c.id,
+      description: description || null,
+      // Interim value; recomputeKnowledgeAggregates overwrites it with the
+      // corroboration-based confidence once provenance edges are written.
+      confidence: Math.max(prevConfidence ?? 0, c.confidence),
       // Preserve a human verification decision; default new nodes to unverified.
       verification_status:
         prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified",
-      meta: { category: item.category },
+      meta: { category: c.category },
     };
+    // Only (re)write the embedding when this concept owns the canonical id — never
+    // clobber the embedding of a node this item merely merged onto.
+    if (c.embeddingJson !== null) node.embedding = c.embeddingJson;
+    return node;
   });
 
   // Ensure competency nodes exist for any mapped codes (never clobber seeded rows).
-  const codes = [...new Set(items.map((i) => i.competencyCode).filter((c): c is string => !!c))];
+  const codes = [...new Set(resolved.map((c) => c.competencyCode).filter((c): c is string => !!c))];
   await ensureCompetencyNodes(codes);
   await upsertNodes(nodes);
 
   // Reconcile only this video's provenance edges: drop the old set, add the new.
+  // The edge meta carries everything the aggregate recompute needs (timestamps,
+  // confidence, trade, competency); weight = repeated extractions within this video.
   const del = await supabase
     .from("knowledge_edges")
     .delete()
@@ -479,31 +803,38 @@ export async function syncVideoKnowledge(
     .eq("kind", "knowledge");
   if (del.error) throw del.error;
 
-  const provenanceEdges: EdgeUpsert[] = items.map((item) => ({
-    id: edgeKey(vNode, item.id),
+  const provenanceEdges: EdgeUpsert[] = resolved.map((c) => ({
+    id: edgeKey(vNode, c.id),
     source_id: vNode,
-    target_id: item.id,
+    target_id: c.id,
     kind: "knowledge",
-    meta: { timestamps: item.timestamps, confidence: item.confidence },
+    weight: Math.max(1, c.timestamps.length),
+    meta: {
+      timestamps: c.timestamps,
+      confidence: c.confidence,
+      trade,
+      competencyCode: c.competencyCode,
+    },
   }));
 
   // Additive hub edges: connect each concept to its trade topic and any mapped
-  // competency. These accumulate across videos (a growing many-to-many web).
+  // competency. These accumulate across videos (a growing many-to-many web); their
+  // weights are set authoritatively by recomputeKnowledgeAggregates below.
   const hubEdges: EdgeUpsert[] = [];
-  for (const item of items) {
+  for (const c of resolved) {
     if (trade) {
       hubEdges.push({
-        id: edgeKey(item.id, topicNodeId(trade)),
-        source_id: item.id,
+        id: edgeKey(c.id, topicNodeId(trade)),
+        source_id: c.id,
         target_id: topicNodeId(trade),
         kind: "topic",
       });
     }
-    if (item.competencyCode) {
+    if (c.competencyCode) {
       hubEdges.push({
-        id: edgeKey(item.id, compNodeId(item.competencyCode)),
-        source_id: item.id,
-        target_id: compNodeId(item.competencyCode),
+        id: edgeKey(c.id, compNodeId(c.competencyCode)),
+        source_id: c.id,
+        target_id: compNodeId(c.competencyCode),
         kind: "competency",
       });
     }
@@ -511,6 +842,10 @@ export async function syncVideoKnowledge(
 
   await upsertEdges([...provenanceEdges, ...hubEdges]);
   await pruneOrphanKnowledge();
+
+  // Reconverge every concept this run touched — the ones it now corroborates and
+  // any it dropped — so confidence, provenance, and edge weights stay in sync.
+  await recomputeKnowledgeAggregates([...canonicalIds, ...priorTargets]);
 }
 
 /**
@@ -524,9 +859,15 @@ export async function syncVideoGraph(videoId: string): Promise<void> {
 
 /** Remove a video's node and prune any topic/knowledge its removal left orphaned. */
 export async function removeVideoGraph(videoId: string): Promise<void> {
+  // Capture the concepts this video corroborated before its node (and, by cascade,
+  // its provenance edges) are deleted, so the survivors can reconverge afterward.
+  const affected = await provenanceTargetsForVideo(videoNodeId(videoId));
   await deleteVideoNode(videoId);
   await pruneOrphanTopics();
   await pruneOrphanKnowledge();
+  // Concepts that lost their last source were pruned above; recompute those that
+  // remain so confidence, provenance, and hub-edge weights drop to reflect the loss.
+  await recomputeKnowledgeAggregates(affected);
 }
 
 /**
@@ -569,6 +910,17 @@ export async function rebuildGraph(): Promise<void> {
   // knowledge — those nodes persist across rebuilds. Just drop any left orphaned
   // by stale video removal.
   await pruneOrphanKnowledge();
+
+  // Reconverge every surviving atomic concept from its provenance edges, so a
+  // rebuild self-heals stale confidence, source lists, and hub-edge weights (e.g.
+  // a DB written before the Graph Intelligence layer existed).
+  const { data: kNodes, error: kErr } = await supabase
+    .from("knowledge_nodes")
+    .select("id")
+    .in("kind", [...KNOWLEDGE_NODE_KINDS]);
+  if (kErr) throw kErr;
+  const knowledgeIds = (kNodes ?? []).map((r: Record<string, unknown>) => r["id"] as string);
+  await recomputeKnowledgeAggregates(knowledgeIds);
 }
 
 /** Read the full persisted graph. */

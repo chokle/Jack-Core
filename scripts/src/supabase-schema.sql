@@ -159,6 +159,10 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
   confidence FLOAT,
   verification_status TEXT NOT NULL DEFAULT 'unverified'
     CHECK (verification_status IN ('unverified','verified','rejected')),
+  -- Embedding of an atomic-knowledge concept (title + description), used by the
+  -- Graph Intelligence layer to detect differently-worded duplicates of the same
+  -- concept and collapse them onto one canonical node. NULL for scaffold nodes.
+  embedding vector(1536),
   meta JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -189,6 +193,7 @@ ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS confidence FLOAT;
 ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS verification_status TEXT
   NOT NULL DEFAULT 'unverified';
+ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS embedding vector(1536);
 ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_kind_check;
 ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_kind_check CHECK (kind IN (
   'core','topic','competency','video',
@@ -210,6 +215,37 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_trade ON knowledge_nodes(trade);
 CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_edges_kind ON knowledge_edges(kind);
+
+-- match_knowledge_nodes — semantic duplicate detection for the Graph Intelligence
+-- layer. Given a concept embedding, return the most similar EXISTING atomic
+-- knowledge nodes of the SAME category (kind) above a threshold, so a
+-- differently-worded extraction of the same concept ("Arc Blow" vs "Arc Blowing")
+-- collapses onto the already-persisted canonical node instead of creating a
+-- near-duplicate. Only same-category nodes are compared, and the caller's own
+-- deterministic id (and any ids already claimed in the current batch) are
+-- excluded so a concept never matches itself.
+CREATE OR REPLACE FUNCTION match_knowledge_nodes(
+  query_embedding vector(1536),
+  filter_category text,
+  match_threshold float,
+  match_count int,
+  exclude_ids text[] DEFAULT NULL
+)
+RETURNS TABLE (
+  id text, label text, similarity float
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN QUERY
+  SELECT kn.id, kn.label,
+    1 - (kn.embedding <=> query_embedding) AS similarity
+  FROM knowledge_nodes kn
+  WHERE kn.embedding IS NOT NULL
+    AND kn.kind = filter_category
+    AND 1 - (kn.embedding <=> query_embedding) > match_threshold
+    AND (exclude_ids IS NULL OR kn.id <> ALL (exclude_ids))
+  ORDER BY kn.embedding <=> query_embedding LIMIT match_count;
+END; $$;
 
 -- Seed the base graph from the seeded competencies (idempotent). Video nodes
 -- and their edges are added at runtime by the API as videos are processed.
