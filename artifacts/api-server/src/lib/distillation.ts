@@ -63,7 +63,7 @@ export interface AtomicKnowledge {
 
 /** Never create more than this many concepts from one video — this is a distiller,
  * not a per-sentence indexer. */
-const MAX_KNOWLEDGE_ITEMS = 12;
+export const MAX_KNOWLEDGE_ITEMS = 12;
 const MAX_TITLE_LEN = 120;
 const MAX_DESCRIPTION_LEN = 600;
 const MAX_TIMESTAMPS_PER_ITEM = 8;
@@ -111,7 +111,7 @@ function buildTimestampedTranscript(
  * normalized concept + category) are merged: their timestamps are unioned and the
  * higher confidence is kept.
  */
-function normalizeItems(raw: unknown, validCompetencyCodes: Set<string>): AtomicKnowledge[] {
+export function normalizeItems(raw: unknown, validCompetencyCodes: Set<string>): AtomicKnowledge[] {
   const arr = Array.isArray(raw) ? raw : [];
   const byId = new Map<string, AtomicKnowledge>();
 
