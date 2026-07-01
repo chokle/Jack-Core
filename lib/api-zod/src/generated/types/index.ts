@@ -29,6 +29,8 @@ export * from './searchResults';
 export * from './transcriptSegment';
 export * from './uploadUrlRequest';
 export * from './uploadUrlResponse';
+export * from './verificationUpdate';
+export * from './verificationUpdateStatus';
 export * from './video';
 export * from './videoDetail';
 export * from './videoDetailStatus';

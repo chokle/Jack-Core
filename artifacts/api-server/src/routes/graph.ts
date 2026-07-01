@@ -1,6 +1,11 @@
 import { Router } from "express";
-import { GetGraphResponse } from "@workspace/api-zod";
-import { getGraph, rebuildGraph } from "../lib/memory-graph.js";
+import {
+  GetGraphResponse,
+  SetNodeVerificationParams,
+  SetNodeVerificationBody,
+} from "@workspace/api-zod";
+import { getGraph, rebuildGraph, setNodeVerification } from "../lib/memory-graph.js";
+import { requireAdminSession } from "../lib/admin-auth.js";
 
 const router = Router();
 
@@ -26,6 +31,29 @@ router.get("/graph", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "getGraph error");
     return res.status(500).json({ error: "Failed to load knowledge graph" });
+  }
+});
+
+// Admin-only review surface: record a human verify/reject/reset decision on a
+// distilled concept node. This is the only route that mutates the graph, so it
+// is gated behind the same signed admin session used for library management —
+// the API uses the Supabase service-role key and has no other auth boundary.
+router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, res) => {
+  const paramsParsed = SetNodeVerificationParams.safeParse(req.params);
+  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
+
+  const bodyParsed = SetNodeVerificationBody.safeParse(req.body);
+  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+
+  try {
+    const node = await setNodeVerification(paramsParsed.data.id, bodyParsed.data.status);
+    if (!node) {
+      return res.status(404).json({ error: "No distilled knowledge node with that id." });
+    }
+    return res.json(node);
+  } catch (err) {
+    req.log.error({ err }, "setNodeVerification error");
+    return res.status(500).json({ error: "Failed to update verification status" });
   }
 });
 

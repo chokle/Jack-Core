@@ -15,6 +15,12 @@ import {
   ShieldAlert,
   ShieldQuestion,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useSetNodeVerification,
+  getGetGraphQueryKey,
+} from "@workspace/api-client-react";
+import type { VerificationUpdateStatus } from "@workspace/api-client-react";
 import {
   MemoryGraphCanvas,
   type MemoryGraphHandle,
@@ -62,6 +68,35 @@ export function MemoryGraphView({
   const [locked, setLocked] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
   const [showLegend, setShowLegend] = useState(true);
+
+  // Reviewers with a valid admin session can verify/reject distilled concepts.
+  // We reuse the same signed session that gates library ingestion; the PATCH
+  // route is admin-only on the server, this just hides the controls otherwise.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/admin/session", { credentials: "include" })
+      .then((res) => res.json() as Promise<{ authenticated?: boolean }>)
+      .then((body) => {
+        if (alive) setIsAdmin(Boolean(body.authenticated));
+      })
+      .catch(() => {
+        if (alive) setIsAdmin(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const queryClient = useQueryClient();
+  const setVerification = useSetNodeVerification({
+    request: { credentials: "include" },
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
+      },
+    },
+  });
 
   const nodeById = useMemo(() => {
     const m = new Map<string, MemoryNode>();
@@ -262,6 +297,11 @@ export function MemoryGraphView({
           onOpenVideo={onOpenVideo}
           onJumpToTimestamp={onJumpToTimestamp}
           onSelectNode={setSelectedId}
+          isAdmin={isAdmin}
+          isUpdatingVerification={setVerification.isPending}
+          onSetVerification={(id, status) =>
+            setVerification.mutate({ id, data: { status } })
+          }
         />
         {selected && !isKnowledgeKind(selected.kind) && (
           <RelatedCompetencies node={selected} competencies={competencies} />
@@ -416,7 +456,7 @@ const VERIFICATION_META: Record<
 > = {
   verified: { label: "Verified", color: [99, 214, 142], Icon: ShieldCheck },
   unverified: { label: "Unverified", color: [245, 197, 66], Icon: ShieldQuestion },
-  disputed: { label: "Disputed", color: [239, 90, 90], Icon: ShieldAlert },
+  rejected: { label: "Rejected", color: [239, 90, 90], Icon: ShieldAlert },
 };
 
 function formatTimestamp(sec: number): string {
@@ -437,6 +477,9 @@ function KnowledgeInspector({
   onOpenVideo,
   onJumpToTimestamp,
   onSelectNode,
+  isAdmin,
+  isUpdatingVerification,
+  onSetVerification,
 }: {
   node: MemoryNode | null;
   degree: number;
@@ -448,6 +491,9 @@ function KnowledgeInspector({
   onOpenVideo: (id: string) => void;
   onJumpToTimestamp: (videoId: string, startTime: number) => void;
   onSelectNode: (id: string) => void;
+  isAdmin: boolean;
+  isUpdatingVerification: boolean;
+  onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
 }) {
   if (!node) {
     return (
@@ -610,6 +656,42 @@ function KnowledgeInspector({
           <Row label="Code" value={node.meta.code} />
         )}
       </div>
+
+      {knowledge && isAdmin && (
+        <div className="mt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Review
+          </div>
+          <div className="flex gap-1.5">
+            {(
+              [
+                { status: "verified", label: "Verify", Icon: ShieldCheck, color: [99, 214, 142] as RGB },
+                { status: "rejected", label: "Reject", Icon: ShieldAlert, color: [239, 90, 90] as RGB },
+                { status: "unverified", label: "Reset", Icon: ShieldQuestion, color: [245, 197, 66] as RGB },
+              ] satisfies { status: VerificationUpdateStatus; label: string; Icon: typeof ShieldCheck; color: RGB }[]
+            ).map(({ status, label, Icon, color }) => {
+              const active = verifyKey === status;
+              return (
+                <button
+                  key={status}
+                  disabled={isUpdatingVerification || active}
+                  onClick={() => onSetVerification(node.id, status)}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    borderColor: rgba(color, active ? 0.9 : 0.35),
+                    color: rgbCss(color),
+                    background: active ? rgba(color, 0.18) : "transparent",
+                  }}
+                  title={active ? `Already ${label.toLowerCase()}ed` : label}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {knowledge && sources.length > 0 && (
         <div className="mt-3">

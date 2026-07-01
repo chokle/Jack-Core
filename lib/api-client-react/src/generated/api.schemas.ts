@@ -225,6 +225,19 @@ export interface UploadUrlResponse {
   token?: string | null;
 }
 
+export type VerificationUpdateStatus = typeof VerificationUpdateStatus[keyof typeof VerificationUpdateStatus];
+
+
+export const VerificationUpdateStatus = {
+  verified: 'verified',
+  rejected: 'rejected',
+  unverified: 'unverified',
+} as const;
+
+export interface VerificationUpdate {
+  status: VerificationUpdateStatus;
+}
+
 export type KnowledgeNodeKind = typeof KnowledgeNodeKind[keyof typeof KnowledgeNodeKind];
 
 

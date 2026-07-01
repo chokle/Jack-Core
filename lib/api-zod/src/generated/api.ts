@@ -403,3 +403,29 @@ export const GetGraphResponse = zod.object({
 })
 
 
+/**
+ * @summary Set the human verification status of a distilled knowledge node (admin only)
+ */
+export const SetNodeVerificationParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const SetNodeVerificationBody = zod.object({
+  "status": zod.enum(['verified', 'rejected', 'unverified'])
+})
+
+export const SetNodeVerificationResponse = zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
+  "label": zod.string(),
+  "trade": zod.string().nullish(),
+  "refId": zod.string().nullish(),
+  "description": zod.string().nullable(),
+  "confidence": zod.number().nullable(),
+  "verificationStatus": zod.string(),
+  "meta": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+

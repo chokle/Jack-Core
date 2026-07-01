@@ -923,6 +923,59 @@ export async function rebuildGraph(): Promise<void> {
   await recomputeKnowledgeAggregates(knowledgeIds);
 }
 
+/** The human review decisions a reviewer may record on a distilled concept. */
+export const VERIFICATION_STATUSES = ["verified", "rejected", "unverified"] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+/**
+ * Record a reviewer's verification decision on a single atomic-knowledge node.
+ *
+ * Only distilled concept nodes carry a human `verification_status` (the merge
+ * logic preserves a `verified`/`rejected` decision across re-processing), so
+ * this refuses to touch scaffold nodes (core/topic/competency/video). Returns
+ * the updated node, or null if no such knowledge node exists. This is the ONE
+ * place a human decision is written — it is admin-gated at the route layer since
+ * the API holds the Supabase service-role key and is otherwise unauthenticated.
+ */
+export async function setNodeVerification(
+  nodeId: string,
+  status: VerificationStatus,
+): Promise<GraphNode | null> {
+  const { data: existing, error: readErr } = await supabase
+    .from("knowledge_nodes")
+    .select("kind")
+    .eq("id", nodeId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!existing) return null;
+
+  const kind = (existing as Record<string, unknown>)["kind"] as string;
+  if (!KNOWLEDGE_NODE_KINDS.includes(kind as KnowledgeNodeKind)) return null;
+
+  const { data: updated, error: updErr } = await supabase
+    .from("knowledge_nodes")
+    .update({ verification_status: status, updated_at: new Date().toISOString() })
+    .eq("id", nodeId)
+    .select("*")
+    .single();
+  if (updErr) throw updErr;
+
+  const r = updated as Record<string, unknown>;
+  return {
+    id: r["id"] as string,
+    kind: r["kind"] as GraphNode["kind"],
+    label: r["label"] as string,
+    trade: (r["trade"] as string | null) ?? null,
+    refId: (r["ref_id"] as string | null) ?? null,
+    description: (r["description"] as string | null) ?? null,
+    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
+    verificationStatus: (r["verification_status"] as string) ?? "unverified",
+    meta: (r["meta"] as Record<string, unknown>) ?? {},
+    createdAt: r["created_at"] as string,
+    updatedAt: (r["updated_at"] as string) ?? (r["created_at"] as string),
+  };
+}
+
 /** Read the full persisted graph. */
 export async function getGraph(): Promise<KnowledgeGraph> {
   const [{ data: nodeRows, error: nErr }, { data: edgeRows, error: eErr }] = await Promise.all([

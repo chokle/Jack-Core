@@ -27,11 +27,13 @@ import type {
   HealthStatus,
   JobStatus,
   KnowledgeGraph,
+  KnowledgeNode,
   ListVideosParams,
   SearchInput,
   SearchResults,
   UploadUrlRequest,
   UploadUrlResponse,
+  VerificationUpdate,
   Video,
   VideoDetail,
   VideoInput,
@@ -1405,4 +1407,75 @@ export function useGetGraph<TData = Awaited<ReturnType<typeof getGraph>>, TError
 
 
 
+
+export const getSetNodeVerificationUrl = (id: string,) => {
+
+
+
+
+  return `/api/graph/nodes/${id}/verification`
+}
+
+/**
+ * @summary Set the human verification status of a distilled knowledge node (admin only)
+ */
+export const setNodeVerification = async (id: string,
+    verificationUpdate: VerificationUpdate, options?: RequestInit): Promise<KnowledgeNode> => {
+
+  return customFetch<KnowledgeNode>(getSetNodeVerificationUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(verificationUpdate)
+  }
+);}
+
+
+
+
+export const getSetNodeVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setNodeVerification>>, TError,{id: string;data: BodyType<VerificationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setNodeVerification>>, TError,{id: string;data: BodyType<VerificationUpdate>}, TContext> => {
+
+const mutationKey = ['setNodeVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setNodeVerification>>, {id: string;data: BodyType<VerificationUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setNodeVerification(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetNodeVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof setNodeVerification>>>
+    export type SetNodeVerificationMutationBody = BodyType<VerificationUpdate>
+    export type SetNodeVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Set the human verification status of a distilled knowledge node (admin only)
+ */
+export const useSetNodeVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setNodeVerification>>, TError,{id: string;data: BodyType<VerificationUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setNodeVerification>>,
+        TError,
+        {id: string;data: BodyType<VerificationUpdate>},
+        TContext
+      > => {
+      return useMutation(getSetNodeVerificationMutationOptions(options));
+    }
 

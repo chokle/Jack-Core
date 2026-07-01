@@ -356,6 +356,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeGraph"
 
+  /graph/nodes/{id}/verification:
+    patch:
+      operationId: setNodeVerification
+      tags: [graph]
+      summary: Set the human verification status of a distilled knowledge node (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerificationUpdate"
+      responses:
+        "200":
+          description: Updated knowledge node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeNode"
+
 components:
   schemas:
     HealthStatus:
@@ -670,6 +695,14 @@ components:
           type: string
         token:
           type: ["string", "null"]
+
+    VerificationUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [verified, rejected, unverified]
 
     KnowledgeNode:
       type: object

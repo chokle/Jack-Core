@@ -78,10 +78,11 @@ export class FakeSupabase {
 }
 
 class QueryBuilder implements PromiseLike<Result<unknown>> {
-  private op: "select" | "upsert" | "delete" = "select";
+  private op: "select" | "upsert" | "delete" | "update" = "select";
   private filters: Filter[] = [];
   private upsertRows: Row[] = [];
   private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
+  private updateValues: Row = {};
   private singleMode: "none" | "maybe" | "single" = "none";
   private orderBy: { col: string; ascending: boolean } | null = null;
 
@@ -95,7 +96,9 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   select(_cols?: string): this {
-    this.op = "select";
+    // `.select()` is a return-columns modifier, not an op switch: after
+    // `.update()`/`.upsert()`/`.delete()` it just asks for the affected rows
+    // back. The default op is already "select", so we never need to set it here.
     return this;
   }
 
@@ -103,6 +106,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     this.op = "upsert";
     this.upsertRows = Array.isArray(rows) ? rows : [rows];
     this.upsertOpts = opts;
+    return this;
+  }
+
+  update(values: Row): this {
+    this.op = "update";
+    this.updateValues = values;
     return this;
   }
 
@@ -151,8 +160,22 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
   private run(): Result<unknown> {
     if (this.op === "upsert") return this.runUpsert();
+    if (this.op === "update") return this.runUpdate();
     if (this.op === "delete") return this.runDelete();
     return this.runSelect();
+  }
+
+  private runUpdate(): Result<unknown> {
+    const updated: Row[] = [];
+    for (const r of this.rows) {
+      if (!this.matches(r)) continue;
+      Object.assign(r, this.updateValues);
+      updated.push({ ...r });
+    }
+    if (this.singleMode !== "none") {
+      return { data: updated[0] ?? null, error: null };
+    }
+    return { data: updated, error: null };
   }
 
   private runSelect(): Result<unknown> {

@@ -18,6 +18,7 @@ import {
   syncVideoKnowledge,
   removeVideoGraph,
   knowledgeNodeId,
+  setNodeVerification,
 } from "../memory-graph.js";
 
 const TRADE = "Welder";
@@ -198,5 +199,57 @@ describe("removeVideoGraph — orphan pruning", () => {
     expect(nodeById(soloId)).toBeUndefined();
     expect(provTo(sharedId)).toHaveLength(1);
     expect((nodeById(sharedId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+  });
+});
+
+describe("setNodeVerification — reviewer decisions", () => {
+  it("records verify/reject/reset on a distilled concept node", async () => {
+    const v = "vid-verify";
+    await seedVideo(v);
+    const id = knowledgeNodeId("concept", "Root Pass");
+    await syncVideoKnowledge(v, [makeItem("concept", "Root Pass")]);
+
+    // New nodes default to unverified.
+    expect(nodeById(id)!["verification_status"]).toBe("unverified");
+
+    const verified = await setNodeVerification(id, "verified");
+    expect(verified?.verificationStatus).toBe("verified");
+    expect(nodeById(id)!["verification_status"]).toBe("verified");
+
+    const rejected = await setNodeVerification(id, "rejected");
+    expect(rejected?.verificationStatus).toBe("rejected");
+    expect(nodeById(id)!["verification_status"]).toBe("rejected");
+
+    const reset = await setNodeVerification(id, "unverified");
+    expect(reset?.verificationStatus).toBe("unverified");
+    expect(nodeById(id)!["verification_status"]).toBe("unverified");
+  });
+
+  it("refuses to verify scaffold nodes and unknown ids", async () => {
+    const v = "vid-scaffold";
+    await seedVideo(v);
+
+    // A topic/competency/video scaffold node is not a distilled concept.
+    expect(await setNodeVerification(`topic:${TRADE}`, "verified")).toBeNull();
+    expect(await setNodeVerification("comp:W-2", "verified")).toBeNull();
+    expect(await setNodeVerification(`video:${v}`, "verified")).toBeNull();
+    expect(await setNodeVerification("k:concept:does-not-exist", "verified")).toBeNull();
+
+    // The scaffold node is untouched (no verification_status written).
+    expect(nodeById(`topic:${TRADE}`)!["verification_status"]).toBeUndefined();
+  });
+
+  it("a reviewer decision survives re-processing of the source video", async () => {
+    const v = "vid-persist";
+    await seedVideo(v);
+    const id = knowledgeNodeId("concept", "Undercut");
+    const items = [makeItem("concept", "Undercut")];
+    await syncVideoKnowledge(v, items);
+
+    await setNodeVerification(id, "verified");
+
+    // Re-distilling the same video must preserve the human decision.
+    await syncVideoKnowledge(v, items);
+    expect(nodeById(id)!["verification_status"]).toBe("verified");
   });
 });
