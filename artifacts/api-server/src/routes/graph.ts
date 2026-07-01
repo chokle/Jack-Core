@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { GetGraphResponse } from "@workspace/api-zod";
 import { getGraph, rebuildGraph } from "../lib/memory-graph.js";
 
 const router = Router();
@@ -18,7 +19,10 @@ router.get("/graph", async (req, res) => {
       graph = await getGraph();
     }
 
-    return res.json(graph);
+    // Validate against the generated contract before returning so the persisted
+    // graph (including distilled atomic-knowledge nodes/edges) always matches the
+    // OpenAPI shape the frontend is generated against.
+    return res.json(GetGraphResponse.parse(graph));
   } catch (err) {
     req.log.error({ err }, "getGraph error");
     return res.status(500).json({ error: "Failed to load knowledge graph" });

@@ -673,19 +673,42 @@ components:
 
     KnowledgeNode:
       type: object
-      required: [id, kind, label, meta, createdAt, updatedAt]
+      required:
+        [id, kind, label, description, confidence, verificationStatus, meta, createdAt, updatedAt]
       properties:
         id:
           type: string
         kind:
           type: string
-          enum: [core, topic, competency, video]
+          enum:
+            [
+              core,
+              topic,
+              competency,
+              video,
+              concept,
+              tool,
+              equipment,
+              material,
+              procedure,
+              hazard,
+              slang,
+              certification,
+              standard,
+              regional_term,
+            ]
         label:
           type: string
         trade:
           type: ["string", "null"]
         refId:
           type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        confidence:
+          type: ["number", "null"]
+        verificationStatus:
+          type: string
         meta:
           type: object
           additionalProperties: true
@@ -696,7 +719,7 @@ components:
 
     KnowledgeEdge:
       type: object
-      required: [id, source, target, kind]
+      required: [id, source, target, kind, meta]
       properties:
         id:
           type: string
@@ -708,6 +731,9 @@ components:
           type: string
         weight:
           type: number
+        meta:
+          type: object
+          additionalProperties: true
 
     KnowledgeGraph:
       type: object
@@ -723,7 +749,7 @@ components:
             $ref: "#/components/schemas/KnowledgeEdge"
         counts:
           type: object
-          required: [nodes, edges, topics, competencies, videos]
+          required: [nodes, edges, topics, competencies, videos, knowledge]
           properties:
             nodes:
               type: integer
@@ -734,6 +760,8 @@ components:
             competencies:
               type: integer
             videos:
+              type: integer
+            knowledge:
               type: integer
         generatedAt:
           type: string

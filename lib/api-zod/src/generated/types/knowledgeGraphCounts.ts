@@ -12,4 +12,5 @@ export type KnowledgeGraphCounts = {
   topics: number;
   competencies: number;
   videos: number;
+  knowledge: number;
 };

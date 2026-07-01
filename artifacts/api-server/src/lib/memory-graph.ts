@@ -12,6 +12,7 @@
  * A brief poll-visible inconsistency is acceptable for a derived view.
  */
 import { supabase } from "./supabase.js";
+import type { AtomicKnowledge, KnowledgeCategory } from "./distillation.js";
 
 export const GRAPH_CORE_ID = "__jack__";
 
@@ -20,12 +21,56 @@ const compNodeId = (code: string) => `comp:${code}`;
 const videoNodeId = (id: string) => `video:${id}`;
 const edgeKey = (source: string, target: string) => `e:${source}->${target}`;
 
+/**
+ * Normalize a free-text concept name into a stable slug so the same concept
+ * (regardless of casing, punctuation, or surrounding whitespace) always maps to
+ * the same canonical id. This guarantees exact/normalized reuse across videos —
+ * fuzzy/semantic dedup of differently-worded concepts is the Graph Intelligence
+ * task, not this one.
+ */
+export function normalizeConcept(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Canonical, deterministic id for an atomic knowledge node: the same concept
+ * name + category always yields the same id, so re-extracting it (from this or
+ * any other video) upserts the one shared node instead of duplicating it.
+ */
+export function knowledgeNodeId(category: KnowledgeCategory, title: string): string {
+  return `k:${category}:${normalizeConcept(title)}`;
+}
+
+/** Atomic knowledge categories — the node kinds distilled from transcripts. */
+export const KNOWLEDGE_NODE_KINDS = [
+  "concept",
+  "tool",
+  "equipment",
+  "material",
+  "procedure",
+  "hazard",
+  "slang",
+  "certification",
+  "standard",
+  "regional_term",
+] as const;
+
+export type KnowledgeNodeKind = (typeof KNOWLEDGE_NODE_KINDS)[number];
+
 export interface GraphNode {
   id: string;
-  kind: "core" | "topic" | "competency" | "video";
+  kind: "core" | "topic" | "competency" | "video" | KnowledgeNodeKind;
   label: string;
   trade: string | null;
   refId: string | null;
+  description: string | null;
+  confidence: number | null;
+  verificationStatus: string;
   meta: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -37,6 +82,7 @@ export interface GraphEdge {
   target: string;
   kind: string;
   weight: number;
+  meta: Record<string, unknown>;
 }
 
 export interface KnowledgeGraph {
@@ -48,6 +94,7 @@ export interface KnowledgeGraph {
     topics: number;
     competencies: number;
     videos: number;
+    knowledge: number;
   };
   generatedAt: string;
 }
@@ -58,6 +105,9 @@ interface NodeUpsert {
   label: string;
   trade?: string | null;
   ref_id?: string | null;
+  description?: string | null;
+  confidence?: number | null;
+  verification_status?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -66,20 +116,30 @@ interface EdgeUpsert {
   source_id: string;
   target_id: string;
   kind: string;
+  meta?: Record<string, unknown>;
 }
 
 async function upsertNodes(nodes: NodeUpsert[]): Promise<void> {
   if (nodes.length === 0) return;
   const now = new Date().toISOString();
-  const rows = nodes.map((n) => ({
-    id: n.id,
-    kind: n.kind,
-    label: n.label,
-    trade: n.trade ?? null,
-    ref_id: n.ref_id ?? null,
-    meta: n.meta ?? {},
-    updated_at: now,
-  }));
+  // Only include the atomic-knowledge columns when a caller provides them, so
+  // upserting a scaffold node (core/topic/competency/video) never clobbers an
+  // atomic node's description/confidence/verification_status on conflict.
+  const rows = nodes.map((n) => {
+    const row: Record<string, unknown> = {
+      id: n.id,
+      kind: n.kind,
+      label: n.label,
+      trade: n.trade ?? null,
+      ref_id: n.ref_id ?? null,
+      meta: n.meta ?? {},
+      updated_at: now,
+    };
+    if (n.description !== undefined) row["description"] = n.description;
+    if (n.confidence !== undefined) row["confidence"] = n.confidence;
+    if (n.verification_status !== undefined) row["verification_status"] = n.verification_status;
+    return row;
+  });
   const { error } = await supabase.from("knowledge_nodes").upsert(rows, { onConflict: "id" });
   if (error) throw error;
 }
@@ -107,7 +167,17 @@ async function ensureCompetencyNodes(codes: string[]): Promise<void> {
 
 async function upsertEdges(edges: EdgeUpsert[]): Promise<void> {
   if (edges.length === 0) return;
-  const { error } = await supabase.from("knowledge_edges").upsert(edges, { onConflict: "id" });
+  const rows = edges.map((e) => {
+    const row: Record<string, unknown> = {
+      id: e.id,
+      source_id: e.source_id,
+      target_id: e.target_id,
+      kind: e.kind,
+    };
+    if (e.meta !== undefined) row["meta"] = e.meta;
+    return row;
+  });
+  const { error } = await supabase.from("knowledge_edges").upsert(rows, { onConflict: "id" });
   if (error) throw error;
 }
 
@@ -222,10 +292,17 @@ async function writeVideoNode(videoId: string): Promise<void> {
   await upsertNodes(nodes);
   await ensureCompetencyNodes(codes);
 
-  // Reconcile: remove every edge incident to this video node, then re-add the
+  // Reconcile the structural edges incident to this video node, then re-add the
   // authoritative set. Two scoped deletes avoid building a raw `.or()` filter
-  // string from the node id.
-  const del1 = await supabase.from("knowledge_edges").delete().eq("source_id", vNode);
+  // string from the node id. Crucially, the source_id delete EXCLUDES kind
+  // 'knowledge': those video→knowledge provenance edges are owned by the
+  // distillation engine (syncVideoKnowledge) and must survive a plain re-sync
+  // (e.g. a metadata edit) that does not re-run distillation.
+  const del1 = await supabase
+    .from("knowledge_edges")
+    .delete()
+    .eq("source_id", vNode)
+    .neq("kind", "knowledge");
   if (del1.error) throw del1.error;
   const del2 = await supabase.from("knowledge_edges").delete().eq("target_id", vNode);
   if (del2.error) throw del2.error;
@@ -291,6 +368,152 @@ async function pruneOrphanTopics(): Promise<void> {
 }
 
 /**
+ * Remove atomic knowledge nodes that no longer have a single source video (no
+ * incoming video→knowledge edge). A concept only exists because some video
+ * taught it; once its last provenance edge is gone (video deleted or a
+ * re-processing no longer distills it), an empty-provenance node is meaningless,
+ * so it is pruned. Its knowledge→topic / knowledge→competency edges cascade away.
+ * Scaffold nodes (core/topic/competency/video) are never touched here.
+ */
+async function pruneOrphanKnowledge(): Promise<void> {
+  const [nodes, edges] = await Promise.all([
+    supabase.from("knowledge_nodes").select("id, kind").in("kind", [...KNOWLEDGE_NODE_KINDS]),
+    supabase.from("knowledge_edges").select("target_id").eq("kind", "knowledge"),
+  ]);
+  if (nodes.error) throw nodes.error;
+  if (edges.error) throw edges.error;
+
+  const sourced = new Set<string>();
+  for (const e of edges.data ?? []) {
+    const t = (e as Record<string, unknown>)["target_id"];
+    if (typeof t === "string") sourced.add(t);
+  }
+
+  const orphanIds = (nodes.data ?? [])
+    .map((r: Record<string, unknown>) => r["id"] as string)
+    .filter((id) => !sourced.has(id));
+
+  if (orphanIds.length > 0) {
+    const { error } = await supabase.from("knowledge_nodes").delete().in("id", orphanIds);
+    if (error) throw error;
+  }
+}
+
+/**
+ * Distill a video's atomic knowledge into the graph. For each reusable concept,
+ * upsert the shared canonical node (merging with any prior extraction rather than
+ * clobbering it), then reconcile ONLY this video's provenance edges — so the
+ * concept's source-video list grows across videos and re-processing never
+ * duplicates or drops another video's contribution. Knowledge→topic and
+ * knowledge→competency edges are additive (a growing many-to-many); orphaned
+ * concepts (no remaining source video) are pruned at the end.
+ *
+ * Internal to the pipeline: there is no public route that mutates the graph.
+ */
+export async function syncVideoKnowledge(
+  videoId: string,
+  items: AtomicKnowledge[],
+): Promise<void> {
+  const vNode = videoNodeId(videoId);
+
+  const { data: video, error: vErr } = await supabase
+    .from("videos")
+    .select("trade")
+    .eq("id", videoId)
+    .maybeSingle();
+  if (vErr) throw vErr;
+  // If the video vanished between distillation and persistence, clear any stale
+  // provenance it left behind and stop.
+  if (!video) {
+    await supabase.from("knowledge_edges").delete().eq("source_id", vNode).eq("kind", "knowledge");
+    await pruneOrphanKnowledge();
+    return;
+  }
+  const trade = (video.trade as string | null) ?? null;
+
+  const ids = items.map((i) => i.id);
+  const existingById = new Map<string, Record<string, unknown>>();
+  if (ids.length > 0) {
+    const { data: rows, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id, label, trade, description, confidence, verification_status")
+      .in("id", ids);
+    if (error) throw error;
+    for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
+  }
+
+  const nodes: NodeUpsert[] = items.map((item) => {
+    const prev = existingById.get(item.id);
+    const prevStatus = prev?.["verification_status"] as string | undefined;
+    const prevConfidence =
+      typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : null;
+    return {
+      id: item.id,
+      kind: item.category,
+      // First writer wins for the display label/trade so the shared node stays
+      // stable; later videos still append provenance via the edge.
+      label: (prev?.["label"] as string) || item.title,
+      trade: (prev?.["trade"] as string | null) ?? trade,
+      ref_id: item.id,
+      description: item.description || ((prev?.["description"] as string | null) ?? null),
+      // Sensible monotonic init only — corroboration-based recomputation is the
+      // Graph Intelligence task's job, not this one.
+      confidence: Math.max(prevConfidence ?? 0, item.confidence),
+      // Preserve a human verification decision; default new nodes to unverified.
+      verification_status:
+        prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified",
+      meta: { category: item.category },
+    };
+  });
+
+  // Ensure competency nodes exist for any mapped codes (never clobber seeded rows).
+  const codes = [...new Set(items.map((i) => i.competencyCode).filter((c): c is string => !!c))];
+  await ensureCompetencyNodes(codes);
+  await upsertNodes(nodes);
+
+  // Reconcile only this video's provenance edges: drop the old set, add the new.
+  const del = await supabase
+    .from("knowledge_edges")
+    .delete()
+    .eq("source_id", vNode)
+    .eq("kind", "knowledge");
+  if (del.error) throw del.error;
+
+  const provenanceEdges: EdgeUpsert[] = items.map((item) => ({
+    id: edgeKey(vNode, item.id),
+    source_id: vNode,
+    target_id: item.id,
+    kind: "knowledge",
+    meta: { timestamps: item.timestamps, confidence: item.confidence },
+  }));
+
+  // Additive hub edges: connect each concept to its trade topic and any mapped
+  // competency. These accumulate across videos (a growing many-to-many web).
+  const hubEdges: EdgeUpsert[] = [];
+  for (const item of items) {
+    if (trade) {
+      hubEdges.push({
+        id: edgeKey(item.id, topicNodeId(trade)),
+        source_id: item.id,
+        target_id: topicNodeId(trade),
+        kind: "topic",
+      });
+    }
+    if (item.competencyCode) {
+      hubEdges.push({
+        id: edgeKey(item.id, compNodeId(item.competencyCode)),
+        source_id: item.id,
+        target_id: compNodeId(item.competencyCode),
+        kind: "competency",
+      });
+    }
+  }
+
+  await upsertEdges([...provenanceEdges, ...hubEdges]);
+  await pruneOrphanKnowledge();
+}
+
+/**
  * Mirror a single video into the graph, then prune any topic left orphaned when
  * a video changed trade. Best-effort callers (syncGraphSafe) swallow failures.
  */
@@ -299,10 +522,11 @@ export async function syncVideoGraph(videoId: string): Promise<void> {
   await pruneOrphanTopics();
 }
 
-/** Remove a video's node and prune any topic its removal left orphaned. */
+/** Remove a video's node and prune any topic/knowledge its removal left orphaned. */
 export async function removeVideoGraph(videoId: string): Promise<void> {
   await deleteVideoNode(videoId);
   await pruneOrphanTopics();
+  await pruneOrphanKnowledge();
 }
 
 /**
@@ -341,6 +565,10 @@ export async function rebuildGraph(): Promise<void> {
   }
 
   await pruneOrphanTopics();
+  // Rebuild is deterministic/free (no AI calls), so it does not re-distill atomic
+  // knowledge — those nodes persist across rebuilds. Just drop any left orphaned
+  // by stale video removal.
+  await pruneOrphanKnowledge();
 }
 
 /** Read the full persisted graph. */
@@ -352,12 +580,17 @@ export async function getGraph(): Promise<KnowledgeGraph> {
   if (nErr) throw nErr;
   if (eErr) throw eErr;
 
+  const knowledgeKinds = new Set<string>(KNOWLEDGE_NODE_KINDS);
+
   const nodes: GraphNode[] = (nodeRows ?? []).map((r: Record<string, unknown>) => ({
     id: r["id"] as string,
     kind: r["kind"] as GraphNode["kind"],
     label: r["label"] as string,
     trade: (r["trade"] as string | null) ?? null,
     refId: (r["ref_id"] as string | null) ?? null,
+    description: (r["description"] as string | null) ?? null,
+    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
+    verificationStatus: (r["verification_status"] as string) ?? "unverified",
     meta: (r["meta"] as Record<string, unknown>) ?? {},
     createdAt: r["created_at"] as string,
     updatedAt: (r["updated_at"] as string) ?? (r["created_at"] as string),
@@ -369,6 +602,7 @@ export async function getGraph(): Promise<KnowledgeGraph> {
     target: r["target_id"] as string,
     kind: r["kind"] as string,
     weight: (r["weight"] as number) ?? 1,
+    meta: (r["meta"] as Record<string, unknown>) ?? {},
   }));
 
   return {
@@ -380,6 +614,7 @@ export async function getGraph(): Promise<KnowledgeGraph> {
       topics: nodes.filter((n) => n.kind === "topic").length,
       competencies: nodes.filter((n) => n.kind === "competency").length,
       videos: nodes.filter((n) => n.kind === "video").length,
+      knowledge: nodes.filter((n) => knowledgeKinds.has(n.kind)).length,
     },
     generatedAt: new Date().toISOString(),
   };

@@ -15,6 +15,7 @@ export * from './competency';
 export * from './healthStatus';
 export * from './jobStatus';
 export * from './knowledgeEdge';
+export * from './knowledgeEdgeMeta';
 export * from './knowledgeGraph';
 export * from './knowledgeGraphCounts';
 export * from './knowledgeNode';

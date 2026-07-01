@@ -16,6 +16,11 @@ export interface KnowledgeNode {
   trade?: string | null;
   /** @nullable */
   refId?: string | null;
+  /** @nullable */
+  description: string | null;
+  /** @nullable */
+  confidence: number | null;
+  verificationStatus: string;
   meta: KnowledgeNodeMeta;
   createdAt: string;
   updatedAt: string;

@@ -301,7 +301,18 @@ export function buildGraphModelFromServer(graph: {
   nodes: ServerGraphNode[];
   edges: ServerGraphEdge[];
 }): GraphModel {
-  const topicNodes = graph.nodes
+  // The persisted graph now also carries distilled atomic-knowledge nodes
+  // (concept/tool/hazard/…) and their provenance edges. This canvas only renders
+  // the core/topic/competency/video scaffold, so drop the atomic-knowledge nodes
+  // and any edge incident to them here — visualizing them is a separate concern.
+  const RENDERED_KINDS = new Set(["core", "topic", "competency", "video"]);
+  const serverNodes = graph.nodes.filter((n) => RENDERED_KINDS.has(n.kind));
+  const renderedIds = new Set(serverNodes.map((n) => n.id));
+  const serverEdges = graph.edges.filter(
+    (e) => renderedIds.has(e.source) && renderedIds.has(e.target),
+  );
+
+  const topicNodes = serverNodes
     .filter((n) => n.kind === "topic")
     .sort((a, b) => (a.trade ?? a.label).localeCompare(b.trade ?? b.label));
 
@@ -314,7 +325,7 @@ export function buildGraphModelFromServer(graph: {
   const colorByTopicId = new Map(topics.map((t) => [t.id, t.color]));
   const colorByTrade = new Map(topics.map((t) => [t.trade, t.color]));
 
-  const nodes: MemoryNode[] = graph.nodes.map((n) => {
+  const nodes: MemoryNode[] = serverNodes.map((n) => {
     const trade = n.trade ?? undefined;
     const topicColor = (trade ? colorByTrade.get(trade) : undefined) ?? CORE_COLOR;
 
@@ -368,7 +379,7 @@ export function buildGraphModelFromServer(graph: {
     };
   });
 
-  const edges: MemoryEdge[] = graph.edges.map((e) => ({
+  const edges: MemoryEdge[] = serverEdges.map((e) => ({
     a: e.source,
     b: e.target,
     kind: (e.kind as NodeKind) ?? "video",

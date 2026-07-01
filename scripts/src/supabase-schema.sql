@@ -140,31 +140,76 @@ ON CONFLICT (code) DO NOTHING;
 -- 'video:<uuid>') so every write is an idempotent upsert — re-processing or
 -- "merging" knowledge collapses onto the same node instead of duplicating it.
 
+-- Node kinds: the original scaffold kinds (core/topic/competency/video) plus the
+-- reusable "atomic knowledge" categories distilled from video transcripts. Each
+-- atomic node is one durable, reusable trade concept — never a sentence — with a
+-- canonical id (k:<category>:<normalized-name>) so the same concept extracted
+-- from many videos collapses onto a single shared node.
 CREATE TABLE IF NOT EXISTS knowledge_nodes (
   id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  kind TEXT NOT NULL CHECK (kind IN (
+    'core','topic','competency','video',
+    'concept','tool','equipment','material','procedure',
+    'hazard','slang','certification','standard','regional_term'
+  )),
   label TEXT NOT NULL,
   trade TEXT,
   ref_id TEXT,
+  description TEXT,
+  confidence FLOAT,
+  verification_status TEXT NOT NULL DEFAULT 'unverified'
+    CHECK (verification_status IN ('unverified','verified','rejected')),
   meta JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Edge kinds mirror the node relationships. 'knowledge' is the video -> atomic
+-- knowledge provenance link (many-to-many): one video contributes many concepts,
+-- and one concept accumulates many source videos over time. Per-video timestamps
+-- and the per-extraction confidence for that link live in the edge `meta`.
 CREATE TABLE IF NOT EXISTS knowledge_edges (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('core','topic','competency','video')),
+  kind TEXT NOT NULL CHECK (kind IN (
+    'core','topic','competency','video','knowledge'
+  )),
   weight FLOAT NOT NULL DEFAULT 1,
+  meta JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (source_id, target_id, kind)
 );
+
+-- Idempotent migration for databases created before the atomic-knowledge fields
+-- existed. CREATE TABLE IF NOT EXISTS above does not alter an existing table, so
+-- add the new columns and broaden the CHECK constraints here. All statements are
+-- safe to re-run.
+ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS confidence FLOAT;
+ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS verification_status TEXT
+  NOT NULL DEFAULT 'unverified';
+ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_kind_check;
+ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_kind_check CHECK (kind IN (
+  'core','topic','competency','video',
+  'concept','tool','equipment','material','procedure',
+  'hazard','slang','certification','standard','regional_term'
+));
+ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_verification_status_check;
+ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_verification_status_check
+  CHECK (verification_status IN ('unverified','verified','rejected'));
+
+ALTER TABLE knowledge_edges ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE knowledge_edges DROP CONSTRAINT IF EXISTS knowledge_edges_kind_check;
+ALTER TABLE knowledge_edges ADD CONSTRAINT knowledge_edges_kind_check CHECK (kind IN (
+  'core','topic','competency','video','knowledge'
+));
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_kind ON knowledge_nodes(kind);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_trade ON knowledge_nodes(trade);
 CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_kind ON knowledge_edges(kind);
 
 -- Seed the base graph from the seeded competencies (idempotent). Video nodes
 -- and their edges are added at runtime by the API as videos are processed.

@@ -372,10 +372,13 @@ export const GetVideosByCompetencyResponse = zod.array(GetVideosByCompetencyResp
 export const GetGraphResponse = zod.object({
   "nodes": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video']),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
   "label": zod.string(),
   "trade": zod.string().nullish(),
   "refId": zod.string().nullish(),
+  "description": zod.string().nullable(),
+  "confidence": zod.number().nullable(),
+  "verificationStatus": zod.string(),
   "meta": zod.record(zod.string(), zod.unknown()),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
@@ -385,14 +388,16 @@ export const GetGraphResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "kind": zod.string(),
-  "weight": zod.number().optional()
+  "weight": zod.number().optional(),
+  "meta": zod.record(zod.string(), zod.unknown())
 })),
   "counts": zod.object({
   "nodes": zod.number(),
   "edges": zod.number(),
   "topics": zod.number(),
   "competencies": zod.number(),
-  "videos": zod.number()
+  "videos": zod.number(),
+  "knowledge": zod.number()
 }),
   "generatedAt": zod.string()
 })

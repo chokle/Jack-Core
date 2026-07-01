@@ -233,6 +233,16 @@ export const KnowledgeNodeKind = {
   topic: 'topic',
   competency: 'competency',
   video: 'video',
+  concept: 'concept',
+  tool: 'tool',
+  equipment: 'equipment',
+  material: 'material',
+  procedure: 'procedure',
+  hazard: 'hazard',
+  slang: 'slang',
+  certification: 'certification',
+  standard: 'standard',
+  regional_term: 'regional_term',
 } as const;
 
 export type KnowledgeNodeMeta = { [key: string]: unknown };
@@ -245,10 +255,17 @@ export interface KnowledgeNode {
   trade?: string | null;
   /** @nullable */
   refId?: string | null;
+  /** @nullable */
+  description: string | null;
+  /** @nullable */
+  confidence: number | null;
+  verificationStatus: string;
   meta: KnowledgeNodeMeta;
   createdAt: string;
   updatedAt: string;
 }
+
+export type KnowledgeEdgeMeta = { [key: string]: unknown };
 
 export interface KnowledgeEdge {
   id: string;
@@ -256,6 +273,7 @@ export interface KnowledgeEdge {
   target: string;
   kind: string;
   weight?: number;
+  meta: KnowledgeEdgeMeta;
 }
 
 export type KnowledgeGraphCounts = {
@@ -264,6 +282,7 @@ export type KnowledgeGraphCounts = {
   topics: number;
   competencies: number;
   videos: number;
+  knowledge: number;
 };
 
 export interface KnowledgeGraph {

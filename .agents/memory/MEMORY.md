@@ -1,2 +1,3 @@
 - [Chat privacy without auth](chat-session-privacy.md) — Jack is intentionally no-auth; chat history must always filter by a client-owned sessionId, never return global rows.
 - [Untrusted content rendering](untrusted-content-rendering.md) — video analysis + chat content come from public uploads; render as text, never via dangerouslySetInnerHTML.
+- [Atomic knowledge graph provenance](knowledge-graph-provenance.md) — distilled concepts share one canonical node; provenance is edge-owned (kind='knowledge'); invariants that keep re-processing idempotent.

@@ -5,6 +5,7 @@ import { openai, createEmbedding, createEmbeddings, MODELS } from "../lib/openai
 import { logger } from "../lib/logger.js";
 import { transcribeFromUrl } from "../lib/transcription.js";
 import { syncVideoGraph, removeVideoGraph } from "../lib/memory-graph.js";
+import { runDistillation } from "../lib/distillation.js";
 import { aiPipelineLimiter } from "../lib/rate-limit.js";
 import { requireAdminSession } from "../lib/admin-auth.js";
 import {
@@ -52,6 +53,21 @@ async function removeGraphSafe(videoId: string): Promise<void> {
     await removeVideoGraph(videoId);
   } catch (err) {
     logger.error({ err, videoId }, "knowledge graph node removal failed");
+  }
+}
+
+/**
+ * Best-effort atomic-knowledge distillation for a ready video. Like graph sync,
+ * this is a value-add on a derived view: a distillation failure (or LLM/Supabase
+ * hiccup) must never downgrade a successfully transcribed/analyzed video, so we
+ * log and move on. Runs after the video node + competency edges are already
+ * mirrored, so the video→knowledge provenance edges attach to an existing node.
+ */
+async function distillGraphSafe(videoId: string): Promise<void> {
+  try {
+    await runDistillation(videoId);
+  } catch (err) {
+    logger.error({ err, videoId }, "atomic knowledge distillation failed");
   }
 }
 
@@ -136,6 +152,9 @@ async function runAnalysis(videoId: string): Promise<void> {
     // Video reached "ready" with competency mappings — mirror it into the graph
     // so the new node and its competency edges appear on the next poll.
     await syncGraphSafe(videoId);
+    // Then distill the transcript into reusable atomic knowledge nodes, attaching
+    // this video's provenance edges to the node we just mirrored.
+    await distillGraphSafe(videoId);
   } catch (bgErr) {
     logger.error({ err: bgErr, videoId }, "Analysis failed");
     // Keep a successfully-transcribed video usable even if analysis failed —
