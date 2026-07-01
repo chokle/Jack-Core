@@ -404,6 +404,86 @@ describe("removeVideoGraph — embedding-merged concepts reconverge on removal",
     expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(1);
   });
 
+  it("preserves reviewer verification and provenance history when one of two source videos is deleted", async () => {
+    const [v1, v2] = ["vid-verify-rm1", "vid-verify-rm2"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // Force the two differently-worded titles to embed identically so v2's item
+    // MERGES onto v1's canonical node (recording a mergedFrom entry).
+    const shared = defaultEmbed("__stickout_cluster__");
+    embedRegistry.set("Electrode Stickout", shared);
+    embedRegistry.set("Electrode Stick-Out", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Electrode Stickout");
+    const wordedId = knowledgeNodeId("concept", "Electrode Stick-Out");
+
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Electrode Stickout", {
+        confidence: 0.5,
+        timestamps: [30, 10],
+        competencyCode: "W-2",
+      }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Electrode Stick-Out", {
+        confidence: 0.4,
+        timestamps: [20, 30],
+        competencyCode: "W-2",
+      }),
+    ]);
+
+    // A reviewer verifies the merged concept (records a verificationHistory transition).
+    await setNodeVerification(canonicalId, "verified");
+
+    // Preconditions: the human + provenance state a routine deletion must preserve.
+    const before = nodeById(canonicalId)!;
+    const beforeMeta = before["meta"] as Record<string, unknown>;
+    expect(before["verification_status"]).toBe("verified");
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    expect(beforeHistory).toHaveLength(1);
+    expect(beforeHistory[0]).toMatchObject({ from: "unverified", to: "verified" });
+    const beforeMerged = beforeMeta["mergedFrom"] as Array<Record<string, unknown>>;
+    expect(beforeMerged).toHaveLength(1);
+    expect(beforeMerged[0]).toMatchObject({
+      id: wordedId,
+      label: "Electrode Stick-Out",
+      category: "concept",
+    });
+    expect(provTo(canonicalId)).toHaveLength(2);
+    expect(beforeMeta["sourceCount"]).toBe(2);
+
+    // Routine deletion of ONE source video — the concept survives on the other.
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v1);
+    await removeVideoGraph(v1);
+
+    const after = nodeById(canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+
+    // The reviewer's decision is intact — deletion never wipes verification.
+    expect(after["verification_status"]).toBe("verified");
+    expect(afterMeta["verificationHistory"]).toEqual(beforeHistory);
+
+    // The "why this concept exists" merge audit trail is intact too.
+    expect(afterMeta["mergedFrom"]).toEqual(beforeMerged);
+
+    // Derived corroboration correctly drops to the single surviving source:
+    // confidence collapses to v2's own extraction confidence (noisy-OR of one).
+    expect(after["confidence"] as number).toBeCloseTo(0.4, 10);
+    expect(afterMeta["sourceVideoIds"]).toEqual([v2]);
+    expect(afterMeta["sourceCount"]).toBe(1);
+    expect(afterMeta["timestamps"]).toEqual([20, 30]);
+    expect(provTo(canonicalId)).toHaveLength(1);
+
+    // Hub-edge weights fall back to the single corroborating video.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(1);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(1);
+
+    // The merge is not undone — still exactly one canonical node, no duplicate.
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(nodes().filter((n) => n["id"] === canonicalId)).toHaveLength(1);
+  });
+
   it("prunes the merged node entirely once both contributing videos are removed", async () => {
     const [v1, v2] = ["vid-unmerge-all1", "vid-unmerge-all2"];
     await seedVideo(v1);
