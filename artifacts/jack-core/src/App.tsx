@@ -69,7 +69,11 @@ function JackApp() {
             seek={seek}
           />
         ) : view === "graph" ? (
-          <MemoryGraphView data={graph} onOpenVideo={handleSelectVideo} />
+          <MemoryGraphView
+            data={graph}
+            onOpenVideo={handleSelectVideo}
+            onJumpToTimestamp={handleCitationClick}
+          />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}

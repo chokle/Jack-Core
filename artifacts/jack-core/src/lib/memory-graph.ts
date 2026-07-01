@@ -38,7 +38,36 @@ export interface RawCompetency {
   videoCount?: number;
 }
 
-export type NodeKind = "core" | "topic" | "video" | "competency";
+/** Atomic knowledge categories distilled from transcripts (Living Memory). */
+export const KNOWLEDGE_KINDS = [
+  "concept",
+  "tool",
+  "equipment",
+  "material",
+  "procedure",
+  "hazard",
+  "slang",
+  "certification",
+  "standard",
+  "regional_term",
+] as const;
+
+export type KnowledgeKind = (typeof KNOWLEDGE_KINDS)[number];
+
+export type NodeKind = "core" | "topic" | "video" | "competency" | KnowledgeKind;
+
+const KNOWLEDGE_KIND_SET = new Set<string>(KNOWLEDGE_KINDS);
+
+export function isKnowledgeKind(kind: string): kind is KnowledgeKind {
+  return KNOWLEDGE_KIND_SET.has(kind);
+}
+
+/** One source video that corroborates an atomic knowledge node. */
+export interface NodeSource {
+  videoId: string;
+  timestamps: number[];
+  confidence: number;
+}
 
 export interface MemoryNode {
   id: string;
@@ -56,13 +85,50 @@ export interface MemoryNode {
     updatedAt?: string;
     competencyCodes?: string[];
     videoCount?: number;
+    /** Atomic-knowledge fields (present only for KnowledgeKind nodes). */
+    category?: string;
+    refId?: string;
+    confidence?: number;
+    verificationStatus?: string;
+    sourceCount?: number;
+    sourceVideoIds?: string[];
+    timestamps?: number[];
+    sources?: NodeSource[];
   };
 }
 
 export interface MemoryEdge {
   a: string;
   b: string;
-  kind: NodeKind;
+  kind: string;
+}
+
+/** Human-facing label + signature color for every knowledge kind, so atomic
+ *  nodes are visually distinguishable in the graph and legend. Colors are keyed
+ *  by kind (not trade) so the atomic-knowledge layer reads as its own stratum. */
+export const KNOWLEDGE_KIND_META: Record<
+  KnowledgeKind,
+  { label: string; color: RGB }
+> = {
+  concept: { label: "Concept", color: [130, 170, 255] },
+  tool: { label: "Tool", color: [255, 180, 70] },
+  equipment: { label: "Equipment", color: [178, 140, 248] },
+  material: { label: "Material", color: [110, 220, 180] },
+  procedure: { label: "Procedure", color: [90, 200, 250] },
+  hazard: { label: "Hazard", color: [255, 95, 95] },
+  slang: { label: "Slang", color: [255, 140, 200] },
+  certification: { label: "Certification", color: [240, 210, 90] },
+  standard: { label: "Standard", color: [150, 205, 120] },
+  regional_term: { label: "Regional Term", color: [205, 165, 125] },
+};
+
+/** Display label for any node kind (used by the inspector + legend). */
+export function kindLabel(kind: NodeKind): string {
+  if (kind === "core") return "Memory Core";
+  if (kind === "topic") return "Topic Hub";
+  if (kind === "competency") return "Red Seal Competency";
+  if (kind === "video") return "Video";
+  return KNOWLEDGE_KIND_META[kind]?.label ?? "Knowledge";
 }
 
 export interface Topic {
@@ -272,7 +338,12 @@ export interface ServerGraphNode {
   label: string;
   trade?: string | null;
   refId?: string | null;
+  description?: string | null;
+  confidence?: number | null;
+  verificationStatus?: string;
   meta?: Record<string, unknown> | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ServerGraphEdge {
@@ -281,6 +352,7 @@ export interface ServerGraphEdge {
   target: string;
   kind: string;
   weight?: number;
+  meta?: Record<string, unknown> | null;
 }
 
 function metaStr(
@@ -289,6 +361,47 @@ function metaStr(
 ): string | undefined {
   const val = meta?.[key];
   return typeof val === "string" ? val : undefined;
+}
+
+function metaNumArray(
+  meta: Record<string, unknown> | null | undefined,
+  key: string,
+): number[] {
+  const val = meta?.[key];
+  return Array.isArray(val)
+    ? val.filter((n): n is number => typeof n === "number")
+    : [];
+}
+
+function metaStrArray(
+  meta: Record<string, unknown> | null | undefined,
+  key: string,
+): string[] {
+  const val = meta?.[key];
+  return Array.isArray(val)
+    ? val.filter((s): s is string => typeof s === "string")
+    : [];
+}
+
+/** Parse the per-source provenance array stored on a knowledge node's meta. */
+function readSources(meta: Record<string, unknown> | null | undefined): NodeSource[] {
+  const raw = meta?.["sources"];
+  if (!Array.isArray(raw)) return [];
+  const out: NodeSource[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const videoId = typeof e["videoId"] === "string" ? e["videoId"] : null;
+    if (!videoId) continue;
+    out.push({
+      videoId,
+      timestamps: Array.isArray(e["timestamps"])
+        ? (e["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
+        : [],
+      confidence: typeof e["confidence"] === "number" ? e["confidence"] : 0.5,
+    });
+  }
+  return out;
 }
 
 /**
@@ -301,12 +414,11 @@ export function buildGraphModelFromServer(graph: {
   nodes: ServerGraphNode[];
   edges: ServerGraphEdge[];
 }): GraphModel {
-  // The persisted graph now also carries distilled atomic-knowledge nodes
-  // (concept/tool/hazard/…) and their provenance edges. This canvas only renders
-  // the core/topic/competency/video scaffold, so drop the atomic-knowledge nodes
-  // and any edge incident to them here — visualizing them is a separate concern.
-  const RENDERED_KINDS = new Set(["core", "topic", "competency", "video"]);
-  const serverNodes = graph.nodes.filter((n) => RENDERED_KINDS.has(n.kind));
+  // The persisted graph carries the core/topic/competency/video scaffold *and*
+  // the distilled atomic-knowledge layer (concept/tool/hazard/…) with its
+  // provenance edges. Render every node whose id is present; drop only edges
+  // that dangle to a missing endpoint.
+  const serverNodes = graph.nodes;
   const renderedIds = new Set(serverNodes.map((n) => n.id));
   const serverEdges = graph.edges.filter(
     (e) => renderedIds.has(e.source) && renderedIds.has(e.target),
@@ -356,33 +468,68 @@ export function buildGraphModelFromServer(graph: {
         },
       };
     }
-    // video
-    const codes = Array.isArray(n.meta?.["competencyCodes"])
-      ? (n.meta!["competencyCodes"] as unknown[]).filter(
-          (c): c is string => typeof c === "string",
-        )
-      : [];
+    if (n.kind === "video") {
+      const codes = metaStrArray(n.meta, "competencyCodes");
+      return {
+        id: n.id,
+        kind: "video",
+        label: n.label,
+        topicId: trade ? topicIdForTrade(trade) : undefined,
+        color: topicColor,
+        status: metaStr(n.meta, "status"),
+        meta: {
+          trade,
+          description: n.description ?? metaStr(n.meta, "description"),
+          createdAt: n.createdAt ?? metaStr(n.meta, "createdAt"),
+          updatedAt: n.updatedAt ?? metaStr(n.meta, "updatedAt"),
+          competencyCodes: codes,
+        },
+      };
+    }
+    if (isKnowledgeKind(n.kind)) {
+      // Atomic knowledge: signature color by kind, clustered under its trade hub.
+      const kindColor = KNOWLEDGE_KIND_META[n.kind].color;
+      const sources = readSources(n.meta);
+      return {
+        id: n.id,
+        kind: n.kind,
+        label: n.label,
+        topicId: trade ? topicIdForTrade(trade) : undefined,
+        color: kindColor,
+        meta: {
+          trade,
+          category: metaStr(n.meta, "category") ?? n.kind,
+          refId: n.refId ?? undefined,
+          description: n.description ?? metaStr(n.meta, "description"),
+          confidence: typeof n.confidence === "number" ? n.confidence : undefined,
+          verificationStatus: n.verificationStatus,
+          sourceCount:
+            typeof n.meta?.["sourceCount"] === "number"
+              ? (n.meta["sourceCount"] as number)
+              : sources.length,
+          sourceVideoIds: metaStrArray(n.meta, "sourceVideoIds"),
+          timestamps: metaNumArray(n.meta, "timestamps"),
+          sources,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+        },
+      };
+    }
+    // Unknown kind fallback — render as a neutral node so nothing silently vanishes.
     return {
       id: n.id,
-      kind: "video",
+      kind: n.kind as NodeKind,
       label: n.label,
       topicId: trade ? topicIdForTrade(trade) : undefined,
       color: topicColor,
-      status: metaStr(n.meta, "status"),
-      meta: {
-        trade,
-        description: metaStr(n.meta, "description"),
-        createdAt: metaStr(n.meta, "createdAt"),
-        updatedAt: metaStr(n.meta, "updatedAt"),
-        competencyCodes: codes,
-      },
+      meta: { trade, description: n.description ?? metaStr(n.meta, "description") },
     };
   });
 
   const edges: MemoryEdge[] = serverEdges.map((e) => ({
     a: e.source,
     b: e.target,
-    kind: (e.kind as NodeKind) ?? "video",
+    kind: e.kind || "video",
   }));
 
   const degree: Record<string, number> = {};

@@ -10,6 +10,10 @@ import {
   Unlock,
   ArrowUpRight,
   Activity,
+  Play,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
 } from "lucide-react";
 import {
   MemoryGraphCanvas,
@@ -21,13 +25,19 @@ import {
   rgba,
   timeAgo,
   readCreatedAt,
+  isKnowledgeKind,
+  kindLabel as kindLabelFor,
+  KNOWLEDGE_KIND_META,
   type MemoryNode,
+  type NodeSource,
   type RGB,
 } from "../lib/memory-graph";
 
 interface MemoryGraphViewProps {
   data: MemoryGraphData;
   onOpenVideo: (id: string) => void;
+  /** Open a source video and seek to a transcript timestamp (seconds). */
+  onJumpToTimestamp: (videoId: string, startTime: number) => void;
 }
 
 const STATUS_COLOR: Record<string, RGB> = {
@@ -38,7 +48,11 @@ const STATUS_COLOR: Record<string, RGB> = {
   analyzing: [245, 197, 66],
 };
 
-export function MemoryGraphView({ data, onOpenVideo }: MemoryGraphViewProps) {
+export function MemoryGraphView({
+  data,
+  onOpenVideo,
+  onJumpToTimestamp,
+}: MemoryGraphViewProps) {
   const { model, recent, competencies } = data;
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,6 +72,46 @@ export function MemoryGraphView({ data, onOpenVideo }: MemoryGraphViewProps) {
   const colorByTrade = useMemo(() => {
     const m = new Map<string, RGB>();
     for (const t of model.topics) m.set(t.trade, t.color);
+    return m;
+  }, [model]);
+
+  const adjacency = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const e of model.edges) {
+      if (!m.has(e.a)) m.set(e.a, new Set());
+      if (!m.has(e.b)) m.set(e.b, new Set());
+      m.get(e.a)!.add(e.b);
+      m.get(e.b)!.add(e.a);
+    }
+    return m;
+  }, [model]);
+
+  const compByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of competencies) m.set(c.code, c.name);
+    return m;
+  }, [competencies]);
+
+  // Knowledge kinds actually present in the graph, for the legend.
+  const presentKnowledgeKinds = useMemo(() => {
+    const seen = new Set<string>();
+    for (const n of model.nodes) if (isKnowledgeKind(n.kind)) seen.add(n.kind);
+    return (Object.keys(KNOWLEDGE_KIND_META) as (keyof typeof KNOWLEDGE_KIND_META)[])
+      .filter((k) => seen.has(k))
+      .map((k) => ({ kind: k, ...KNOWLEDGE_KIND_META[k] }));
+  }, [model]);
+
+  // Index: which knowledge nodes cite each source video, so the inspector can
+  // surface concepts co-taught alongside the selected one.
+  const knowledgeByVideoId = useMemo(() => {
+    const m = new Map<string, MemoryNode[]>();
+    for (const n of model.nodes) {
+      if (!isKnowledgeKind(n.kind)) continue;
+      for (const s of n.meta.sources ?? []) {
+        if (!m.has(s.videoId)) m.set(s.videoId, []);
+        m.get(s.videoId)!.push(n);
+      }
+    }
     return m;
   }, [model]);
 
@@ -143,6 +197,27 @@ export function MemoryGraphView({ data, onOpenVideo }: MemoryGraphViewProps) {
                 </div>
               ))}
             </div>
+            {presentKnowledgeKinds.length > 0 && (
+              <>
+                <div className="mb-2 mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-white/50">
+                  Knowledge
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  {presentKnowledgeKinds.map((k) => (
+                    <div key={k.kind} className="flex items-center gap-1.5">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{
+                          background: rgbCss(k.color),
+                          boxShadow: `0 0 6px ${rgba(k.color, 0.8)}`,
+                        }}
+                      />
+                      <span className="text-xs text-white/75">{k.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -176,13 +251,21 @@ export function MemoryGraphView({ data, onOpenVideo }: MemoryGraphViewProps) {
           colorByTrade={colorByTrade}
           onSelect={(id) => setSelectedId(`video:${id}`)}
         />
-        <SelectedNodePanel
+        <KnowledgeInspector
           node={selected}
           degree={selected ? model.degree[selected.id] ?? 0 : 0}
           relatedVideoCount={relatedVideoCount(selected, model)}
+          nodeById={nodeById}
+          adjacency={adjacency}
+          knowledgeByVideoId={knowledgeByVideoId}
+          compByCode={compByCode}
           onOpenVideo={onOpenVideo}
+          onJumpToTimestamp={onJumpToTimestamp}
+          onSelectNode={setSelectedId}
         />
-        <RelatedCompetencies node={selected} competencies={competencies} />
+        {selected && !isKnowledgeKind(selected.kind) && (
+          <RelatedCompetencies node={selected} competencies={competencies} />
+        )}
       </aside>
     </div>
   );
@@ -327,20 +410,48 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function SelectedNodePanel({
+const VERIFICATION_META: Record<
+  string,
+  { label: string; color: RGB; Icon: typeof ShieldCheck }
+> = {
+  verified: { label: "Verified", color: [99, 214, 142], Icon: ShieldCheck },
+  unverified: { label: "Unverified", color: [245, 197, 66], Icon: ShieldQuestion },
+  disputed: { label: "Disputed", color: [239, 90, 90], Icon: ShieldAlert },
+};
+
+function formatTimestamp(sec: number): string {
+  const t = Number.isFinite(sec) && sec > 0 ? sec : 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function KnowledgeInspector({
   node,
   degree,
   relatedVideoCount,
+  nodeById,
+  adjacency,
+  knowledgeByVideoId,
+  compByCode,
   onOpenVideo,
+  onJumpToTimestamp,
+  onSelectNode,
 }: {
   node: MemoryNode | null;
   degree: number;
   relatedVideoCount: number;
+  nodeById: Map<string, MemoryNode>;
+  adjacency: Map<string, Set<string>>;
+  knowledgeByVideoId: Map<string, MemoryNode[]>;
+  compByCode: Map<string, string>;
   onOpenVideo: (id: string) => void;
+  onJumpToTimestamp: (videoId: string, startTime: number) => void;
+  onSelectNode: (id: string) => void;
 }) {
   if (!node) {
     return (
-      <Panel title="Selected Node">
+      <Panel title="Knowledge Inspector">
         <p className="text-xs text-muted-foreground">
           Click any node in the graph to inspect what Jack knows about it.
         </p>
@@ -348,21 +459,17 @@ function SelectedNodePanel({
     );
   }
 
-  const kindLabel =
-    node.kind === "core"
-      ? "Memory Core"
-      : node.kind === "topic"
-        ? "Topic Hub"
-        : node.kind === "competency"
-          ? "Red Seal Competency"
-          : "Memory · Video";
+  const knowledge = isKnowledgeKind(node.kind);
+  const kLabel = kindLabelFor(node.kind);
 
   const subtitle =
-    node.kind === "competency"
-      ? node.meta.trade
-      : node.kind === "video" || node.kind === "topic"
+    node.kind === "core"
+      ? undefined
+      : knowledge
         ? node.meta.trade
-        : undefined;
+          ? `${kLabel} · ${node.meta.trade}`
+          : kLabel
+        : node.meta.trade;
 
   const description =
     node.meta.description ??
@@ -372,10 +479,55 @@ function SelectedNodePanel({
         : `Currently ${node.status ?? "queued"} — Jack is still learning from this.`
       : node.kind === "topic"
         ? "A cluster of Jack's knowledge for this trade."
-        : "The core of Jack's living memory.");
+        : node.kind === "core"
+          ? "The core of Jack's living memory."
+          : "An atomic unit of knowledge distilled from Jack's videos.");
+
+  const confidence =
+    typeof node.meta.confidence === "number"
+      ? Math.max(0, Math.min(1, node.meta.confidence))
+      : undefined;
+
+  const verifyKey = (node.meta.verificationStatus ?? "").toLowerCase();
+  const verify = VERIFICATION_META[verifyKey];
+
+  const sources: NodeSource[] = knowledge ? node.meta.sources ?? [] : [];
+
+  // Concepts co-taught with this one (share ≥1 source video).
+  const related: { node: MemoryNode; shared: number }[] = [];
+  if (knowledge) {
+    const counts = new Map<string, { node: MemoryNode; shared: number }>();
+    for (const s of sources) {
+      for (const kn of knowledgeByVideoId.get(s.videoId) ?? []) {
+        if (kn.id === node.id) continue;
+        const cur = counts.get(kn.id);
+        if (cur) cur.shared += 1;
+        else counts.set(kn.id, { node: kn, shared: 1 });
+      }
+    }
+    related.push(
+      ...[...counts.values()].sort((a, b) => b.shared - a.shared).slice(0, 8),
+    );
+  } else {
+    for (const id of adjacency.get(node.id) ?? []) {
+      const n = nodeById.get(id);
+      if (n && n.kind !== "core") related.push({ node: n, shared: 0 });
+      if (related.length >= 10) break;
+    }
+  }
+
+  // Competencies directly linked to a knowledge node (via competency edges).
+  const linkedComps: { code: string; name: string }[] = [];
+  if (knowledge) {
+    for (const id of adjacency.get(node.id) ?? []) {
+      if (!id.startsWith("comp:")) continue;
+      const code = nodeById.get(id)?.meta.code ?? id.replace("comp:", "");
+      linkedComps.push({ code, name: compByCode.get(code) ?? "" });
+    }
+  }
 
   return (
-    <Panel title="Selected Node">
+    <Panel title="Knowledge Inspector">
       <div className="mb-3 flex items-start gap-2.5">
         <span
           className="mt-1 h-3 w-3 shrink-0 rounded-full"
@@ -385,27 +537,72 @@ function SelectedNodePanel({
           }}
         />
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-foreground">
+          <div className="text-sm font-semibold leading-snug text-foreground">
             {node.label}
           </div>
           <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
-            {subtitle ?? kindLabel}
+            {subtitle ?? kLabel}
           </div>
         </div>
       </div>
 
-      <p className="mb-3 line-clamp-4 text-xs leading-relaxed text-muted-foreground">
+      <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
         {description}
       </p>
 
-      <div className="divide-y divide-border/60 border-t border-border/60">
+      {knowledge && confidence !== undefined && (
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between text-[11px]">
+            <span className="text-muted-foreground">Confidence</span>
+            <span className="font-mono font-semibold tabular-nums text-foreground">
+              {Math.round(confidence * 100)}%
+            </span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.round(confidence * 100)}%`,
+                background: rgbCss(node.color),
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="divide-y divide-border/60 border-y border-border/60">
+        {knowledge && (
+          <Row
+            label="Knowledge ID"
+            value={
+              <span className="max-w-[10rem] truncate" title={node.meta.refId ?? node.id}>
+                {node.meta.refId ?? node.id}
+              </span>
+            }
+          />
+        )}
+        {knowledge && verify && (
+          <Row
+            label="Verification"
+            value={
+              <span
+                className="inline-flex items-center gap-1"
+                style={{ color: rgbCss(verify.color) }}
+              >
+                <verify.Icon className="h-3.5 w-3.5" />
+                {verify.label}
+              </span>
+            }
+          />
+        )}
+        {knowledge && sources.length > 0 && (
+          <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
+        )}
         <Row label="Connections" value={degree} />
         {(node.kind === "video" || node.kind === "competency") && (
           <Row label="Related Videos" value={relatedVideoCount} />
         )}
-        {node.kind === "topic" && (
-          <Row label="Videos" value={relatedVideoCount} />
-        )}
+        {node.kind === "topic" && <Row label="Videos" value={relatedVideoCount} />}
         {node.meta.updatedAt && (
           <Row label="Last Updated" value={timeAgo(node.meta.updatedAt)} />
         )}
@@ -413,6 +610,89 @@ function SelectedNodePanel({
           <Row label="Code" value={node.meta.code} />
         )}
       </div>
+
+      {knowledge && sources.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Source Videos
+          </div>
+          <ul className="space-y-2.5">
+            {sources.map((s) => {
+              const vNode = nodeById.get(`video:${s.videoId}`);
+              const title = vNode?.label ?? "Untitled video";
+              const stamps = s.timestamps.length ? s.timestamps : [0];
+              return (
+                <li key={s.videoId}>
+                  <button
+                    onClick={() => onOpenVideo(s.videoId)}
+                    className="block w-full truncate text-left text-xs font-medium text-foreground hover:text-primary"
+                    title={title}
+                  >
+                    {title}
+                  </button>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {stamps.map((t, i) => (
+                      <button
+                        key={`${t}-${i}`}
+                        onClick={() => onJumpToTimestamp(s.videoId, t)}
+                        className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                      >
+                        <Play className="h-2.5 w-2.5" />
+                        {formatTimestamp(t)}
+                      </button>
+                    ))}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {knowledge && linkedComps.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Competencies
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {linkedComps.map((c) => (
+              <button
+                key={c.code}
+                onClick={() => onSelectNode(`comp:${c.code}`)}
+                className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-primary/20 hover:text-primary"
+                title={c.name}
+              >
+                {c.code}
+                {c.name ? ` · ${c.name}` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {related.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Related Nodes
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {related.map(({ node: rn, shared }) => (
+              <button
+                key={rn.id}
+                onClick={() => onSelectNode(rn.id)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[11px] font-medium text-white/80 transition-colors hover:border-primary/50 hover:text-primary"
+                title={shared > 0 ? `Shares ${shared} source${shared === 1 ? "" : "s"}` : kindLabelFor(rn.kind)}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: rgbCss(rn.color) }}
+                />
+                <span className="max-w-[8rem] truncate">{rn.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {node.kind === "video" && (
         <button

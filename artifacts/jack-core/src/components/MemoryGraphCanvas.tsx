@@ -6,6 +6,7 @@ import {
 } from "react";
 import {
   CORE_ID,
+  isKnowledgeKind,
   rgba,
   type GraphModel,
   type MemoryNode,
@@ -51,18 +52,55 @@ interface P {
   vx: number;
   vy: number;
   radius: number;
+  /** Knowledge-weighted target radius; `radius` eases toward this each frame. */
+  targetRadius: number;
   bornAt: number;
   // Topic hubs orbit a fixed radial anchor; others spring to their hub.
   anchorX?: number;
   anchorY?: number;
 }
 
-const RADII: Record<NodeKind, number> = {
+const BASE_RADII: Record<NodeKind, number> = {
   core: 26,
   topic: 9,
   video: 5,
   competency: 3.4,
+  concept: 3.2,
+  tool: 3.2,
+  equipment: 3.2,
+  material: 3.2,
+  procedure: 3.2,
+  hazard: 3.2,
+  slang: 3.2,
+  certification: 3.2,
+  standard: 3.2,
+  regional_term: 3.2,
 };
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * Node radius scaled by *accumulated knowledge*. Atomic-knowledge nodes grow
+ * with corroboration (how many videos teach them) and confidence; scaffold
+ * nodes grow with their connection count so busy hubs read larger.
+ */
+function nodeRadius(n: MemoryNode, degree: number): number {
+  const base = BASE_RADII[n.kind] ?? 3.2;
+  if (n.kind === "core") return base;
+  let weight = 0;
+  if (isKnowledgeKind(n.kind)) {
+    const sources = n.meta.sourceCount ?? 1;
+    const confidence = n.meta.confidence ?? 0.5;
+    weight = clamp01(0.55 * clamp01(sources / 5) + 0.45 * clamp01(confidence));
+  } else if (n.kind === "topic") {
+    weight = clamp01(degree / 40);
+  } else {
+    weight = clamp01(degree / 10);
+  }
+  return base * (1 + weight * 1.3);
+}
 
 const REPULSION = 1600;
 const DAMP = 0.86;
@@ -91,6 +129,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const nodesRef = useRef<Map<string, P>>(new Map());
     const edgesRef = useRef(model.edges);
+    const edgeBornRef = useRef<Map<string, number>>(new Map());
     const adjacencyRef = useRef<Map<string, Set<string>>>(new Map());
     const topicsRef = useRef(model.topics);
     const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
@@ -176,6 +215,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const desired = new Set<string>();
       for (const n of model.nodes) {
         desired.add(n.id);
+        const target = nodeRadius(n, model.degree[n.id] ?? 0);
         const existing = map.get(n.id);
         if (existing) {
           existing.label = n.label;
@@ -183,6 +223,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           existing.status = n.status;
           existing.topicId = n.topicId;
           existing.kind = n.kind;
+          // Ease toward the new size in step(); corroboration growth animates.
+          existing.targetRadius = target;
           if (n.kind === "topic") {
             const a = anchorByTopic.get(n.id);
             if (a) {
@@ -192,10 +234,25 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           }
           continue;
         }
-        map.set(n.id, makeNode(n, anchorByTopic, cx, cy, map, now));
+        const node = makeNode(n, anchorByTopic, cx, cy, map, now);
+        node.radius = target;
+        node.targetRadius = target;
+        map.set(n.id, node);
       }
       for (const id of [...map.keys()]) {
         if (!desired.has(id)) map.delete(id);
+      }
+
+      // Track edge births so freshly-added connections can draw/fade in.
+      const born = edgeBornRef.current;
+      const liveEdgeKeys = new Set<string>();
+      for (const e of model.edges) {
+        const key = `${e.a}->${e.b}:${e.kind}`;
+        liveEdgeKeys.add(key);
+        if (!born.has(key)) born.set(key, now);
+      }
+      for (const key of [...born.keys()]) {
+        if (!liveEdgeKeys.has(key)) born.delete(key);
       }
     }, [model]);
 
@@ -424,6 +481,14 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           }
           node.x += node.vx * dt;
           node.y += node.vy * dt;
+          // Ease the rendered radius toward its knowledge-weighted target so
+          // corroboration growth (and shrink-back) animates smoothly.
+          if (node.radius !== node.targetRadius) {
+            node.radius += (node.targetRadius - node.radius) * Math.min(1, 0.08 * dt);
+            if (Math.abs(node.targetRadius - node.radius) < 0.02) {
+              node.radius = node.targetRadius;
+            }
+          }
         }
       };
 
@@ -487,6 +552,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         ctx.globalCompositeOperation = "source-over";
 
         // Edges.
+        const bornMap = edgeBornRef.current;
         for (const e of edgesRef.current) {
           const a = map.get(e.a);
           const b = map.get(e.b);
@@ -495,14 +561,20 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             sel && (e.a === sel || e.b === sel);
           const faded = dimmed(e.a, a.topicId) && dimmed(e.b, b.topicId);
           const col = b.color;
-          let alpha = e.kind === "competency" ? 0.08 : 0.14;
+          // Provenance (video -> knowledge) edges get a touch more presence so
+          // the atomic-knowledge web is legible against the scaffold.
+          let alpha =
+            e.kind === "competency" ? 0.08 : e.kind === "knowledge" ? 0.16 : 0.14;
           if (isSel) alpha = 0.55;
           else if (faded) alpha = 0.03;
-          ctx.strokeStyle = rgba(col, alpha);
+          // Fade freshly-added connections in, and grow the line toward the target.
+          const bornAt = bornMap.get(`${e.a}->${e.b}:${e.kind}`);
+          const grow = bornAt == null ? 1 : Math.min(1, (time - bornAt) / 700);
+          ctx.strokeStyle = rgba(col, alpha * grow);
           ctx.lineWidth = (isSel ? 1.4 : 0.7) / cam.scale;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(a.x + (b.x - a.x) * grow, a.y + (b.y - a.y) * grow);
           ctx.stroke();
         }
 
@@ -623,7 +695,8 @@ function makeNode(
     y,
     vx: 0,
     vy: 0,
-    radius: RADII[n.kind],
+    radius: BASE_RADII[n.kind] ?? 3.2,
+    targetRadius: BASE_RADII[n.kind] ?? 3.2,
     bornAt: now,
     anchorX: n.kind === "topic" ? anchors.get(n.id)?.x : undefined,
     anchorY: n.kind === "topic" ? anchors.get(n.id)?.y : undefined,
