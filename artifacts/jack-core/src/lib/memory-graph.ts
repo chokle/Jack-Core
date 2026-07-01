@@ -143,7 +143,13 @@ export interface GraphModel {
   nodes: MemoryNode[];
   edges: MemoryEdge[];
   degree: Record<string, number>;
-  counts: { nodes: number; connections: number; topics: number; videos: number };
+  counts: {
+    nodes: number;
+    connections: number;
+    topics: number;
+    videos: number;
+    knowledge: number;
+  };
 }
 
 export const CORE_ID = "__jack__";
@@ -327,6 +333,7 @@ export function buildGraphModel(
       connections: edges.length,
       topics: topics.length,
       videos: videos.length,
+      knowledge: nodes.filter((n) => isKnowledgeKind(n.kind)).length,
     },
   };
 }
@@ -539,6 +546,7 @@ export function buildGraphModelFromServer(graph: {
   }
 
   const videos = nodes.filter((n) => n.kind === "video").length;
+  const knowledge = nodes.filter((n) => isKnowledgeKind(n.kind)).length;
 
   return {
     topics,
@@ -550,6 +558,7 @@ export function buildGraphModelFromServer(graph: {
       connections: edges.length,
       topics: topics.length,
       videos,
+      knowledge,
     },
   };
 }

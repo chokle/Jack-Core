@@ -52,6 +52,7 @@ export function JackShell({
   const stats: { label: string; value: string; accent?: boolean }[] = [
     { label: "Total Nodes", value: fmt(model.counts.nodes), accent: true },
     { label: "Connections", value: fmt(model.counts.connections), accent: true },
+    { label: "Concepts", value: fmt(model.counts.knowledge), accent: true },
     { label: "Topics", value: fmt(model.counts.topics) },
     { label: "Videos Processed", value: fmt(readyCount) },
   ];
