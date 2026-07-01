@@ -404,6 +404,40 @@ export const GetGraphResponse = zod.object({
 
 
 /**
+ * @summary List mentor-concept candidates queued for review (read-only)
+ */
+export const listKnowledgeCandidatesQueryStatusDefault = `pending`;
+
+export const ListKnowledgeCandidatesQueryParams = zod.object({
+  "status": zod.enum(['pending', 'approved', 'rejected', 'merged']).default(listKnowledgeCandidatesQueryStatusDefault)
+})
+
+export const ListKnowledgeCandidatesResponse = zod.object({
+  "candidates": zod.array(zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'merged']),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "category": zod.string(),
+  "trade": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "competencyCode": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "answerId": zod.string().nullish(),
+  "sessionId": zod.string().nullish(),
+  "bestMatches": zod.array(zod.object({
+  "nodeId": zod.string(),
+  "label": zod.string(),
+  "similarity": zod.number()
+})),
+  "createdAt": zod.string().nullish()
+})),
+  "total": zod.number()
+})
+
+
+/**
  * @summary Set the human verification status of a distilled knowledge node (admin only)
  */
 export const SetNodeVerificationParams = zod.object({
@@ -519,7 +553,9 @@ export const SubmitInterviewAnswerResponse = zod.object({
   "description": zod.string().optional(),
   "category": zod.string(),
   "confidence": zod.number(),
-  "competencyCode": zod.string().nullish()
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
 }))
 })
 
@@ -560,7 +596,9 @@ export const SkipInterviewQuestionResponse = zod.object({
   "description": zod.string().optional(),
   "category": zod.string(),
   "confidence": zod.number(),
-  "competencyCode": zod.string().nullish()
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
 }))
 })
 

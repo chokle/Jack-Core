@@ -30,6 +30,28 @@ export const GRAPH_CORE_ID = "__jack__";
 const KNOWLEDGE_MATCH_THRESHOLD = 0.85;
 const KNOWLEDGE_MATCH_COUNT = 1;
 
+/**
+ * Mentor-path (Interview Mode) decision bands — reinforcement-first policy.
+ *
+ * Mentor answers must strengthen the SAME canonical concepts rather than spawn
+ * near-duplicates, so mentor concepts get a three-band decision instead of the
+ * video path's single threshold:
+ *   - similarity ≥ MENTOR_REINFORCE_THRESHOLD (or an exact id / recorded alias
+ *     match) → reinforce the existing canonical node;
+ *   - similarity in [MENTOR_NOVELTY_THRESHOLD, MENTOR_REINFORCE_THRESHOLD) →
+ *     plausible-but-uncertain: queue as a pending candidate OUTSIDE the live
+ *     graph (never auto-create) so a human can review it later;
+ *   - below MENTOR_NOVELTY_THRESHOLD against every signal → confidently novel:
+ *     create a new node.
+ * The video ingestion path is deliberately untouched by these bands.
+ */
+const MENTOR_REINFORCE_THRESHOLD = KNOWLEDGE_MATCH_THRESHOLD;
+const MENTOR_NOVELTY_THRESHOLD = 0.7;
+/** Top semantic neighbors recorded on a queued candidate for later review. */
+const MENTOR_NEIGHBOR_COUNT = 3;
+/** Cap the recorded alternate wordings on a canonical node. */
+const ALIAS_CAP = 25;
+
 const topicNodeId = (trade: string) => `topic:${trade}`;
 const compNodeId = (code: string) => `comp:${code}`;
 const videoNodeId = (id: string) => `video:${id}`;
@@ -599,6 +621,263 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
   return [...byCanonical.values()];
 }
 
+/** How a single mentor-distilled concept landed relative to the live graph. */
+export type MentorConceptOutcome = "reinforced" | "created" | "queued";
+
+/** Per-item mentor ingestion result, keyed by the distilled item's own id. */
+export interface MentorKnowledgeOutcome {
+  /** The distilled item's deterministic id (k:<category>:<slug>). */
+  itemId: string;
+  /** The live node reinforced/created, or null when the item was queued. */
+  canonicalId: string | null;
+  title: string;
+  category: KnowledgeCategory;
+  outcome: MentorConceptOutcome;
+  /** Label of the existing node this item reinforced (null for created/queued). */
+  matchedLabel: string | null;
+}
+
+/** A near-match recorded on a queued candidate so reviewers see the context. */
+export interface CandidateMatch {
+  nodeId: string;
+  label: string;
+  similarity: number;
+}
+
+/** A mentor concept held back as a pending candidate (uncertain middle band). */
+interface QueuedMentorConcept {
+  item: AtomicKnowledge;
+  bestMatches: CandidateMatch[];
+}
+
+/** ResolvedConcept plus the mentor-path decision that produced it. */
+interface MentorResolvedConcept extends ResolvedConcept {
+  /** True when this collapses onto a node that already existed in the graph. */
+  reinforced: boolean;
+  matchedLabel: string | null;
+  /** New alternate wordings to record on the canonical node's alias list. */
+  newAliases: string[];
+}
+
+/** Read the alias list (alternate wordings) recorded on a node's meta. */
+function metaAliases(meta: Record<string, unknown> | null | undefined): string[] {
+  const raw = meta?.["aliases"];
+  return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === "string") : [];
+}
+
+/**
+ * Reinforcement-first resolution for mentor-distilled concepts (Interview Mode
+ * only — the video path keeps resolveCanonicalItems). Each item is matched
+ * against multiple signals, in order of confidence:
+ *   1. its own deterministic id already exists (canonical title match);
+ *   2. its normalized title equals an existing node's label or a recorded
+ *      alias/alternate wording — across ALL knowledge categories, so a slang or
+ *      regional wording that names an existing concept reinforces that concept;
+ *   3. top semantic neighbors (same category, plus the concept category for
+ *      slang/regional terms) fetched down to the novelty threshold:
+ *        best ≥ reinforce-threshold → reinforce that canonical node,
+ *        best in the middle band    → queue as a pending candidate,
+ *        nothing above the band     → confidently novel, create a new node.
+ * When a differently-worded item confidently resolves to an existing node, the
+ * mentor's wording is recorded as an alias so future matches get stronger.
+ */
+async function resolveMentorConcepts(items: AtomicKnowledge[]): Promise<{
+  resolved: MentorResolvedConcept[];
+  queued: QueuedMentorConcept[];
+  outcomes: MentorKnowledgeOutcome[];
+}> {
+  if (items.length === 0) return { resolved: [], queued: [], outcomes: [] };
+
+  // Signal 1: which items' own deterministic ids already exist?
+  const exactIds = [...new Set(items.map((i) => i.id))];
+  const existing = new Set<string>();
+  {
+    const { data, error } = await supabase.from("knowledge_nodes").select("id").in("id", exactIds);
+    if (error) throw error;
+    for (const r of data ?? []) existing.add((r as Record<string, unknown>)["id"] as string);
+  }
+
+  // Signal 2: normalized label + recorded alias index across every knowledge
+  // category (first writer wins on collisions — deterministic and stable).
+  const aliasIndex = new Map<string, { id: string; label: string }>();
+  {
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id, kind, label, meta")
+      .in("kind", [...KNOWLEDGE_NODE_KINDS]);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const r = row as Record<string, unknown>;
+      const id = r["id"] as string;
+      const label = (r["label"] as string) ?? "";
+      const entry = { id, label };
+      const normLabel = normalizeConcept(label);
+      if (normLabel && !aliasIndex.has(normLabel)) aliasIndex.set(normLabel, entry);
+      for (const alias of metaAliases(r["meta"] as Record<string, unknown>)) {
+        const normAlias = normalizeConcept(alias);
+        if (normAlias && !aliasIndex.has(normAlias)) aliasIndex.set(normAlias, entry);
+      }
+    }
+  }
+
+  const byCanonical = new Map<string, MentorResolvedConcept>();
+  const queuedById = new Map<string, QueuedMentorConcept>();
+  const outcomes: MentorKnowledgeOutcome[] = [];
+  const claimed: string[] = [];
+
+  for (const item of items) {
+    const normTitle = normalizeConcept(item.title);
+    const embedding = await createEmbedding(conceptEmbeddingText(item.title, item.description));
+
+    let canonicalId = item.id;
+    let ownsId = true;
+    let matchedLabel: string | null = null;
+    let outcome: MentorConceptOutcome;
+    let queuedMatches: CandidateMatch[] | null = null;
+
+    if (existing.has(item.id)) {
+      // Canonical title match — the node already lives in the graph.
+      outcome = "reinforced";
+    } else {
+      const aliasHit = aliasIndex.get(normTitle);
+      if (aliasHit && aliasHit.id !== item.id) {
+        canonicalId = aliasHit.id;
+        ownsId = false;
+        matchedLabel = aliasHit.label;
+        outcome = "reinforced";
+      } else if (embedding.length > 0) {
+        // Signal 3: top semantic neighbors down to the novelty threshold. Slang
+        // and regional terms also search the concept category, since a trade
+        // wording usually names a concept rather than another slang node.
+        const categories: KnowledgeCategory[] =
+          item.category === "slang" || item.category === "regional_term"
+            ? [item.category, "concept"]
+            : [item.category];
+        const matches: CandidateMatch[] = [];
+        for (const cat of categories) {
+          const { data, error } = await supabase.rpc("match_knowledge_nodes", {
+            query_embedding: embedding,
+            filter_category: cat,
+            match_threshold: MENTOR_NOVELTY_THRESHOLD,
+            match_count: MENTOR_NEIGHBOR_COUNT,
+            exclude_ids: [item.id, ...claimed],
+          });
+          if (error) throw error;
+          for (const m of (data ?? []) as Array<{ id?: string; label?: string; similarity?: number }>) {
+            if (typeof m.id === "string" && typeof m.similarity === "number") {
+              matches.push({ nodeId: m.id, label: m.label ?? m.id, similarity: m.similarity });
+            }
+          }
+        }
+        matches.sort((a, b) => b.similarity - a.similarity);
+        const best = matches[0];
+        if (best && best.similarity >= MENTOR_REINFORCE_THRESHOLD) {
+          canonicalId = best.nodeId;
+          ownsId = false;
+          matchedLabel = best.label;
+          outcome = "reinforced";
+        } else if (best) {
+          // Plausible-but-uncertain: hold OUTSIDE the live graph for review.
+          outcome = "queued";
+          queuedMatches = matches.slice(0, MENTOR_NEIGHBOR_COUNT);
+        } else {
+          outcome = "created";
+        }
+      } else {
+        outcome = "created";
+      }
+    }
+
+    if (outcome === "queued") {
+      const prev = queuedById.get(item.id);
+      if (prev) {
+        prev.item.confidence = Math.max(prev.item.confidence, item.confidence);
+        if (item.description.length > prev.item.description.length) {
+          prev.item.description = item.description;
+        }
+      } else {
+        queuedById.set(item.id, { item: { ...item }, bestMatches: queuedMatches ?? [] });
+      }
+      outcomes.push({
+        itemId: item.id,
+        canonicalId: null,
+        title: item.title,
+        category: item.category,
+        outcome: "queued",
+        matchedLabel: null,
+      });
+      continue;
+    }
+
+    const embeddingJson = ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
+    const mergeRef: MergedConceptRef | null =
+      item.id !== canonicalId
+        ? { id: item.id, label: item.title, category: item.category }
+        : null;
+    // Record the mentor's wording as an alias when it confidently resolved to a
+    // differently-labelled node, so the next mentor using the same wording hits
+    // the alias index directly.
+    const newAlias = !ownsId && matchedLabel !== null && normalizeConcept(matchedLabel) !== normTitle
+      ? item.title
+      : null;
+    if (newAlias && !aliasIndex.has(normTitle)) {
+      aliasIndex.set(normTitle, { id: canonicalId, label: matchedLabel ?? item.title });
+    }
+
+    const prev = byCanonical.get(canonicalId);
+    if (prev) {
+      const ts = new Set([...prev.timestamps, ...item.timestamps]);
+      prev.timestamps = [...ts].sort((a, b) => a - b);
+      prev.confidence = Math.max(prev.confidence, item.confidence);
+      if (item.description.length > prev.description.length) prev.description = item.description;
+      if (!prev.competencyCode && item.competencyCode) prev.competencyCode = item.competencyCode;
+      if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
+      if (mergeRef && !prev.mergedFrom.some((m) => m.id === mergeRef.id)) {
+        prev.mergedFrom.push(mergeRef);
+      }
+      if (newAlias && !prev.newAliases.some((a) => normalizeConcept(a) === normTitle)) {
+        prev.newAliases.push(newAlias);
+      }
+      outcomes.push({
+        itemId: item.id,
+        canonicalId,
+        title: item.title,
+        category: item.category,
+        outcome: prev.reinforced ? "reinforced" : "created",
+        matchedLabel: prev.reinforced ? (prev.matchedLabel ?? prev.title) : null,
+      });
+      continue;
+    }
+
+    const reinforced = outcome === "reinforced";
+    claimed.push(canonicalId);
+    byCanonical.set(canonicalId, {
+      id: canonicalId,
+      category: item.category,
+      title: item.title,
+      description: item.description,
+      timestamps: [...item.timestamps].sort((a, b) => a - b),
+      confidence: item.confidence,
+      competencyCode: item.competencyCode,
+      embeddingJson,
+      mergedFrom: mergeRef ? [mergeRef] : [],
+      reinforced,
+      matchedLabel,
+      newAliases: newAlias ? [newAlias] : [],
+    });
+    outcomes.push({
+      itemId: item.id,
+      canonicalId,
+      title: item.title,
+      category: item.category,
+      outcome,
+      matchedLabel,
+    });
+  }
+
+  return { resolved: [...byCanonical.values()], queued: [...queuedById.values()], outcomes };
+}
+
 /**
  * Recompute the corroboration-derived fields for a set of atomic-knowledge nodes
  * from their provenance edges (the single source of truth), so every ingestion,
@@ -1067,13 +1346,25 @@ async function ensureMentorNode(
  * upserted with merged meta (union of contributing answerIds, max confidence).
  * Replaying the same answer is therefore idempotent — the deterministic edge id
  * plus answerId de-dup keeps the corroboration count stable.
+ *
+ * Resolution is reinforcement-first (resolveMentorConcepts): concepts that
+ * confidently match existing knowledge reinforce it, confidently novel concepts
+ * create nodes, and plausible-but-uncertain concepts are queued as pending rows
+ * in knowledge_candidates OUTSIDE the live graph. Returns the per-item outcomes
+ * so callers can preview reinforced/created/queued to the mentor.
  */
 export async function syncMentorAnswerKnowledge(
   mentorProfileId: string,
   mentorName: string,
   items: AtomicKnowledge[],
-  opts: { answerId: string; trade?: string | null; model?: string | null; extractedAt?: string },
-): Promise<void> {
+  opts: {
+    answerId: string;
+    trade?: string | null;
+    model?: string | null;
+    extractedAt?: string;
+    sessionId?: string | null;
+  },
+): Promise<MentorKnowledgeOutcome[]> {
   const mNode = mentorNodeId(mentorProfileId);
   const trade = opts.trade ?? null;
   const model = opts.model ?? null;
@@ -1083,11 +1374,38 @@ export async function syncMentorAnswerKnowledge(
   // Always ensure the mentor source node exists and is wired into the graph, even
   // if this particular answer distilled nothing.
   await ensureMentorNode(mentorProfileId, mentorName, trade);
-  if (items.length === 0) return;
+  if (items.length === 0) return [];
 
-  // Duplicate detection + merge: collapse each item onto its canonical node.
-  const resolved = await resolveCanonicalItems(items);
+  // Reinforcement-first resolution: reinforce / create / queue per concept.
+  const { resolved, queued, outcomes } = await resolveMentorConcepts(items);
   const canonicalIds = resolved.map((c) => c.id);
+
+  // Queued candidates live OUTSIDE the live graph until reviewed. The row id is
+  // deterministic per (answer, item) and inserted with ignoreDuplicates, so
+  // replaying an answer never duplicates a candidate or resets a reviewed status.
+  if (queued.length > 0) {
+    const rows = queued.map((q) => ({
+      id: `cand:${answerId}:${q.item.id}`,
+      status: "pending",
+      title: q.item.title,
+      description: q.item.description || null,
+      category: q.item.category,
+      trade,
+      confidence: q.item.confidence,
+      competency_code: q.item.competencyCode,
+      mentor_profile_id: mentorProfileId,
+      mentor_name: mentorName,
+      answer_id: answerId,
+      session_id: opts.sessionId ?? null,
+      best_matches: q.bestMatches,
+    }));
+    const { error } = await supabase
+      .from("knowledge_candidates")
+      .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+    if (error) throw error;
+  }
+
+  if (resolved.length === 0) return outcomes;
 
   const existingById = new Map<string, Record<string, unknown>>();
   if (canonicalIds.length > 0) {
@@ -1123,19 +1441,34 @@ export async function syncMentorAnswerKnowledge(
     }
     const mergedFrom = [...mergedById.values()];
 
+    // Grow the node's alias list with the mentor's alternate wordings (deduped by
+    // normalized form against the label and existing aliases, capped) so future
+    // mentor wordings match directly.
+    const label = (prev?.["label"] as string) || c.title;
+    const prevAliases = metaAliases(prevMeta);
+    const seenNorms = new Set([normalizeConcept(label), ...prevAliases.map(normalizeConcept)]);
+    const aliases = [...prevAliases];
+    for (const a of c.newAliases) {
+      const norm = normalizeConcept(a);
+      if (!norm || seenNorms.has(norm)) continue;
+      seenNorms.add(norm);
+      aliases.push(a);
+    }
+    const cappedAliases = aliases.slice(-ALIAS_CAP);
+
     const node: NodeUpsert = {
       id: c.id,
       kind: c.category,
       // First writer wins for the display label/trade so a node videos already
       // created keeps its identity; the mentor still appends provenance.
-      label: (prev?.["label"] as string) || c.title,
+      label,
       trade: (prev?.["trade"] as string | null) ?? trade,
       ref_id: c.id,
       description: description || null,
       // Interim value; recomputeKnowledgeAggregates overwrites it below.
       confidence: Math.max(prevConfidence ?? 0, c.confidence),
       verification_status: mentorVerification(prevStatus),
-      meta: { ...prevMeta, category: c.category, mergedFrom },
+      meta: { ...prevMeta, category: c.category, mergedFrom, aliases: cappedAliases },
     };
     if (c.embeddingJson !== null) node.embedding = c.embeddingJson;
     return node;
@@ -1218,6 +1551,64 @@ export async function syncMentorAnswerKnowledge(
 
   await upsertEdges([...provenanceEdges, ...hubEdges]);
   await recomputeKnowledgeAggregates(canonicalIds);
+  return outcomes;
+}
+
+/** A queued mentor-concept candidate as returned by the read API. */
+export interface KnowledgeCandidateRecord {
+  id: string;
+  status: string;
+  title: string;
+  description: string | null;
+  category: string;
+  trade: string | null;
+  confidence: number | null;
+  competencyCode: string | null;
+  mentorProfileId: string | null;
+  mentorName: string | null;
+  answerId: string | null;
+  sessionId: string | null;
+  bestMatches: CandidateMatch[];
+  createdAt: string | null;
+}
+
+/** List queued mentor-concept candidates by status (read-only; default pending). */
+export async function listKnowledgeCandidates(
+  status: string = "pending",
+): Promise<KnowledgeCandidateRecord[]> {
+  const { data, error } = await supabase
+    .from("knowledge_candidates")
+    .select("*")
+    .eq("status", status)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const rawMatches = Array.isArray(row["best_matches"]) ? row["best_matches"] : [];
+    const bestMatches: CandidateMatch[] = rawMatches
+      .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
+      .map((m) => ({
+        nodeId: typeof m["nodeId"] === "string" ? m["nodeId"] : "",
+        label: typeof m["label"] === "string" ? m["label"] : "",
+        similarity: typeof m["similarity"] === "number" ? m["similarity"] : 0,
+      }))
+      .filter((m) => m.nodeId !== "");
+    return {
+      id: String(row["id"] ?? ""),
+      status: String(row["status"] ?? "pending"),
+      title: String(row["title"] ?? ""),
+      description: (row["description"] as string | null) ?? null,
+      category: String(row["category"] ?? "concept"),
+      trade: (row["trade"] as string | null) ?? null,
+      confidence: typeof row["confidence"] === "number" ? row["confidence"] : null,
+      competencyCode: (row["competency_code"] as string | null) ?? null,
+      mentorProfileId: (row["mentor_profile_id"] as string | null) ?? null,
+      mentorName: (row["mentor_name"] as string | null) ?? null,
+      answerId: (row["answer_id"] as string | null) ?? null,
+      sessionId: (row["session_id"] as string | null) ?? null,
+      bestMatches,
+      createdAt: (row["created_at"] as string | null) ?? null,
+    };
+  });
 }
 
 /**

@@ -33,6 +33,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
 - `artifacts/api-server/src/routes/interview.ts` — Interview Mode endpoints (start session, get, submit/skip answer, finish)
+- `artifacts/api-server/src/routes/graph.ts` — also serves `GET /graph/candidates` (read-only list of queued mentor-concept candidates)
 - `artifacts/api-server/src/lib/interview.ts` — interview trades/categories + next-question engine (GPT-4o with deterministic fallback)
 - `artifacts/jack-core/src/components/InterviewMode.tsx` — Interview Mode UI (intake → conversation → completion)
 - `artifacts/jack-core/src/lib/memory-graph.ts` — client graph model (`buildGraphModelFromServer` + client-derived fallback)
@@ -46,6 +47,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - Jack always searches the internal library (pgvector RAG) before answering — `usedInternalKnowledge` flag in responses
 - Red Seal competency codes are seeded from a canonical list and mapped by GPT-4o during analysis
 - Interview Mode reuses the video distillation + graph pipeline: mentor answers are distilled into the SAME canonical concept nodes (provenance is edge-owned via `mentor:<uuid>` → concept edges, deduped by answer id) with `verification_status="mentor_supplied"`, so mentor input corroborates rather than fragments the graph. Interview trade labels are normalized to the seeded Red Seal trades (e.g. "Welding" → "Welder") so mentor concepts hang off existing topic hubs
+- Mentor ingestion is reinforcement-first with a three-band decision per concept: exact id / label+alias index / semantic neighbors ≥ 0.85 → **reinforce** the existing node (mentor wording recorded as an alias, capped at 25); similarity 0.70–0.85 → **queue** as a pending row in `knowledge_candidates` (OUTSIDE the live graph, deterministic `cand:<answerId>:<itemId>` id so replays never duplicate or reset review status); below 0.70 → **create** a new node. Slang/regional wordings also search the concept category and the cross-category alias index. `GET /graph/candidates` is read-only; per-concept outcomes (reinforced/new/review) surface as chips in the Interview Mode preview
 - The knowledge graph is persisted in Supabase (`knowledge_nodes`/`knowledge_edges`) as a deterministic-ID mirror (core `__jack__`, `topic:<trade>`, `comp:<code>`, `video:<uuid>`) synced through the video pipeline, so re-processing/merging collapses onto the same node instead of duplicating. `GET /graph` self-heals when empty; there is **no** public rebuild endpoint (the API uses the service-role key and has no auth), and the frontend falls back to deriving the graph client-side if the persisted graph is unavailable
 
 ## Product

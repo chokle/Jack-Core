@@ -28,8 +28,10 @@ import type {
   InterviewSession,
   InterviewTurnResult,
   JobStatus,
+  KnowledgeCandidateList,
   KnowledgeGraph,
   KnowledgeNode,
+  ListKnowledgeCandidatesParams,
   ListVideosParams,
   SearchInput,
   SearchResults,
@@ -1400,6 +1402,90 @@ export function useGetGraph<TData = Awaited<ReturnType<typeof getGraph>>, TError
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetGraphQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListKnowledgeCandidatesUrl = (params?: ListKnowledgeCandidatesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/graph/candidates?${stringifiedParams}` : `/api/graph/candidates`
+}
+
+/**
+ * @summary List mentor-concept candidates queued for review (read-only)
+ */
+export const listKnowledgeCandidates = async (params?: ListKnowledgeCandidatesParams, options?: RequestInit): Promise<KnowledgeCandidateList> => {
+
+  return customFetch<KnowledgeCandidateList>(getListKnowledgeCandidatesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListKnowledgeCandidatesQueryKey = (params?: ListKnowledgeCandidatesParams,) => {
+    return [
+    `/api/graph/candidates`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListKnowledgeCandidatesQueryOptions = <TData = Awaited<ReturnType<typeof listKnowledgeCandidates>>, TError = ErrorType<unknown>>(params?: ListKnowledgeCandidatesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledgeCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListKnowledgeCandidatesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listKnowledgeCandidates>>> = ({ signal }) => listKnowledgeCandidates(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listKnowledgeCandidates>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListKnowledgeCandidatesQueryResult = NonNullable<Awaited<ReturnType<typeof listKnowledgeCandidates>>>
+export type ListKnowledgeCandidatesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List mentor-concept candidates queued for review (read-only)
+ */
+
+export function useListKnowledgeCandidates<TData = Awaited<ReturnType<typeof listKnowledgeCandidates>>, TError = ErrorType<unknown>>(
+ params?: ListKnowledgeCandidatesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listKnowledgeCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListKnowledgeCandidatesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

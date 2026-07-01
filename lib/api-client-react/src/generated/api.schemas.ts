@@ -387,6 +387,18 @@ export interface InterviewAnswer {
   createdAt: string;
 }
 
+/**
+ * How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.
+ */
+export type ExtractedKnowledgeItemOutcome = typeof ExtractedKnowledgeItemOutcome[keyof typeof ExtractedKnowledgeItemOutcome];
+
+
+export const ExtractedKnowledgeItemOutcome = {
+  reinforced: 'reinforced',
+  created: 'created',
+  queued: 'queued',
+} as const;
+
 export interface ExtractedKnowledgeItem {
   id: string;
   title: string;
@@ -395,6 +407,60 @@ export interface ExtractedKnowledgeItem {
   confidence: number;
   /** @nullable */
   competencyCode?: string | null;
+  /** How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review. */
+  outcome?: ExtractedKnowledgeItemOutcome;
+  /**
+     * Label of the existing concept this item reinforced, if any.
+     * @nullable
+     */
+  matchedLabel?: string | null;
+}
+
+export interface KnowledgeCandidateMatch {
+  nodeId: string;
+  label: string;
+  similarity: number;
+}
+
+export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typeof KnowledgeCandidateStatus];
+
+
+export const KnowledgeCandidateStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  merged: 'merged',
+} as const;
+
+export interface KnowledgeCandidate {
+  id: string;
+  status: KnowledgeCandidateStatus;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  category: string;
+  /** @nullable */
+  trade?: string | null;
+  /** @nullable */
+  confidence?: number | null;
+  /** @nullable */
+  competencyCode?: string | null;
+  /** @nullable */
+  mentorProfileId?: string | null;
+  /** @nullable */
+  mentorName?: string | null;
+  /** @nullable */
+  answerId?: string | null;
+  /** @nullable */
+  sessionId?: string | null;
+  bestMatches: KnowledgeCandidateMatch[];
+  /** @nullable */
+  createdAt?: string | null;
+}
+
+export interface KnowledgeCandidateList {
+  candidates: KnowledgeCandidate[];
+  total: number;
 }
 
 export interface InterviewTurnResult {
@@ -425,5 +491,19 @@ export const ListVideosStatus = {
   analyzing: 'analyzing',
   ready: 'ready',
   error: 'error',
+} as const;
+
+export type ListKnowledgeCandidatesParams = {
+status?: ListKnowledgeCandidatesStatus;
+};
+
+export type ListKnowledgeCandidatesStatus = typeof ListKnowledgeCandidatesStatus[keyof typeof ListKnowledgeCandidatesStatus];
+
+
+export const ListKnowledgeCandidatesStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  merged: 'merged',
 } as const;
 

@@ -358,6 +358,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeGraph"
 
+  /graph/candidates:
+    get:
+      operationId: listKnowledgeCandidates
+      tags: [graph]
+      summary: List mentor-concept candidates queued for review (read-only)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected, merged]
+            default: pending
+      responses:
+        "200":
+          description: Queued knowledge candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeCandidateList"
+
   /graph/nodes/{id}/verification:
     patch:
       operationId: setNodeVerification
@@ -1033,6 +1054,74 @@ components:
           type: number
         competencyCode:
           type: ["string", "null"]
+        outcome:
+          type: string
+          enum: [reinforced, created, queued]
+          description: >-
+            How this concept landed in the knowledge graph: reinforced an
+            existing concept, created a new concept, or queued as a pending
+            candidate for review.
+        matchedLabel:
+          type: ["string", "null"]
+          description: Label of the existing concept this item reinforced, if any.
+
+    KnowledgeCandidateMatch:
+      type: object
+      required: [nodeId, label, similarity]
+      properties:
+        nodeId:
+          type: string
+        label:
+          type: string
+        similarity:
+          type: number
+
+    KnowledgeCandidate:
+      type: object
+      required: [id, status, title, category, bestMatches]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected, merged]
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        category:
+          type: string
+        trade:
+          type: ["string", "null"]
+        confidence:
+          type: ["number", "null"]
+        competencyCode:
+          type: ["string", "null"]
+        mentorProfileId:
+          type: ["string", "null"]
+        mentorName:
+          type: ["string", "null"]
+        answerId:
+          type: ["string", "null"]
+        sessionId:
+          type: ["string", "null"]
+        bestMatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeCandidateMatch"
+        createdAt:
+          type: ["string", "null"]
+
+    KnowledgeCandidateList:
+      type: object
+      required: [candidates, total]
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeCandidate"
+        total:
+          type: integer
 
     InterviewTurnResult:
       type: object

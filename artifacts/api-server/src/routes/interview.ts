@@ -22,7 +22,7 @@ import {
   type AnsweredTurn,
   type MentorProfileLite,
 } from "../lib/interview.js";
-import { runMentorAnswerDistillation, type AtomicKnowledge } from "../lib/distillation.js";
+import { runMentorAnswerDistillation, type MentorDistilledItem } from "../lib/distillation.js";
 
 const router = Router();
 
@@ -63,7 +63,7 @@ function serializeAnswer(answer: Row): Record<string, unknown> {
 }
 
 /** Snapshot distilled knowledge for the answer row + the API response. */
-function serializeKnowledge(items: AtomicKnowledge[]): Array<Record<string, unknown>> {
+function serializeKnowledge(items: MentorDistilledItem[]): Array<Record<string, unknown>> {
   return items.map((k) => ({
     id: k.id,
     title: k.title,
@@ -71,6 +71,8 @@ function serializeKnowledge(items: AtomicKnowledge[]): Array<Record<string, unkn
     category: k.category,
     confidence: k.confidence,
     competencyCode: k.competencyCode,
+    outcome: k.outcome,
+    matchedLabel: k.matchedLabel,
   }));
 }
 
@@ -236,12 +238,13 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
     const answerRow = answer as Row;
 
     // Best-effort distillation into the shared graph. Failure logs and continues.
-    let extracted: AtomicKnowledge[] = [];
+    let extracted: MentorDistilledItem[] = [];
     try {
       extracted = await runMentorAnswerDistillation({
         mentorProfileId: session["mentor_profile_id"] as string,
         mentorName: mentor["name"] as string,
         answerId: answerRow["id"] as string,
+        sessionId: session["id"] as string,
         trade: (session["trade"] as string | null) ?? null,
         category: (session["current_category"] as string | null) ?? null,
         topic: (session["current_topic"] as string | null) ?? null,

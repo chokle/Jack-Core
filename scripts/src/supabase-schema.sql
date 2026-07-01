@@ -380,3 +380,32 @@ CREATE TABLE IF NOT EXISTS interview_answers (
 CREATE INDEX IF NOT EXISTS idx_interview_sessions_mentor ON interview_sessions(mentor_profile_id);
 CREATE INDEX IF NOT EXISTS idx_interview_answers_session ON interview_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_interview_answers_mentor ON interview_answers(mentor_profile_id);
+
+-- Knowledge candidates — mentor-distilled concepts held OUTSIDE the live graph.
+-- When a mentor concept is a plausible-but-uncertain match against existing
+-- knowledge (the ambiguous middle band of the reinforcement-first policy), it is
+-- queued here as a pending candidate instead of becoming a live node, capturing
+-- the extracted concept, its best-match nodes/scores, and mentor/answer/session
+-- provenance so it can be reviewed later and nothing is lost. The id is
+-- deterministic per (answer, item) so replaying an answer never duplicates a
+-- candidate or resets a reviewed status.
+CREATE TABLE IF NOT EXISTS knowledge_candidates (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','merged')),
+  title TEXT NOT NULL,
+  description TEXT,
+  category TEXT NOT NULL,
+  trade TEXT,
+  confidence FLOAT,
+  competency_code TEXT,
+  mentor_profile_id UUID,
+  mentor_name TEXT,
+  answer_id UUID,
+  session_id UUID,
+  best_matches JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_status ON knowledge_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_answer ON knowledge_candidates(answer_id);

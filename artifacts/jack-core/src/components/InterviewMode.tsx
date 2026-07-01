@@ -355,6 +355,34 @@ export function InterviewMode() {
   );
 }
 
+/**
+ * Per-concept outcome styling for the extracted-knowledge preview: reinforced an
+ * existing concept (emerald), created a new concept (sky), or queued for review
+ * (amber). Older snapshots without an outcome fall back to the created style.
+ */
+const OUTCOME_STYLE: Record<string, string> = {
+  reinforced: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  created: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+  queued: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+};
+
+const OUTCOME_TAG: Record<string, string> = {
+  reinforced: "reinforced",
+  created: "new",
+  queued: "review",
+};
+
+function outcomeTitle(k: ExtractedKnowledgeItem): string {
+  const base = k.description ? `${k.description} — ` : "";
+  if (k.outcome === "reinforced") {
+    return `${base}Reinforced existing concept${k.matchedLabel ? `: ${k.matchedLabel}` : ""}`;
+  }
+  if (k.outcome === "queued") {
+    return `${base}Held for review — close match to existing knowledge`;
+  }
+  return `${base}Added as a new concept`;
+}
+
 function TranscriptItem({ turn }: { turn: Turn }) {
   return (
     <div className="rounded-xl border border-border/60 bg-card/40 p-4">
@@ -371,15 +399,19 @@ function TranscriptItem({ turn }: { turn: Turn }) {
       )}
       {turn.knowledge.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5 pl-5">
-          {turn.knowledge.map((k) => (
-            <span
-              key={k.id}
-              className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
-              title={k.description}
-            >
-              {k.title}
-            </span>
-          ))}
+          {turn.knowledge.map((k) => {
+            const outcome = k.outcome ?? "created";
+            return (
+              <span
+                key={k.id}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${OUTCOME_STYLE[outcome] ?? OUTCOME_STYLE["created"]}`}
+                title={outcomeTitle(k)}
+              >
+                {k.title}
+                <span className="ml-1 opacity-60">· {OUTCOME_TAG[outcome] ?? "new"}</span>
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

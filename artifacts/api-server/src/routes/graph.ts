@@ -1,10 +1,17 @@
 import { Router } from "express";
 import {
   GetGraphResponse,
+  ListKnowledgeCandidatesQueryParams,
+  ListKnowledgeCandidatesResponse,
   SetNodeVerificationParams,
   SetNodeVerificationBody,
 } from "@workspace/api-zod";
-import { getGraph, rebuildGraph, setNodeVerification } from "../lib/memory-graph.js";
+import {
+  getGraph,
+  rebuildGraph,
+  setNodeVerification,
+  listKnowledgeCandidates,
+} from "../lib/memory-graph.js";
 import { requireAdminSession } from "../lib/admin-auth.js";
 
 const router = Router();
@@ -31,6 +38,25 @@ router.get("/graph", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "getGraph error");
     return res.status(500).json({ error: "Failed to load knowledge graph" });
+  }
+});
+
+// Read-only list of mentor-concept candidates queued for review — uncertain
+// mentor knowledge held OUTSIDE the live graph so it is never lost. The review
+// (approve/merge/reject) surface is a separate follow-up; this endpoint mutates
+// nothing.
+router.get("/graph/candidates", async (req, res) => {
+  const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
+
+  try {
+    const candidates = await listKnowledgeCandidates(parsed.data.status);
+    return res.json(
+      ListKnowledgeCandidatesResponse.parse({ candidates, total: candidates.length }),
+    );
+  } catch (err) {
+    req.log.error({ err }, "listKnowledgeCandidates error");
+    return res.status(500).json({ error: "Failed to load knowledge candidates" });
   }
 });
 

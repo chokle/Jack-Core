@@ -22,7 +22,12 @@
 import { openai, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
-import { knowledgeNodeId, syncVideoKnowledge, syncMentorAnswerKnowledge } from "./memory-graph.js";
+import {
+  knowledgeNodeId,
+  syncVideoKnowledge,
+  syncMentorAnswerKnowledge,
+  type MentorConceptOutcome,
+} from "./memory-graph.js";
 
 /**
  * The reusable atomic knowledge categories. `competency` already exists as a
@@ -395,6 +400,13 @@ Respond with a JSON object of the exact shape:
   return normalizeItems(knowledge, validCodes);
 }
 
+/** A distilled mentor item plus how it landed in the graph (for the preview). */
+export interface MentorDistilledItem extends AtomicKnowledge {
+  outcome: MentorConceptOutcome;
+  /** Label of the existing concept this item reinforced, when applicable. */
+  matchedLabel: string | null;
+}
+
 /**
  * Interview pipeline step: distill one mentor answer's reusable knowledge and
  * persist it into the shared graph as mentor-sourced corroboration. Returns the
@@ -406,12 +418,13 @@ export async function runMentorAnswerDistillation(input: {
   mentorProfileId: string;
   mentorName: string;
   answerId: string;
+  sessionId?: string | null;
   trade: string | null;
   category: string | null;
   topic: string | null;
   question: string;
   answer: string;
-}): Promise<AtomicKnowledge[]> {
+}): Promise<MentorDistilledItem[]> {
   const { data: comps, error: cErr } = await supabase
     .from("competencies")
     .select("code, name, trade");
@@ -431,15 +444,20 @@ export async function runMentorAnswerDistillation(input: {
     competencies,
   });
 
-  await syncMentorAnswerKnowledge(input.mentorProfileId, input.mentorName, items, {
+  const outcomes = await syncMentorAnswerKnowledge(input.mentorProfileId, input.mentorName, items, {
     answerId: input.answerId,
     trade: input.trade,
     model: MODELS.analysis,
+    sessionId: input.sessionId ?? null,
   });
+  const byItemId = new Map(outcomes.map((o) => [o.itemId, o]));
 
   logger.info(
     { mentorProfileId: input.mentorProfileId, answerId: input.answerId, count: items.length },
     "distilled mentor answer knowledge",
   );
-  return items;
+  return items.map((k) => {
+    const o = byItemId.get(k.id);
+    return { ...k, outcome: o?.outcome ?? "created", matchedLabel: o?.matchedLabel ?? null };
+  });
 }
