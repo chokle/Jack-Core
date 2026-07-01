@@ -146,7 +146,9 @@ export function StructuredAnswer({
   const cites = citations ?? [];
   const confidence = deriveConfidence(cites, usedInternalKnowledge);
   const sections = cites.length > 0 ? parsed.sections.filter((s) => s.key !== "sources") : parsed.sections;
-  const hasDetail = sections.length > 0;
+  const safetySections = sections.filter((s) => s.key === "safety");
+  const detailSections = sections.filter((s) => s.key !== "safety");
+  const hasDetail = detailSections.length > 0;
 
   return (
     <div className="w-full space-y-2">
@@ -164,6 +166,10 @@ export function StructuredAnswer({
         <p className="text-[15px] font-medium leading-snug text-white break-words">{parsed.shortAnswer}</p>
       </div>
 
+      {safetySections.map((s, i) => (
+        <SectionCard key={`safety-${i}`} section={s} />
+      ))}
+
       {hasDetail && (
         <div className="space-y-2">
           <button
@@ -171,7 +177,7 @@ export function StructuredAnswer({
             onClick={() => setOpen((o) => !o)}
             className="flex min-h-11 w-full items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
           >
-            <span className="text-sm font-semibold text-foreground">{open ? "Hide Details" : "Expand Details"}</span>
+            <span className="text-sm font-semibold text-foreground">{open ? "Show Less" : "Expand Answer"}</span>
             {open ? (
               <ChevronUp className="h-4 w-4 text-primary" />
             ) : (
@@ -188,7 +194,7 @@ export function StructuredAnswer({
                 className="overflow-hidden"
               >
                 <div className="space-y-2">
-                  {sections.map((s, i) => (
+                  {detailSections.map((s, i) => (
                     <SectionCard key={`${s.key}-${i}`} section={s} />
                   ))}
                 </div>
