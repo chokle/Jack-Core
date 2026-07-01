@@ -3,11 +3,6 @@ import { X, UploadCloud, FileVideo, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  useCreateVideo,
-  useGetUploadUrl,
-  useTranscribeVideo,
-} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListVideosQueryKey } from "@workspace/api-client-react";
 
@@ -24,16 +19,12 @@ export function UploadModal({ onClose }: UploadModalProps) {
   const [isUploading, setIsUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const createMutation = useCreateVideo();
-  const uploadUrlMutation = useGetUploadUrl();
-  const transcribeMutation = useTranscribeVideo();
   const queryClient = useQueryClient();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0] ?? null;
     setFile(selected);
     if (selected && !title) {
-      // Pre-fill the title from the filename (sans extension) for convenience.
       setTitle(selected.name.replace(/\.[^.]+$/, ""));
     }
   };
@@ -45,33 +36,24 @@ export function UploadModal({ onClose }: UploadModalProps) {
     setError(null);
     setIsUploading(true);
     try {
-      // 1. Register the video record (metadata only).
-      const video = await createMutation.mutateAsync({
-        data: { title, description, trade, tags: [] },
+      const form = new FormData();
+      form.append("file", file);
+      form.append("title", title);
+      if (description) form.append("description", description);
+      if (trade) form.append("trade", trade);
+
+      // Session cookie is sent automatically by the browser (httpOnly, sameOrigin).
+      // No credentials are embedded in the bundle.
+      const res = await fetch("/api/videos/ingest", {
+        method: "POST",
+        credentials: "include",
+        body: form,
       });
 
-      // 2. Get a signed upload URL + set the video's public URL server-side.
-      const { uploadUrl } = await uploadUrlMutation.mutateAsync({
-        id: video.id,
-        data: { filename: file.name, contentType: file.type || "video/mp4" },
-      });
-
-      // 3. Upload the file bytes straight to Supabase Storage (bucket is public,
-      //    token is embedded in the signed URL — no keys needed in the browser).
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: {
-          "content-type": file.type || "video/mp4",
-          "x-upsert": "true",
-        },
-        body: file,
-      });
-      if (!putRes.ok) {
-        throw new Error(`Upload failed (${putRes.status})`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Upload failed (${res.status})`);
       }
-
-      // 4. Kick off the transcription pipeline (which chains analysis).
-      await transcribeMutation.mutateAsync({ id: video.id });
 
       queryClient.invalidateQueries({ queryKey: getListVideosQueryKey() });
       onClose();

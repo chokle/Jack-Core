@@ -1,10 +1,12 @@
 import { Router } from "express";
+import multer from "multer";
 import { supabase } from "../lib/supabase.js";
 import { openai, createEmbedding, createEmbeddings, MODELS } from "../lib/openai.js";
 import { logger } from "../lib/logger.js";
 import { transcribeFromUrl } from "../lib/transcription.js";
 import { syncVideoGraph, removeVideoGraph } from "../lib/memory-graph.js";
 import { aiPipelineLimiter } from "../lib/rate-limit.js";
+import { requireAdminSession } from "../lib/admin-auth.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -180,7 +182,172 @@ router.get("/videos", async (req, res) => {
   }
 });
 
-router.post("/videos", aiPipelineLimiter, async (req, res) => {
+const ALLOWED_VIDEO_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/x-matroska",
+  "video/3gpp",
+  "video/3gpp2",
+]);
+
+// ---------------------------------------------------------------------------
+// Multer — memory storage for proxied video ingest. We stream the buffer
+// directly to Supabase Storage so no temp file touches the server disk.
+// 2 GB cap matches the UI label; Multer enforces it before the handler runs.
+// ---------------------------------------------------------------------------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, ALLOWED_VIDEO_TYPES.has(file.mimetype));
+  },
+});
+
+/**
+ * POST /videos/ingest — fully server-side upload flow.
+ *
+ * Accepts multipart/form-data with fields:
+ *   file       — the video binary
+ *   title      — required string
+ *   description, trade, tags — optional
+ *
+ * The server creates the DB record, uploads to Supabase Storage using the
+ * service-role key (never exposed to the browser), writes the public URL
+ * back, and kicks off transcription.  No signed URL ever leaves the server.
+ */
+router.post(
+  "/videos/ingest",
+  requireAdminSession,
+  aiPipelineLimiter,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "A video file is required." });
+      }
+
+      const title = typeof req.body["title"] === "string" ? req.body["title"].trim() : "";
+      if (!title) return res.status(400).json({ error: "title is required." });
+
+      const description =
+        typeof req.body["description"] === "string" ? req.body["description"] : undefined;
+      const trade =
+        typeof req.body["trade"] === "string" ? req.body["trade"] : undefined;
+
+      // 1. Create the DB record.
+      const { data: video, error: insertErr } = await supabase
+        .from("videos")
+        .insert({
+          title,
+          description: description ?? null,
+          trade: trade ?? null,
+          tags: [],
+          status: "pending",
+          competency_codes: [],
+        })
+        .select()
+        .single();
+
+      if (insertErr) throw insertErr;
+
+      // 2. Upload bytes to Supabase Storage using the service-role key.
+      //    No signed URL is issued — the server performs the upload directly.
+      const filename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `videos/${video.id}/${filename}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("jack-videos")
+        .upload(storagePath, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        // Roll back the DB row if storage fails.
+        await supabase.from("videos").delete().eq("id", video.id);
+        throw uploadErr;
+      }
+
+      // 3. Write the public URL back to the video row.
+      const publicUrl = `${process.env["SUPABASE_URL"]}/storage/v1/object/public/jack-videos/${storagePath}`;
+      await supabase.from("videos").update({ video_url: publicUrl }).eq("id", video.id);
+
+      // 4. Sync graph node for the new video.
+      await syncGraphSafe(video.id);
+
+      // 5. Atomically acquire the transcription slot and kick it off.
+      const { data: acquired } = await supabase
+        .from("videos")
+        .update({ status: "transcribing" })
+        .eq("id", video.id)
+        .is("transcript", null)
+        .neq("status", "transcribing")
+        .select("id")
+        .maybeSingle();
+
+      if (acquired) {
+        setImmediate(async () => {
+          try {
+            const { text: fullTranscript, segments: rawSegments } =
+              await transcribeFromUrl(publicUrl);
+
+            const segments = rawSegments.map((s) => ({
+              video_id: video.id,
+              start_time: s.start,
+              end_time: s.end,
+              text: s.text,
+              confidence: null as number | null,
+              embedding: null as string | null,
+            }));
+
+            if (segments.length > 0) {
+              const vectors = await createEmbeddings(segments.map((s) => s.text || " "));
+              segments.forEach((seg, i) => {
+                const vec = vectors[i];
+                seg.embedding = vec && vec.length > 0 ? JSON.stringify(vec) : null;
+              });
+            }
+
+            await supabase.from("transcript_segments").delete().eq("video_id", video.id);
+            const BATCH = 100;
+            for (let i = 0; i < segments.length; i += BATCH) {
+              const { error: segErr } = await supabase
+                .from("transcript_segments")
+                .insert(segments.slice(i, i + BATCH));
+              if (segErr) throw segErr;
+            }
+
+            const videoEmbedding = await createEmbedding(fullTranscript.slice(0, 8000));
+            await supabase
+              .from("videos")
+              .update({
+                transcript: fullTranscript,
+                embedding: JSON.stringify(videoEmbedding),
+              })
+              .eq("id", video.id);
+
+            await syncGraphSafe(video.id);
+            void runAnalysis(video.id);
+          } catch (bgErr) {
+            logger.error({ err: bgErr, videoId: video.id }, "Ingest transcription failed");
+            await supabase.from("videos").update({ status: "error" }).eq("id", video.id);
+            await syncGraphSafe(video.id);
+          }
+        });
+      }
+
+      return res.status(201).json({ ...video, video_url: publicUrl });
+    } catch (err) {
+      req.log.error({ err }, "ingestVideo error");
+      return res.status(500).json({ error: "Failed to ingest video" });
+    }
+  },
+);
+
+router.post("/videos", requireAdminSession, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = CreateVideoBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -294,7 +461,7 @@ router.get("/videos/:id", async (req, res) => {
   }
 });
 
-router.patch("/videos/:id", async (req, res) => {
+router.patch("/videos/:id", requireAdminSession, async (req, res) => {
   try {
     const paramsParsed = UpdateVideoParams.safeParse(req.params);
     if (!paramsParsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -328,7 +495,7 @@ router.patch("/videos/:id", async (req, res) => {
   }
 });
 
-router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
+router.delete("/videos/:id", requireAdminSession, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = DeleteVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -345,7 +512,7 @@ router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
   }
 });
 
-router.post("/videos/:id/transcribe", aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/transcribe", requireAdminSession, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = TranscribeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -504,7 +671,7 @@ router.post("/videos/:id/transcribe", aiPipelineLimiter, async (req, res) => {
   }
 });
 
-router.post("/videos/:id/analyze", aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/analyze", requireAdminSession, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = AnalyzeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -609,18 +776,7 @@ router.get("/videos/:id/related", async (req, res) => {
   }
 });
 
-const ALLOWED_VIDEO_TYPES = new Set([
-  "video/mp4",
-  "video/webm",
-  "video/ogg",
-  "video/quicktime",
-  "video/x-msvideo",
-  "video/x-matroska",
-  "video/3gpp",
-  "video/3gpp2",
-]);
-
-router.post("/videos/:id/upload-url", aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/upload-url", requireAdminSession, aiPipelineLimiter, async (req, res) => {
   try {
     const paramsParsed = GetUploadUrlParams.safeParse(req.params);
     if (!paramsParsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -633,7 +789,22 @@ router.post("/videos/:id/upload-url", aiPipelineLimiter, async (req, res) => {
     if (!ALLOWED_VIDEO_TYPES.has(contentType)) {
       return res.status(400).json({ error: "Unsupported file type. Only video files are accepted." });
     }
-    const path = `videos/${paramsParsed.data.id}/${filename}`;
+
+    const videoId = paramsParsed.data.id;
+
+    // Verify the video record actually exists before issuing a storage token.
+    // Without this check, a caller could mint a valid upload URL for a
+    // fabricated ID and populate the bucket with orphaned objects.
+    const { data: existing, error: lookupErr } = await supabase
+      .from("videos")
+      .select("id")
+      .eq("id", videoId)
+      .maybeSingle();
+
+    if (lookupErr) throw lookupErr;
+    if (!existing) return res.status(404).json({ error: "Video not found" });
+
+    const path = `videos/${videoId}/${filename}`;
 
     const { data, error } = await supabase.storage
       .from("jack-videos")
@@ -646,7 +817,7 @@ router.post("/videos/:id/upload-url", aiPipelineLimiter, async (req, res) => {
       .update({
         video_url: `${process.env["SUPABASE_URL"]}/storage/v1/object/public/jack-videos/${path}`,
       })
-      .eq("id", paramsParsed.data.id);
+      .eq("id", videoId);
 
     return res.json({ uploadUrl: data.signedUrl, path, token: (data as Record<string, unknown>)["token"] ?? null });
   } catch (err) {

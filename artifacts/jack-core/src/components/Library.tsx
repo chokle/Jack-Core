@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Search, Filter, Upload, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { VideoCard } from "./VideoCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
 import { UploadModal } from "./UploadModal";
+import { AdminLogin } from "./AdminLogin";
 
 interface LibraryProps {
   onSelectVideo: (id: string) => void;
@@ -16,6 +17,21 @@ export function Library({ onSelectVideo }: LibraryProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTrade, setSelectedTrade] = useState<string | undefined>();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+  const openIngest = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/session", { credentials: "include" });
+      const body = (await res.json()) as { authenticated?: boolean };
+      if (body.authenticated) {
+        setIsUploadOpen(true);
+      } else {
+        setIsLoginOpen(true);
+      }
+    } catch {
+      setIsLoginOpen(true);
+    }
+  }, []);
 
   // Poll the list while any video is still being processed so cards advance
   // to "ready" on their own (no manual refresh during the demo flow).
@@ -58,7 +74,7 @@ export function Library({ onSelectVideo }: LibraryProps) {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Button onClick={() => setIsUploadOpen(true)} className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(255,100,0,0.3)]">
+            <Button onClick={() => { void openIngest(); }} className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(255,100,0,0.3)]">
               <Upload className="h-4 w-4 mr-2" />
               Ingest
             </Button>
@@ -126,6 +142,14 @@ export function Library({ onSelectVideo }: LibraryProps) {
         </div>
       </div>
 
+      {isLoginOpen && (
+        <AdminLogin
+          onSuccess={() => {
+            setIsLoginOpen(false);
+            setIsUploadOpen(true);
+          }}
+        />
+      )}
       {isUploadOpen && <UploadModal onClose={() => setIsUploadOpen(false)} />}
     </div>
   );
