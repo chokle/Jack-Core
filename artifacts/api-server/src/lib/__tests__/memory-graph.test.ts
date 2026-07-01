@@ -505,6 +505,92 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
     expect(nodeById(wordedId)).toBeUndefined();
     expect(nodes().filter((n) => n["kind"] === "concept")).toHaveLength(1);
   });
+
+  it("preserves reviewer verification and provenance history (verification, mergedFrom, rejectedEvidence) across a rebuild", async () => {
+    const [v1, v2, v3] = ["vid-preserve1", "vid-preserve2", "vid-preserve3"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+    await seedVideo(v3);
+
+    // Force the two differently-worded titles to embed identically so v2's item
+    // MERGES onto v1's canonical node (records a mergedFrom entry). v3 teaches the
+    // same concept by exact label, then withdraws it to record rejectedEvidence.
+    const shared = defaultEmbed("__preheat_cluster__");
+    embedRegistry.set("Preheat", shared);
+    embedRegistry.set("Pre-Heating", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Preheat");
+    const wordedId = knowledgeNodeId("concept", "Pre-Heating");
+
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+    ], { extractedAt: "2026-06-02T00:00:00.000Z" });
+    // v3 briefly corroborates the concept too, then a re-process withdraws it —
+    // this is what records a rejectedEvidence entry for the withdrawn source.
+    await syncVideoKnowledge(v3, [
+      makeItem("concept", "Preheat", { confidence: 0.7, competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v3, [makeItem("concept", "Bevel Angle")], {
+      extractedAt: "2026-06-04T00:00:00.000Z",
+    });
+
+    // A reviewer verifies the concept (records a verificationHistory transition).
+    await setNodeVerification(canonicalId, "verified");
+
+    // Preconditions: the human + provenance state we expect a rebuild to preserve.
+    const before = nodeById(canonicalId)!;
+    const beforeMeta = before["meta"] as Record<string, unknown>;
+    expect(before["verification_status"]).toBe("verified");
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    expect(beforeHistory).toHaveLength(1);
+    expect(beforeHistory[0]).toMatchObject({ from: "unverified", to: "verified" });
+    const beforeMerged = beforeMeta["mergedFrom"] as Array<Record<string, unknown>>;
+    expect(beforeMerged).toHaveLength(1);
+    expect(beforeMerged[0]).toMatchObject({ id: wordedId, label: "Pre-Heating", category: "concept" });
+    const beforeRejected = beforeMeta["rejectedEvidence"] as Array<Record<string, unknown>>;
+    expect(beforeRejected).toHaveLength(1);
+    expect(beforeRejected[0]).toMatchObject({ videoId: v3, reason: "no-longer-extracted" });
+    // Only v1 + v2 currently corroborate it (v3 withdrew).
+    expect(provTo(canonicalId)).toHaveLength(2);
+
+    await rebuildGraph();
+
+    // A rebuild recomputes aggregates but must NOT re-run distillation, so the
+    // human decision and every provenance/audit record survive untouched.
+    const after = nodeById(canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+
+    // Reviewer verification is intact.
+    expect(after["verification_status"]).toBe("verified");
+    expect(afterMeta["verificationHistory"]).toEqual(beforeHistory);
+
+    // Merge records ("why this concept exists") are intact.
+    expect(afterMeta["mergedFrom"]).toEqual(beforeMerged);
+
+    // rejectedEvidence for the withdrawn source is preserved — not dropped (v3 is
+    // not a current source) and not recreated (still exactly one entry).
+    const afterRejected = afterMeta["rejectedEvidence"] as Array<Record<string, unknown>>;
+    expect(afterRejected).toHaveLength(1);
+    expect(afterRejected[0]).toMatchObject({ videoId: v3, reason: "no-longer-extracted" });
+
+    // Derived corroboration is still correct: noisy-OR of v1 (0.5) + v2 (0.4) = 0.7.
+    expect(after["confidence"] as number).toBeCloseTo(0.7, 10);
+    expect((afterMeta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect(afterMeta["sourceCount"]).toBe(2);
+    expect(afterMeta["timestamps"]).toEqual([10, 20, 30]);
+
+    // Hub-edge weights reflect the two corroborating videos.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(2);
+
+    // The merge is not undone — the Preheat cluster is still one canonical node,
+    // no duplicate (Bevel Angle is a separate, legitimate concept from v3).
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(nodes().filter((n) => n["id"] === canonicalId)).toHaveLength(1);
+  });
 });
 
 describe("removeVideoGraph — orphan pruning", () => {
