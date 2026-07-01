@@ -369,7 +369,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [pending, approved, rejected, merged]
+            enum: [pending, accepted, rejected, merged]
             default: pending
       responses:
         "200":
@@ -378,6 +378,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KnowledgeCandidateList"
+
+  /graph/candidates/{id}/resolve:
+    post:
+      operationId: resolveKnowledgeCandidate
+      tags: [graph]
+      summary: Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CandidateResolutionInput"
+      responses:
+        "200":
+          description: The resolved candidate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeCandidate"
+        "400":
+          description: Invalid resolution (missing reason/target, or bad target node)
+        "404":
+          description: Candidate not found
+        "409":
+          description: Candidate already resolved with a different outcome
 
   /graph/nodes/{id}/verification:
     patch:
@@ -1084,7 +1115,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, approved, rejected, merged]
+          enum: [pending, accepted, rejected, merged]
         title:
           type: string
         description:
@@ -1111,6 +1142,31 @@ components:
             $ref: "#/components/schemas/KnowledgeCandidateMatch"
         createdAt:
           type: ["string", "null"]
+        resolvedTargetId:
+          type: ["string", "null"]
+          description: The canonical concept node reinforced by an accept/merge resolution.
+        resolutionReason:
+          type: ["string", "null"]
+          description: The reviewer's reason, recorded on reject.
+        resolvedAt:
+          type: ["string", "null"]
+
+    CandidateResolutionInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [accept, merge, reject]
+          description: >-
+            accept — reinforce the top best-match concept; merge — reinforce the
+            reviewer-chosen targetNodeId; reject — discard with a required reason.
+        targetNodeId:
+          type: string
+          description: The existing concept to merge into (required for merge).
+        reason:
+          type: string
+          description: Why the candidate was rejected (required for reject).
 
     KnowledgeCandidateList:
       type: object

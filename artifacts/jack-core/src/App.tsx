@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import { InterviewMode } from "./components/InterviewMode";
+import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
@@ -77,6 +78,8 @@ function JackApp() {
           />
         ) : view === "interview" ? (
           <InterviewMode />
+        ) : view === "review" ? (
+          <KnowledgeReview />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}

@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CandidateResolutionInput,
   ChatInput,
   ChatMessage,
   ChatResponse,
@@ -28,6 +29,7 @@ import type {
   InterviewSession,
   InterviewTurnResult,
   JobStatus,
+  KnowledgeCandidate,
   KnowledgeCandidateList,
   KnowledgeGraph,
   KnowledgeNode,
@@ -1497,6 +1499,77 @@ export function useListKnowledgeCandidates<TData = Awaited<ReturnType<typeof lis
 
 
 
+
+export const getResolveKnowledgeCandidateUrl = (id: string,) => {
+
+
+
+
+  return `/api/graph/candidates/${id}/resolve`
+}
+
+/**
+ * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ */
+export const resolveKnowledgeCandidate = async (id: string,
+    candidateResolutionInput: CandidateResolutionInput, options?: RequestInit): Promise<KnowledgeCandidate> => {
+
+  return customFetch<KnowledgeCandidate>(getResolveKnowledgeCandidateUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(candidateResolutionInput)
+  }
+);}
+
+
+
+
+export const getResolveKnowledgeCandidateMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext> => {
+
+const mutationKey = ['resolveKnowledgeCandidate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, {id: string;data: BodyType<CandidateResolutionInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  resolveKnowledgeCandidate(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveKnowledgeCandidateMutationResult = NonNullable<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>>
+    export type ResolveKnowledgeCandidateMutationBody = BodyType<CandidateResolutionInput>
+    export type ResolveKnowledgeCandidateMutationError = ErrorType<void>
+
+    /**
+ * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ */
+export const useResolveKnowledgeCandidate = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveKnowledgeCandidate>>,
+        TError,
+        {id: string;data: BodyType<CandidateResolutionInput>},
+        TContext
+      > => {
+      return useMutation(getResolveKnowledgeCandidateMutationOptions(options));
+    }
 
 export const getSetNodeVerificationUrl = (id: string,) => {
 

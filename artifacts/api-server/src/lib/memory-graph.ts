@@ -1365,7 +1365,6 @@ export async function syncMentorAnswerKnowledge(
     sessionId?: string | null;
   },
 ): Promise<MentorKnowledgeOutcome[]> {
-  const mNode = mentorNodeId(mentorProfileId);
   const trade = opts.trade ?? null;
   const model = opts.model ?? null;
   const extractedAt = opts.extractedAt ?? new Date().toISOString();
@@ -1406,6 +1405,40 @@ export async function syncMentorAnswerKnowledge(
   }
 
   if (resolved.length === 0) return outcomes;
+
+  await persistMentorResolvedConcepts(mentorProfileId, resolved, {
+    answerId,
+    trade,
+    model,
+    extractedAt,
+  });
+  return outcomes;
+}
+
+/**
+ * Persist a batch of mentor-resolved concepts into the live graph: canonical
+ * node upsert (label first-writer-wins, longest description, alias growth,
+ * 'mentor_supplied' verification unless a human already decided), ADDITIVE
+ * mentor→concept provenance edges deduped by answerId, hub edges, and the
+ * aggregate recompute. This is the ONE write path for mentor knowledge — both
+ * ingestion-time reinforcement (syncMentorAnswerKnowledge) and Knowledge Review
+ * resolutions (resolveKnowledgeCandidate) route through it, so replays are
+ * idempotent everywhere.
+ */
+async function persistMentorResolvedConcepts(
+  mentorProfileId: string,
+  resolved: MentorResolvedConcept[],
+  opts: {
+    answerId: string;
+    trade: string | null;
+    model: string | null;
+    extractedAt: string;
+  },
+): Promise<void> {
+  if (resolved.length === 0) return;
+  const mNode = mentorNodeId(mentorProfileId);
+  const { answerId, trade, model, extractedAt } = opts;
+  const canonicalIds = resolved.map((c) => c.id);
 
   const existingById = new Map<string, Record<string, unknown>>();
   if (canonicalIds.length > 0) {
@@ -1551,7 +1584,6 @@ export async function syncMentorAnswerKnowledge(
 
   await upsertEdges([...provenanceEdges, ...hubEdges]);
   await recomputeKnowledgeAggregates(canonicalIds);
-  return outcomes;
 }
 
 /** A queued mentor-concept candidate as returned by the read API. */
@@ -1570,6 +1602,41 @@ export interface KnowledgeCandidateRecord {
   sessionId: string | null;
   bestMatches: CandidateMatch[];
   createdAt: string | null;
+  resolvedTargetId: string | null;
+  resolutionReason: string | null;
+  resolvedAt: string | null;
+}
+
+/** Map a raw knowledge_candidates row to the API record shape. */
+function mapCandidateRow(row: Record<string, unknown>): KnowledgeCandidateRecord {
+  const rawMatches = Array.isArray(row["best_matches"]) ? row["best_matches"] : [];
+  const bestMatches: CandidateMatch[] = rawMatches
+    .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
+    .map((m) => ({
+      nodeId: typeof m["nodeId"] === "string" ? m["nodeId"] : "",
+      label: typeof m["label"] === "string" ? m["label"] : "",
+      similarity: typeof m["similarity"] === "number" ? m["similarity"] : 0,
+    }))
+    .filter((m) => m.nodeId !== "");
+  return {
+    id: String(row["id"] ?? ""),
+    status: String(row["status"] ?? "pending"),
+    title: String(row["title"] ?? ""),
+    description: (row["description"] as string | null) ?? null,
+    category: String(row["category"] ?? "concept"),
+    trade: (row["trade"] as string | null) ?? null,
+    confidence: typeof row["confidence"] === "number" ? row["confidence"] : null,
+    competencyCode: (row["competency_code"] as string | null) ?? null,
+    mentorProfileId: (row["mentor_profile_id"] as string | null) ?? null,
+    mentorName: (row["mentor_name"] as string | null) ?? null,
+    answerId: (row["answer_id"] as string | null) ?? null,
+    sessionId: (row["session_id"] as string | null) ?? null,
+    bestMatches,
+    createdAt: (row["created_at"] as string | null) ?? null,
+    resolvedTargetId: (row["resolved_target_id"] as string | null) ?? null,
+    resolutionReason: (row["resolution_reason"] as string | null) ?? null,
+    resolvedAt: (row["resolved_at"] as string | null) ?? null,
+  };
 }
 
 /** List queued mentor-concept candidates by status (read-only; default pending). */
@@ -1582,33 +1649,231 @@ export async function listKnowledgeCandidates(
     .eq("status", status)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const rawMatches = Array.isArray(row["best_matches"]) ? row["best_matches"] : [];
-    const bestMatches: CandidateMatch[] = rawMatches
-      .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
-      .map((m) => ({
-        nodeId: typeof m["nodeId"] === "string" ? m["nodeId"] : "",
-        label: typeof m["label"] === "string" ? m["label"] : "",
-        similarity: typeof m["similarity"] === "number" ? m["similarity"] : 0,
-      }))
-      .filter((m) => m.nodeId !== "");
-    return {
-      id: String(row["id"] ?? ""),
-      status: String(row["status"] ?? "pending"),
-      title: String(row["title"] ?? ""),
-      description: (row["description"] as string | null) ?? null,
-      category: String(row["category"] ?? "concept"),
-      trade: (row["trade"] as string | null) ?? null,
-      confidence: typeof row["confidence"] === "number" ? row["confidence"] : null,
-      competencyCode: (row["competency_code"] as string | null) ?? null,
-      mentorProfileId: (row["mentor_profile_id"] as string | null) ?? null,
-      mentorName: (row["mentor_name"] as string | null) ?? null,
-      answerId: (row["answer_id"] as string | null) ?? null,
-      sessionId: (row["session_id"] as string | null) ?? null,
-      bestMatches,
-      createdAt: (row["created_at"] as string | null) ?? null,
-    };
+  return (data ?? []).map((row: Record<string, unknown>) => mapCandidateRow(row));
+}
+
+/** The three Knowledge Review outcomes for a queued candidate. */
+export type CandidateResolutionAction = "accept" | "merge" | "reject";
+
+export type CandidateResolutionResult =
+  | { ok: true; candidate: KnowledgeCandidateRecord; replayed: boolean }
+  | { ok: false; code: "not_found" | "conflict" | "invalid"; message: string };
+
+const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
+  accept: "accepted",
+  merge: "merged",
+  reject: "rejected",
+};
+
+/**
+ * Resolve a pending knowledge candidate — the Knowledge Review write path.
+ *
+ * - **accept** reinforces the candidate's top best-match concept exactly like
+ *   ingestion-time mentor reinforcement (alias, additive mentor→concept
+ *   provenance edge deduped by answerId, aggregate recompute).
+ * - **merge** does the same onto a reviewer-chosen existing concept node.
+ * - **reject** records the required reason on the row; the graph is untouched.
+ *
+ * Both graph-writing outcomes route through persistMentorResolvedConcepts — the
+ * SAME machinery syncMentorAnswerKnowledge uses — so there is no parallel way of
+ * writing mentor knowledge. Replaying a resolution is a no-op: an already-
+ * resolved candidate with the same outcome (and target) returns unchanged, and
+ * a conflicting re-resolution is refused. The graph write happens BEFORE the
+ * status flip, so a mid-flight failure leaves the candidate pending and the
+ * retry converges (the underlying writes are idempotent).
+ *
+ * Concurrency: resolutions for the SAME candidate are serialized through an
+ * in-process queue (the API is a single Node process), and the status flip is
+ * a compare-and-set (`WHERE status='pending'`), so even a lost race with an
+ * external writer can never record two different outcomes — the loser
+ * re-reads the row and reports replay/conflict against the winner's outcome.
+ */
+export async function resolveKnowledgeCandidate(
+  candidateId: string,
+  action: CandidateResolutionAction,
+  opts: { targetNodeId?: string | null; reason?: string | null } = {},
+): Promise<CandidateResolutionResult> {
+  const prior = resolutionQueues.get(candidateId) ?? Promise.resolve();
+  const run = prior.then(
+    () => resolveKnowledgeCandidateInner(candidateId, action, opts),
+    () => resolveKnowledgeCandidateInner(candidateId, action, opts),
+  );
+  // Park the chain (errors swallowed for chaining only — the caller still
+  // sees them via `run`), and clean up once we're the tail.
+  const parked = run.catch(() => undefined);
+  resolutionQueues.set(candidateId, parked);
+  void parked.finally(() => {
+    if (resolutionQueues.get(candidateId) === parked) resolutionQueues.delete(candidateId);
   });
+  return run;
+}
+
+/** Per-candidate serialization of concurrent resolve requests. */
+const resolutionQueues = new Map<string, Promise<unknown>>();
+
+async function resolveKnowledgeCandidateInner(
+  candidateId: string,
+  action: CandidateResolutionAction,
+  opts: { targetNodeId?: string | null; reason?: string | null } = {},
+): Promise<CandidateResolutionResult> {
+  const { data: row, error } = await supabase
+    .from("knowledge_candidates")
+    .select("*")
+    .eq("id", candidateId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) {
+    return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+  }
+
+  const cand = row as Record<string, unknown>;
+  const record = mapCandidateRow(cand);
+  const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
+
+  // Validate the action's inputs before touching anything.
+  let targetNodeId: string | null = null;
+  let reason: string | null = null;
+  if (action === "accept") {
+    targetNodeId = record.bestMatches[0]?.nodeId ?? null;
+    if (!targetNodeId) {
+      return {
+        ok: false,
+        code: "invalid",
+        message: "This candidate has no recorded best match to accept — use merge with a target.",
+      };
+    }
+  } else if (action === "merge") {
+    targetNodeId = opts.targetNodeId?.trim() || null;
+    if (!targetNodeId) {
+      return { ok: false, code: "invalid", message: "Merge requires a target concept." };
+    }
+  } else {
+    reason = opts.reason?.trim() || null;
+    if (!reason) {
+      return { ok: false, code: "invalid", message: "Reject requires a reason." };
+    }
+  }
+
+  // Idempotent replay: same outcome (and same target for accept/merge) is a
+  // no-op; a different outcome on a resolved candidate is a conflict.
+  if (record.status !== "pending") {
+    const sameOutcome =
+      record.status === nextStatus &&
+      (action === "reject" || record.resolvedTargetId === targetNodeId);
+    if (sameOutcome) return { ok: true, candidate: record, replayed: true };
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Candidate was already resolved as '${record.status}'.`,
+    };
+  }
+
+  if (action !== "reject") {
+    // The target must be an existing distilled concept node — never a scaffold
+    // node (core/topic/competency/video/mentor).
+    const { data: target, error: tErr } = await supabase
+      .from("knowledge_nodes")
+      .select("id, kind, label")
+      .eq("id", targetNodeId!)
+      .maybeSingle();
+    if (tErr) throw tErr;
+    const t = target as Record<string, unknown> | null;
+    if (!t || !KNOWLEDGE_NODE_KINDS.includes(t["kind"] as KnowledgeNodeKind)) {
+      return {
+        ok: false,
+        code: "invalid",
+        message: "Target must be an existing distilled concept node.",
+      };
+    }
+
+    if (!record.mentorProfileId) {
+      return {
+        ok: false,
+        code: "invalid",
+        message: "Candidate has no mentor provenance to preserve.",
+      };
+    }
+
+    const category = record.category as KnowledgeCategory;
+    const itemId = knowledgeNodeId(category, record.title);
+    const targetLabel = (t["label"] as string) || targetNodeId!;
+    const resolvedConcept: MentorResolvedConcept = {
+      id: targetNodeId!,
+      // Keep the target node's own kind — a slang candidate merged into a
+      // concept node must not re-kind the concept.
+      category: t["kind"] as KnowledgeCategory,
+      title: record.title,
+      description: record.description ?? "",
+      timestamps: [],
+      confidence: record.confidence ?? 0.6,
+      competencyCode: record.competencyCode,
+      // The target owns its embedding; the candidate never brings one in.
+      embeddingJson: null,
+      mergedFrom:
+        itemId !== targetNodeId
+          ? [{ id: itemId, label: record.title, category }]
+          : [],
+      reinforced: true,
+      matchedLabel: targetLabel,
+      // Record the mentor's wording as an alias when it differs from the label
+      // (persistMentorResolvedConcepts dedups against existing aliases).
+      newAliases:
+        normalizeConcept(record.title) !== normalizeConcept(targetLabel) ? [record.title] : [],
+    };
+
+    await ensureMentorNode(record.mentorProfileId, record.mentorName ?? "Mentor", record.trade);
+    await persistMentorResolvedConcepts(record.mentorProfileId, [resolvedConcept], {
+      // Dedup key for the mentor→concept provenance edge: the original answer
+      // when known, otherwise the candidate id (still deterministic per item).
+      answerId: record.answerId ?? record.id,
+      trade: record.trade,
+      model: null,
+      extractedAt: new Date().toISOString(),
+    });
+  }
+
+  const now = new Date().toISOString();
+  // Compare-and-set: only flip the status if the row is still pending. If an
+  // external writer resolved it in the meantime, re-read and report the
+  // winner's outcome as replay (same) or conflict (different).
+  const { data: updated, error: updErr } = await supabase
+    .from("knowledge_candidates")
+    .update({
+      status: nextStatus,
+      resolved_target_id: action === "reject" ? null : targetNodeId,
+      resolution_reason: action === "reject" ? reason : null,
+      resolved_at: now,
+      updated_at: now,
+    })
+    .eq("id", candidateId)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+  if (updErr) throw updErr;
+
+  if (!updated) {
+    const { data: current, error: curErr } = await supabase
+      .from("knowledge_candidates")
+      .select("*")
+      .eq("id", candidateId)
+      .maybeSingle();
+    if (curErr) throw curErr;
+    if (!current) {
+      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+    }
+    const winner = mapCandidateRow(current as Record<string, unknown>);
+    const sameOutcome =
+      winner.status === nextStatus &&
+      (action === "reject" || winner.resolvedTargetId === targetNodeId);
+    if (sameOutcome) return { ok: true, candidate: winner, replayed: true };
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Candidate was already resolved as '${winner.status}'.`,
+    };
+  }
+
+  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
 }
 
 /**

@@ -427,7 +427,7 @@ export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typ
 
 export const KnowledgeCandidateStatus = {
   pending: 'pending',
-  approved: 'approved',
+  accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
 } as const;
@@ -456,6 +456,39 @@ export interface KnowledgeCandidate {
   bestMatches: KnowledgeCandidateMatch[];
   /** @nullable */
   createdAt?: string | null;
+  /**
+     * The canonical concept node reinforced by an accept/merge resolution.
+     * @nullable
+     */
+  resolvedTargetId?: string | null;
+  /**
+     * The reviewer's reason, recorded on reject.
+     * @nullable
+     */
+  resolutionReason?: string | null;
+  /** @nullable */
+  resolvedAt?: string | null;
+}
+
+/**
+ * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason.
+ */
+export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
+
+
+export const CandidateResolutionInputAction = {
+  accept: 'accept',
+  merge: 'merge',
+  reject: 'reject',
+} as const;
+
+export interface CandidateResolutionInput {
+  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason. */
+  action: CandidateResolutionInputAction;
+  /** The existing concept to merge into (required for merge). */
+  targetNodeId?: string;
+  /** Why the candidate was rejected (required for reject). */
+  reason?: string;
 }
 
 export interface KnowledgeCandidateList {
@@ -502,7 +535,7 @@ export type ListKnowledgeCandidatesStatus = typeof ListKnowledgeCandidatesStatus
 
 export const ListKnowledgeCandidatesStatus = {
   pending: 'pending',
-  approved: 'approved',
+  accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
 } as const;

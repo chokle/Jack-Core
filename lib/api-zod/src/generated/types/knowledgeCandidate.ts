@@ -32,4 +32,16 @@ export interface KnowledgeCandidate {
   bestMatches: KnowledgeCandidateMatch[];
   /** @nullable */
   createdAt?: string | null;
+  /**
+     * The canonical concept node reinforced by an accept/merge resolution.
+     * @nullable
+     */
+  resolvedTargetId?: string | null;
+  /**
+     * The reviewer's reason, recorded on reject.
+     * @nullable
+     */
+  resolutionReason?: string | null;
+  /** @nullable */
+  resolvedAt?: string | null;
 }

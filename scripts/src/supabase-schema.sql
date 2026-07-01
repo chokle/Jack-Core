@@ -391,7 +391,7 @@ CREATE INDEX IF NOT EXISTS idx_interview_answers_mentor ON interview_answers(men
 -- candidate or resets a reviewed status.
 CREATE TABLE IF NOT EXISTS knowledge_candidates (
   id TEXT PRIMARY KEY,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','merged')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected','merged')),
   title TEXT NOT NULL,
   description TEXT,
   category TEXT NOT NULL,
@@ -403,9 +403,25 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
   answer_id UUID,
   session_id UUID,
   best_matches JSONB NOT NULL DEFAULT '[]',
+  resolved_target_id TEXT,
+  resolution_reason TEXT,
+  resolved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_status ON knowledge_candidates(status);
 CREATE INDEX IF NOT EXISTS idx_knowledge_candidates_answer ON knowledge_candidates(answer_id);
+
+-- Knowledge Review migration (idempotent) — resolution record columns for
+-- databases created before the review surface existed, plus the rename of the
+-- legacy 'approved' status to 'accepted' (the review language is
+-- Accept / Merge / Reject). Drop-then-add keeps the CHECK swap re-runnable.
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS resolved_target_id TEXT;
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS resolution_reason TEXT;
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE knowledge_candidates DROP CONSTRAINT IF EXISTS knowledge_candidates_status_check;
+UPDATE knowledge_candidates SET status = 'accepted' WHERE status = 'approved';
+ALTER TABLE knowledge_candidates
+  ADD CONSTRAINT knowledge_candidates_status_check
+  CHECK (status IN ('pending','accepted','rejected','merged'));

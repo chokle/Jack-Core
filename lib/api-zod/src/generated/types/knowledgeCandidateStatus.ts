@@ -11,7 +11,7 @@ export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typ
 
 export const KnowledgeCandidateStatus = {
   pending: 'pending',
-  approved: 'approved',
+  accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
 } as const;

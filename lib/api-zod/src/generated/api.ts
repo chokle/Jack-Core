@@ -409,13 +409,13 @@ export const GetGraphResponse = zod.object({
 export const listKnowledgeCandidatesQueryStatusDefault = `pending`;
 
 export const ListKnowledgeCandidatesQueryParams = zod.object({
-  "status": zod.enum(['pending', 'approved', 'rejected', 'merged']).default(listKnowledgeCandidatesQueryStatusDefault)
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']).default(listKnowledgeCandidatesQueryStatusDefault)
 })
 
 export const ListKnowledgeCandidatesResponse = zod.object({
   "candidates": zod.array(zod.object({
   "id": zod.string(),
-  "status": zod.enum(['pending', 'approved', 'rejected', 'merged']),
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']),
   "title": zod.string(),
   "description": zod.string().nullish(),
   "category": zod.string(),
@@ -431,9 +431,50 @@ export const ListKnowledgeCandidatesResponse = zod.object({
   "label": zod.string(),
   "similarity": zod.number()
 })),
-  "createdAt": zod.string().nullish()
+  "createdAt": zod.string().nullish(),
+  "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
+  "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
+  "resolvedAt": zod.string().nullish()
 })),
   "total": zod.number()
+})
+
+
+/**
+ * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ */
+export const ResolveKnowledgeCandidateParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ResolveKnowledgeCandidateBody = zod.object({
+  "action": zod.enum(['accept', 'merge', 'reject']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason.'),
+  "targetNodeId": zod.string().optional().describe('The existing concept to merge into (required for merge).'),
+  "reason": zod.string().optional().describe('Why the candidate was rejected (required for reject).')
+})
+
+export const ResolveKnowledgeCandidateResponse = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "category": zod.string(),
+  "trade": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "competencyCode": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "answerId": zod.string().nullish(),
+  "sessionId": zod.string().nullish(),
+  "bestMatches": zod.array(zod.object({
+  "nodeId": zod.string(),
+  "label": zod.string(),
+  "similarity": zod.number()
+})),
+  "createdAt": zod.string().nullish(),
+  "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
+  "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
+  "resolvedAt": zod.string().nullish()
 })
 
 

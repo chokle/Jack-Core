@@ -33,7 +33,8 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
 - `artifacts/api-server/src/routes/interview.ts` — Interview Mode endpoints (start session, get, submit/skip answer, finish)
-- `artifacts/api-server/src/routes/graph.ts` — also serves `GET /graph/candidates` (read-only list of queued mentor-concept candidates)
+- `artifacts/api-server/src/routes/graph.ts` — also serves `GET /graph/candidates` (queued mentor-concept candidates, filterable by status) and `POST /graph/candidates/:id/resolve` (admin-gated Knowledge Review: accept/merge/reject)
+- `artifacts/jack-core/src/components/KnowledgeReview.tsx` — Knowledge Review UI (admin-gated candidate curation: Accept / Merge into… / Reject with reason)
 - `artifacts/api-server/src/lib/interview.ts` — interview trades/categories + next-question engine (GPT-4o with deterministic fallback)
 - `artifacts/jack-core/src/components/InterviewMode.tsx` — Interview Mode UI (intake → conversation → completion)
 - `artifacts/jack-core/src/lib/memory-graph.ts` — client graph model (`buildGraphModelFromServer` + client-derived fallback)
@@ -48,6 +49,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - Red Seal competency codes are seeded from a canonical list and mapped by GPT-4o during analysis
 - Interview Mode reuses the video distillation + graph pipeline: mentor answers are distilled into the SAME canonical concept nodes (provenance is edge-owned via `mentor:<uuid>` → concept edges, deduped by answer id) with `verification_status="mentor_supplied"`, so mentor input corroborates rather than fragments the graph. Interview trade labels are normalized to the seeded Red Seal trades (e.g. "Welding" → "Welder") so mentor concepts hang off existing topic hubs
 - Mentor ingestion is reinforcement-first with a three-band decision per concept: exact id / label+alias index / semantic neighbors ≥ 0.85 → **reinforce** the existing node (mentor wording recorded as an alias, capped at 25); similarity 0.70–0.85 → **queue** as a pending row in `knowledge_candidates` (OUTSIDE the live graph, deterministic `cand:<answerId>:<itemId>` id so replays never duplicate or reset review status); below 0.70 → **create** a new node. Slang/regional wordings also search the concept category and the cross-category alias index. `GET /graph/candidates` is read-only; per-concept outcomes (reinforced/new/review) surface as chips in the Interview Mode preview
+- Knowledge Review resolves queued candidates through `resolveKnowledgeCandidate` in `memory-graph.ts`: **accept** reinforces the top best-match, **merge** reinforces a reviewer-chosen concept node, **reject** records a required reason and never touches the graph. Accept/merge route through `persistMentorResolvedConcepts` — the SAME write path as ingestion-time mentor reinforcement (mentor provenance edge deduped by answerId, alias recording, aggregate recompute), so there is no parallel graph-write path. Candidate statuses are `pending/accepted/rejected/merged` (renamed from `approved`); resolution is recorded on the row (`resolved_target_id`, `resolution_reason`, `resolved_at`). Replaying the same resolution is a no-op; a conflicting re-resolution returns 409; the graph write happens BEFORE the status flip so a mid-flight failure leaves the candidate pending and the retry converges
 - The knowledge graph is persisted in Supabase (`knowledge_nodes`/`knowledge_edges`) as a deterministic-ID mirror (core `__jack__`, `topic:<trade>`, `comp:<code>`, `video:<uuid>`) synced through the video pipeline, so re-processing/merging collapses onto the same node instead of duplicating. `GET /graph` self-heals when empty; there is **no** public rebuild endpoint (the API uses the service-role key and has no auth), and the frontend falls back to deriving the graph client-side if the persisted graph is unavailable
 
 ## Product
@@ -59,6 +61,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - **Ask Jack** — Conversational AI that searches the internal library first, answers with timestamp citations
 - **Related Videos** — Vector similarity to surface related content after watching
 - **Interview Mode** — Jack conversationally interviews experienced tradespeople one plainspoken question at a time (skippable); answers are saved verbatim, distilled with the same engine as videos, and reinforce the SAME shared knowledge graph as `mentor_supplied` corroboration
+- **Knowledge Review** — admin-gated curation of queued mentor-concept candidates: Accept (green, reinforce the suggested best match), Merge (amber, reinforce a reviewer-chosen concept), Reject (red, required reason); replay-safe, with pending/accepted/merged/rejected tabs
 
 ## Required Setup — Supabase Schema
 

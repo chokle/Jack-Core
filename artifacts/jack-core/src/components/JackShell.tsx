@@ -9,11 +9,12 @@ import {
   Mic,
   Settings,
   Menu,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 
-export type JackView = "graph" | "library" | "interview";
+export type JackView = "graph" | "library" | "interview" | "review";
 
 interface JackShellProps {
   active: JackView;
@@ -147,6 +148,12 @@ export function JackShell({
             label="Interview"
             active={active === "interview"}
             onClick={() => go("interview")}
+          />
+          <NavItem
+            icon={<ShieldCheck className="h-4 w-4" />}
+            label="Review"
+            active={active === "review"}
+            onClick={() => go("review")}
           />
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
           <NavItem icon={<GraduationCap className="h-4 w-4" />} label="Competencies" soon />

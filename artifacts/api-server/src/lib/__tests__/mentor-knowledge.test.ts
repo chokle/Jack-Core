@@ -349,10 +349,10 @@ describe("mentor ingestion — three-band decision", () => {
     expect(candidates()).toHaveLength(1);
 
     // A reviewer resolves the candidate; replaying the answer must not undo it.
-    candidates()[0]!["status"] = "approved";
+    candidates()[0]!["status"] = "accepted";
     await run();
     expect(candidates()).toHaveLength(1);
-    expect(candidates()[0]!["status"]).toBe("approved");
+    expect(candidates()[0]!["status"]).toBe("accepted");
   });
 
   it("a confidently novel concept creates a new node with mentor provenance", async () => {

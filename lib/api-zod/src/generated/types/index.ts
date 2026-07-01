@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './candidateResolutionInput';
+export * from './candidateResolutionInputAction';
 export * from './chatInput';
 export * from './chatMessage';
 export * from './chatMessageRole';

@@ -3,6 +3,9 @@ import {
   GetGraphResponse,
   ListKnowledgeCandidatesQueryParams,
   ListKnowledgeCandidatesResponse,
+  ResolveKnowledgeCandidateParams,
+  ResolveKnowledgeCandidateBody,
+  ResolveKnowledgeCandidateResponse,
   SetNodeVerificationParams,
   SetNodeVerificationBody,
 } from "@workspace/api-zod";
@@ -11,6 +14,7 @@ import {
   rebuildGraph,
   setNodeVerification,
   listKnowledgeCandidates,
+  resolveKnowledgeCandidate,
 } from "../lib/memory-graph.js";
 import { requireAdminSession } from "../lib/admin-auth.js";
 
@@ -41,11 +45,11 @@ router.get("/graph", async (req, res) => {
   }
 });
 
-// Read-only list of mentor-concept candidates queued for review — uncertain
-// mentor knowledge held OUTSIDE the live graph so it is never lost. The review
-// (approve/merge/reject) surface is a separate follow-up; this endpoint mutates
-// nothing.
-router.get("/graph/candidates", async (req, res) => {
+// List of mentor-concept candidates queued for review — uncertain mentor
+// knowledge held OUTSIDE the live graph so it is never lost. Admin-gated: the
+// queue carries mentor-attributed context and exists solely for the Knowledge
+// Review surface, so reads share the same boundary as the resolve route.
+router.get("/graph/candidates", requireAdminSession, async (req, res) => {
   const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
 
@@ -57,6 +61,34 @@ router.get("/graph/candidates", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "listKnowledgeCandidates error");
     return res.status(500).json({ error: "Failed to load knowledge candidates" });
+  }
+});
+
+// Knowledge Review write path: resolve a pending candidate as Accept (reinforce
+// its top best match), Merge (reinforce a reviewer-chosen concept), or Reject
+// (record a required reason; graph untouched). Admin-gated like node
+// verification — this mutates the shared Living Memory graph.
+router.post("/graph/candidates/:id/resolve", requireAdminSession, async (req, res) => {
+  const paramsParsed = ResolveKnowledgeCandidateParams.safeParse(req.params);
+  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid candidate id" });
+
+  const bodyParsed = ResolveKnowledgeCandidateBody.safeParse(req.body);
+  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+
+  try {
+    const result = await resolveKnowledgeCandidate(paramsParsed.data.id, bodyParsed.data.action, {
+      targetNodeId: bodyParsed.data.targetNodeId ?? null,
+      reason: bodyParsed.data.reason ?? null,
+    });
+    if (!result.ok) {
+      const status =
+        result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 400;
+      return res.status(status).json({ error: result.message });
+    }
+    return res.json(ResolveKnowledgeCandidateResponse.parse(result.candidate));
+  } catch (err) {
+    req.log.error({ err }, "resolveKnowledgeCandidate error");
+    return res.status(500).json({ error: "Failed to resolve knowledge candidate" });
   }
 });
 
