@@ -6,21 +6,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAskJack, useGetChatHistory, ChatMessage } from "@workspace/api-client-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Chat history is private to a session. With no auth, the session id is a
-// client-owned, unguessable token kept in localStorage — it is never rendered
-// or shared, so one browser cannot read another's conversation.
-function getOrCreateSessionId(): string {
-  if (typeof window === "undefined") return "";
-  const KEY = "jack_session_id";
-  let sid = window.localStorage.getItem(KEY);
-  if (!sid) {
-    sid =
-      window.crypto?.randomUUID?.() ??
-      `s_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    window.localStorage.setItem(KEY, sid);
-  }
-  return sid;
-}
+// Session identity is managed entirely by the server via an HttpOnly cookie.
+// The client does not read, store, or transmit any session identifier —
+// the browser sends the cookie automatically on every /api request.
 
 interface AskJackProps {
   isOpen: boolean;
@@ -31,16 +19,13 @@ interface AskJackProps {
 
 export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
-  const [sessionId] = useState<string>(() => getOrCreateSessionId());
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: history } = useGetChatHistory(
-    { sessionId },
-    { query: { queryKey: ['chatHistory', sessionId] } }
-  );
+  // No sessionId parameter — the server resolves the session from the cookie.
+  const { data: history } = useGetChatHistory();
   // @ts-ignore
   const askJack = useAskJack?.();
-  
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
@@ -77,8 +62,10 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
 
     if (askJack) {
       askJack.mutate(
+        // sessionId is omitted — the server binds the request to the caller's
+        // HttpOnly cookie session and ignores any id in the body.
         // @ts-ignore
-        { data: { message: userMessage.content, sessionId } },
+        { data: { message: userMessage.content } },
         {
           onSuccess: (data: any) => {
             const assistantMessage: ChatMessage = {

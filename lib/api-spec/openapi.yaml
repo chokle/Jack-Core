@@ -296,15 +296,7 @@ paths:
     get:
       operationId: getChatHistory
       tags: [chat]
-      summary: Get recent chat history for a single session
-      parameters:
-        - name: sessionId
-          in: query
-          required: true
-          description: Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.
-          schema:
-            type: string
-            minLength: 1
+      summary: Get chat history for the caller's session (identified by HttpOnly cookie)
       responses:
         "200":
           description: Chat history
@@ -595,12 +587,10 @@ components:
         message:
           type: string
           minLength: 1
-        sessionId:
-          type: ["string", "null"]
 
     ChatResponse:
       type: object
-      required: [answer, citations, sessionId]
+      required: [answer, citations]
       properties:
         answer:
           type: string
@@ -608,8 +598,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Citation"
-        sessionId:
-          type: string
         usedInternalKnowledge:
           type: boolean
 
@@ -635,8 +623,6 @@ components:
       required: [id, role, content, createdAt]
       properties:
         id:
-          type: string
-        sessionId:
           type: string
         role:
           type: string

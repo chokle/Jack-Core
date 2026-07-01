@@ -170,8 +170,6 @@ export interface SearchResults {
 export interface ChatInput {
   /** @minLength 1 */
   message: string;
-  /** @nullable */
-  sessionId?: string | null;
 }
 
 export interface Citation {
@@ -187,7 +185,6 @@ export interface Citation {
 export interface ChatResponse {
   answer: string;
   citations: Citation[];
-  sessionId: string;
   usedInternalKnowledge?: boolean;
 }
 
@@ -201,7 +198,6 @@ export const ChatMessageRole = {
 
 export interface ChatMessage {
   id: string;
-  sessionId?: string;
   role: ChatMessageRole;
   content: string;
   citations?: Citation[];
@@ -300,12 +296,4 @@ export const ListVideosStatus = {
   ready: 'ready',
   error: 'error',
 } as const;
-
-export type GetChatHistoryParams = {
-/**
- * Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.
- * @minLength 1
- */
-sessionId: string;
-};
 

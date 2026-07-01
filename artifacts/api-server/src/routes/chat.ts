@@ -6,13 +6,43 @@ import { randomUUID } from "crypto";
 
 const router = Router();
 
+// Session cookie name and configuration. The cookie is HttpOnly so JavaScript
+// cannot read or overwrite it, and SameSite=Strict prevents cross-site use.
+const SESSION_COOKIE = "jack_session";
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: "strict" as const,
+  // Scope to /api so the session cookie is never sent to the frontend origin.
+  path: "/api",
+  // 30-day lifetime — long enough to feel persistent, bounded for cleanup.
+  maxAge: 60 * 60 * 24 * 30,
+  // Only set Secure in production so local dev works over http.
+  secure: process.env["NODE_ENV"] === "production",
+};
+
+/**
+ * Read the caller's session ID from the HttpOnly cookie.
+ * If none exists, mint a new UUID, set the cookie, and return the new value.
+ * The session ID is NEVER read from the request body or query string so that
+ * no caller can impersonate or hijack another user's conversation.
+ */
+function resolveSession(req: Parameters<Parameters<ReturnType<typeof Router>["post"]>[1]>[0], res: Parameters<Parameters<ReturnType<typeof Router>["post"]>[1]>[1]): string {
+  const existing = req.cookies?.[SESSION_COOKIE];
+  if (typeof existing === "string" && existing.length > 0) return existing;
+  const fresh = randomUUID();
+  res.cookie(SESSION_COOKIE, fresh, COOKIE_OPTS);
+  return fresh;
+}
+
 router.post("/chat", async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
 
-    const { message, sessionId } = parsed.data;
-    const session = sessionId ?? randomUUID();
+    const { message } = parsed.data;
+    // Session identity is owned by the server via an HttpOnly cookie.
+    // Any sessionId the client may have included in the body is ignored.
+    const session = resolveSession(req, res);
 
     const embedding = await createEmbedding(message);
 
@@ -88,7 +118,7 @@ ${usedInternalKnowledge ? `Relevant content from the internal knowledge library:
       { session_id: session, role: "assistant", content: answer, citations },
     ]);
 
-    return res.json({ answer, citations, sessionId: session, usedInternalKnowledge });
+    return res.json({ answer, citations, usedInternalKnowledge });
   } catch (err) {
     req.log.error({ err }, "askJack error");
     return res.status(500).json({ error: "Jack encountered an error" });
@@ -97,18 +127,15 @@ ${usedInternalKnowledge ? `Relevant content from the internal knowledge library:
 
 router.get("/chat/history", async (req, res) => {
   try {
-    // Chat history is private to a single session. Require the caller to name a
-    // session and scope the query to it — without this filter the endpoint
-    // returned every user's recent messages, leaking conversations across
-    // sessions. No session id => no messages (never a global dump).
-    const rawSession = req.query["sessionId"];
-    const sessionId = typeof rawSession === "string" ? rawSession.trim() : "";
-    if (!sessionId) return res.json([]);
+    // Session is bound to the HttpOnly cookie, not a query parameter.
+    // If no session cookie exists, there is no conversation to return.
+    const session = req.cookies?.[SESSION_COOKIE];
+    if (typeof session !== "string" || session.length === 0) return res.json([]);
 
     const { data, error } = await supabase
       .from("chat_messages")
       .select("*")
-      .eq("session_id", sessionId)
+      .eq("session_id", session)
       .order("created_at", { ascending: true })
       .limit(50);
 
@@ -116,7 +143,8 @@ router.get("/chat/history", async (req, res) => {
     return res.json(
       (data ?? []).map((m: Record<string, unknown>) => ({
         id: m["id"],
-        sessionId: m["session_id"],
+        // sessionId is intentionally omitted — it is the caller's cookie value
+        // and there is no reason to echo it back into the response body.
         role: m["role"],
         content: m["content"],
         citations: m["citations"] ?? [],

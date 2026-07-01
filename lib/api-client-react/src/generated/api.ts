@@ -24,7 +24,6 @@ import type {
   ChatMessage,
   ChatResponse,
   Competency,
-  GetChatHistoryParams,
   HealthStatus,
   JobStatus,
   KnowledgeGraph,
@@ -1099,27 +1098,20 @@ export const useAskJack = <TError = ErrorType<unknown>,
       return useMutation(getAskJackMutationOptions(options));
     }
 
-export const getGetChatHistoryUrl = (params: GetChatHistoryParams,) => {
-  const normalizedParams = new URLSearchParams();
+export const getGetChatHistoryUrl = () => {
 
-  Object.entries(params || {}).forEach(([key, value]) => {
 
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
 
-  const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `/api/chat/history?${stringifiedParams}` : `/api/chat/history`
+  return `/api/chat/history`
 }
 
 /**
- * @summary Get recent chat history for a single session
+ * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
-export const getChatHistory = async (params: GetChatHistoryParams, options?: RequestInit): Promise<ChatMessage[]> => {
+export const getChatHistory = async ( options?: RequestInit): Promise<ChatMessage[]> => {
 
-  return customFetch<ChatMessage[]>(getGetChatHistoryUrl(params),
+  return customFetch<ChatMessage[]>(getGetChatHistoryUrl(),
   {
     ...options,
     method: 'GET'
@@ -1132,23 +1124,23 @@ export const getChatHistory = async (params: GetChatHistoryParams, options?: Req
 
 
 
-export const getGetChatHistoryQueryKey = (params?: GetChatHistoryParams,) => {
+export const getGetChatHistoryQueryKey = () => {
     return [
-    `/api/chat/history`, ...(params ? [params] : [])
+    `/api/chat/history`
     ] as const;
     }
 
 
-export const getGetChatHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getChatHistory>>, TError = ErrorType<unknown>>(params: GetChatHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChatHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetChatHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getChatHistory>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChatHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetChatHistoryQueryKey(params);
+  const queryKey =  queryOptions?.queryKey ?? getGetChatHistoryQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatHistory>>> = ({ signal }) => getChatHistory(params, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatHistory>>> = ({ signal }) => getChatHistory({ signal, ...requestOptions });
 
 
 
@@ -1162,15 +1154,15 @@ export type GetChatHistoryQueryError = ErrorType<unknown>
 
 
 /**
- * @summary Get recent chat history for a single session
+ * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
 
 export function useGetChatHistory<TData = Awaited<ReturnType<typeof getChatHistory>>, TError = ErrorType<unknown>>(
- params: GetChatHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChatHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getChatHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetChatHistoryQueryOptions(params,options)
+  const queryOptions = getGetChatHistoryQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

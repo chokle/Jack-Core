@@ -1,14 +1,20 @@
 ---
 name: Chat privacy without auth
-description: How chat history stays private in a deliberately no-auth app, and the rule for any history-style endpoint.
+description: How chat history stays private in a no-auth app via server-issued HttpOnly cookies.
 ---
 
 # Chat privacy without auth
 
-Jack has **no authentication by design** (a stated user preference in `replit.md`: no auth, billing, or multi-page nav). Privacy of chat history therefore rests entirely on the **session id**, which is a client-owned, unguessable token generated in the browser (`crypto.randomUUID`) and stored in `localStorage`. It is never rendered or shared.
+Jack has **no authentication by design** (a stated user preference in `replit.md`: no auth, billing, or multi-page nav). Privacy of chat history rests on **server-issued HttpOnly session cookies** — the server mints the session UUID on first `/api/chat` request, sets it as `jack_session` (HttpOnly, SameSite=Strict, Path=/api), and never accepts a session identifier from the request body or query string.
 
-**Rule:** any endpoint that returns chat history (or similar per-conversation data) MUST filter by `sessionId` and return nothing when no session is supplied. Never return a global/most-recent-across-all-sessions list.
+**Rule:** Session identity is always derived from the HttpOnly cookie (`req.cookies["jack_session"]`). Any attempt to pass a `sessionId` in the request body is silently ignored. Any history endpoint must use the cookie value — never a caller-supplied parameter.
 
-**Why:** `/chat/history` originally selected the most recent messages with no session filter, so every visitor saw every other visitor's questions and answers — a cross-session information-disclosure leak. This matters especially because the app is public with no auth boundary.
+**Why:** The original design trusted a caller-supplied `sessionId` from the request body, making every valid UUID a potential session hijack vector: if an attacker knew another user's UUID they could read prior messages and inject new ones. Moving ownership to the server-set cookie means only the originating browser possesses the credential.
 
-**How to apply:** when adding or changing a history/list endpoint, require the caller's `sessionId`, `.eq("session_id", sessionId)` (or equivalent), and short-circuit to an empty result if it's missing. Do NOT "fix" this by adding auth — that contradicts the product preference; scope by client session instead.
+**How to apply:**
+- `POST /api/chat` — call `resolveSession(req, res)` which reads the cookie (or sets a fresh UUID cookie and returns it); never read `sessionId` from `req.body`.
+- `GET /api/chat/history` — read `req.cookies["jack_session"]`; return `[]` if absent.
+- The client (`AskJack.tsx`) sends no session identifier; the browser cookie is included automatically on same-origin requests.
+- `ChatInput`, `ChatResponse`, and `ChatMessage` OpenAPI schemas have no `sessionId` field.
+- `GET /chat/history` OpenAPI path has no `sessionId` query param.
+- After any OpenAPI schema change, run `pnpm --filter @workspace/api-spec run codegen`.

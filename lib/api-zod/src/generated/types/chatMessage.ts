@@ -10,7 +10,6 @@ import type { Citation } from './citation';
 
 export interface ChatMessage {
   id: string;
-  sessionId?: string;
   role: ChatMessageRole;
   content: string;
   citations?: Citation[];

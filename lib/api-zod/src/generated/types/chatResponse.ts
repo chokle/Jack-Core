@@ -10,6 +10,5 @@ import type { Citation } from './citation';
 export interface ChatResponse {
   answer: string;
   citations: Citation[];
-  sessionId: string;
   usedInternalKnowledge?: boolean;
 }

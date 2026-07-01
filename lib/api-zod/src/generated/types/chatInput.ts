@@ -9,6 +9,4 @@
 export interface ChatInput {
   /** @minLength 1 */
   message: string;
-  /** @nullable */
-  sessionId?: string | null;
 }

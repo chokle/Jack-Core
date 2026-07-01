@@ -292,8 +292,7 @@ export const SemanticSearchResponse = zod.object({
 
 
 export const AskJackBody = zod.object({
-  "message": zod.string().min(1),
-  "sessionId": zod.string().nullish()
+  "message": zod.string().min(1)
 })
 
 export const AskJackResponse = zod.object({
@@ -306,24 +305,15 @@ export const AskJackResponse = zod.object({
   "text": zod.string(),
   "thumbnailUrl": zod.string().nullish()
 })),
-  "sessionId": zod.string(),
   "usedInternalKnowledge": zod.boolean().optional()
 })
 
 
 /**
- * @summary Get recent chat history for a single session
+ * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
-
-
-
-export const GetChatHistoryQueryParams = zod.object({
-  "sessionId": zod.coerce.string().min(1).describe('Client-owned session identifier. History is scoped to this session only; omitting it returns no messages.')
-})
-
 export const GetChatHistoryResponseItem = zod.object({
   "id": zod.string(),
-  "sessionId": zod.string().optional(),
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string(),
   "citations": zod.array(zod.object({

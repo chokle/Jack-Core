@@ -12,7 +12,6 @@ export * from './chatMessageRole';
 export * from './chatResponse';
 export * from './citation';
 export * from './competency';
-export * from './getChatHistoryParams';
 export * from './healthStatus';
 export * from './jobStatus';
 export * from './knowledgeEdge';
