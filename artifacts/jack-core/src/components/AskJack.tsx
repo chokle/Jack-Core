@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, X, Loader2, Sparkles, BookOpen } from "lucide-react";
+import { Send, Bot, User, X, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAskJack, useGetChatHistory, ChatMessage } from "@workspace/api-client-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { StructuredAnswer } from "@/components/StructuredAnswer";
+
+type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
 // Session identity is managed entirely by the server via an HttpOnly cookie.
 // The client does not read, store, or transmit any session identifier —
@@ -26,7 +29,7 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
   // @ts-ignore
   const askJack = useAskJack?.();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
 
   useEffect(() => {
     if (history && history.length > 0 && messages.length === 0) {
@@ -68,11 +71,12 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
         { data: { message: userMessage.content } },
         {
           onSuccess: (data: any) => {
-            const assistantMessage: ChatMessage = {
+            const assistantMessage: DisplayMessage = {
               id: Date.now().toString(),
               role: "assistant",
               content: data.answer,
               citations: data.citations,
+              usedInternalKnowledge: data.usedInternalKnowledge,
               createdAt: new Date().toISOString()
             };
             setMessages(prev => [...prev, assistantMessage]);
@@ -128,34 +132,18 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
                       {msg.role === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                     </div>
                     
-                    <div className={`flex flex-col gap-2 max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                      <div className={`p-3 rounded-xl text-sm ${msg.role === "user" ? "bg-secondary text-secondary-foreground" : "bg-card border border-card-border"}`}>
-                        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                      </div>
-                      
-                      {msg.citations && msg.citations.length > 0 && (
-                        <div className="mt-2 space-y-2 w-full">
-                          <div className="flex items-center text-xs font-mono text-muted-foreground mb-1">
-                            <BookOpen className="h-3 w-3 mr-1" /> Sources
-                          </div>
-                          {msg.citations.map((cite, i) => (
-                            <button
-                              key={i}
-                              onClick={() => onCitationClick(cite.videoId, cite.startTime)}
-                              className="w-full text-left bg-muted/30 hover:bg-muted/80 border border-border rounded p-2 text-xs transition-colors flex gap-2"
-                            >
-                              <div className="w-10 h-6 bg-zinc-800 rounded overflow-hidden flex-shrink-0">
-                                {cite.thumbnailUrl && <img src={cite.thumbnailUrl} className="w-full h-full object-cover" alt="" />}
-                              </div>
-                              <div className="overflow-hidden">
-                                <div className="font-semibold truncate">{cite.videoTitle}</div>
-                                <div className="text-[10px] font-mono text-primary">
-                                  {Math.floor(cite.startTime / 60)}:{(cite.startTime % 60).toString().padStart(2, '0')}
-                                </div>
-                              </div>
-                            </button>
-                          ))}
+                    <div className={`flex flex-col gap-2 ${msg.role === "user" ? "max-w-[80%] items-end" : "min-w-0 flex-1 items-start"}`}>
+                      {msg.role === "user" ? (
+                        <div className="p-3 rounded-xl text-sm bg-secondary text-secondary-foreground">
+                          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                         </div>
+                      ) : (
+                        <StructuredAnswer
+                          content={msg.content}
+                          citations={msg.citations}
+                          usedInternalKnowledge={msg.usedInternalKnowledge}
+                          onCitationClick={onCitationClick}
+                        />
                       )}
                     </div>
                   </motion.div>
