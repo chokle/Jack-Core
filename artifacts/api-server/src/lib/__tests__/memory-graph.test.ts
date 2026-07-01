@@ -257,6 +257,47 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(2);
   });
 
+  it("keeps exact corroboration math when a differently-worded duplicate is embedding-merged", async () => {
+    const [v1, v2] = ["vid-merge-agg1", "vid-merge-agg2"];
+    await seedVideo(v1);
+    await seedVideo(v2);
+
+    // Force the two differently-worded titles to embed identically so they merge
+    // via cosine similarity rather than exact/normalized-label reuse.
+    const shared = defaultEmbed("__preheat_cluster__");
+    embedRegistry.set("Preheat", shared);
+    embedRegistry.set("Pre-Heating", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Preheat");
+    const wordedId = knowledgeNodeId("concept", "Pre-Heating");
+
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+    ]);
+
+    // The two videos funnel onto one canonical node.
+    expect(nodeById(canonicalId)).toBeDefined();
+    expect(nodeById(wordedId)).toBeUndefined();
+    expect(provTo(canonicalId)).toHaveLength(2);
+
+    // Confidence is the noisy-OR of both videos' extraction confidences.
+    // 1 - (1-0.5)(1-0.4) = 1 - 0.5*0.6 = 0.7.
+    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(0.7, 10);
+
+    const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    // Timestamp union is de-duplicated (30 appears in both) and sorted ascending.
+    expect(meta["timestamps"]).toEqual([10, 20, 30]);
+    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect(meta["sourceCount"]).toBe(2);
+
+    // Both videos map the merged concept to the same trade + competency → weight 2.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(2);
+  });
+
   it("counts a competency once per video even if extracted multiple times in that video", async () => {
     const v = "vid-dup-in-one";
     await seedVideo(v);
