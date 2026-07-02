@@ -16,7 +16,7 @@ import {
   listKnowledgeCandidates,
   resolveKnowledgeCandidate,
 } from "../lib/memory-graph.js";
-import { requireAdminSession } from "../lib/admin-auth.js";
+import { requireAdminSession, isAdminSessionValid } from "../lib/admin-auth.js";
 
 const router = Router();
 
@@ -46,12 +46,22 @@ router.get("/graph", async (req, res) => {
 });
 
 // List of mentor-concept candidates queued for review — uncertain mentor
-// knowledge held OUTSIDE the live graph so it is never lost. Admin-gated: the
-// queue carries mentor-attributed context and exists solely for the Knowledge
-// Review surface, so reads share the same boundary as the resolve route.
-router.get("/graph/candidates", requireAdminSession, async (req, res) => {
+// knowledge held OUTSIDE the live graph so it is never lost. Pending items are
+// publicly readable: anyone browsing the Living Memory can see what knowledge
+// is awaiting Knowledge Review, so mentors trust queued concepts aren't lost.
+// Non-pending statuses carry resolution details (rejection reasons, merge
+// targets) and stay behind the same admin boundary as the resolve route.
+router.get("/graph/candidates", async (req, res) => {
   const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
+
+  if (parsed.data.status !== "pending" && !isAdminSessionValid(req)) {
+    req.log.warn(
+      { url: req.url, status: parsed.data.status },
+      "non-pending candidate list requires admin session",
+    );
+    return res.status(401).json({ error: "Unauthorized — admin session required." });
+  }
 
   try {
     const candidates = await listKnowledgeCandidates(parsed.data.status);

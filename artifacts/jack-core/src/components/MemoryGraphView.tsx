@@ -25,6 +25,7 @@ import {
   MemoryGraphCanvas,
   type MemoryGraphHandle,
 } from "./MemoryGraphCanvas";
+import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
 import {
   rgbCss,
@@ -306,6 +307,7 @@ export function MemoryGraphView({
         {selected && !isKnowledgeKind(selected.kind) && (
           <RelatedCompetencies node={selected} competencies={competencies} />
         )}
+        <PendingKnowledgePanel />
       </aside>
     </div>
   );
