@@ -81,6 +81,14 @@ export function KnowledgeReview() {
     [graphQuery.data],
   );
 
+  // Resolve a stored node id (e.g. `k:concept:...`) to its human label. Includes
+  // scaffold nodes too, since a resolution can point at a competency/topic hub.
+  const nodeLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of graphQuery.data?.nodes ?? []) map.set(n.id, n.label);
+    return map;
+  }, [graphQuery.data]);
+
   // When a resolve is refused because the target vanished (code=target_gone),
   // the candidate stays pending — remember which card hit it so it can open
   // the merge picker with an explanation.
@@ -176,6 +184,7 @@ export function KnowledgeReview() {
                 <CandidateCard
                   candidate={cand}
                   conceptNodes={conceptNodes}
+                  nodeLabelById={nodeLabelById}
                   busy={resolve.isPending}
                   targetGone={goneCandidateId === cand.id}
                   onResolve={(action, extra) =>
@@ -196,12 +205,15 @@ export function KnowledgeReview() {
 function CandidateCard({
   candidate,
   conceptNodes,
+  nodeLabelById,
   busy,
   targetGone,
   onResolve,
 }: {
   candidate: KnowledgeCandidate;
   conceptNodes: KnowledgeNode[];
+  /** Node id → human label, for rendering resolution targets by name. */
+  nodeLabelById: Map<string, string>;
   busy: boolean;
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
@@ -345,10 +357,38 @@ function CandidateCard({
             </span>
           )}
           {candidate.status !== "rejected" && !isArchived && candidate.resolvedTargetId && (
-            <span className="font-mono">→ {candidate.resolvedTargetId}</span>
-          )}
-          {candidate.status !== "rejected" && !isArchived && candidate.redirectReason && (
-            <span className="ml-2 text-amber-400/90">{candidate.redirectReason}</span>
+            (() => {
+              const resolvedId = candidate.resolvedTargetId;
+              const requestedId = candidate.requestedTargetId;
+              const resolvedName = nodeLabelById.get(resolvedId) ?? resolvedId;
+              const wasRedirected =
+                !!requestedId && requestedId !== resolvedId;
+              const requestedName = requestedId
+                ? nodeLabelById.get(requestedId) ?? requestedId
+                : null;
+              return (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {wasRedirected && requestedName && (
+                    <>
+                      <span>Requested</span>
+                      <span className="rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 text-muted-foreground/80 line-through">
+                        {requestedName}
+                      </span>
+                      <span className="text-amber-400/90">→</span>
+                    </>
+                  )}
+                  <span>{wasRedirected ? "landed in" : "Reinforced"}</span>
+                  <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300">
+                    {resolvedName}
+                  </span>
+                  {candidate.redirectReason && (
+                    <span className="text-amber-400/90">
+                      ({candidate.redirectReason})
+                    </span>
+                  )}
+                </div>
+              );
+            })()
           )}
         </div>
       )}
