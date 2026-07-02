@@ -433,7 +433,7 @@ async function pruneOrphanTopics(): Promise<void> {
  * so it is pruned. Its knowledge→topic / knowledge→competency edges cascade away.
  * Scaffold nodes (core/topic/competency/video) are never touched here.
  */
-async function pruneOrphanKnowledge(): Promise<void> {
+export async function pruneOrphanKnowledge(): Promise<void> {
   const [nodes, edges] = await Promise.all([
     supabase.from("knowledge_nodes").select("id, kind, meta").in("kind", [...KNOWLEDGE_NODE_KINDS]),
     supabase.from("knowledge_edges").select("target_id").eq("kind", "knowledge"),
