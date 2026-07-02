@@ -1,5 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
 import { supabase } from "../lib/supabase.js";
 import {
   claimStage,
@@ -69,12 +73,23 @@ const ALLOWED_VIDEO_TYPES = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
-// Multer — memory storage for proxied video ingest. We stream the buffer
-// directly to Supabase Storage so no temp file touches the server disk.
+// Multer — DISK storage for proxied video ingest. The file spools to a tmp
+// dir instead of the Node heap (memoryStorage buffered up to 2 GB in RAM per
+// in-flight upload — two concurrent large uploads could OOM the process).
+// The handler streams the temp file to Supabase Storage and removes it in a
+// finally block on both success and failure.
 // 2 GB cap matches the UI label; Multer enforces it before the handler runs.
 // ---------------------------------------------------------------------------
+const UPLOAD_TMP_DIR = path.join(os.tmpdir(), "jack-uploads");
+fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
+
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: UPLOAD_TMP_DIR,
+    filename: (_req, _file, cb) => {
+      cb(null, `ingest-${Date.now()}-${crypto.randomUUID()}`);
+    },
+  }),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     cb(null, ALLOWED_VIDEO_TYPES.has(file.mimetype));
@@ -99,8 +114,9 @@ router.post(
   aiPipelineLimiter,
   upload.single("file"),
   async (req, res) => {
+    const tempPath = req.file?.path;
     try {
-      if (!req.file) {
+      if (!req.file || !tempPath) {
         return res.status(400).json({ error: "A video file is required." });
       }
 
@@ -137,7 +153,7 @@ router.post(
 
       const { error: uploadErr } = await supabase.storage
         .from("jack-videos")
-        .upload(storagePath, req.file.buffer, {
+        .upload(storagePath, fs.createReadStream(tempPath), {
           contentType: req.file.mimetype,
           upsert: false,
         });
@@ -175,6 +191,15 @@ router.post(
     } catch (err) {
       req.log.error({ err }, "ingestVideo error");
       return res.status(500).json({ error: "Failed to ingest video" });
+    } finally {
+      // Always remove the spooled temp file — success or failure.
+      if (tempPath) {
+        fs.promises.unlink(tempPath).catch((err) => {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+            req.log.warn({ err, tempPath }, "failed to remove ingest temp file");
+          }
+        });
+      }
     }
   },
 );

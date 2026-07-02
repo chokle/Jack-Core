@@ -4,3 +4,4 @@
 - [express-rate-limit IPv6](express-rate-limit-ipv6.md) — custom keyGenerator must wrap req.ip with ipKeyGenerator or v8 throws ERR_ERL_KEY_GEN_IPV6 and IPv6 clients evade limits.
 - [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.
 - [Project task dependency editing](project-task-dependencies.md) — dependsOn is only editable while a task is a draft; after acceptance, enforce ordering via self-contained plan text.
+- [Supabase Storage upload limits](supabase-storage-limits.md) — project-level file-size cap 413s big uploads regardless of app cap; storage-js ≥2.108 streams Node ReadStreams natively.
