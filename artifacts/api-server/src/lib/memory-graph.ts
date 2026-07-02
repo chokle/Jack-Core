@@ -217,8 +217,16 @@ async function upsertEdges(edges: EdgeUpsert[]): Promise<void> {
       target_id: e.target_id,
       kind: e.kind,
     };
-    if (e.weight !== undefined) row["weight"] = e.weight;
-    if (e.meta !== undefined) row["meta"] = e.meta;
+    // Always set weight explicitly (default 1, matching the DB column default).
+    // PostgREST bulk upserts unify the column set across the batch, so if any
+    // row in the batch carries `weight` while others omit it, the omitters are
+    // inserted with an explicit NULL — violating the NOT NULL constraint — rather
+    // than falling back to the column default. Mixed batches (weighted provenance
+    // edges + weightless hub edges) hit exactly this, so never leave it undefined.
+    row["weight"] = e.weight ?? 1;
+    // Same NOT NULL / mixed-batch hazard as weight — meta defaults to {} in the
+    // DB, but a mixed batch would insert an explicit NULL for rows that omit it.
+    row["meta"] = e.meta ?? {};
     return row;
   });
   const { error } = await supabase.from("knowledge_edges").upsert(rows, { onConflict: "id" });
