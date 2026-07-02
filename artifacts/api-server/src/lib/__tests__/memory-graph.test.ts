@@ -16,6 +16,7 @@ import {
   ensureBaseGraph,
   syncVideoGraph,
   syncVideoKnowledge,
+  syncMentorAnswerKnowledge,
   removeVideoGraph,
   rebuildGraph,
   knowledgeNodeId,
@@ -815,6 +816,138 @@ describe("removeVideoGraph — orphan pruning", () => {
     expect(nodeById(soloId)).toBeUndefined();
     expect(provTo(sharedId)).toHaveLength(1);
     expect((nodeById(sharedId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+  });
+});
+
+describe("removeVideoGraph — mentor-backed concepts survive video deletion", () => {
+  const MENTOR = "aaaaaaaa-0000-0000-0000-000000000001";
+  const ANSWER_1 = "11111111-0000-0000-0000-000000000001";
+  const mentorSourceId = `mentor:${MENTOR}`;
+
+  it("deleting the only source video keeps a mentor-corroborated concept alive with verification, aliases, and mentor-only aggregates", async () => {
+    const v = "vid-mentor-rm1";
+    await seedVideo(v);
+
+    // Force the mentor's differently-worded answer to embed identically to the
+    // video's concept so it REINFORCES the same canonical node and records the
+    // mentor's wording as an alias.
+    const shared = defaultEmbed("__arc_length_cluster__");
+    embedRegistry.set("Arc Length Control", shared);
+    embedRegistry.set("Keeping a Tight Arc", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Arc Length Control");
+
+    // The video teaches the concept first (mints the canonical node).
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Arc Length Control", {
+        confidence: 0.5,
+        timestamps: [10, 30],
+        competencyCode: "W-2",
+      }),
+    ]);
+
+    // A mentor corroborates the SAME concept through Interview Mode, using their
+    // own wording — reinforcement records the alias and a mentor provenance edge.
+    const outcomes = await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Keeping a Tight Arc", { confidence: 0.8, competencyCode: "W-2" })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+    expect(outcomes[0]!.outcome).toBe("reinforced");
+    expect(outcomes[0]!.canonicalId).toBe(canonicalId);
+
+    // A reviewer then verifies the concept (records a verificationHistory entry).
+    await setNodeVerification(canonicalId, "verified");
+
+    // Preconditions: mixed corroboration (one video + one mentor), verified, alias.
+    const before = nodeById(canonicalId)!;
+    const beforeMeta = before["meta"] as Record<string, unknown>;
+    expect(before["verification_status"]).toBe("verified");
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    expect(beforeHistory).toHaveLength(1);
+    expect(beforeHistory[0]).toMatchObject({ from: "mentor_supplied", to: "verified" });
+    expect(beforeMeta["aliases"]).toEqual(["Keeping a Tight Arc"]);
+    expect(provTo(canonicalId).map((e) => e["source_id"]).sort()).toEqual(
+      [mentorSourceId, `video:${v}`].sort(),
+    );
+    expect(beforeMeta["sourceCount"]).toBe(2);
+    // Two sources (video + mentor) corroborate trade + competency → weight 2.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(2);
+
+    // Routine deletion of the ONLY source video.
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v);
+    await removeVideoGraph(v);
+
+    // The concept is NOT pruned as an orphan — the mentor's provenance edge
+    // keeps it alive.
+    const after = nodeById(canonicalId)!;
+    expect(after).toBeDefined();
+    const prov = provTo(canonicalId);
+    expect(prov).toHaveLength(1);
+    expect(prov[0]!["source_id"]).toBe(mentorSourceId);
+    // The mentor source node itself is untouched.
+    expect(nodeById(mentorSourceId)).toBeDefined();
+
+    // The reviewer's decision and its audit history are intact.
+    expect(after["verification_status"]).toBe("verified");
+    const afterMeta = after["meta"] as Record<string, unknown>;
+    expect(afterMeta["verificationHistory"]).toEqual(beforeHistory);
+
+    // The mentor's recorded wording (alias) is intact.
+    expect(afterMeta["aliases"]).toEqual(["Keeping a Tight Arc"]);
+
+    // Derived corroboration reflects ONLY the mentor source now:
+    // confidence collapses to the mentor's own contribution (noisy-OR of one).
+    expect(after["confidence"] as number).toBeCloseTo(0.8, 10);
+    expect(afterMeta["sourceCount"]).toBe(1);
+    expect(afterMeta["sourceVideoIds"]).toEqual([mentorSourceId]);
+    // Typed mentor answers carry no media timeline — the video's timestamps go.
+    expect(afterMeta["timestamps"]).toEqual([]);
+    const sources = afterMeta["sources"] as Array<Record<string, unknown>>;
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ videoId: mentorSourceId, confidence: 0.8 });
+
+    // Hub-edge weights drop to the single surviving (mentor) corroborator.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(1);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(1);
+  });
+
+  it("a mentor-corroborated concept keeps its mentor_supplied status when its source video is deleted (no reviewer decision)", async () => {
+    const v = "vid-mentor-rm2";
+    await seedVideo(v);
+
+    const canonicalId = knowledgeNodeId("concept", "Puddle Watching");
+
+    // Video and mentor teach the exact same wording (deterministic-id reinforce).
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Puddle Watching", { confidence: 0.6, timestamps: [15] }),
+    ]);
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Puddle Watching", { confidence: 0.7 })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+
+    // Mentor corroboration marked the node mentor_supplied (no human decision).
+    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
+    expect(provTo(canonicalId)).toHaveLength(2);
+
+    fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v);
+    await removeVideoGraph(v);
+
+    // Survives on the mentor edge with mentor_supplied corroboration intact.
+    const after = nodeById(canonicalId)!;
+    expect(after).toBeDefined();
+    expect(after["verification_status"]).toBe("mentor_supplied");
+    const prov = provTo(canonicalId);
+    expect(prov).toHaveLength(1);
+    expect(prov[0]!["source_id"]).toBe(mentorSourceId);
+    const meta = after["meta"] as Record<string, unknown>;
+    expect(meta["sourceCount"]).toBe(1);
+    expect(after["confidence"] as number).toBeCloseTo(0.7, 10);
   });
 });
 
