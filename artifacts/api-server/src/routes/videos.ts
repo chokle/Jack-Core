@@ -61,6 +61,25 @@ router.get("/videos", async (req, res) => {
   }
 });
 
+/**
+ * Detects Supabase Storage's oversized-object rejection. The project-level
+ * "Upload file size limit" (Storage → Settings) returns HTTP 413 with a message
+ * like "The object exceeded the maximum allowed size", independent of our own
+ * multer cap. Match on either the numeric status or the message so we stay
+ * robust across storage-js error shapes.
+ */
+function isFileSizeLimitError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { status?: unknown; statusCode?: unknown; message?: unknown };
+  if (e.status === 413 || e.statusCode === 413 || e.statusCode === "413") return true;
+  const message = typeof e.message === "string" ? e.message.toLowerCase() : "";
+  return (
+    message.includes("exceeded the maximum allowed size") ||
+    message.includes("payload too large") ||
+    message.includes("maximum allowed size")
+  );
+}
+
 const ALLOWED_VIDEO_TYPES = new Set([
   "video/mp4",
   "video/webm",
@@ -161,6 +180,17 @@ router.post(
       if (uploadErr) {
         // Roll back the DB row if storage fails.
         await supabase.from("videos").delete().eq("id", video.id);
+
+        // Supabase enforces a project-level "Upload file size limit" (Storage →
+        // Settings) that rejects oversized objects with a 413 regardless of our
+        // own 2 GB multer cap. Surface that as a clear, friendly message instead
+        // of a generic 500 so the uploader knows the video is simply too large.
+        if (isFileSizeLimitError(uploadErr)) {
+          return res.status(413).json({
+            error:
+              "This video exceeds the storage plan's file size limit. Please upload a smaller file or ask an administrator to raise the Supabase storage upload limit.",
+          });
+        }
         throw uploadErr;
       }
 
