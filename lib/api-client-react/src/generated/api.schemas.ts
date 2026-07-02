@@ -496,6 +496,18 @@ export interface KnowledgeCandidateList {
   total: number;
 }
 
+export interface MentorWithdrawalResult {
+  mentorProfileId: string;
+  /** Concepts kept alive on surviving evidence, aggregates recomputed. */
+  conceptsRetained: number;
+  /** Mentor-only concepts demoted to archived candidates (out of the live graph). */
+  conceptsArchived: number;
+  /** Pending knowledge candidates from this mentor that were removed. */
+  candidatesDeleted: number;
+  /** Resolved candidates that kept their audit record but lost all mentor attribution. */
+  candidatesScrubbed: number;
+}
+
 export interface InterviewTurnResult {
   session: InterviewSession;
   answer: InterviewAnswer;

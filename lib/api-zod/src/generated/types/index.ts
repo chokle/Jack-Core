@@ -38,6 +38,7 @@ export * from './listKnowledgeCandidatesStatus';
 export * from './listVideosParams';
 export * from './listVideosStatus';
 export * from './mentorProfile';
+export * from './mentorWithdrawalResult';
 export * from './searchInput';
 export * from './searchResult';
 export * from './searchResults';

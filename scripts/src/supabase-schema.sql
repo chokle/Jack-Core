@@ -391,7 +391,7 @@ CREATE INDEX IF NOT EXISTS idx_interview_answers_mentor ON interview_answers(men
 -- candidate or resets a reviewed status.
 CREATE TABLE IF NOT EXISTS knowledge_candidates (
   id TEXT PRIMARY KEY,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected','merged')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected','merged','archived')),
   title TEXT NOT NULL,
   description TEXT,
   category TEXT NOT NULL,
@@ -403,6 +403,7 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
   answer_id UUID,
   session_id UUID,
   best_matches JSONB NOT NULL DEFAULT '[]',
+  aliases JSONB NOT NULL DEFAULT '[]',
   resolved_target_id TEXT,
   resolution_reason TEXT,
   resolved_at TIMESTAMPTZ,
@@ -422,6 +423,11 @@ ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS resolution_reason TEXT
 ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
 ALTER TABLE knowledge_candidates DROP CONSTRAINT IF EXISTS knowledge_candidates_status_check;
 UPDATE knowledge_candidates SET status = 'accepted' WHERE status = 'approved';
+-- 'archived' (Mentor Withdrawal): a mentor-only concept demoted OUT of the live
+-- graph when its sole mentor withdrew — an attribution-free content snapshot
+-- (with an `aliases` list) preserved for potential future review, never
+-- surfaced for action.
 ALTER TABLE knowledge_candidates
   ADD CONSTRAINT knowledge_candidates_status_check
-  CHECK (status IN ('pending','accepted','rejected','merged'));
+  CHECK (status IN ('pending','accepted','rejected','merged','archived'));
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';

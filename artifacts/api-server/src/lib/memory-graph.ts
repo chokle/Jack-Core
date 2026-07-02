@@ -1983,6 +1983,292 @@ export async function removeVideoGraph(videoId: string): Promise<void> {
   await recomputeKnowledgeAggregates(affected);
 }
 
+/** What removeMentorGraph did to the concepts the withdrawn mentor touched. */
+export interface MentorGraphRemoval {
+  /** Concepts that survive on other evidence (videos / other mentors). */
+  retainedConceptIds: string[];
+  /** Mentor-only concepts demoted to `archived` knowledge_candidates rows. */
+  archivedConceptIds: string[];
+}
+
+/**
+ * Remove a withdrawn mentor's graph footprint — the counterpart to
+ * removeVideoGraph, but re-evaluated concept by concept instead of blindly
+ * pruned. Withdrawal removes the PERSON, not the community's corroborated
+ * knowledge:
+ *
+ *  - A concept with surviving evidence (source videos or other mentors) is
+ *    RETAINED; its aggregates are recomputed from the remaining provenance so
+ *    confidence/sourceCount/timestamps/hub-edge weights honestly drop — the
+ *    same automatic reduction video deletion already gets.
+ *  - A concept resting SOLELY on the withdrawn mentor is not silently
+ *    hard-deleted: it is demoted OUT of the live graph into an `archived`
+ *    knowledge_candidates row (deterministic `arch:<nodeId>` id, inserted with
+ *    ignoreDuplicates so replays converge; attribution-free content snapshot
+ *    only), preserving the concept text for potential future review with no
+ *    link back to the mentor.
+ *  - Reviewer verification (verified/rejected + verificationHistory) survives
+ *    untouched on retained concepts. A `mentor_supplied` status that rested
+ *    solely on this mentor is recomputed from surviving evidence: with no
+ *    mentor provenance left it falls back to 'unverified' (a system-derived
+ *    status change, like ingestion setting it — no history entry is appended,
+ *    since verificationHistory records human decisions only).
+ *  - Aliases on retained concepts STAY (deliberate): aliases are unattributed
+ *    alternate wordings of the concept, not mentor data — removing them would
+ *    break duplicate-matching for every other source that taught the wording.
+ *
+ * The archive write happens BEFORE any deletion so a mid-flight failure never
+ * loses concept content; every step is idempotent, so a retry converges.
+ */
+export async function removeMentorGraph(profileId: string): Promise<MentorGraphRemoval> {
+  const mNode = mentorNodeId(profileId);
+
+  // Concepts this mentor corroborates, captured before the node (and, by
+  // cascade, its provenance edges) is deleted.
+  const affected = await provenanceTargetsForVideo(mNode);
+
+  // Partition: which affected concepts still have provenance from OTHER sources?
+  let retained: string[] = [];
+  let orphaned: string[] = [];
+  if (affected.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id")
+      .eq("kind", "knowledge")
+      .in("target_id", affected);
+    if (error) throw error;
+    const otherSourced = new Set<string>();
+    for (const e of data ?? []) {
+      const src = (e as Record<string, unknown>)["source_id"] as string;
+      const tgt = (e as Record<string, unknown>)["target_id"] as string;
+      if (src !== mNode) otherSourced.add(tgt);
+    }
+    retained = affected.filter((id) => otherSourced.has(id));
+    orphaned = affected.filter((id) => !otherSourced.has(id));
+  }
+
+  // Demote mentor-only concepts to archived candidates BEFORE deleting anything,
+  // so a mid-flight failure is retryable without losing the concept content.
+  if (orphaned.length > 0) {
+    await archiveOrphanedConcepts(orphaned);
+    const { error } = await supabase.from("knowledge_nodes").delete().in("id", orphaned);
+    if (error) throw error;
+  }
+
+  // Remove the mentor source node; its provenance + hub edges cascade away.
+  const { error: mErr } = await supabase.from("knowledge_nodes").delete().eq("id", mNode);
+  if (mErr) throw mErr;
+
+  // A trade hub anchored only by this mentor loses its reason to exist; the
+  // knowledge prune is a safety net (retained concepts all have other sources).
+  await pruneOrphanTopics();
+  await pruneOrphanKnowledge();
+
+  // Reconverge the survivors from their remaining provenance edges.
+  await recomputeKnowledgeAggregates(retained);
+  await demoteStaleMentorSupplied(retained);
+
+  return { retainedConceptIds: retained, archivedConceptIds: orphaned };
+}
+
+/**
+ * Snapshot mentor-only concept nodes into `archived` knowledge_candidates rows.
+ * The snapshot is attribution-FREE by construction: label, description,
+ * category, trade, confidence, competency code, and aliases — never a mentor
+ * profile/name/answer/session. The deterministic `arch:<nodeId>` id plus
+ * ignoreDuplicates makes replays converge without duplicating or resetting.
+ */
+async function archiveOrphanedConcepts(conceptIds: string[]): Promise<void> {
+  if (conceptIds.length === 0) return;
+  const [nodesRes, hubRes] = await Promise.all([
+    supabase
+      .from("knowledge_nodes")
+      .select("id, kind, label, trade, description, confidence, meta")
+      .in("id", conceptIds),
+    supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id")
+      .in("source_id", conceptIds)
+      .eq("kind", "competency"),
+  ]);
+  if (nodesRes.error) throw nodesRes.error;
+  if (hubRes.error) throw hubRes.error;
+
+  // First mapped competency code per concept (from its hub edges), if any.
+  const compByConcept = new Map<string, string>();
+  for (const e of hubRes.data ?? []) {
+    const src = (e as Record<string, unknown>)["source_id"] as string;
+    const tgt = (e as Record<string, unknown>)["target_id"] as string;
+    if (tgt.startsWith("comp:") && !compByConcept.has(src)) {
+      compByConcept.set(src, tgt.slice("comp:".length));
+    }
+  }
+
+  const rows = (nodesRes.data ?? []).map((row) => {
+    const n = row as Record<string, unknown>;
+    const id = n["id"] as string;
+    const meta = (n["meta"] as Record<string, unknown>) ?? {};
+    return {
+      id: `arch:${id}`,
+      status: "archived",
+      title: n["label"] as string,
+      description: (n["description"] as string | null) ?? null,
+      category: n["kind"] as string,
+      trade: (n["trade"] as string | null) ?? null,
+      confidence: typeof n["confidence"] === "number" ? (n["confidence"] as number) : null,
+      competency_code: compByConcept.get(id) ?? null,
+      mentor_profile_id: null,
+      mentor_name: null,
+      answer_id: null,
+      session_id: null,
+      best_matches: [],
+      aliases: metaAliases(meta),
+    };
+  });
+
+  const { error } = await supabase
+    .from("knowledge_candidates")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+  if (error) throw error;
+}
+
+/**
+ * Recompute 'mentor_supplied' from surviving evidence: a concept may only keep
+ * that status while at least one mentor provenance edge remains. Human
+ * decisions (verified/rejected) are never touched, and no verificationHistory
+ * entry is appended — mentor_supplied is a system-derived status (ingestion
+ * sets it without history), so its withdrawal-driven fallback to 'unverified'
+ * is equally silent.
+ */
+async function demoteStaleMentorSupplied(conceptIds: string[]): Promise<void> {
+  const ids = [...new Set(conceptIds)];
+  if (ids.length === 0) return;
+  const [nodesRes, provRes] = await Promise.all([
+    supabase.from("knowledge_nodes").select("id, verification_status").in("id", ids),
+    supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id")
+      .eq("kind", "knowledge")
+      .in("target_id", ids),
+  ]);
+  if (nodesRes.error) throw nodesRes.error;
+  if (provRes.error) throw provRes.error;
+
+  const mentorBacked = new Set<string>();
+  for (const e of provRes.data ?? []) {
+    const src = (e as Record<string, unknown>)["source_id"] as string;
+    const tgt = (e as Record<string, unknown>)["target_id"] as string;
+    if (src.startsWith("mentor:")) mentorBacked.add(tgt);
+  }
+
+  const demote = (nodesRes.data ?? [])
+    .map((r) => r as Record<string, unknown>)
+    .filter(
+      (n) =>
+        ((n["verification_status"] as string | null) ?? "unverified") === "mentor_supplied" &&
+        !mentorBacked.has(n["id"] as string),
+    )
+    .map((n) => n["id"] as string);
+
+  if (demote.length > 0) {
+    const { error } = await supabase
+      .from("knowledge_nodes")
+      .update({ verification_status: "unverified", updated_at: new Date().toISOString() })
+      .in("id", demote);
+    if (error) throw error;
+  }
+}
+
+/** Summary of a completed mentor withdrawal, returned to the admin. */
+export interface MentorWithdrawalSummary {
+  mentorProfileId: string;
+  conceptsRetained: number;
+  conceptsArchived: number;
+  candidatesDeleted: number;
+  candidatesScrubbed: number;
+}
+
+export type MentorWithdrawalResult =
+  | { ok: true; summary: MentorWithdrawalSummary }
+  | { ok: false; code: "not_found" };
+
+/**
+ * Withdraw a mentor entirely: graph re-evaluation FIRST (removeMentorGraph —
+ * retryable and convergent), then knowledge_candidates attribution (pending
+ * rows are deleted outright — they are mentor-sourced by construction and can
+ * never be resolved once the answers are gone; resolved rows keep their
+ * accept/merge/reject audit record but lose every mentor-identifying field),
+ * and the mentor_profiles row LAST (cascading interview_sessions +
+ * interview_answers). Because the destructive profile delete is the final
+ * step, a mid-flight failure leaves the withdrawal retryable: every earlier
+ * step is idempotent, so the retry converges. Replaying a completed
+ * withdrawal returns not_found (the profile row is gone).
+ *
+ * Admin-gated at the route layer — the API holds the service-role key and is
+ * otherwise unauthenticated, and this is a destructive action.
+ */
+export async function withdrawMentor(profileId: string): Promise<MentorWithdrawalResult> {
+  const { data: profile, error: pErr } = await supabase
+    .from("mentor_profiles")
+    .select("id")
+    .eq("id", profileId)
+    .maybeSingle();
+  if (pErr) throw pErr;
+  if (!profile) return { ok: false, code: "not_found" };
+
+  // 1) Graph evaluation first — same ordering discipline as candidate
+  //    resolution: the graph write precedes the row that marks completion.
+  const graph = await removeMentorGraph(profileId);
+
+  // 2) Candidates: delete pending rows, scrub attribution off resolved ones.
+  const { data: pendingRows, error: listErr } = await supabase
+    .from("knowledge_candidates")
+    .select("id")
+    .eq("mentor_profile_id", profileId)
+    .eq("status", "pending");
+  if (listErr) throw listErr;
+  const pendingIds = (pendingRows ?? []).map((r) => (r as Record<string, unknown>)["id"] as string);
+  if (pendingIds.length > 0) {
+    const { error } = await supabase.from("knowledge_candidates").delete().in("id", pendingIds);
+    if (error) throw error;
+  }
+
+  const { data: resolvedRows, error: resErr } = await supabase
+    .from("knowledge_candidates")
+    .select("id")
+    .eq("mentor_profile_id", profileId);
+  if (resErr) throw resErr;
+  const scrubIds = (resolvedRows ?? []).map((r) => (r as Record<string, unknown>)["id"] as string);
+  if (scrubIds.length > 0) {
+    const { error } = await supabase
+      .from("knowledge_candidates")
+      .update({
+        mentor_profile_id: null,
+        mentor_name: null,
+        answer_id: null,
+        session_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", scrubIds);
+    if (error) throw error;
+  }
+
+  // 3) The person, last: profile row deletion cascades sessions + answers.
+  const { error: dErr } = await supabase.from("mentor_profiles").delete().eq("id", profileId);
+  if (dErr) throw dErr;
+
+  return {
+    ok: true,
+    summary: {
+      mentorProfileId: profileId,
+      conceptsRetained: graph.retainedConceptIds.length,
+      conceptsArchived: graph.archivedConceptIds.length,
+      candidatesDeleted: pendingIds.length,
+      candidatesScrubbed: scrubIds.length,
+    },
+  };
+}
+
 /**
  * Rebuild the whole graph from the source tables: base scaffold, one sync per
  * existing video, then prune video nodes whose source video is gone. Used to

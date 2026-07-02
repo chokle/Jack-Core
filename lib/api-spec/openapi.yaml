@@ -523,6 +523,27 @@ paths:
         "404":
           description: Session not found
 
+  /interview/mentors/{id}/withdraw:
+    post:
+      operationId: withdrawMentor
+      tags: [interview]
+      summary: Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Withdrawal summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MentorWithdrawalResult"
+        "404":
+          description: Mentor not found (or already withdrawn)
+
   /interview/sessions/{id}/finish:
     post:
       operationId: finishInterview
@@ -1178,6 +1199,26 @@ components:
             $ref: "#/components/schemas/KnowledgeCandidate"
         total:
           type: integer
+
+    MentorWithdrawalResult:
+      type: object
+      required:
+        [mentorProfileId, conceptsRetained, conceptsArchived, candidatesDeleted, candidatesScrubbed]
+      properties:
+        mentorProfileId:
+          type: string
+        conceptsRetained:
+          type: integer
+          description: Concepts kept alive on surviving evidence, aggregates recomputed.
+        conceptsArchived:
+          type: integer
+          description: Mentor-only concepts demoted to archived candidates (out of the live graph).
+        candidatesDeleted:
+          type: integer
+          description: Pending knowledge candidates from this mentor that were removed.
+        candidatesScrubbed:
+          type: integer
+          description: Resolved candidates that kept their audit record but lost all mentor attribution.
 
     InterviewTurnResult:
       type: object

@@ -226,6 +226,18 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
         (e) => !goneIds.has(e["source_id"]) && !goneIds.has(e["target_id"]),
       );
     }
+
+    // Emulate ON DELETE CASCADE from mentor_profiles -> interview_sessions and
+    // interview_answers (both reference mentor_profile_id), mirroring the schema.
+    if (this.table === "mentor_profiles" && deleted.length > 0) {
+      const goneIds = new Set(deleted.map((r) => r["id"]));
+      this.db.tables["interview_sessions"] = (this.db.tables["interview_sessions"] ?? []).filter(
+        (s) => !goneIds.has(s["mentor_profile_id"]),
+      );
+      this.db.tables["interview_answers"] = (this.db.tables["interview_answers"] ?? []).filter(
+        (a) => !goneIds.has(a["mentor_profile_id"]),
+      );
+    }
     return { data: null, error: null };
   }
 

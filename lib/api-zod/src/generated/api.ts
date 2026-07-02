@@ -645,6 +645,22 @@ export const SkipInterviewQuestionResponse = zod.object({
 
 
 /**
+ * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
+ */
+export const WithdrawMentorParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const WithdrawMentorResponse = zod.object({
+  "mentorProfileId": zod.string(),
+  "conceptsRetained": zod.number().describe('Concepts kept alive on surviving evidence, aggregates recomputed.'),
+  "conceptsArchived": zod.number().describe('Mentor-only concepts demoted to archived candidates (out of the live graph).'),
+  "candidatesDeleted": zod.number().describe('Pending knowledge candidates from this mentor that were removed.'),
+  "candidatesScrubbed": zod.number().describe('Resolved candidates that kept their audit record but lost all mentor attribution.')
+})
+
+
+/**
  * @summary End the interview session
  */
 export const FinishInterviewParams = zod.object({

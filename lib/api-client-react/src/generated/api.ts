@@ -35,6 +35,7 @@ import type {
   KnowledgeNode,
   ListKnowledgeCandidatesParams,
   ListVideosParams,
+  MentorWithdrawalResult,
   SearchInput,
   SearchResults,
   StartInterviewInput,
@@ -1928,6 +1929,76 @@ export const useSkipInterviewQuestion = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSkipInterviewQuestionMutationOptions(options));
+    }
+
+export const getWithdrawMentorUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/mentors/${id}/withdraw`
+}
+
+/**
+ * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
+ */
+export const withdrawMentor = async (id: string, options?: RequestInit): Promise<MentorWithdrawalResult> => {
+
+  return customFetch<MentorWithdrawalResult>(getWithdrawMentorUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getWithdrawMentorMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawMentor>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof withdrawMentor>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['withdrawMentor'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof withdrawMentor>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  withdrawMentor(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WithdrawMentorMutationResult = NonNullable<Awaited<ReturnType<typeof withdrawMentor>>>
+
+    export type WithdrawMentorMutationError = ErrorType<void>
+
+    /**
+ * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
+ */
+export const useWithdrawMentor = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawMentor>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof withdrawMentor>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getWithdrawMentorMutationOptions(options));
     }
 
 export const getFinishInterviewUrl = (id: string,) => {

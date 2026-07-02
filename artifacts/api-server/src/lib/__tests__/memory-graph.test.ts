@@ -18,6 +18,8 @@ import {
   syncVideoKnowledge,
   syncMentorAnswerKnowledge,
   removeVideoGraph,
+  removeMentorGraph,
+  withdrawMentor,
   rebuildGraph,
   knowledgeNodeId,
   setNodeVerification,
@@ -1423,5 +1425,333 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       ]);
       expect(meta(conceptB)["rejectedEvidence"]).toEqual([]);
     });
+  });
+});
+
+describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
+  const MENTOR = "cccccccc-0000-0000-0000-000000000001";
+  const MENTOR_B = "cccccccc-0000-0000-0000-000000000002";
+  const ANSWER_1 = "33333333-0000-0000-0000-000000000001";
+  const ANSWER_B1 = "33333333-0000-0000-0000-000000000002";
+  const SESSION_1 = "44444444-0000-0000-0000-000000000001";
+  const mentorSourceId = `mentor:${MENTOR}`;
+
+  const candidates = () => fake.tables["knowledge_candidates"] ?? [];
+
+  /** Seed the interview-side rows the person's withdrawal must erase. */
+  function seedMentorRows(profileId: string, sessionId: string, answerIds: string[]): void {
+    fake.tables["mentor_profiles"] ??= [];
+    fake.tables["interview_sessions"] ??= [];
+    fake.tables["interview_answers"] ??= [];
+    fake.tables["mentor_profiles"]!.push({ id: profileId, name: "Alice", trade: TRADE });
+    fake.tables["interview_sessions"]!.push({
+      id: sessionId,
+      mentor_profile_id: profileId,
+      status: "completed",
+    });
+    for (const answerId of answerIds) {
+      fake.tables["interview_answers"]!.push({
+        id: answerId,
+        session_id: sessionId,
+        mentor_profile_id: profileId,
+        answer_text: "verbatim mentor wisdom",
+      });
+    }
+  }
+
+  it("retains a video-corroborated concept: aggregates collapse to the video's evidence, verification and aliases survive, mentor footprint is gone", async () => {
+    const v = "vid-withdraw-1";
+    await seedVideo(v);
+    const canonicalId = knowledgeNodeId("concept", "Tack Spacing");
+
+    // Video teaches the concept; the mentor corroborates it with their OWN
+    // wording (registered as semantically identical), so an alias is recorded.
+    embedRegistry.set("Tack Spacing", defaultEmbed("shared-tack-vector"));
+    embedRegistry.set("Tack Gapping", defaultEmbed("shared-tack-vector"));
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Tack Spacing", { confidence: 0.6, timestamps: [15], competencyCode: "W-3" }),
+    ]);
+    const outcomes = await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Tack Gapping", { confidence: 0.7, competencyCode: "W-3" })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+    expect(outcomes[0]!.outcome).toBe("reinforced");
+    expect(outcomes[0]!.canonicalId).toBe(canonicalId);
+
+    // A human reviewer verifies the concept before the mentor withdraws.
+    await setNodeVerification(canonicalId, "verified");
+
+    // Sanity: both sources are currently counted.
+    const beforeMeta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    expect(beforeMeta["sourceCount"]).toBe(2);
+    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(0.88, 10);
+
+    const result = await removeMentorGraph(MENTOR);
+    expect(result.retainedConceptIds).toEqual([canonicalId]);
+    expect(result.archivedConceptIds).toEqual([]);
+
+    // The concept SURVIVES on the video's evidence, aggregates honestly reduced.
+    const after = nodeById(canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+    expect(after["confidence"] as number).toBeCloseTo(0.6, 10);
+    expect(afterMeta["sourceCount"]).toBe(1);
+    expect(afterMeta["sourceVideoIds"]).toEqual([v]);
+    expect(afterMeta["timestamps"]).toEqual([15]);
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(1);
+    expect(hubEdge(canonicalId, compId("W-3"))!["weight"]).toBe(1);
+
+    // Human verification is untouched (verified is a reviewer decision, not
+    // mentor-derived), and the mentor-taught alias STAYS — it is an
+    // unattributed alternate wording the community still searches by.
+    expect(after["verification_status"]).toBe("verified");
+    expect((afterMeta["aliases"] as string[]) ?? []).toContain("Tack Gapping");
+
+    // The mentor's footprint is fully gone: node, provenance, hub edges.
+    expect(nodeById(mentorSourceId)).toBeUndefined();
+    expect(edges().filter((e) => e["source_id"] === mentorSourceId)).toHaveLength(0);
+    expect(provTo(canonicalId)).toHaveLength(1);
+    expect(provTo(canonicalId)[0]!["source_id"]).toBe(`video:${v}`);
+
+    // Nothing was archived — the concept is alive, not a candidate.
+    expect(candidates()).toHaveLength(0);
+  });
+
+  it("demotes mentor_supplied to unverified when the LAST mentor leaves, but keeps it while another mentor still corroborates", async () => {
+    const conceptId = knowledgeNodeId("concept", "Ground Clamp Placement");
+
+    // Two mentors independently teach the same concept.
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Ground Clamp Placement", { confidence: 0.7, competencyCode: "W-2" })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+    const second = await syncMentorAnswerKnowledge(
+      MENTOR_B,
+      "Bob",
+      [makeItem("concept", "Ground Clamp Placement", { confidence: 0.8, competencyCode: "W-2" })],
+      { answerId: ANSWER_B1, trade: TRADE },
+    );
+    expect(second[0]!.outcome).toBe("reinforced");
+
+    // Mentor A withdraws: the concept survives on B's corroboration and KEEPS
+    // mentor_supplied — a mentor still stands behind it.
+    const first = await removeMentorGraph(MENTOR);
+    expect(first.retainedConceptIds).toEqual([conceptId]);
+    expect(first.archivedConceptIds).toEqual([]);
+    const mid = nodeById(conceptId)!;
+    expect(mid["verification_status"]).toBe("mentor_supplied");
+    expect((mid["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(mid["confidence"] as number).toBeCloseTo(0.8, 10);
+    expect(provTo(conceptId)).toHaveLength(1);
+    expect(provTo(conceptId)[0]!["source_id"]).toBe(`mentor:${MENTOR_B}`);
+
+    // Add video evidence, then withdraw mentor B: the concept survives on the
+    // video but no mentor is left — mentor_supplied silently falls back to
+    // unverified (system-derived status, no history entry).
+    const v = "vid-withdraw-2";
+    await seedVideo(v);
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Ground Clamp Placement", { confidence: 0.5, timestamps: [30], competencyCode: "W-2" }),
+    ]);
+    const secondRemoval = await removeMentorGraph(MENTOR_B);
+    expect(secondRemoval.retainedConceptIds).toEqual([conceptId]);
+    const after = nodeById(conceptId)!;
+    expect(after["verification_status"]).toBe("unverified");
+    const history = ((after["meta"] as Record<string, unknown>)["verificationHistory"] ?? []) as unknown[];
+    expect(history).toHaveLength(0);
+    expect(after["confidence"] as number).toBeCloseTo(0.5, 10);
+  });
+
+  it("demotes a mentor-only concept into an attribution-free archived candidate, replay-safe", async () => {
+    const conceptId = knowledgeNodeId("concept", "Reading Heat by Color");
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [
+        makeItem("concept", "Reading Heat by Color", {
+          confidence: 0.9,
+          competencyCode: "W-2",
+          description: "Judge base-metal temperature by its color bands.",
+        }),
+      ],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+    expect(nodeById(conceptId)).toBeDefined();
+
+    const result = await removeMentorGraph(MENTOR);
+    expect(result.retainedConceptIds).toEqual([]);
+    expect(result.archivedConceptIds).toEqual([conceptId]);
+
+    // OUT of the live graph entirely — node and every edge that touched it.
+    expect(nodeById(conceptId)).toBeUndefined();
+    expect(
+      edges().filter((e) => e["source_id"] === conceptId || e["target_id"] === conceptId),
+    ).toHaveLength(0);
+    expect(nodeById(mentorSourceId)).toBeUndefined();
+
+    // The archived candidate preserves the CONTENT with zero attribution.
+    expect(candidates()).toHaveLength(1);
+    const arch = candidates()[0]!;
+    expect(arch["id"]).toBe(`arch:${conceptId}`);
+    expect(arch["status"]).toBe("archived");
+    expect(arch["title"]).toBe("Reading Heat by Color");
+    expect(arch["description"]).toBe("Judge base-metal temperature by its color bands.");
+    expect(arch["category"]).toBe("concept");
+    expect(arch["trade"]).toBe(TRADE);
+    expect(arch["competency_code"]).toBe("W-2");
+    expect(arch["confidence"] as number).toBeCloseTo(0.9, 10);
+    expect(arch["mentor_profile_id"]).toBeNull();
+    expect(arch["mentor_name"]).toBeNull();
+    expect(arch["answer_id"]).toBeNull();
+    expect(arch["session_id"]).toBeNull();
+
+    // Replaying the removal converges: no duplicate row, no status reset.
+    const replay = await removeMentorGraph(MENTOR);
+    expect(replay.retainedConceptIds).toEqual([]);
+    expect(replay.archivedConceptIds).toEqual([]);
+    expect(candidates()).toHaveLength(1);
+  });
+
+  it("withdrawMentor erases the person: profile/sessions/answers gone, pending candidates deleted, resolved candidates scrubbed but auditable; replay is not_found", async () => {
+    seedMentorRows(MENTOR, SESSION_1, [ANSWER_1]);
+
+    // Graph: one video-shared concept (retained) + one mentor-only (archived).
+    const v = "vid-withdraw-3";
+    await seedVideo(v);
+    const sharedId = knowledgeNodeId("concept", "Travel Speed Control");
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Travel Speed Control", { confidence: 0.6, timestamps: [10], competencyCode: "W-3" }),
+    ]);
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [
+        makeItem("concept", "Travel Speed Control", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Stick Whip Timing", { confidence: 0.8 }),
+      ],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+
+    // Candidates: one still pending (deleted outright — unresolvable once the
+    // verbatim answers are gone) and one already resolved (kept as an audit
+    // record, but every mentor-identifying field is scrubbed).
+    fake.tables["knowledge_candidates"] ??= [];
+    fake.tables["knowledge_candidates"]!.push(
+      {
+        id: `cand:${ANSWER_1}:k:concept:half-match`,
+        status: "pending",
+        title: "Half Match",
+        category: "concept",
+        mentor_profile_id: MENTOR,
+        mentor_name: "Alice",
+        answer_id: ANSWER_1,
+        session_id: SESSION_1,
+        best_matches: [],
+      },
+      {
+        id: `cand:${ANSWER_1}:k:concept:old-accepted`,
+        status: "accepted",
+        title: "Old Accepted",
+        category: "concept",
+        mentor_profile_id: MENTOR,
+        mentor_name: "Alice",
+        answer_id: ANSWER_1,
+        session_id: SESSION_1,
+        best_matches: [],
+        resolved_target_id: sharedId,
+        resolution_reason: null,
+        resolved_at: "2026-06-01T00:00:00.000Z",
+      },
+    );
+
+    const result = await withdrawMentor(MENTOR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.summary).toEqual({
+      mentorProfileId: MENTOR,
+      conceptsRetained: 1,
+      conceptsArchived: 1,
+      candidatesDeleted: 1,
+      candidatesScrubbed: 1,
+    });
+
+    // The person is fully erased: profile, session, verbatim answers.
+    expect(fake.tables["mentor_profiles"]).toHaveLength(0);
+    expect(fake.tables["interview_sessions"]).toHaveLength(0);
+    expect(fake.tables["interview_answers"]).toHaveLength(0);
+
+    // Pending candidate is gone; resolved candidate survives scrubbed.
+    const remaining = candidates();
+    const pending = remaining.find((c) => c["status"] === "pending");
+    expect(pending).toBeUndefined();
+    const resolved = remaining.find((c) => c["status"] === "accepted")!;
+    expect(resolved["mentor_profile_id"]).toBeNull();
+    expect(resolved["mentor_name"]).toBeNull();
+    expect(resolved["answer_id"]).toBeNull();
+    expect(resolved["session_id"]).toBeNull();
+    expect(resolved["resolved_target_id"]).toBe(sharedId);
+    expect(resolved["resolved_at"]).toBe("2026-06-01T00:00:00.000Z");
+
+    // Graph outcomes match the summary: shared retained, mentor-only archived.
+    expect(nodeById(sharedId)).toBeDefined();
+    expect(nodeById(sharedId)!["confidence"] as number).toBeCloseTo(0.6, 10);
+    expect(remaining.find((c) => c["status"] === "archived")).toBeDefined();
+
+    // Replaying a completed withdrawal is a clean not-found, and nothing moves.
+    const replay = await withdrawMentor(MENTOR);
+    expect(replay).toEqual({ ok: false, code: "not_found" });
+    expect(candidates()).toHaveLength(2);
+  });
+
+  it("a mid-flight failure leaves the withdrawal retryable — the retry converges to the same end state", async () => {
+    seedMentorRows(MENTOR, SESSION_1, [ANSWER_1]);
+    const conceptId = knowledgeNodeId("concept", "Arc Blow Workarounds");
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Arc Blow Workarounds", { confidence: 0.8, competencyCode: "W-2" })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+
+    // Inject a crash at the FINAL step: the mentor_profiles delete. Everything
+    // before it (graph re-evaluation, candidate cleanup) has already run.
+    const origFrom = fake.from.bind(fake);
+    const spy = vi.spyOn(fake, "from").mockImplementation((table: string) => {
+      const builder = origFrom(table);
+      if (table === "mentor_profiles") {
+        builder.delete = () => {
+          throw new Error("injected crash before profile deletion");
+        };
+      }
+      return builder;
+    });
+    try {
+      await expect(withdrawMentor(MENTOR)).rejects.toThrow("injected crash");
+    } finally {
+      spy.mockRestore();
+    }
+
+    // The profile row survived the crash, so the withdrawal is retryable (a
+    // replay is NOT yet not_found) even though the graph work already ran.
+    expect(fake.tables["mentor_profiles"]).toHaveLength(1);
+    expect(nodeById(conceptId)).toBeUndefined();
+    expect(candidates()).toHaveLength(1);
+
+    // The retry converges: idempotent graph/candidate steps are no-ops, the
+    // profile finally goes, and the archived snapshot is not duplicated.
+    const retry = await withdrawMentor(MENTOR);
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) throw new Error("unreachable");
+    expect(retry.summary.conceptsRetained).toBe(0);
+    expect(retry.summary.conceptsArchived).toBe(0);
+    expect(fake.tables["mentor_profiles"]).toHaveLength(0);
+    expect(fake.tables["interview_sessions"]).toHaveLength(0);
+    expect(fake.tables["interview_answers"]).toHaveLength(0);
+    expect(candidates()).toHaveLength(1);
+    expect(candidates()[0]!["id"]).toBe(`arch:${conceptId}`);
+    expect(candidates()[0]!["status"]).toBe("archived");
   });
 });

@@ -14,7 +14,14 @@
  */
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { StartInterviewBody, SubmitInterviewAnswerBody } from "@workspace/api-zod";
+import {
+  StartInterviewBody,
+  SubmitInterviewAnswerBody,
+  WithdrawMentorParams,
+  WithdrawMentorResponse,
+} from "@workspace/api-zod";
+import { requireAdminSession } from "../lib/admin-auth.js";
+import { withdrawMentor } from "../lib/memory-graph.js";
 import { aiInterviewLimiter } from "../lib/rate-limit.js";
 import {
   generateNextQuestion,
@@ -339,6 +346,35 @@ router.post("/interview/sessions/:id/finish", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "finishInterview error");
     return res.status(500).json({ error: "Failed to finish interview" });
+  }
+});
+
+/**
+ * Mentor Withdrawal — admin-gated, destructive. Removes the PERSON (profile,
+ * sessions, verbatim answers, candidate attribution) while the Living Memory
+ * graph is re-evaluated concept by concept: retained concepts recompute their
+ * aggregates from surviving sources; mentor-only concepts are demoted to
+ * attribution-free `archived` candidates. All ordering/idempotency lives in
+ * withdrawMentor (graph work first, profile row last), so a replay after
+ * success is a clean 404 and a mid-flight retry converges.
+ */
+router.post("/interview/mentors/:id/withdraw", requireAdminSession, async (req, res) => {
+  try {
+    const parsed = WithdrawMentorParams.safeParse(req.params);
+    // A malformed id can never name a mentor — same not-found semantics as a
+    // missing profile (no oracle for which ids are structurally valid).
+    if (!parsed.success || !UUID_RE.test(parsed.data.id)) {
+      return res.status(404).json({ error: "Mentor not found" });
+    }
+
+    const result = await withdrawMentor(parsed.data.id);
+    if (!result.ok) return res.status(404).json({ error: "Mentor not found" });
+
+    req.log.info({ summary: result.summary }, "mentor withdrawn");
+    return res.json(WithdrawMentorResponse.parse(result.summary));
+  } catch (err) {
+    req.log.error({ err }, "withdrawMentor error");
+    return res.status(500).json({ error: "Failed to withdraw mentor" });
   }
 });
 
