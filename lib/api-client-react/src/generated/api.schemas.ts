@@ -618,6 +618,27 @@ export interface MentorWithdrawalResult {
   candidatesScrubbed: number;
 }
 
+export interface MentorWithdrawalPreviewConcept {
+  id: string;
+  label: string;
+  /** The concept's knowledge kind (concept, tool, hazard, …). */
+  category: string;
+}
+
+export interface MentorWithdrawalPreview {
+  mentorProfileId: string;
+  /** Concepts that would stay in the graph on surviving evidence. */
+  conceptsRetained: number;
+  /** Mentor-only concepts that would be demoted to archived candidates. */
+  conceptsArchived: number;
+  /** Pending knowledge candidates from this mentor that would be removed. */
+  candidatesDeleted: number;
+  /** Resolved candidates that would keep their audit record but lose mentor attribution. */
+  candidatesScrubbed: number;
+  /** The mentor-only concepts that would leave the live graph, for admin review. */
+  archivedConcepts: MentorWithdrawalPreviewConcept[];
+}
+
 export interface InterviewTurnResult {
   session: InterviewSession;
   answer: InterviewAnswer;

@@ -38,6 +38,7 @@ import type {
   ListKnowledgeCandidatesParams,
   ListVideosParams,
   MentorList,
+  MentorWithdrawalPreview,
   MentorWithdrawalResult,
   RedistillAnswerResult,
   SearchInput,
@@ -2081,6 +2082,83 @@ export const useWithdrawMentor = <TError = ErrorType<void>,
       > => {
       return useMutation(getWithdrawMentorMutationOptions(options));
     }
+
+export const getPreviewMentorWithdrawalUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/mentors/${id}/withdrawal-preview`
+}
+
+/**
+ * @summary Preview the impact of withdrawing a mentor without making any changes (admin only)
+ */
+export const previewMentorWithdrawal = async (id: string, options?: RequestInit): Promise<MentorWithdrawalPreview> => {
+
+  return customFetch<MentorWithdrawalPreview>(getPreviewMentorWithdrawalUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPreviewMentorWithdrawalQueryKey = (id: string,) => {
+    return [
+    `/api/interview/mentors/${id}/withdrawal-preview`
+    ] as const;
+    }
+
+
+export const getPreviewMentorWithdrawalQueryOptions = <TData = Awaited<ReturnType<typeof previewMentorWithdrawal>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof previewMentorWithdrawal>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPreviewMentorWithdrawalQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof previewMentorWithdrawal>>> = ({ signal }) => previewMentorWithdrawal(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof previewMentorWithdrawal>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type PreviewMentorWithdrawalQueryResult = NonNullable<Awaited<ReturnType<typeof previewMentorWithdrawal>>>
+export type PreviewMentorWithdrawalQueryError = ErrorType<void>
+
+
+/**
+ * @summary Preview the impact of withdrawing a mentor without making any changes (admin only)
+ */
+
+export function usePreviewMentorWithdrawal<TData = Awaited<ReturnType<typeof previewMentorWithdrawal>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof previewMentorWithdrawal>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getPreviewMentorWithdrawalQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getFinishInterviewUrl = (id: string,) => {
 

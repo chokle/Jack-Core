@@ -707,6 +707,27 @@ export const WithdrawMentorResponse = zod.object({
 
 
 /**
+ * @summary Preview the impact of withdrawing a mentor without making any changes (admin only)
+ */
+export const PreviewMentorWithdrawalParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const PreviewMentorWithdrawalResponse = zod.object({
+  "mentorProfileId": zod.string(),
+  "conceptsRetained": zod.number().describe('Concepts that would stay in the graph on surviving evidence.'),
+  "conceptsArchived": zod.number().describe('Mentor-only concepts that would be demoted to archived candidates.'),
+  "candidatesDeleted": zod.number().describe('Pending knowledge candidates from this mentor that would be removed.'),
+  "candidatesScrubbed": zod.number().describe('Resolved candidates that would keep their audit record but lose mentor attribution.'),
+  "archivedConcepts": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "category": zod.string().describe('The concept\'s knowledge kind (concept, tool, hazard, …).')
+})).describe('The mentor-only concepts that would leave the live graph, for admin review.')
+})
+
+
+/**
  * @summary End the interview session
  */
 export const FinishInterviewParams = zod.object({

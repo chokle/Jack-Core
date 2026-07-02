@@ -50,6 +50,8 @@ export * from './listVideosStatus';
 export * from './mentorList';
 export * from './mentorProfile';
 export * from './mentorSummary';
+export * from './mentorWithdrawalPreview';
+export * from './mentorWithdrawalPreviewConcept';
 export * from './mentorWithdrawalResult';
 export * from './redistillAnswerResult';
 export * from './searchInput';

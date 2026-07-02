@@ -16,13 +16,19 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import {
   ListMentorsResponse,
+  PreviewMentorWithdrawalParams,
+  PreviewMentorWithdrawalResponse,
   StartInterviewBody,
   SubmitInterviewAnswerBody,
   WithdrawMentorParams,
   WithdrawMentorResponse,
 } from "@workspace/api-zod";
 import { requireAdminSession } from "../lib/admin-auth.js";
-import { withdrawMentor, verifyAndRecordGraphWrite } from "../lib/memory-graph.js";
+import {
+  previewMentorWithdrawal,
+  withdrawMentor,
+  verifyAndRecordGraphWrite,
+} from "../lib/memory-graph.js";
 import { aiInterviewLimiter } from "../lib/rate-limit.js";
 import {
   generateNextQuestion,
@@ -538,6 +544,30 @@ router.post("/interview/mentors/:id/withdraw", requireAdminSession, async (req, 
   } catch (err) {
     req.log.error({ err }, "withdrawMentor error");
     return res.status(500).json({ error: "Failed to withdraw mentor" });
+  }
+});
+
+/**
+ * Withdrawal impact preview — admin-gated, read-only dry run. Returns the exact
+ * counts (and the labels of concepts that would be archived out of the live
+ * graph) that a real withdrawal would produce, WITHOUT writing anything, so an
+ * admin can make a fully informed decision before this irreversible action.
+ * Shares the same concept-evaluation logic as the withdrawal itself.
+ */
+router.get("/interview/mentors/:id/withdrawal-preview", requireAdminSession, async (req, res) => {
+  try {
+    const parsed = PreviewMentorWithdrawalParams.safeParse(req.params);
+    if (!parsed.success || !UUID_RE.test(parsed.data.id)) {
+      return res.status(404).json({ error: "Mentor not found" });
+    }
+
+    const result = await previewMentorWithdrawal(parsed.data.id);
+    if (!result.ok) return res.status(404).json({ error: "Mentor not found" });
+
+    return res.json(PreviewMentorWithdrawalResponse.parse(result.preview));
+  } catch (err) {
+    req.log.error({ err }, "previewMentorWithdrawal error");
+    return res.status(500).json({ error: "Failed to preview mentor withdrawal" });
   }
 });
 

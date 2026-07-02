@@ -572,6 +572,29 @@ paths:
         "404":
           description: Mentor not found (or already withdrawn)
 
+  /interview/mentors/{id}/withdrawal-preview:
+    get:
+      operationId: previewMentorWithdrawal
+      tags: [interview]
+      summary: Preview the impact of withdrawing a mentor without making any changes (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dry-run projection of the withdrawal impact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MentorWithdrawalPreview"
+        "401":
+          description: Admin session required
+        "404":
+          description: Mentor not found
+
   /interview/sessions/{id}/finish:
     post:
       operationId: finishInterview
@@ -1382,6 +1405,50 @@ components:
         candidatesScrubbed:
           type: integer
           description: Resolved candidates that kept their audit record but lost all mentor attribution.
+
+    MentorWithdrawalPreviewConcept:
+      type: object
+      required: [id, label, category]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        category:
+          type: string
+          description: The concept's knowledge kind (concept, tool, hazard, …).
+
+    MentorWithdrawalPreview:
+      type: object
+      required:
+        [
+          mentorProfileId,
+          conceptsRetained,
+          conceptsArchived,
+          candidatesDeleted,
+          candidatesScrubbed,
+          archivedConcepts,
+        ]
+      properties:
+        mentorProfileId:
+          type: string
+        conceptsRetained:
+          type: integer
+          description: Concepts that would stay in the graph on surviving evidence.
+        conceptsArchived:
+          type: integer
+          description: Mentor-only concepts that would be demoted to archived candidates.
+        candidatesDeleted:
+          type: integer
+          description: Pending knowledge candidates from this mentor that would be removed.
+        candidatesScrubbed:
+          type: integer
+          description: Resolved candidates that would keep their audit record but lose mentor attribution.
+        archivedConcepts:
+          type: array
+          description: The mentor-only concepts that would leave the live graph, for admin review.
+          items:
+            $ref: "#/components/schemas/MentorWithdrawalPreviewConcept"
 
     InterviewTurnResult:
       type: object

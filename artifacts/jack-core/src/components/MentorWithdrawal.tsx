@@ -14,12 +14,96 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   useListMentors,
+  usePreviewMentorWithdrawal,
   useWithdrawMentor,
   getListMentorsQueryKey,
   getListKnowledgeCandidatesQueryKey,
   getGetGraphQueryKey,
+  getPreviewMentorWithdrawalQueryKey,
 } from "@workspace/api-client-react";
 import type { MentorSummary, MentorWithdrawalResult } from "@workspace/api-client-react";
+
+/** Cap the concept names shown inline before collapsing to a "+N more" note. */
+const MAX_ARCHIVED_NAMES = 8;
+
+/**
+ * Dry-run impact preview shown inside the confirm dialog. Fetches the read-only
+ * withdrawal projection so the admin sees the concrete counts — and the names of
+ * concepts that would leave the graph — BEFORE confirming this irreversible act.
+ */
+function WithdrawalImpactPreview({ mentorId }: { mentorId: string }) {
+  const previewQuery = usePreviewMentorWithdrawal(mentorId, {
+    request: { credentials: "include" },
+    query: { queryKey: getPreviewMentorWithdrawalQueryKey(mentorId), staleTime: 0 },
+  });
+
+  if (previewQuery.isLoading) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Calculating impact…
+      </div>
+    );
+  }
+
+  if (previewQuery.isError || !previewQuery.data) {
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-200/90">
+        Couldn't load the impact preview. You can still withdraw, but the exact effect isn't shown.
+      </div>
+    );
+  }
+
+  const p = previewQuery.data;
+  const archivedNames = p.archivedConcepts ?? [];
+  const shownNames = archivedNames.slice(0, MAX_ARCHIVED_NAMES);
+  const extraNames = archivedNames.length - shownNames.length;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+      <div className="font-medium text-foreground">What this withdrawal will do:</div>
+      <ul className="grid gap-1 sm:grid-cols-2">
+        <li>
+          <span className="font-mono font-semibold text-foreground">{p.conceptsRetained}</span>{" "}
+          concept{p.conceptsRetained === 1 ? "" : "s"} retained on other evidence
+        </li>
+        <li>
+          <span className="font-mono font-semibold text-destructive">{p.conceptsArchived}</span>{" "}
+          mentor-only concept{p.conceptsArchived === 1 ? "" : "s"} archived out of the graph
+        </li>
+        <li>
+          <span className="font-mono font-semibold text-foreground">{p.candidatesDeleted}</span>{" "}
+          pending candidate{p.candidatesDeleted === 1 ? "" : "s"} deleted
+        </li>
+        <li>
+          <span className="font-mono font-semibold text-foreground">{p.candidatesScrubbed}</span>{" "}
+          resolved candidate{p.candidatesScrubbed === 1 ? "" : "s"} kept, attribution scrubbed
+        </li>
+      </ul>
+      {archivedNames.length > 0 && (
+        <div className="pt-1">
+          <div className="mb-1 text-xs font-medium text-foreground">
+            Concepts leaving the live graph:
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {shownNames.map((c) => (
+              <span
+                key={c.id}
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs text-destructive"
+              >
+                {c.label}
+              </span>
+            ))}
+            {extraNames > 0 && (
+              <span className="rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                +{extraNames} more
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Admin-only mentor roster with a confirm-guarded Withdraw action. Rendered
@@ -192,6 +276,7 @@ export function MentorWithdrawal() {
                     later review.
                   </li>
                 </ul>
+                {confirming && <WithdrawalImpactPreview mentorId={confirming.id} />}
                 <p className="font-medium text-destructive">This cannot be undone.</p>
               </div>
             </AlertDialogDescription>

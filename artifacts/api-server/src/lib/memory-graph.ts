@@ -2753,6 +2753,124 @@ export async function withdrawMentor(profileId: string): Promise<MentorWithdrawa
   };
 }
 
+/** A mentor-only concept that would be archived out of the live graph. */
+export interface WithdrawalPreviewConcept {
+  id: string;
+  label: string;
+  category: string;
+}
+
+/** Dry-run projection of what withdrawing a mentor would do — no writes. */
+export interface MentorWithdrawalPreview {
+  mentorProfileId: string;
+  conceptsRetained: number;
+  conceptsArchived: number;
+  candidatesDeleted: number;
+  candidatesScrubbed: number;
+  archivedConcepts: WithdrawalPreviewConcept[];
+}
+
+export type MentorWithdrawalPreviewResult =
+  | { ok: true; preview: MentorWithdrawalPreview }
+  | { ok: false; code: "not_found" };
+
+/**
+ * Read-only counterpart to withdrawMentor: project exactly what a withdrawal
+ * WOULD do without touching the graph, candidates, or profile. It reuses the
+ * same concept-evaluation logic as removeMentorGraph (partition the concepts
+ * this mentor corroborates into those that survive on other evidence vs. the
+ * mentor-only ones that would be archived) and the same candidate-attribution
+ * queries as withdrawMentor (pending rows deleted, resolved rows scrubbed), so
+ * the preview and the actual action can never diverge in what they report.
+ *
+ * The archived-concept LABELS are included so the admin sees precisely which
+ * pieces of knowledge would leave the live graph before confirming this
+ * irreversible action. Admin-gated at the route layer, like withdrawMentor.
+ */
+export async function previewMentorWithdrawal(
+  profileId: string,
+): Promise<MentorWithdrawalPreviewResult> {
+  const { data: profile, error: pErr } = await supabase
+    .from("mentor_profiles")
+    .select("id")
+    .eq("id", profileId)
+    .maybeSingle();
+  if (pErr) throw pErr;
+  if (!profile) return { ok: false, code: "not_found" };
+
+  const mNode = mentorNodeId(profileId);
+
+  // Concepts this mentor corroborates (same source as removeMentorGraph).
+  const affected = await provenanceTargetsForVideo(mNode);
+
+  // Partition: which affected concepts still have provenance from OTHER sources?
+  let retained: string[] = [];
+  let orphaned: string[] = [];
+  if (affected.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id")
+      .eq("kind", "knowledge")
+      .in("target_id", affected);
+    if (error) throw error;
+    const otherSourced = new Set<string>();
+    for (const e of data ?? []) {
+      const src = (e as Record<string, unknown>)["source_id"] as string;
+      const tgt = (e as Record<string, unknown>)["target_id"] as string;
+      if (src !== mNode) otherSourced.add(tgt);
+    }
+    retained = affected.filter((id) => otherSourced.has(id));
+    orphaned = affected.filter((id) => !otherSourced.has(id));
+  }
+
+  // Resolve the mentor-only concepts to human-readable labels for the preview.
+  let archivedConcepts: WithdrawalPreviewConcept[] = [];
+  if (orphaned.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id, kind, label")
+      .in("id", orphaned);
+    if (error) throw error;
+    archivedConcepts = (data ?? []).map((row) => {
+      const n = row as Record<string, unknown>;
+      return {
+        id: n["id"] as string,
+        label: (n["label"] as string) ?? "",
+        category: (n["kind"] as string) ?? "concept",
+      };
+    });
+    archivedConcepts.sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  // Candidate counts, mirroring withdrawMentor's delete-pending / scrub-resolved
+  // split (resolved = everything this mentor owns that is NOT pending).
+  const { data: pendingRows, error: pendErr } = await supabase
+    .from("knowledge_candidates")
+    .select("id")
+    .eq("mentor_profile_id", profileId)
+    .eq("status", "pending");
+  if (pendErr) throw pendErr;
+
+  const { data: scrubRows, error: scrubErr } = await supabase
+    .from("knowledge_candidates")
+    .select("id")
+    .eq("mentor_profile_id", profileId)
+    .neq("status", "pending");
+  if (scrubErr) throw scrubErr;
+
+  return {
+    ok: true,
+    preview: {
+      mentorProfileId: profileId,
+      conceptsRetained: retained.length,
+      conceptsArchived: orphaned.length,
+      candidatesDeleted: (pendingRows ?? []).length,
+      candidatesScrubbed: (scrubRows ?? []).length,
+      archivedConcepts,
+    },
+  };
+}
+
 /**
  * Rebuild the whole graph from the source tables: base scaffold, one sync per
  * existing video, then prune video nodes whose source video is gone. Used to
