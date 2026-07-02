@@ -443,12 +443,17 @@ export const ListKnowledgeCandidatesResponse = zod.object({
   "bestMatches": zod.array(zod.object({
   "nodeId": zod.string(),
   "label": zod.string(),
-  "similarity": zod.number()
+  "similarity": zod.number(),
+  "validity": zod.enum(['live', 'redirected', 'gone']).optional().describe('Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.'),
+  "currentNodeId": zod.string().nullish().describe('The node this match currently resolves to (itself when live, the survivor when redirected).'),
+  "currentLabel": zod.string().nullish()
 })),
   "createdAt": zod.string().nullish(),
   "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
   "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
-  "resolvedAt": zod.string().nullish()
+  "resolvedAt": zod.string().nullish(),
+  "requestedTargetId": zod.string().nullish().describe('The target the reviewer originally asked for (accept\/merge only).'),
+  "redirectReason": zod.string().nullish().describe('Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.')
 })),
   "total": zod.number()
 })
@@ -483,12 +488,17 @@ export const ResolveKnowledgeCandidateResponse = zod.object({
   "bestMatches": zod.array(zod.object({
   "nodeId": zod.string(),
   "label": zod.string(),
-  "similarity": zod.number()
+  "similarity": zod.number(),
+  "validity": zod.enum(['live', 'redirected', 'gone']).optional().describe('Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.'),
+  "currentNodeId": zod.string().nullish().describe('The node this match currently resolves to (itself when live, the survivor when redirected).'),
+  "currentLabel": zod.string().nullish()
 })),
   "createdAt": zod.string().nullish(),
   "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
   "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
-  "resolvedAt": zod.string().nullish()
+  "resolvedAt": zod.string().nullish(),
+  "requestedTargetId": zod.string().nullish().describe('The target the reviewer originally asked for (accept\/merge only).'),
+  "redirectReason": zod.string().nullish().describe('Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.')
 })
 
 

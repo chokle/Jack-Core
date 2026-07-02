@@ -740,6 +740,11 @@ export interface CandidateMatch {
   nodeId: string;
   label: string;
   similarity: number;
+  /** Read-time validity annotation (set by listKnowledgeCandidates, never stored). */
+  validity?: "live" | "redirected" | "gone";
+  /** The node this match currently resolves to (itself when live, survivor when redirected). */
+  currentNodeId?: string | null;
+  currentLabel?: string | null;
 }
 
 /** A mentor concept held back as a pending candidate (uncertain middle band). */
@@ -1690,6 +1695,10 @@ export interface KnowledgeCandidateRecord {
   resolvedTargetId: string | null;
   resolutionReason: string | null;
   resolvedAt: string | null;
+  /** The target the reviewer originally asked for (accept/merge only). */
+  requestedTargetId: string | null;
+  /** Why the recorded target differs from the requested one (null when it doesn't). */
+  redirectReason: string | null;
 }
 
 /** Map a raw knowledge_candidates row to the API record shape. */
@@ -1721,7 +1730,200 @@ function mapCandidateRow(row: Record<string, unknown>): KnowledgeCandidateRecord
     resolvedTargetId: (row["resolved_target_id"] as string | null) ?? null,
     resolutionReason: (row["resolution_reason"] as string | null) ?? null,
     resolvedAt: (row["resolved_at"] as string | null) ?? null,
+    requestedTargetId: (row["requested_target_id"] as string | null) ?? null,
+    redirectReason: (row["redirect_reason"] as string | null) ?? null,
   };
+}
+
+/** Minimal live-graph view used to re-validate review-time targets. */
+interface LiveKnowledgeIndex {
+  live: Map<string, { id: string; kind: KnowledgeNodeKind; label: string }>;
+  /** absorbed identity id → surviving live node id (from node meta.mergedFrom). */
+  mergedInto: Map<string, string>;
+}
+
+/**
+ * One pass over the live knowledge nodes: liveness (id/kind/label) plus the
+ * mergedFrom ledger recording which absorbed identities each survivor carries.
+ */
+async function loadLiveKnowledgeIndex(): Promise<LiveKnowledgeIndex> {
+  const { data, error } = await supabase
+    .from("knowledge_nodes")
+    .select("id, kind, label, meta")
+    .in("kind", [...KNOWLEDGE_NODE_KINDS]);
+  if (error) throw error;
+  const live = new Map<string, { id: string; kind: KnowledgeNodeKind; label: string }>();
+  const mergedInto = new Map<string, string>();
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>;
+    const id = r["id"] as string;
+    live.set(id, {
+      id,
+      kind: r["kind"] as KnowledgeNodeKind,
+      label: (r["label"] as string) || id,
+    });
+    const meta = (r["meta"] as Record<string, unknown>) ?? {};
+    const mergedFrom = Array.isArray(meta["mergedFrom"]) ? meta["mergedFrom"] : [];
+    for (const m of mergedFrom) {
+      const mid = (m as Record<string, unknown> | null)?.["id"];
+      // First writer wins — deterministic even if two survivors claim an id.
+      if (typeof mid === "string" && !mergedInto.has(mid)) mergedInto.set(mid, id);
+    }
+  }
+  return { live, mergedInto };
+}
+
+/**
+ * Follow the mergedFrom redirect chain from a (possibly vanished) node id to
+ * its final live survivor. Returns the survivor plus the ids traversed, or
+ * null when no chain lands on a live node. Cycle-guarded.
+ */
+function followMergeChain(
+  nodeId: string,
+  index: LiveKnowledgeIndex,
+): { survivor: { id: string; kind: KnowledgeNodeKind; label: string }; via: string[] } | null {
+  const via: string[] = [];
+  const seen = new Set<string>([nodeId]);
+  let cur = nodeId;
+  while (index.mergedInto.has(cur)) {
+    const next = index.mergedInto.get(cur)!;
+    if (seen.has(next)) return null; // defensive: cyclic ledger
+    via.push(cur);
+    seen.add(next);
+    cur = next;
+    const survivor = index.live.get(cur);
+    if (survivor) return { survivor, via };
+  }
+  return null;
+}
+
+/** How a review-time target id maps onto the CURRENT live graph. */
+export type TargetRevalidation =
+  | { state: "live"; targetId: string; label: string; kind: KnowledgeNodeKind }
+  | { state: "merged"; targetId: string; label: string; kind: KnowledgeNodeKind; via: string[] }
+  | { state: "rematched"; targetId: string; label: string; kind: KnowledgeNodeKind }
+  | { state: "gone"; freshMatches: CandidateMatch[] };
+
+/**
+ * Re-validate a resolution target against the live graph at decision time.
+ * The graph legitimately moves while a candidate sits in review (videos get
+ * deleted, mentors withdraw, re-processing collapses nodes), so a recorded
+ * best-match id is a HINT, not a guarantee.
+ *
+ *  1. **live** — the node still exists as-is: use it.
+ *  2. **merged** — the id appears in a survivor's meta.mergedFrom ledger:
+ *     follow the redirect chain (A→B→C lands on C) and use the survivor.
+ *  3. **rematched** — the id is gone without a ledger trail: re-run the SAME
+ *     duplicate-smart signals ingestion uses on the candidate's own content
+ *     (exact deterministic id → cross-category label+alias index →
+ *     same-category semantic ≥ KNOWLEDGE_MATCH_THRESHOLD, with slang/regional
+ *     also searching the concept category).
+ *  4. **gone** — nothing confidently matches: hand back the CURRENT near
+ *     matches (novelty band) so the reviewer can pick a new destination.
+ */
+export async function revalidateConceptTarget(
+  nodeId: string,
+  content: { title: string; description: string; category: KnowledgeCategory },
+): Promise<TargetRevalidation> {
+  const index = await loadLiveKnowledgeIndex();
+
+  // 1. Live as-is.
+  const asIs = index.live.get(nodeId);
+  if (asIs) return { state: "live", targetId: asIs.id, label: asIs.label, kind: asIs.kind };
+
+  // 2. Merged away — follow the redirect chain to the final survivor.
+  const chain = followMergeChain(nodeId, index);
+  if (chain) {
+    return {
+      state: "merged",
+      targetId: chain.survivor.id,
+      label: chain.survivor.label,
+      kind: chain.survivor.kind,
+      via: chain.via,
+    };
+  }
+
+  // 3. Re-match by the candidate's own content — same signals as ingestion.
+  const exactId = knowledgeNodeId(content.category, content.title);
+  const exact = index.live.get(exactId);
+  if (exact) {
+    return { state: "rematched", targetId: exact.id, label: exact.label, kind: exact.kind };
+  }
+
+  const aliasIndex = await buildKnowledgeAliasIndex();
+  const aliasHit = aliasIndex.get(normalizeConcept(content.title));
+  if (aliasHit) {
+    const hit = index.live.get(aliasHit.id);
+    if (hit) return { state: "rematched", targetId: hit.id, label: hit.label, kind: hit.kind };
+  }
+
+  const matches: CandidateMatch[] = [];
+  const embedding = await createEmbedding(
+    conceptEmbeddingText(content.title, content.description),
+  );
+  if (embedding.length > 0) {
+    const categories: KnowledgeCategory[] =
+      content.category === "slang" || content.category === "regional_term"
+        ? [content.category, "concept"]
+        : [content.category];
+    for (const cat of categories) {
+      const { data, error } = await supabase.rpc("match_knowledge_nodes", {
+        query_embedding: embedding,
+        filter_category: cat,
+        match_threshold: MENTOR_NOVELTY_THRESHOLD,
+        match_count: MENTOR_NEIGHBOR_COUNT,
+        exclude_ids: [nodeId],
+      });
+      if (error) throw error;
+      for (const m of (data ?? []) as Array<{ id?: string; label?: string; similarity?: number }>) {
+        if (typeof m.id === "string" && typeof m.similarity === "number") {
+          matches.push({ nodeId: m.id, label: m.label ?? m.id, similarity: m.similarity });
+        }
+      }
+    }
+    matches.sort((a, b) => b.similarity - a.similarity);
+    const best = matches[0];
+    if (best && best.similarity >= KNOWLEDGE_MATCH_THRESHOLD) {
+      const hit = index.live.get(best.nodeId);
+      if (hit) return { state: "rematched", targetId: hit.id, label: hit.label, kind: hit.kind };
+    }
+  }
+
+  // 4. Gone — reviewer input required; hand back the current near matches.
+  return { state: "gone", freshMatches: matches.slice(0, MENTOR_NEIGHBOR_COUNT) };
+}
+
+/**
+ * Annotate stored best-matches with their CURRENT validity so reviewers see
+ * graph drift before acting: `live` (node still exists), `redirected` (absorbed
+ * into a survivor — currentNodeId/currentLabel point at it), or `gone`.
+ * One live-graph pass covers the whole listing.
+ */
+function annotateCandidateMatches(
+  records: KnowledgeCandidateRecord[],
+  index: LiveKnowledgeIndex,
+): void {
+  for (const record of records) {
+    for (const match of record.bestMatches) {
+      const liveNode = index.live.get(match.nodeId);
+      if (liveNode) {
+        match.validity = "live";
+        match.currentNodeId = liveNode.id;
+        match.currentLabel = liveNode.label;
+        continue;
+      }
+      const chain = followMergeChain(match.nodeId, index);
+      if (chain) {
+        match.validity = "redirected";
+        match.currentNodeId = chain.survivor.id;
+        match.currentLabel = chain.survivor.label;
+      } else {
+        match.validity = "gone";
+        match.currentNodeId = null;
+        match.currentLabel = null;
+      }
+    }
+  }
 }
 
 /** List queued mentor-concept candidates by status (read-only; default pending). */
@@ -1734,7 +1936,11 @@ export async function listKnowledgeCandidates(
     .eq("status", status)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((row: Record<string, unknown>) => mapCandidateRow(row));
+  const records = (data ?? []).map((row: Record<string, unknown>) => mapCandidateRow(row));
+  if (records.some((r) => r.bestMatches.length > 0)) {
+    annotateCandidateMatches(records, await loadLiveKnowledgeIndex());
+  }
+  return records;
 }
 
 /** The three Knowledge Review outcomes for a queued candidate. */
@@ -1742,7 +1948,10 @@ export type CandidateResolutionAction = "accept" | "merge" | "reject";
 
 export type CandidateResolutionResult =
   | { ok: true; candidate: KnowledgeCandidateRecord; replayed: boolean }
-  | { ok: false; code: "not_found" | "conflict" | "invalid"; message: string };
+  | { ok: false; code: "not_found" | "conflict" | "invalid"; message: string }
+  /** The requested target no longer exists and nothing confidently replaces it —
+   * the candidate STAYS pending; bestMatches are fresh near matches for the reviewer. */
+  | { ok: false; code: "target_gone"; message: string; bestMatches: CandidateMatch[] };
 
 const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   accept: "accepted",
@@ -1840,11 +2049,16 @@ async function resolveKnowledgeCandidateInner(
   }
 
   // Idempotent replay: same outcome (and same target for accept/merge) is a
-  // no-op; a different outcome on a resolved candidate is a conflict.
+  // no-op; a different outcome on a resolved candidate is a conflict. A
+  // resolution recorded via redirect still replays cleanly: the reviewer's
+  // requested target is stored alongside the actual one, and matching EITHER
+  // counts as the same outcome.
   if (record.status !== "pending") {
     const sameOutcome =
       record.status === nextStatus &&
-      (action === "reject" || record.resolvedTargetId === targetNodeId);
+      (action === "reject" ||
+        record.resolvedTargetId === targetNodeId ||
+        record.requestedTargetId === targetNodeId);
     if (sameOutcome) return { ok: true, candidate: record, replayed: true };
     return {
       ok: false,
@@ -1853,17 +2067,22 @@ async function resolveKnowledgeCandidateInner(
     };
   }
 
+  // The reviewer's requested target vs. what the live graph resolves it to.
+  let actualTargetId: string | null = null;
+  let redirectReason: string | null = null;
+
   if (action !== "reject") {
-    // The target must be an existing distilled concept node — never a scaffold
-    // node (core/topic/competency/video/mentor).
-    const { data: target, error: tErr } = await supabase
+    // A target that EXISTS but is a scaffold node (core/topic/competency/
+    // video/mentor) is reviewer error, not graph drift — refuse it outright
+    // rather than letting content re-matching paper over it.
+    const { data: rawTarget, error: tErr } = await supabase
       .from("knowledge_nodes")
-      .select("id, kind, label")
+      .select("id, kind")
       .eq("id", targetNodeId!)
       .maybeSingle();
     if (tErr) throw tErr;
-    const t = target as Record<string, unknown> | null;
-    if (!t || !KNOWLEDGE_NODE_KINDS.includes(t["kind"] as KnowledgeNodeKind)) {
+    const raw = rawTarget as Record<string, unknown> | null;
+    if (raw && !KNOWLEDGE_NODE_KINDS.includes(raw["kind"] as KnowledgeNodeKind)) {
       return {
         ok: false,
         code: "invalid",
@@ -1880,13 +2099,40 @@ async function resolveKnowledgeCandidateInner(
     }
 
     const category = record.category as KnowledgeCategory;
+
+    // Re-validate the target against the live graph INSIDE the serialized
+    // section — the graph may have moved while the candidate sat in review
+    // (video deletion, mentor withdrawal, re-processing merges).
+    const revalidation = await revalidateConceptTarget(targetNodeId!, {
+      title: record.title,
+      description: record.description ?? "",
+      category,
+    });
+    if (revalidation.state === "gone") {
+      return {
+        ok: false,
+        code: "target_gone",
+        message:
+          "The chosen concept no longer exists in the knowledge graph and nothing " +
+          "confidently replaces it — pick a new destination.",
+        bestMatches: revalidation.freshMatches,
+      };
+    }
+    actualTargetId = revalidation.targetId;
+    redirectReason =
+      revalidation.state === "merged"
+        ? `Requested concept was merged into “${revalidation.label}”.`
+        : revalidation.state === "rematched"
+          ? `Requested concept no longer exists; re-matched by content to “${revalidation.label}”.`
+          : null;
+
     const itemId = knowledgeNodeId(category, record.title);
-    const targetLabel = (t["label"] as string) || targetNodeId!;
+    const targetLabel = revalidation.label || actualTargetId;
     const resolvedConcept: MentorResolvedConcept = {
-      id: targetNodeId!,
+      id: actualTargetId,
       // Keep the target node's own kind — a slang candidate merged into a
       // concept node must not re-kind the concept.
-      category: t["kind"] as KnowledgeCategory,
+      category: revalidation.kind as KnowledgeCategory,
       title: record.title,
       description: record.description ?? "",
       timestamps: [],
@@ -1895,7 +2141,7 @@ async function resolveKnowledgeCandidateInner(
       // The target owns its embedding; the candidate never brings one in.
       embeddingJson: null,
       mergedFrom:
-        itemId !== targetNodeId
+        itemId !== actualTargetId
           ? [{ id: itemId, label: record.title, category }]
           : [],
       reinforced: true,
@@ -1925,7 +2171,9 @@ async function resolveKnowledgeCandidateInner(
     .from("knowledge_candidates")
     .update({
       status: nextStatus,
-      resolved_target_id: action === "reject" ? null : targetNodeId,
+      resolved_target_id: action === "reject" ? null : actualTargetId,
+      requested_target_id: action === "reject" ? null : targetNodeId,
+      redirect_reason: action === "reject" ? null : redirectReason,
       resolution_reason: action === "reject" ? reason : null,
       resolved_at: now,
       updated_at: now,
@@ -1949,7 +2197,9 @@ async function resolveKnowledgeCandidateInner(
     const winner = mapCandidateRow(current as Record<string, unknown>);
     const sameOutcome =
       winner.status === nextStatus &&
-      (action === "reject" || winner.resolvedTargetId === targetNodeId);
+      (action === "reject" ||
+        winner.resolvedTargetId === targetNodeId ||
+        winner.requestedTargetId === targetNodeId);
     if (sameOutcome) return { ok: true, candidate: winner, replayed: true };
     return {
       ok: false,

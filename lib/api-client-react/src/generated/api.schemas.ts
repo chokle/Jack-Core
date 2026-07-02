@@ -436,10 +436,31 @@ export interface ExtractedKnowledgeItem {
   matchedLabel?: string | null;
 }
 
+/**
+ * Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail.
+ */
+export type KnowledgeCandidateMatchValidity = typeof KnowledgeCandidateMatchValidity[keyof typeof KnowledgeCandidateMatchValidity];
+
+
+export const KnowledgeCandidateMatchValidity = {
+  live: 'live',
+  redirected: 'redirected',
+  gone: 'gone',
+} as const;
+
 export interface KnowledgeCandidateMatch {
   nodeId: string;
   label: string;
   similarity: number;
+  /** Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail. */
+  validity?: KnowledgeCandidateMatchValidity;
+  /**
+     * The node this match currently resolves to (itself when live, the survivor when redirected).
+     * @nullable
+     */
+  currentNodeId?: string | null;
+  /** @nullable */
+  currentLabel?: string | null;
 }
 
 export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typeof KnowledgeCandidateStatus];
@@ -488,6 +509,16 @@ export interface KnowledgeCandidate {
   resolutionReason?: string | null;
   /** @nullable */
   resolvedAt?: string | null;
+  /**
+     * The target the reviewer originally asked for (accept/merge only).
+     * @nullable
+     */
+  requestedTargetId?: string | null;
+  /**
+     * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
+     * @nullable
+     */
+  redirectReason?: string | null;
 }
 
 /**
@@ -509,6 +540,21 @@ export interface CandidateResolutionInput {
   targetNodeId?: string;
   /** Why the candidate was rejected (required for reject). */
   reason?: string;
+}
+
+export type CandidateResolutionConflictCode = typeof CandidateResolutionConflictCode[keyof typeof CandidateResolutionConflictCode];
+
+
+export const CandidateResolutionConflictCode = {
+  already_resolved: 'already_resolved',
+  target_gone: 'target_gone',
+} as const;
+
+export interface CandidateResolutionConflict {
+  error: string;
+  code: CandidateResolutionConflictCode;
+  /** Fresh near matches from the live graph (target_gone only). */
+  bestMatches?: KnowledgeCandidateMatch[];
 }
 
 export interface KnowledgeCandidateList {

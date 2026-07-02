@@ -77,13 +77,27 @@ export function KnowledgeReview() {
     [graphQuery.data],
   );
 
+  // When a resolve is refused because the target vanished (code=target_gone),
+  // the candidate stays pending — remember which card hit it so it can open
+  // the merge picker with an explanation.
+  const [goneCandidateId, setGoneCandidateId] = useState<string | null>(null);
+
   const resolve = useResolveKnowledgeCandidate({
     request: { credentials: "include" },
     mutation: {
       onSuccess: () => {
+        setGoneCandidateId(null);
         void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: statusTab }) });
         void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: "pending" }) });
         void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
+      },
+      onError: (error, variables) => {
+        const body = (error as { data?: { code?: string } | null }).data;
+        if (body?.code === "target_gone") {
+          setGoneCandidateId(variables.id);
+          // Refresh the listing so match chips show current validity.
+          void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: statusTab }) });
+        }
       },
     },
   });
@@ -157,6 +171,7 @@ export function KnowledgeReview() {
                   candidate={cand}
                   conceptNodes={conceptNodes}
                   busy={resolve.isPending}
+                  targetGone={goneCandidateId === cand.id}
                   onResolve={(action, extra) =>
                     resolve.mutate({ id: cand.id, data: { action, ...extra } })
                   }
@@ -174,11 +189,14 @@ function CandidateCard({
   candidate,
   conceptNodes,
   busy,
+  targetGone,
   onResolve,
 }: {
   candidate: KnowledgeCandidate;
   conceptNodes: KnowledgeNode[];
   busy: boolean;
+  /** The last resolve attempt failed because the target vanished — open the merge picker. */
+  targetGone: boolean;
   onResolve: (
     action: "accept" | "merge" | "reject",
     extra?: { targetNodeId?: string; reason?: string },
@@ -189,7 +207,12 @@ function CandidateCard({
   const [mergeTarget, setMergeTarget] = useState<KnowledgeNode | null>(null);
   const [reason, setReason] = useState("");
 
+  useEffect(() => {
+    if (targetGone) setMode("merge");
+  }, [targetGone]);
+
   const topMatch = candidate.bestMatches[0];
+  const topMatchGone = topMatch?.validity === "gone";
   const isPending = candidate.status === "pending";
 
   const mergeMatches = useMemo(() => {
@@ -266,15 +289,27 @@ function CandidateCard({
               <span
                 key={m.nodeId}
                 className={`rounded-lg border px-2 py-1 text-xs ${
-                  i === 0
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-border bg-muted/30 text-muted-foreground"
+                  m.validity === "gone"
+                    ? "border-border/60 bg-muted/20 text-muted-foreground/60"
+                    : i === 0
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                      : "border-border bg-muted/30 text-muted-foreground"
                 }`}
               >
-                {m.label}
+                <span className={m.validity === "gone" ? "line-through" : undefined}>
+                  {m.label}
+                </span>
                 <span className="ml-1.5 font-mono opacity-70">
                   {(m.similarity * 100).toFixed(0)}%
                 </span>
+                {m.validity === "redirected" && m.currentLabel && (
+                  <span className="ml-1.5 text-amber-300">
+                    → now part of “{m.currentLabel}”
+                  </span>
+                )}
+                {m.validity === "gone" && (
+                  <span className="ml-1.5 italic">no longer exists</span>
+                )}
               </span>
             ))}
           </div>
@@ -290,6 +325,9 @@ function CandidateCard({
           {candidate.status !== "rejected" && candidate.resolvedTargetId && (
             <span className="font-mono">→ {candidate.resolvedTargetId}</span>
           )}
+          {candidate.status !== "rejected" && candidate.redirectReason && (
+            <span className="ml-2 text-amber-400/90">{candidate.redirectReason}</span>
+          )}
         </div>
       )}
 
@@ -300,17 +338,19 @@ function CandidateCard({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={busy || !topMatch}
+                disabled={busy || !topMatch || topMatchGone}
                 onClick={() => onResolve("accept")}
                 className="bg-emerald-600 text-white hover:bg-emerald-500"
                 title={
-                  topMatch
-                    ? `Reinforce “${topMatch.label}”`
-                    : "No suggested match — use merge instead"
+                  !topMatch
+                    ? "No suggested match — use merge instead"
+                    : topMatchGone
+                      ? "The suggested match no longer exists — use merge instead"
+                      : `Reinforce “${topMatch.currentLabel ?? topMatch.label}”`
                 }
               >
                 <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                Accept{topMatch ? ` as “${topMatch.label}”` : ""}
+                Accept{topMatch && !topMatchGone ? ` as “${topMatch.currentLabel ?? topMatch.label}”` : ""}
               </Button>
               <Button
                 size="sm"
@@ -337,6 +377,12 @@ function CandidateCard({
 
           {mode === "merge" && (
             <div className="space-y-2">
+              {targetGone && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  The chosen concept no longer exists in the knowledge graph —
+                  pick a new destination below.
+                </div>
+              )}
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input

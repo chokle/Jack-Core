@@ -408,7 +408,16 @@ paths:
         "404":
           description: Candidate not found
         "409":
-          description: Candidate already resolved with a different outcome
+          description: >-
+            Conflict — either the candidate was already resolved with a
+            different outcome (code=already_resolved), or the requested target
+            concept no longer exists in the live graph and nothing confidently
+            replaces it (code=target_gone; the candidate STAYS pending and
+            bestMatches carries fresh near matches to choose from).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateResolutionConflict"
 
   /graph/nodes/{id}/verification:
     patch:
@@ -1135,6 +1144,19 @@ components:
           type: string
         similarity:
           type: number
+        validity:
+          type: string
+          enum: [live, redirected, gone]
+          description: >-
+            Read-time annotation of whether this recorded match still exists in
+            the live graph: live — usable as-is; redirected — absorbed into
+            another concept (see currentNodeId/currentLabel); gone — no longer
+            exists and left no redirect trail.
+        currentNodeId:
+          type: ["string", "null"]
+          description: The node this match currently resolves to (itself when live, the survivor when redirected).
+        currentLabel:
+          type: ["string", "null"]
 
     KnowledgeCandidate:
       type: object
@@ -1179,6 +1201,15 @@ components:
           description: The reviewer's reason, recorded on reject.
         resolvedAt:
           type: ["string", "null"]
+        requestedTargetId:
+          type: ["string", "null"]
+          description: The target the reviewer originally asked for (accept/merge only).
+        redirectReason:
+          type: ["string", "null"]
+          description: >-
+            Why the recorded resolvedTargetId differs from requestedTargetId —
+            set when the requested concept was merged away or re-matched by
+            content at resolution time; null when the target was used as-is.
 
     CandidateResolutionInput:
       type: object
@@ -1196,6 +1227,21 @@ components:
         reason:
           type: string
           description: Why the candidate was rejected (required for reject).
+
+    CandidateResolutionConflict:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [already_resolved, target_gone]
+        bestMatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeCandidateMatch"
+          description: Fresh near matches from the live graph (target_gone only).
 
     KnowledgeCandidateList:
       type: object

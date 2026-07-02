@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CandidateResolutionConflict,
   CandidateResolutionInput,
   ChatInput,
   ChatMessage,
@@ -1527,7 +1528,7 @@ export const resolveKnowledgeCandidate = async (id: string,
 
 
 
-export const getResolveKnowledgeCandidateMutationOptions = <TError = ErrorType<void>,
+export const getResolveKnowledgeCandidateMutationOptions = <TError = ErrorType<void | CandidateResolutionConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext> => {
 
@@ -1556,12 +1557,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResolveKnowledgeCandidateMutationResult = NonNullable<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>>
     export type ResolveKnowledgeCandidateMutationBody = BodyType<CandidateResolutionInput>
-    export type ResolveKnowledgeCandidateMutationError = ErrorType<void>
+    export type ResolveKnowledgeCandidateMutationError = ErrorType<void | CandidateResolutionConflict>
 
     /**
  * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
  */
-export const useResolveKnowledgeCandidate = <TError = ErrorType<void>,
+export const useResolveKnowledgeCandidate = <TError = ErrorType<void | CandidateResolutionConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof resolveKnowledgeCandidate>>,

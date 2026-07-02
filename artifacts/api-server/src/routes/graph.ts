@@ -91,9 +91,21 @@ router.post("/graph/candidates/:id/resolve", requireAdminSession, async (req, re
       reason: bodyParsed.data.reason ?? null,
     });
     if (!result.ok) {
+      // target_gone is a STRUCTURED conflict: the candidate stays pending and
+      // the body carries fresh near matches so the reviewer can re-aim.
+      if (result.code === "target_gone") {
+        return res.status(409).json({
+          error: result.message,
+          code: "target_gone",
+          bestMatches: result.bestMatches,
+        });
+      }
       const status =
         result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 400;
-      return res.status(status).json({ error: result.message });
+      return res.status(status).json({
+        error: result.message,
+        ...(result.code === "conflict" ? { code: "already_resolved" } : {}),
+      });
     }
     return res.json(ResolveKnowledgeCandidateResponse.parse(result.candidate));
   } catch (err) {

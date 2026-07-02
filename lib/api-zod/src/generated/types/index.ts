@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './candidateResolutionConflict';
+export * from './candidateResolutionConflictCode';
 export * from './candidateResolutionInput';
 export * from './candidateResolutionInputAction';
 export * from './chatInput';
@@ -25,6 +27,7 @@ export * from './jobStatus';
 export * from './knowledgeCandidate';
 export * from './knowledgeCandidateList';
 export * from './knowledgeCandidateMatch';
+export * from './knowledgeCandidateMatchValidity';
 export * from './knowledgeCandidateStatus';
 export * from './knowledgeEdge';
 export * from './knowledgeEdgeMeta';

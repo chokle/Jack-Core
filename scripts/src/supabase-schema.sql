@@ -460,3 +460,11 @@ ALTER TABLE knowledge_candidates
   ADD CONSTRAINT knowledge_candidates_status_check
   CHECK (status IN ('pending','accepted','rejected','merged','archived'));
 ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL DEFAULT '[]';
+
+-- Resilient Knowledge Review (idempotent): the graph legitimately moves while
+-- a candidate sits in review, so a resolution records BOTH the target the
+-- reviewer asked for and why the recorded target differs (merged away /
+-- re-matched by content), keeping redirected resolutions auditable and
+-- replay-safe.
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS requested_target_id TEXT;
+ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS redirect_reason TEXT;

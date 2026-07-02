@@ -44,4 +44,14 @@ export interface KnowledgeCandidate {
   resolutionReason?: string | null;
   /** @nullable */
   resolvedAt?: string | null;
+  /**
+     * The target the reviewer originally asked for (accept/merge only).
+     * @nullable
+     */
+  requestedTargetId?: string | null;
+  /**
+     * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
+     * @nullable
+     */
+  redirectReason?: string | null;
 }

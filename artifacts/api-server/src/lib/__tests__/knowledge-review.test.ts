@@ -251,11 +251,19 @@ describe("Knowledge Review — merge", () => {
     expect(scaffold.ok).toBe(false);
     if (!scaffold.ok) expect(scaffold.code).toBe("invalid");
 
+    // A target that never existed and leaves no redirect trail is a
+    // STRUCTURED target_gone conflict (not a plain invalid): the candidate
+    // stays pending and fresh near matches are handed back to re-aim with.
     const ghost = await resolveKnowledgeCandidate(candidateId, "merge", {
       targetNodeId: "k:concept:does-not-exist",
     });
     expect(ghost.ok).toBe(false);
-    if (!ghost.ok) expect(ghost.code).toBe("invalid");
+    if (!ghost.ok) {
+      expect(ghost.code).toBe("target_gone");
+      if (ghost.code === "target_gone") {
+        expect(ghost.bestMatches.map((m) => m.nodeId)).toContain(canonicalId);
+      }
+    }
 
     // The candidate is still pending after every failed attempt.
     expect(candidates()[0]!["status"]).toBe("pending");
@@ -328,6 +336,190 @@ describe("Knowledge Review — reject", () => {
       expect(replay.replayed).toBe(true);
       expect(replay.candidate.resolutionReason).toBe("original reason");
     }
+  });
+});
+
+/**
+ * Resilient Knowledge Review — the graph legitimately moves while a candidate
+ * sits in review (merges, deletions, withdrawals). A recorded best-match id is
+ * a hint, not a guarantee: resolution must re-validate the target against the
+ * live graph and either follow the redirect, re-match by content, or refuse
+ * with a structured target_gone that keeps the candidate pending.
+ */
+describe("Knowledge Review — resilient targets", () => {
+  const SURVIVOR_TITLE = "Weld Porosity Control";
+  const survivorId = knowledgeNodeId("concept", SURVIVOR_TITLE);
+
+  /** Simulate the canonical node being merged away into a survivor. */
+  function mergeCanonicalInto(
+    intoId: string,
+    intoLabel: string,
+    extraMergedFrom: Array<{ id: string; label: string }> = [],
+  ): void {
+    fake.tables["knowledge_nodes"].push({
+      id: intoId,
+      kind: "concept",
+      label: intoLabel,
+      trade: TRADE,
+      ref_id: null,
+      verification_status: "unverified",
+      embedding: JSON.stringify(BASE_VEC),
+      meta: {
+        aliases: [],
+        mergedFrom: [
+          { id: canonicalId, label: CANONICAL_TITLE, category: "concept" },
+          ...extraMergedFrom.map((m) => ({ ...m, category: "concept" })),
+        ],
+      },
+      created_at: new Date().toISOString(),
+      updated_at: null,
+    });
+    // The absorbed node is gone from the live graph.
+    fake.tables["knowledge_nodes"] = fake.tables["knowledge_nodes"].filter(
+      (n) => n["id"] !== canonicalId,
+    );
+  }
+
+  it("accept follows a merge redirect and records requested vs actual target", async () => {
+    await seedPendingCandidate();
+    mergeCanonicalInto(survivorId, SURVIVOR_TITLE);
+
+    const result = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.status).toBe("accepted");
+    // The reinforcement landed on the SURVIVOR, not the vanished request.
+    expect(result.candidate.resolvedTargetId).toBe(survivorId);
+    expect(result.candidate.requestedTargetId).toBe(canonicalId);
+    expect(result.candidate.redirectReason).toContain("merged into");
+
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, survivorId)!;
+    expect(edge).toBeDefined();
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeUndefined();
+    // No zombie node was resurrected for the vanished id.
+    expect(nodeById(canonicalId)).toBeUndefined();
+  });
+
+  it("replaying a redirected accept is a no-op (matches the requested target)", async () => {
+    await seedPendingCandidate();
+    mergeCanonicalInto(survivorId, SURVIVOR_TITLE);
+    await resolveKnowledgeCandidate(candidateId, "accept");
+    const snap = graphSnapshot();
+
+    // The reviewer's client retries the SAME accept — its target is still the
+    // old canonical id, which now only appears as requested_target_id.
+    const replay = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(replay.ok).toBe(true);
+    if (replay.ok) expect(replay.replayed).toBe(true);
+    expect(graphSnapshot()).toBe(snap);
+  });
+
+  it("an id absorbed transitively (multi-entry merge ledger) lands on the final survivor", async () => {
+    await seedPendingCandidate();
+    // canonical was merged into B, then B into the survivor — the survivor's
+    // ledger carries BOTH absorbed identities.
+    const bId = knowledgeNodeId("concept", "Gas Shield Integrity");
+    mergeCanonicalInto(survivorId, SURVIVOR_TITLE, [
+      { id: bId, label: "Gas Shield Integrity" },
+    ]);
+
+    const result = await resolveKnowledgeCandidate(candidateId, "merge", {
+      targetNodeId: bId,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.resolvedTargetId).toBe(survivorId);
+    expect(result.candidate.requestedTargetId).toBe(bId);
+  });
+
+  it("a vanished id with no redirect trail re-matches by the candidate's own content", async () => {
+    await seedPendingCandidate();
+    // Delete the canonical node outright (no mergedFrom trail anywhere) and
+    // plant a replacement whose embedding matches the candidate's content
+    // exactly (cos = 1 ≥ 0.85) — the same duplicate-smart signal ingestion uses.
+    fake.tables["knowledge_nodes"] = fake.tables["knowledge_nodes"].filter(
+      (n) => n["id"] !== canonicalId,
+    );
+    const replacementId = knowledgeNodeId("concept", "Clean Gas Coverage Habits");
+    fake.tables["knowledge_nodes"].push({
+      id: replacementId,
+      kind: "concept",
+      label: "Clean Gas Coverage Habits",
+      trade: TRADE,
+      ref_id: null,
+      verification_status: "unverified",
+      embedding: JSON.stringify(atSimilarity(0.75)),
+      meta: { aliases: [] },
+      created_at: new Date().toISOString(),
+      updated_at: null,
+    });
+
+    const result = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.resolvedTargetId).toBe(replacementId);
+    expect(result.candidate.requestedTargetId).toBe(canonicalId);
+    expect(result.candidate.redirectReason).toContain("re-matched");
+    expect(edgeBetween(`mentor:${MENTOR_A}`, replacementId)).toBeDefined();
+  });
+
+  it("target_gone keeps the candidate pending and a follow-up merge succeeds", async () => {
+    await seedPendingCandidate();
+    // The canonical node vanishes with no trail and no confident replacement.
+    fake.tables["knowledge_nodes"] = fake.tables["knowledge_nodes"].filter(
+      (n) => n["id"] !== canonicalId,
+    );
+    const before = graphSnapshot();
+
+    const result = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("target_gone");
+    if (result.code === "target_gone") {
+      expect(Array.isArray(result.bestMatches)).toBe(true);
+    }
+    // Nothing was written: candidate pending, graph untouched.
+    expect(candidates()[0]!["status"]).toBe("pending");
+    expect(graphSnapshot()).toBe(before);
+
+    // The reviewer re-aims at a real concept — the retry converges cleanly.
+    const other = makeItem("concept", "Shielding Gas Discipline");
+    embedRegistry.set("Shielding Gas Discipline", BASE_VEC);
+    await syncVideoKnowledge("vid-1", [other]);
+    const retry = await resolveKnowledgeCandidate(candidateId, "merge", {
+      targetNodeId: other.id,
+    });
+    expect(retry.ok).toBe(true);
+    if (retry.ok) {
+      expect(retry.candidate.status).toBe("merged");
+      expect(retry.candidate.resolvedTargetId).toBe(other.id);
+      expect(retry.candidate.redirectReason).toBeNull();
+    }
+  });
+
+  it("listing annotates stored best-matches with live / redirected / gone", async () => {
+    await seedPendingCandidate();
+
+    // Live: the match still exists as-is.
+    let [cand] = await listKnowledgeCandidates("pending");
+    expect(cand!.bestMatches[0]!.validity).toBe("live");
+    expect(cand!.bestMatches[0]!.currentNodeId).toBe(canonicalId);
+
+    // Redirected: absorbed into a survivor — annotation points at it.
+    mergeCanonicalInto(survivorId, SURVIVOR_TITLE);
+    [cand] = await listKnowledgeCandidates("pending");
+    expect(cand!.bestMatches[0]!.validity).toBe("redirected");
+    expect(cand!.bestMatches[0]!.currentNodeId).toBe(survivorId);
+    expect(cand!.bestMatches[0]!.currentLabel).toBe(SURVIVOR_TITLE);
+
+    // Gone: the survivor (and its ledger) vanish too.
+    fake.tables["knowledge_nodes"] = fake.tables["knowledge_nodes"].filter(
+      (n) => n["id"] !== survivorId,
+    );
+    [cand] = await listKnowledgeCandidates("pending");
+    expect(cand!.bestMatches[0]!.validity).toBe("gone");
+    expect(cand!.bestMatches[0]!.currentNodeId).toBeNull();
   });
 });
 
