@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * End-to-end guardrail: a distillation failure must NEVER downgrade a video that
  * has already been transcribed/analyzed. `distillGraphSafe` (and the analysis
  * pipeline that calls it) run distillation best-effort — a thrown error is
- * caught, logged, and the video's status is left untouched at "ready".
+ * caught, logged, and the video's status is left untouched at "completed".
  */
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -75,7 +75,7 @@ describe("distillGraphSafe — best-effort guardrail", () => {
   });
 
   it("swallows a thrown distillation error, logs it, and leaves status unchanged", async () => {
-    seedVideo({ id: "v1", title: "GTAW Root Pass", trade: "Welder", status: "ready" });
+    seedVideo({ id: "v1", title: "GTAW Root Pass", trade: "Welder", status: "completed" });
     const errorSpy = vi.spyOn(logger, "error");
     const boom = new Error("distillation blew up");
     runDistillation.mockRejectedValue(boom);
@@ -90,11 +90,11 @@ describe("distillGraphSafe — best-effort guardrail", () => {
       expect.objectContaining({ err: boom, videoId: "v1" }),
       "atomic knowledge distillation failed",
     );
-    // The whole point: the ready video stays ready.
-    expect(videoStatus("v1")).toBe("ready");
+    // The whole point: the completed video stays completed.
+    expect(videoStatus("v1")).toBe("completed");
   });
 
-  it("does not touch a non-ready video's status when distillation throws", async () => {
+  it("does not touch a non-completed video's status when distillation throws", async () => {
     // Even a still-processing row must not be flipped to "error" by a distill hiccup.
     seedVideo({ id: "v2", title: "Framing Basics", trade: "Carpenter", status: "analyzing" });
     runDistillation.mockRejectedValue(new Error("nope"));
@@ -116,7 +116,7 @@ describe("runAnalysis pipeline — a distillation hiccup cannot cascade into a f
     vi.restoreAllMocks();
   });
 
-  it("reaches 'ready' even when distillation throws at the end of analysis", async () => {
+  it("reaches 'completed' even when distillation throws at the end of analysis", async () => {
     seedVideo({
       id: "v1",
       title: "GTAW Root Pass",
@@ -148,8 +148,9 @@ describe("runAnalysis pipeline — a distillation hiccup cannot cascade into a f
 
     await expect(runAnalysis("v1")).resolves.toBeUndefined();
 
-    // Analysis succeeded and persisted, so the video is ready.
-    expect(videoStatus("v1")).toBe("ready");
+    // Analysis succeeded and persisted, so the video completed the pipeline
+    // (analyzing → indexing → completed).
+    expect(videoStatus("v1")).toBe("completed");
     const row = fake.tables["videos"]!.find((v) => v["id"] === "v1")!;
     expect(row["analysis"]).toBe("This video teaches root pass technique.");
     expect(row["competency_codes"]).toEqual(["W-3"]);

@@ -13,11 +13,15 @@ export type VideoStatus = typeof VideoStatus[keyof typeof VideoStatus];
 
 
 export const VideoStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;
 
 export interface Video {
@@ -36,6 +40,10 @@ export interface Video {
   status: VideoStatus;
   competencyCodes?: string[];
   tags?: string[];
+  /** @nullable */
+  attempts?: number | null;
+  /** @nullable */
+  lastError?: string | null;
   createdAt: string;
   /** @nullable */
   updatedAt?: string | null;
@@ -45,11 +53,15 @@ export type VideoDetailStatus = typeof VideoDetailStatus[keyof typeof VideoDetai
 
 
 export const VideoDetailStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;
 
 export interface TranscriptSegment {
@@ -78,6 +90,10 @@ export interface VideoDetail {
   competencyCodes?: string[];
   tags?: string[];
   /** @nullable */
+  attempts?: number | null;
+  /** @nullable */
+  lastError?: string | null;
+  /** @nullable */
   transcript?: string | null;
   segments?: TranscriptSegment[];
   /** @nullable */
@@ -105,11 +121,15 @@ export type VideoUpdateStatus = typeof VideoUpdateStatus[keyof typeof VideoUpdat
 
 
 export const VideoUpdateStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;
 
 export interface VideoUpdate {
@@ -531,11 +551,15 @@ export type ListVideosStatus = typeof ListVideosStatus[keyof typeof ListVideosSt
 
 
 export const ListVideosStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;
 
 export type ListKnowledgeCandidatesParams = {

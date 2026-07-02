@@ -17,7 +17,7 @@ router.get("/competencies", async (req, res) => {
     const { data: videos } = await supabase
       .from("videos")
       .select("competency_codes")
-      .eq("status", "ready");
+      .eq("status", "completed");
 
     const countByCode: Record<string, number> = {};
     for (const v of videos ?? []) {

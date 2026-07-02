@@ -24,7 +24,7 @@ export const listVideosQueryOffsetDefault = 0;
 
 export const ListVideosQueryParams = zod.object({
   "trade": zod.coerce.string().optional().describe('Filter by trade category'),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']).optional().describe('Filter by processing status'),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']).optional().describe('Filter by processing status'),
   "limit": zod.coerce.number().default(listVideosQueryLimitDefault),
   "offset": zod.coerce.number().default(listVideosQueryOffsetDefault)
 })
@@ -38,9 +38,11 @@ export const ListVideosResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })),
@@ -69,9 +71,11 @@ export const CreateVideoResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })
@@ -99,9 +103,11 @@ export const GetRecentVideosResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })
@@ -123,9 +129,11 @@ export const GetVideoResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "transcript": zod.string().nullish(),
   "segments": zod.array(zod.object({
   "id": zod.string(),
@@ -156,7 +164,7 @@ export const UpdateVideoBody = zod.object({
   "description": zod.string().optional(),
   "trade": zod.string().optional(),
   "tags": zod.array(zod.string()).optional(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']).optional()
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']).optional()
 })
 
 export const UpdateVideoResponse = zod.object({
@@ -167,9 +175,11 @@ export const UpdateVideoResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })
@@ -230,9 +240,11 @@ export const FetchRelatedVideosResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })
@@ -357,9 +369,11 @@ export const GetVideosByCompetencyResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "videoUrl": zod.string().nullish(),
   "duration": zod.number().nullish(),
-  "status": zod.enum(['pending', 'transcribing', 'analyzing', 'ready', 'error']),
+  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
   "competencyCodes": zod.array(zod.string()).optional(),
   "tags": zod.array(zod.string()).optional(),
+  "attempts": zod.number().nullish(),
+  "lastError": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string().nullish()
 })

@@ -50,7 +50,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [pending, transcribing, analyzing, ready, error]
+            enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
           description: Filter by processing status
         - name: limit
           in: query
@@ -594,7 +594,7 @@ components:
           type: ["number", "null"]
         status:
           type: string
-          enum: [pending, transcribing, analyzing, ready, error]
+          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
         competencyCodes:
           type: array
           items:
@@ -603,6 +603,10 @@ components:
           type: array
           items:
             type: string
+        attempts:
+          type: ["integer", "null"]
+        lastError:
+          type: ["string", "null"]
         createdAt:
           type: string
         updatedAt:
@@ -628,7 +632,7 @@ components:
           type: ["number", "null"]
         status:
           type: string
-          enum: [pending, transcribing, analyzing, ready, error]
+          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
         competencyCodes:
           type: array
           items:
@@ -637,6 +641,10 @@ components:
           type: array
           items:
             type: string
+        attempts:
+          type: ["integer", "null"]
+        lastError:
+          type: ["string", "null"]
         transcript:
           type: ["string", "null"]
         segments:
@@ -697,7 +705,7 @@ components:
             type: string
         status:
           type: string
-          enum: [pending, transcribing, analyzing, ready, error]
+          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
 
     VideoStats:
       type: object

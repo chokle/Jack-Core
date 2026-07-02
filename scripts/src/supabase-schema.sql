@@ -16,16 +16,45 @@ CREATE TABLE IF NOT EXISTS videos (
   thumbnail_url TEXT,
   video_url TEXT,
   duration FLOAT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','transcribing','analyzing','ready','error')),
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN
+    ('queued','uploading','uploaded','transcribing','analyzing','indexing','completed','failed','retrying')),
   transcript TEXT,
   analysis TEXT,
   key_points TEXT[] DEFAULT '{}',
   competency_codes TEXT[] DEFAULT '{}',
   tags TEXT[] DEFAULT '{}',
   embedding vector(1536),
+  -- Durable job state (resilient processing pipeline)
+  attempts INT NOT NULL DEFAULT 0,
+  last_error TEXT,
+  heartbeat_at TIMESTAMPTZ,
+  claimed_by TEXT,
+  next_attempt_at TIMESTAMPTZ,
+  processing_stage TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration: resilient job system (idempotent).
+-- Adds the durable job columns to pre-existing installs and migrates the
+-- legacy status enum: pending→queued, ready→completed, error→failed.
+-- The CHECK constraint is dropped BEFORE the legacy mapping runs (old rows
+-- would otherwise violate the new list), then re-added.
+-- ---------------------------------------------------------------------------
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS claimed_by TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS processing_stage TEXT;
+
+ALTER TABLE videos DROP CONSTRAINT IF EXISTS videos_status_check;
+UPDATE videos SET status = 'queued'    WHERE status = 'pending';
+UPDATE videos SET status = 'completed' WHERE status = 'ready';
+UPDATE videos SET status = 'failed'    WHERE status = 'error';
+ALTER TABLE videos ADD CONSTRAINT videos_status_check CHECK (status IN
+  ('queued','uploading','uploaded','transcribing','analyzing','indexing','completed','failed','retrying'));
 
 -- Transcript segments table
 CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -108,7 +137,7 @@ BEGIN
   WHERE v.embedding IS NOT NULL
     AND 1 - (v.embedding <=> query_embedding) > match_threshold
     AND (exclude_id IS NULL OR v.id != exclude_id)
-    AND v.status = 'ready'
+    AND v.status = 'completed'
   ORDER BY v.embedding <=> query_embedding LIMIT match_count;
 END; $$;
 

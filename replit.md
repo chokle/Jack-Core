@@ -29,6 +29,8 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/routes/` — Express route handlers (videos, search, chat, competencies)
 - `artifacts/api-server/src/lib/supabase.ts` — Supabase client
 - `artifacts/api-server/src/lib/openai.ts` — OpenAI client
+- `artifacts/api-server/src/lib/jobs.ts` — resilient job system (stage claiming, pipeline driver, retry/backoff, startup recovery sweep + watchdog)
+- `artifacts/jack-core/src/lib/video-status.ts` — shared client-side IN_FLIGHT_STATUSES set (drives polling + UI states)
 - `scripts/src/setup-supabase.ts` — Supabase schema setup script/reference
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
@@ -45,7 +47,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - Single-page React app with conditional rendering (no multi-page routing) — Library → VideoDetail → overlaid AskJack drawer
 - Supabase is the single source of truth for all persistence: videos, transcript_segments, chat_messages, competencies tables
 - pgvector (1536-dim, text-embedding-3-small) powers both semantic search and related-video discovery
-- Transcription and analysis are async (background jobs via setImmediate) — status polling via the `status` field on Video
+- Video processing is a resilient in-process job system (`artifacts/api-server/src/lib/jobs.ts`): all job state is durable on the videos row (`status`, `processing_stage`, `attempts`, `last_error`, `heartbeat_at`, `claimed_by`, `next_attempt_at`), so a server restart never strands a video. Lifecycle: queued → uploading → uploaded → transcribing → analyzing → indexing → completed, with `failed` (terminal) and `retrying` (capped backoff: 3 attempts, 30s·2^(n-1) capped at 5m). A startup recovery sweep + 60s watchdog reclaim orphaned/stale rows (heartbeat older than 5m) via atomic conditional updates and resume from the START of the stage — every stage is idempotent (transcribe: segments delete-then-insert; analyze: overwrite; index: overwrite + deterministic graph sync). `uploading` is client-owned: the server never resumes it, only TTL-fails it after 2h. Analysis exhaustion is a deliberate exception — the pipeline continues to indexing/completed without analysis so a GPT hiccup never downgrades a usable transcript
 - Jack always searches the internal library (pgvector RAG) before answering — `usedInternalKnowledge` flag in responses
 - Red Seal competency codes are seeded from a canonical list and mapped by GPT-4o during analysis
 - Interview Mode reuses the video distillation + graph pipeline: mentor answers are distilled into the SAME canonical concept nodes (provenance is edge-owned via `mentor:<uuid>` → concept edges, deduped by answer id) with `verification_status="mentor_supplied"`, so mentor input corroborates rather than fragments the graph. Interview trade labels are normalized to the seeded Red Seal trades (e.g. "Welding" → "Welder") so mentor concepts hang off existing topic hubs
@@ -92,7 +94,8 @@ CREATE TABLE IF NOT EXISTS videos (
   thumbnail_url TEXT,
   video_url TEXT,
   duration FLOAT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','transcribing','analyzing','ready','error')),
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN
+    ('queued','uploading','uploaded','transcribing','analyzing','indexing','completed','failed','retrying')),
   transcript TEXT,
   analysis TEXT,
   key_points TEXT[] DEFAULT '{}',
@@ -184,7 +187,7 @@ BEGIN
   WHERE v.embedding IS NOT NULL
     AND 1 - (v.embedding <=> query_embedding) > match_threshold
     AND (exclude_id IS NULL OR v.id != exclude_id)
-    AND v.status = 'ready'
+    AND v.status = 'completed'
   ORDER BY v.embedding <=> query_embedding LIMIT match_count;
 END; $$;
 
@@ -277,7 +280,8 @@ The SQL above also creates the public **`jack-videos`** storage bucket. (If you 
 - Replit is IPv4-only but Supabase's **direct** host (`db.<ref>.supabase.co`) is IPv6-only, so it fails with a cryptic `ENOTFOUND`/`EAFNOSUPPORT`. Always use the **Session pooler** URL (`postgresql://postgres.<ref>:<password>@aws-<N>-<region>.pooler.supabase.com:5432/postgres`), not the direct host or the *transaction* pooler. `setup:supabase` detects this and prints the fix
 - Don't paste Supabase's `[YOUR-PASSWORD]` placeholder with the literal square brackets — strip them. `setup:supabase` warns when the password is still bracket-wrapped, and an auth failure (`28P01`) means reset the password in Dashboard → Project Settings → Database
 - After any OpenAPI spec change, run `pnpm --filter @workspace/api-spec run codegen` before starting the server
-- Transcription/analysis are async background jobs — poll the video `status` field (pending → transcribing → analyzing → ready)
+- Transcription/analysis are async background jobs — poll the video `status` field (queued → uploading → uploaded → transcribing → analyzing → indexing → completed, plus `failed`/`retrying`)
+- Pre-existing installs must re-run the schema setup after upgrading to the job system — the schema file carries an idempotent migration (job columns + pending→queued, ready→completed, error→failed status mapping); until it runs, writes with new statuses violate the old CHECK constraint
 - The `embedding` column stores JSON-serialized float arrays (vector(1536)) — Supabase's pgvector extension must be enabled first
 - Jack's RAG always searches internally first; `usedInternalKnowledge: false` in chat responses means no matching segments were found
 - The knowledge graph needs the `knowledge_nodes`/`knowledge_edges` tables applied too (they are part of the canonical schema) — until then `GET /graph` returns 500 and the frontend silently falls back to a client-derived graph

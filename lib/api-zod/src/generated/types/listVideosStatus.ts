@@ -10,9 +10,13 @@ export type ListVideosStatus = typeof ListVideosStatus[keyof typeof ListVideosSt
 
 
 export const ListVideosStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;

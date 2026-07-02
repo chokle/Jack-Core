@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { startJobSystem } from "./lib/jobs";
 
 const rawPort = process.env["PORT"];
 
@@ -14,6 +15,10 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+// Recover any jobs stranded by a previous process life BEFORE accepting new
+// work, then keep a runtime watchdog sweeping for stale/hung jobs.
+startJobSystem();
 
 app.listen(port, (err) => {
   if (err) {

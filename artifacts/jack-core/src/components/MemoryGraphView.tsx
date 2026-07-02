@@ -522,7 +522,7 @@ function KnowledgeInspector({
   const description =
     node.meta.description ??
     (node.kind === "video"
-      ? node.status === "ready"
+      ? node.status === "completed"
         ? "Transcribed and indexed into Jack's memory."
         : `Currently ${node.status ?? "queued"} — Jack is still learning from this.`
       : node.kind === "topic"

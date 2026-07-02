@@ -23,6 +23,10 @@ export interface Video {
   status: VideoStatus;
   competencyCodes?: string[];
   tags?: string[];
+  /** @nullable */
+  attempts?: number | null;
+  /** @nullable */
+  lastError?: string | null;
   createdAt: string;
   /** @nullable */
   updatedAt?: string | null;

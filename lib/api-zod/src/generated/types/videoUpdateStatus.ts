@@ -10,9 +10,13 @@ export type VideoUpdateStatus = typeof VideoUpdateStatus[keyof typeof VideoUpdat
 
 
 export const VideoUpdateStatus = {
-  pending: 'pending',
+  queued: 'queued',
+  uploading: 'uploading',
+  uploaded: 'uploaded',
   transcribing: 'transcribing',
   analyzing: 'analyzing',
-  ready: 'ready',
-  error: 'error',
+  indexing: 'indexing',
+  completed: 'completed',
+  failed: 'failed',
+  retrying: 'retrying',
 } as const;

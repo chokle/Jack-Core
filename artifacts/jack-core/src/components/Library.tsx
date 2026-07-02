@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
 import { UploadModal } from "./UploadModal";
 import { AdminLogin } from "./AdminLogin";
+import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
 
 interface LibraryProps {
   onSelectVideo: (id: string) => void;
@@ -34,7 +35,7 @@ export function Library({ onSelectVideo }: LibraryProps) {
   }, []);
 
   // Poll the list while any video is still being processed so cards advance
-  // to "ready" on their own (no manual refresh during the demo flow).
+  // to "completed" on their own (no manual refresh during the demo flow).
   const { data: videoList, isLoading } = useListVideos(
     { trade: selectedTrade },
     {
@@ -42,8 +43,8 @@ export function Library({ onSelectVideo }: LibraryProps) {
         queryKey: getListVideosQueryKey({ trade: selectedTrade }),
         refetchInterval: (query) => {
           const videos = (query.state.data as { videos?: Array<{ status?: string }> } | undefined)?.videos ?? [];
-          const processing = videos.some(
-            (v) => v.status === "pending" || v.status === "transcribing" || v.status === "analyzing",
+          const processing = videos.some((v) =>
+            IN_FLIGHT_STATUSES.has(v.status ?? ""),
           );
           return processing ? 4000 : false;
         },

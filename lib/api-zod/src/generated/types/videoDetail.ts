@@ -25,6 +25,10 @@ export interface VideoDetail {
   competencyCodes?: string[];
   tags?: string[];
   /** @nullable */
+  attempts?: number | null;
+  /** @nullable */
+  lastError?: string | null;
+  /** @nullable */
   transcript?: string | null;
   segments?: TranscriptSegment[];
   /** @nullable */

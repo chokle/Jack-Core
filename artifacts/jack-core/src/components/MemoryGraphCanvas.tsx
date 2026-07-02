@@ -706,8 +706,8 @@ function makeNode(
 
 function nodeIntensity(node: P, time: number): number {
   if (node.kind === "video") {
-    if (node.status === "error") return 0.7;
-    if (node.status && node.status !== "ready") {
+    if (node.status === "failed") return 0.7;
+    if (node.status && node.status !== "completed") {
       return 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(time * 0.005 + node.x));
     }
   }
@@ -725,7 +725,7 @@ function drawNodeGlow(
   const r = node.radius * (0.4 + 0.6 * grow);
   const intensity = nodeIntensity(node, time) * (dim ? 0.25 : 1);
   const col =
-    node.kind === "video" && node.status === "error"
+    node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
       : node.color;
   const glowR = r * 5;
@@ -753,7 +753,7 @@ function drawNodeBody(
   const r = node.radius * (0.4 + 0.6 * grow);
   const intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1);
   const col =
-    node.kind === "video" && node.status === "error"
+    node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
       : node.color;
 

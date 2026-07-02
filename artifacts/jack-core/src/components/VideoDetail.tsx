@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useGetVideo, useTranscribeVideo, useAnalyzeVideo, useFetchRelatedVideos } from "@workspace/api-client-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
+import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
 
 interface VideoDetailProps {
   videoId: string;
@@ -23,12 +24,11 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
       enabled: !!videoId,
       queryKey: ['video', videoId],
       // Poll while the pipeline is running so the UI advances
-      // pending -> transcribing -> analyzing -> ready without a manual refresh.
+      // queued -> transcribing -> analyzing -> indexing -> completed without a
+      // manual refresh.
       refetchInterval: (query) => {
         const status = (query.state.data as { status?: string } | undefined)?.status;
-        return status === "pending" || status === "transcribing" || status === "analyzing"
-          ? 4000
-          : false;
+        return status && IN_FLIGHT_STATUSES.has(status) ? 4000 : false;
       },
     },
   });
@@ -97,12 +97,12 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to Library
         </Button>
         <div className="flex items-center gap-2">
-          {video.status === "pending" && (
+          {(video.status === "queued" || video.status === "uploaded" || video.status === "failed") && (
             <Button size="sm" onClick={() => transcribeMutation.mutate({ id: video.id })}>
-              Run Transcription
+              {video.status === "failed" ? "Retry Processing" : "Run Transcription"}
             </Button>
           )}
-          {video.status === "ready" && !video.analysis && (
+          {video.status === "completed" && !video.analysis && (
             <Button size="sm" onClick={() => analyzeMutation.mutate({ id: video.id })}>
               <BrainCircuit className="h-4 w-4 mr-2" /> Analyze
             </Button>
@@ -136,6 +136,16 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
             </div>
             <h1 className="text-3xl font-bold tracking-tight mb-2">{video.title}</h1>
             <p className="text-muted-foreground leading-relaxed">{video.description}</p>
+            {video.status === "failed" && (
+              <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+                <p className="font-mono text-xs text-destructive">
+                  Processing failed{video.lastError ? `: ${video.lastError}` : "."}
+                </p>
+                <p className="font-mono text-xs text-muted-foreground mt-1">
+                  Use "Retry Processing" above to try again.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -168,7 +178,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                     <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground border border-dashed border-border rounded-lg">
                       <BrainCircuit className="h-8 w-8 mb-2 opacity-50" />
                       <p className="font-mono text-xs">No analysis available.</p>
-                      {video.status === "ready" && (
+                      {video.status === "completed" && (
                         <Button variant="link" size="sm" className="mt-2 text-primary" onClick={() => analyzeMutation.mutate({ id: video.id })}>
                           Trigger Analysis
                         </Button>

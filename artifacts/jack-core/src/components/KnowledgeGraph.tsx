@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useListVideos, getListVideosQueryKey } from "@workspace/api-client-react";
+import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
 
 /**
  * KnowledgeGraph — a living, ambient wallpaper that renders Jack's memory as a
@@ -92,12 +93,7 @@ export function KnowledgeGraph() {
         refetchInterval: (q) => {
           const vids =
             (q.state.data as { videos?: RawVideo[] } | undefined)?.videos ?? [];
-          const processing = vids.some(
-            (v) =>
-              v.status === "pending" ||
-              v.status === "transcribing" ||
-              v.status === "analyzing",
-          );
+          const processing = vids.some((v) => IN_FLIGHT_STATUSES.has(v.status ?? ""));
           return processing ? 4000 : 8000;
         },
       },
@@ -341,10 +337,10 @@ export function KnowledgeGraph() {
       let r = n.baseRadius;
 
       if (n.kind === "video") {
-        if (n.status === "error") {
+        if (n.status === "failed") {
           col = COL_ERROR;
           intensity = 0.7;
-        } else if (n.status !== "ready") {
+        } else if (n.status !== "completed") {
           intensity = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 0.005 + n.x));
         }
       }

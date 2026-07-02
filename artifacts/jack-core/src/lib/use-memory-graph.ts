@@ -16,6 +16,7 @@ import {
   type RawCompetency,
   type RawVideo,
 } from "./memory-graph";
+import { IN_FLIGHT_STATUSES } from "./video-status";
 
 export interface MemoryGraphData {
   model: GraphModel;
@@ -43,12 +44,7 @@ export function useMemoryGraphData(): MemoryGraphData {
         refetchInterval: (q) => {
           const vids =
             (q.state.data as { videos?: RawVideo[] } | undefined)?.videos ?? [];
-          const processing = vids.some(
-            (v) =>
-              v.status === "pending" ||
-              v.status === "transcribing" ||
-              v.status === "analyzing",
-          );
+          const processing = vids.some((v) => IN_FLIGHT_STATUSES.has(v.status ?? ""));
           return processing ? 4000 : 8000;
         },
       },
@@ -65,12 +61,7 @@ export function useMemoryGraphData(): MemoryGraphData {
 
   // Poll the graph faster while anything is still processing so newly ingested
   // memories visibly appear (and pick up competency edges) as Jack finishes.
-  const processing = videos.some(
-    (v) =>
-      v.status === "pending" ||
-      v.status === "transcribing" ||
-      v.status === "analyzing",
-  );
+  const processing = videos.some((v) => IN_FLIGHT_STATUSES.has(v.status ?? ""));
   const { data: graph } = useGetGraph({
     query: {
       queryKey: getGetGraphQueryKey(),
@@ -89,7 +80,7 @@ export function useMemoryGraphData(): MemoryGraphData {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, videoList, competencyList]);
 
-  const readyCount = videos.filter((v) => v.status === "ready").length;
+  const readyCount = videos.filter((v) => v.status === "completed").length;
 
   const lastUpdated = useMemo(() => {
     let best = 0;

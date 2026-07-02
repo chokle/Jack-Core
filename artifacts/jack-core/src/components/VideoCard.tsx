@@ -12,20 +12,28 @@ interface VideoCardProps {
 export function VideoCard({ video, onClick, index }: VideoCardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "ready": return "text-emerald-400 bg-emerald-400/10 border-emerald-400/20";
+      case "completed": return "text-emerald-400 bg-emerald-400/10 border-emerald-400/20";
+      case "uploading":
+      case "uploaded":
       case "transcribing":
-      case "analyzing": return "text-amber-400 bg-amber-400/10 border-amber-400/20";
-      case "error": return "text-destructive bg-destructive/10 border-destructive/20";
+      case "analyzing":
+      case "indexing":
+      case "retrying": return "text-amber-400 bg-amber-400/10 border-amber-400/20";
+      case "failed": return "text-destructive bg-destructive/10 border-destructive/20";
       default: return "text-muted-foreground bg-muted border-border";
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "ready": return <CheckCircle2 className="h-3 w-3 mr-1" />;
+      case "completed": return <CheckCircle2 className="h-3 w-3 mr-1" />;
+      case "uploading":
+      case "uploaded":
       case "transcribing":
-      case "analyzing": return <Activity className="h-3 w-3 mr-1 animate-pulse" />;
-      case "error": return <AlertCircle className="h-3 w-3 mr-1" />;
+      case "analyzing":
+      case "indexing":
+      case "retrying": return <Activity className="h-3 w-3 mr-1 animate-pulse" />;
+      case "failed": return <AlertCircle className="h-3 w-3 mr-1" />;
       default: return <Clock className="h-3 w-3 mr-1" />;
     }
   };

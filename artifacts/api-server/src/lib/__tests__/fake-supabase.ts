@@ -17,7 +17,10 @@ type Row = Record<string, unknown>;
 type Filter =
   | { kind: "eq"; col: string; val: unknown }
   | { kind: "neq"; col: string; val: unknown }
-  | { kind: "in"; col: string; vals: unknown[] };
+  | { kind: "in"; col: string; vals: unknown[] }
+  | { kind: "is"; col: string; val: unknown }
+  | { kind: "not-is"; col: string; val: unknown }
+  | { kind: "lt"; col: string; val: unknown };
 
 interface Result<T> {
   data: T;
@@ -78,7 +81,7 @@ export class FakeSupabase {
 }
 
 class QueryBuilder implements PromiseLike<Result<unknown>> {
-  private op: "select" | "upsert" | "delete" | "update" = "select";
+  private op: "select" | "upsert" | "delete" | "update" | "insert" = "select";
   private filters: Filter[] = [];
   private upsertRows: Row[] = [];
   private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
@@ -115,6 +118,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this;
   }
 
+  insert(rows: Row | Row[]): this {
+    this.op = "insert";
+    this.upsertRows = Array.isArray(rows) ? rows : [rows];
+    return this;
+  }
+
   delete(): this {
     this.op = "delete";
     return this;
@@ -132,6 +141,24 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
   in(col: string, vals: unknown[]): this {
     this.filters.push({ kind: "in", col, vals });
+    return this;
+  }
+
+  // `.is(col, null)` — SQL "IS NULL" (also matches undefined, like a missing column).
+  is(col: string, val: unknown): this {
+    this.filters.push({ kind: "is", col, val });
+    return this;
+  }
+
+  // Only the `.not(col, "is", null)` form is modeled (that's all the code uses).
+  not(col: string, op: string, val: unknown): this {
+    if (op !== "is") throw new Error(`fake-supabase: unsupported not() operator "${op}"`);
+    this.filters.push({ kind: "not-is", col, val });
+    return this;
+  }
+
+  lt(col: string, val: unknown): this {
+    this.filters.push({ kind: "lt", col, val });
     return this;
   }
 
@@ -154,15 +181,31 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this.filters.every((f) => {
       if (f.kind === "eq") return row[f.col] === f.val;
       if (f.kind === "neq") return row[f.col] !== f.val;
+      if (f.kind === "is") return (row[f.col] ?? null) === f.val;
+      if (f.kind === "not-is") return (row[f.col] ?? null) !== f.val;
+      if (f.kind === "lt") return (row[f.col] as never) < (f.val as never);
       return f.vals.includes(row[f.col]);
     });
   }
 
   private run(): Result<unknown> {
     if (this.op === "upsert") return this.runUpsert();
+    if (this.op === "insert") return this.runInsert();
     if (this.op === "update") return this.runUpdate();
     if (this.op === "delete") return this.runDelete();
     return this.runSelect();
+  }
+
+  private runInsert(): Result<unknown> {
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const incoming of this.upsertRows) {
+      const row: Row = { created_at: now, ...incoming };
+      if (row["id"] === undefined) row["id"] = `fake-${this.table}-${this.rows.length + n}`;
+      this.rows.push(row);
+      n++;
+    }
+    return { data: null, error: null };
   }
 
   private runUpdate(): Result<unknown> {
