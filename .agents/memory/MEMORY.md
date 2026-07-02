@@ -6,3 +6,4 @@
 - [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.
 - [Project task dependency editing](project-task-dependencies.md) — dependsOn is only editable while a task is a draft; after acceptance, enforce ordering via self-contained plan text.
 - [Supabase Storage upload limits](supabase-storage-limits.md) — project-level file-size cap 413s big uploads regardless of app cap; storage-js ≥2.108 streams Node ReadStreams natively.
+- [Workflow names](workflow-names.md) — restart_workflow needs the exact `artifacts/<dir>: <title>` name; call listWorkflows() first instead of guessing.

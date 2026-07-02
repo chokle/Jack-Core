@@ -669,6 +669,26 @@ export const SkipInterviewQuestionResponse = zod.object({
 
 
 /**
+ * @summary List mentor profiles with contribution counts (admin only)
+ */
+export const ListMentorsResponse = zod.object({
+  "mentors": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "trade": zod.string().nullish(),
+  "tradeInput": zod.string().nullish().describe('What the mentor typed for their trade, before normalization.'),
+  "yearsExperience": zod.number().nullish(),
+  "region": zod.string().nullish(),
+  "specialties": zod.array(zod.string()).optional(),
+  "sessionCount": zod.number().describe('Interview sessions this mentor has started.'),
+  "answerCount": zod.number().describe('Verbatim answers recorded (skips excluded).'),
+  "createdAt": zod.string()
+})),
+  "total": zod.number()
+})
+
+
+/**
  * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
  */
 export const WithdrawMentorParams = zod.object({

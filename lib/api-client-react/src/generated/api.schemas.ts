@@ -562,6 +562,33 @@ export interface KnowledgeCandidateList {
   total: number;
 }
 
+export interface MentorSummary {
+  id: string;
+  name: string;
+  /** @nullable */
+  trade?: string | null;
+  /**
+     * What the mentor typed for their trade, before normalization.
+     * @nullable
+     */
+  tradeInput?: string | null;
+  /** @nullable */
+  yearsExperience?: number | null;
+  /** @nullable */
+  region?: string | null;
+  specialties?: string[];
+  /** Interview sessions this mentor has started. */
+  sessionCount: number;
+  /** Verbatim answers recorded (skips excluded). */
+  answerCount: number;
+  createdAt: string;
+}
+
+export interface MentorList {
+  mentors: MentorSummary[];
+  total: number;
+}
+
 export interface MentorWithdrawalResult {
   mentorProfileId: string;
   /** Concepts kept alive on surviving evidence, aggregates recomputed. */

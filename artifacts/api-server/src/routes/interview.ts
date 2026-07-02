@@ -15,6 +15,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import {
+  ListMentorsResponse,
   StartInterviewBody,
   SubmitInterviewAnswerBody,
   WithdrawMentorParams,
@@ -346,6 +347,59 @@ router.post("/interview/sessions/:id/finish", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "finishInterview error");
     return res.status(500).json({ error: "Failed to finish interview" });
+  }
+});
+
+/**
+ * List mentor profiles with contribution counts — admin-gated because names,
+ * regions, and backgrounds are personal data that the public product surface
+ * never exposes (mentors appear only as provenance on concepts). Counts are
+ * computed in-memory from id-only projections, which is fine at library scale.
+ */
+router.get("/interview/mentors", requireAdminSession, async (req, res) => {
+  try {
+    const { data: mentors, error } = await supabase
+      .from("mentor_profiles")
+      .select("id, name, trade, trade_input, years_experience, specialties, region, created_at")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    const [sessionsRes, answersRes] = await Promise.all([
+      supabase.from("interview_sessions").select("mentor_profile_id"),
+      supabase.from("interview_answers").select("mentor_profile_id, skipped"),
+    ]);
+    if (sessionsRes.error) throw sessionsRes.error;
+    if (answersRes.error) throw answersRes.error;
+
+    const sessionCounts = new Map<string, number>();
+    for (const row of sessionsRes.data ?? []) {
+      const id = (row as Row)["mentor_profile_id"] as string | null;
+      if (id) sessionCounts.set(id, (sessionCounts.get(id) ?? 0) + 1);
+    }
+    const answerCounts = new Map<string, number>();
+    for (const row of answersRes.data ?? []) {
+      const r = row as Row;
+      const id = r["mentor_profile_id"] as string | null;
+      if (id && !r["skipped"]) answerCounts.set(id, (answerCounts.get(id) ?? 0) + 1);
+    }
+
+    const shaped = (mentors ?? []).map((m: Row) => ({
+      id: m["id"],
+      name: m["name"],
+      trade: (m["trade"] as string | null) ?? null,
+      tradeInput: (m["trade_input"] as string | null) ?? null,
+      yearsExperience: (m["years_experience"] as number | null) ?? null,
+      region: (m["region"] as string | null) ?? null,
+      specialties: Array.isArray(m["specialties"]) ? (m["specialties"] as string[]) : [],
+      sessionCount: sessionCounts.get(m["id"] as string) ?? 0,
+      answerCount: answerCounts.get(m["id"] as string) ?? 0,
+      createdAt: m["created_at"],
+    }));
+
+    return res.json(ListMentorsResponse.parse({ mentors: shaped, total: shaped.length }));
+  } catch (err) {
+    req.log.error({ err }, "listMentors error");
+    return res.status(500).json({ error: "Failed to list mentors" });
   }
 });
 

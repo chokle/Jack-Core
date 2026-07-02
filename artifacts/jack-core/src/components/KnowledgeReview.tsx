@@ -26,6 +26,7 @@ import type {
   ListKnowledgeCandidatesStatus,
 } from "@workspace/api-client-react";
 import { AdminLogin } from "./AdminLogin";
+import { MentorWithdrawal } from "./MentorWithdrawal";
 
 /** Scaffold kinds that can never be a merge target. */
 const SCAFFOLD_KINDS = new Set(["core", "topic", "competency", "video", "mentor"]);
@@ -180,6 +181,8 @@ export function KnowledgeReview() {
             ))}
           </div>
         )}
+
+        {isAdmin === true && <MentorWithdrawal />}
       </div>
     </div>
   );

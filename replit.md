@@ -34,7 +34,8 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `scripts/src/setup-supabase.ts` — Supabase schema setup script/reference
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
-- `artifacts/api-server/src/routes/interview.ts` — Interview Mode endpoints (start session, get, submit/skip answer, finish) plus the admin-gated `POST /interview/mentors/:id/withdraw` (Mentor Withdrawal)
+- `artifacts/api-server/src/routes/interview.ts` — Interview Mode endpoints (start session, get, submit/skip answer, finish) plus the admin-gated `GET /interview/mentors` (mentor roster with session/answer counts) and `POST /interview/mentors/:id/withdraw` (Mentor Withdrawal)
+- `artifacts/jack-core/src/components/MentorWithdrawal.tsx` — admin-only mentor roster on the Review screen with a confirm-guarded destructive Withdraw action; surfaces the retained/archived/deleted/scrubbed summary after withdrawal
 - `artifacts/api-server/src/routes/graph.ts` — also serves `GET /graph/candidates` (queued mentor-concept candidates, filterable by status; `pending` reads are public, non-pending statuses carry resolution details and require the admin session) and `POST /graph/candidates/:id/resolve` (admin-gated Knowledge Review: accept/merge/reject)
 - `artifacts/jack-core/src/components/KnowledgeReview.tsx` — Knowledge Review UI (admin-gated candidate curation: Accept / Merge into… / Reject with reason)
 - `artifacts/jack-core/src/components/PendingKnowledgePanel.tsx` — read-only "Awaiting Knowledge Review" panel in the Living Memory right rail (public: title, category, mentor, near-matches; no resolution controls)

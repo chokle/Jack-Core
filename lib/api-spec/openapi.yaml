@@ -532,6 +532,21 @@ paths:
         "404":
           description: Session not found
 
+  /interview/mentors:
+    get:
+      operationId: listMentors
+      tags: [interview]
+      summary: List mentor profiles with contribution counts (admin only)
+      responses:
+        "200":
+          description: Mentor profiles ordered newest-first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MentorList"
+        "401":
+          description: Admin session required
+
   /interview/mentors/{id}/withdraw:
     post:
       operationId: withdrawMentor
@@ -1251,6 +1266,47 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KnowledgeCandidate"
+        total:
+          type: integer
+
+    MentorSummary:
+      type: object
+      required: [id, name, sessionCount, answerCount, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        trade:
+          type: ["string", "null"]
+        tradeInput:
+          type: ["string", "null"]
+          description: What the mentor typed for their trade, before normalization.
+        yearsExperience:
+          type: ["number", "null"]
+        region:
+          type: ["string", "null"]
+        specialties:
+          type: array
+          items:
+            type: string
+        sessionCount:
+          type: integer
+          description: Interview sessions this mentor has started.
+        answerCount:
+          type: integer
+          description: Verbatim answers recorded (skips excluded).
+        createdAt:
+          type: string
+
+    MentorList:
+      type: object
+      required: [mentors, total]
+      properties:
+        mentors:
+          type: array
+          items:
+            $ref: "#/components/schemas/MentorSummary"
         total:
           type: integer
 

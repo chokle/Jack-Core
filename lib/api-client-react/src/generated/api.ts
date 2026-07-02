@@ -36,6 +36,7 @@ import type {
   KnowledgeNode,
   ListKnowledgeCandidatesParams,
   ListVideosParams,
+  MentorList,
   MentorWithdrawalResult,
   SearchInput,
   SearchResults,
@@ -1931,6 +1932,83 @@ export const useSkipInterviewQuestion = <TError = ErrorType<void>,
       > => {
       return useMutation(getSkipInterviewQuestionMutationOptions(options));
     }
+
+export const getListMentorsUrl = () => {
+
+
+
+
+  return `/api/interview/mentors`
+}
+
+/**
+ * @summary List mentor profiles with contribution counts (admin only)
+ */
+export const listMentors = async ( options?: RequestInit): Promise<MentorList> => {
+
+  return customFetch<MentorList>(getListMentorsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMentorsQueryKey = () => {
+    return [
+    `/api/interview/mentors`
+    ] as const;
+    }
+
+
+export const getListMentorsQueryOptions = <TData = Awaited<ReturnType<typeof listMentors>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMentors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMentorsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMentors>>> = ({ signal }) => listMentors({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMentors>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMentorsQueryResult = NonNullable<Awaited<ReturnType<typeof listMentors>>>
+export type ListMentorsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List mentor profiles with contribution counts (admin only)
+ */
+
+export function useListMentors<TData = Awaited<ReturnType<typeof listMentors>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMentors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMentorsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getWithdrawMentorUrl = (id: string,) => {
 
