@@ -9,6 +9,7 @@ import {
   RotateCcw,
   ArrowRight,
   Quote,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ import {
   getGetGraphQueryKey,
   type InterviewSession,
   type ExtractedKnowledgeItem,
+  type InterviewAnswerDistillationStatus,
 } from "@workspace/api-client-react";
 
 /** The interview trade options, mirrored from the server vocabulary. */
@@ -44,6 +46,12 @@ interface Turn {
   answer: string | null;
   skipped: boolean;
   knowledge: ExtractedKnowledgeItem[];
+  /**
+   * Whether this answer's knowledge actually reached the Living Memory graph.
+   * "failed" means the verbatim answer is safe but distillation didn't land —
+   * a reviewer can retry it from the Graph Health dashboard.
+   */
+  distillationStatus: InterviewAnswerDistillationStatus;
 }
 
 export function InterviewMode() {
@@ -146,7 +154,13 @@ export function InterviewMode() {
         onSuccess: (result) => {
           setTranscript((t) => [
             ...t,
-            { question, answer: text, skipped: false, knowledge: result.extractedKnowledge },
+            {
+              question,
+              answer: text,
+              skipped: false,
+              knowledge: result.extractedKnowledge,
+              distillationStatus: result.answer.distillationStatus ?? "verified",
+            },
           ]);
           setSession(result.session);
           setAnswer("");
@@ -169,7 +183,13 @@ export function InterviewMode() {
         onSuccess: (result) => {
           setTranscript((t) => [
             ...t,
-            { question, answer: null, skipped: true, knowledge: [] },
+            {
+              question,
+              answer: null,
+              skipped: true,
+              knowledge: [],
+              distillationStatus: "pending",
+            },
           ]);
           setSession(result.session);
           setAnswer("");
@@ -197,6 +217,7 @@ export function InterviewMode() {
 
   const totalDistilled = transcript.reduce((n, t) => n + t.knowledge.length, 0);
   const answeredCount = transcript.filter((t) => !t.skipped).length;
+  const failedCount = transcript.filter((t) => t.distillationStatus === "failed").length;
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden">
@@ -327,6 +348,20 @@ export function InterviewMode() {
                 </div>
               )}
 
+              {/* Failed-capture warning — the answer is saved, but its knowledge
+                  didn't reach the graph and a reviewer needs to retry it. */}
+              {failedCount > 0 && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {failedCount} answer{failedCount === 1 ? "" : "s"} saved, but{" "}
+                    {failedCount === 1 ? "its" : "their"} knowledge didn't reach Jack's memory.
+                    A reviewer can retry {failedCount === 1 ? "it" : "them"} from Graph Health —
+                    nothing you said is lost.
+                  </span>
+                </div>
+              )}
+
               {/* Transcript */}
               {transcript.length > 0 && (
                 <div className="space-y-4 pt-2">
@@ -412,6 +447,12 @@ function TranscriptItem({ turn }: { turn: Turn }) {
               </span>
             );
           })}
+        </div>
+      )}
+      {!turn.skipped && turn.distillationStatus === "failed" && (
+        <div className="mt-3 ml-5 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-300">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>Knowledge not captured — saved, but a reviewer needs to retry it.</span>
         </div>
       )}
     </div>
