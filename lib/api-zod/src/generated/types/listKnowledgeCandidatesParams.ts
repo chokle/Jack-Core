@@ -8,5 +8,8 @@
 import type { ListKnowledgeCandidatesStatus } from './listKnowledgeCandidatesStatus';
 
 export type ListKnowledgeCandidatesParams = {
+/**
+ * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.
+ */
 status?: ListKnowledgeCandidatesStatus;
 };

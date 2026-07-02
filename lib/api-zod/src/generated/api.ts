@@ -423,13 +423,13 @@ export const GetGraphResponse = zod.object({
 export const listKnowledgeCandidatesQueryStatusDefault = `pending`;
 
 export const ListKnowledgeCandidatesQueryParams = zod.object({
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']).default(listKnowledgeCandidatesQueryStatusDefault)
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived']).default(listKnowledgeCandidatesQueryStatusDefault).describe('pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.')
 })
 
 export const ListKnowledgeCandidatesResponse = zod.object({
   "candidates": zod.array(zod.object({
   "id": zod.string(),
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']),
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']),
   "title": zod.string(),
   "description": zod.string().nullish(),
   "category": zod.string(),
@@ -467,14 +467,14 @@ export const ResolveKnowledgeCandidateParams = zod.object({
 })
 
 export const ResolveKnowledgeCandidateBody = zod.object({
-  "action": zod.enum(['accept', 'merge', 'reject']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason.'),
+  "action": zod.enum(['accept', 'merge', 'reject', 'restore']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.'),
   "targetNodeId": zod.string().optional().describe('The existing concept to merge into (required for merge).'),
   "reason": zod.string().optional().describe('Why the candidate was rejected (required for reject).')
 })
 
 export const ResolveKnowledgeCandidateResponse = zod.object({
   "id": zod.string(),
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged']),
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']),
   "title": zod.string(),
   "description": zod.string().nullish(),
   "category": zod.string(),

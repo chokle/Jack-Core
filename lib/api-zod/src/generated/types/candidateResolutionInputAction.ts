@@ -7,7 +7,7 @@
  */
 
 /**
- * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason.
+ * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.
  */
 export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
 
@@ -16,4 +16,5 @@ export const CandidateResolutionInputAction = {
   accept: 'accept',
   merge: 'merge',
   reject: 'reject',
+  restore: 'restore',
 } as const;

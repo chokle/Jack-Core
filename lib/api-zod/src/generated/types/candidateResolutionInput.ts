@@ -8,7 +8,7 @@
 import type { CandidateResolutionInputAction } from './candidateResolutionInputAction';
 
 export interface CandidateResolutionInput {
-  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason. */
+  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge. */
   action: CandidateResolutionInputAction;
   /** The existing concept to merge into (required for merge). */
   targetNodeId?: string;

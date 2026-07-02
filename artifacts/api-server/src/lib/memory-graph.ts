@@ -426,7 +426,7 @@ async function pruneOrphanTopics(): Promise<void> {
  */
 async function pruneOrphanKnowledge(): Promise<void> {
   const [nodes, edges] = await Promise.all([
-    supabase.from("knowledge_nodes").select("id, kind").in("kind", [...KNOWLEDGE_NODE_KINDS]),
+    supabase.from("knowledge_nodes").select("id, kind, meta").in("kind", [...KNOWLEDGE_NODE_KINDS]),
     supabase.from("knowledge_edges").select("target_id").eq("kind", "knowledge"),
   ]);
   if (nodes.error) throw nodes.error;
@@ -439,7 +439,12 @@ async function pruneOrphanKnowledge(): Promise<void> {
   }
 
   const orphanIds = (nodes.data ?? [])
-    .map((r: Record<string, unknown>) => r["id"] as string)
+    .map((r) => r as Record<string, unknown>)
+    // Reviewer-restored (curated) concepts are intentionally source-free — the
+    // reviewer, not a video/mentor, vouches for them — so they have no
+    // provenance edge but must NOT be pruned.
+    .filter((r) => ((r["meta"] as Record<string, unknown>) ?? {})["curated"] !== true)
+    .map((r) => r["id"] as string)
     .filter((id) => !sourced.has(id));
 
   if (orphanIds.length > 0) {
@@ -1018,6 +1023,13 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
     const node = row as Record<string, unknown>;
     const id = node["id"] as string;
     const prov = provByConcept.get(id) ?? [];
+
+    // Reviewer-restored (curated) concepts with no provenance are vouched for by
+    // the reviewer, not derived from sources — leave their confidence and hub
+    // edges intact instead of zeroing them out on a rebuild.
+    if (prov.length === 0 && ((node["meta"] as Record<string, unknown>) ?? {})["curated"] === true) {
+      continue;
+    }
 
     // Per-source provenance, de-duplicated by video (a concept links a video once).
     const sourceMap = new Map<
@@ -1943,8 +1955,12 @@ export async function listKnowledgeCandidates(
   return records;
 }
 
-/** The three Knowledge Review outcomes for a queued candidate. */
-export type CandidateResolutionAction = "accept" | "merge" | "reject";
+/**
+ * Knowledge Review outcomes. accept/merge/reject resolve a PENDING mentor
+ * candidate; restore re-mints an ARCHIVED (mentor-withdrawn) concept back into
+ * the live graph.
+ */
+export type CandidateResolutionAction = "accept" | "merge" | "reject" | "restore";
 
 export type CandidateResolutionResult =
   | { ok: true; candidate: KnowledgeCandidateRecord; replayed: boolean }
@@ -1957,6 +1973,7 @@ const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   accept: "accepted",
   merge: "merged",
   reject: "rejected",
+  restore: "restored",
 };
 
 /**
@@ -2022,6 +2039,15 @@ async function resolveKnowledgeCandidateInner(
 
   const cand = row as Record<string, unknown>;
   const record = mapCandidateRow(cand);
+
+  // Restore has its own lifecycle: it acts on ARCHIVED knowledge (mentor-only
+  // concepts demoted out of the graph on withdrawal), re-mints the concept node
+  // as attribution-free unverified knowledge, and flips the row to 'restored'.
+  // It never touches the pending accept/merge/reject path below.
+  if (action === "restore") {
+    return restoreArchivedCandidateInner(record);
+  }
+
   const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
 
   // Validate the action's inputs before touching anything.
@@ -2380,6 +2406,183 @@ async function archiveOrphanedConcepts(conceptIds: string[]): Promise<void> {
     .from("knowledge_candidates")
     .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
   if (error) throw error;
+}
+
+/**
+ * Restore a previously ARCHIVED concept — the inverse of archiveOrphanedConcepts
+ * and the Knowledge Review "restore" write path. An archived row is a mentor-
+ * only concept that was demoted OUT of the live graph on mentor withdrawal
+ * (attribution-free `arch:<nodeId>` snapshot). Restoring re-mints it as
+ * attribution-free, UNVERIFIED curated knowledge:
+ *
+ *  - The node id is recovered from the `arch:<nodeId>` candidate id, so a
+ *    restore lands on the SAME deterministic node the concept had before
+ *    withdrawal. A video/mentor that re-taught the concept meanwhile is
+ *    REINFORCED, not clobbered (label/trade first-writer-wins; a human
+ *    verify/reject decision survives).
+ *  - The node carries `meta.curated` so pruneOrphanKnowledge keeps it despite
+ *    having no source-provenance edge (it is intentionally sourceless — the
+ *    reviewer, not a video or mentor, vouches for it).
+ *  - Replay-safe like the pending resolutions: the graph write happens BEFORE
+ *    the status flip (a mid-flight failure leaves the row 'archived' and a
+ *    retry re-mints idempotently), and the flip is compare-and-set on
+ *    `status='archived'` so an already-'restored' row is a no-op success.
+ */
+async function restoreArchivedCandidateInner(
+  record: KnowledgeCandidateRecord,
+): Promise<CandidateResolutionResult> {
+  // Replay: an already-restored candidate is a no-op success.
+  if (record.status === "restored") {
+    return { ok: true, candidate: record, replayed: true };
+  }
+  // Only archived knowledge can be restored — refuse any other lifecycle state.
+  if (record.status !== "archived") {
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Only archived knowledge can be restored (this candidate is '${record.status}').`,
+    };
+  }
+
+  // Recover the original deterministic concept id from the arch:<nodeId> row id.
+  const nodeId = record.id.startsWith("arch:") ? record.id.slice("arch:".length) : "";
+  if (!nodeId.startsWith("k:")) {
+    return {
+      ok: false,
+      code: "invalid",
+      message: "This archived record has no recoverable concept id to restore.",
+    };
+  }
+
+  // Graph write BEFORE the status flip so a mid-flight failure is retryable.
+  await restoreConceptNode(nodeId, record);
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updErr } = await supabase
+    .from("knowledge_candidates")
+    .update({
+      status: "restored",
+      resolved_target_id: nodeId,
+      resolved_at: now,
+      updated_at: now,
+    })
+    .eq("id", record.id)
+    .eq("status", "archived")
+    .select("*")
+    .maybeSingle();
+  if (updErr) throw updErr;
+
+  if (!updated) {
+    // Lost the compare-and-set race — re-read and report replay/conflict.
+    const { data: current, error: curErr } = await supabase
+      .from("knowledge_candidates")
+      .select("*")
+      .eq("id", record.id)
+      .maybeSingle();
+    if (curErr) throw curErr;
+    if (!current) {
+      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+    }
+    const winner = mapCandidateRow(current as Record<string, unknown>);
+    if (winner.status === "restored") return { ok: true, candidate: winner, replayed: true };
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Candidate was already resolved as '${winner.status}'.`,
+    };
+  }
+
+  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+}
+
+/**
+ * Re-mint a single archived concept node into the live graph as attribution-free
+ * unverified curated knowledge, wired to its trade topic (and any recorded
+ * competency) hub. Idempotent: an existing node keeps its identity and any human
+ * verification decision; a fresh restore is reborn with the archived snapshot's
+ * confidence rather than at zero. `meta.curated` is what keeps a sourceless
+ * restored node alive through pruneOrphanKnowledge.
+ */
+async function restoreConceptNode(
+  nodeId: string,
+  record: KnowledgeCandidateRecord,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: prevRow, error } = await supabase
+    .from("knowledge_nodes")
+    .select("id, kind, label, trade, description, confidence, verification_status, meta")
+    .eq("id", nodeId)
+    .maybeSingle();
+  if (error) throw error;
+  const prev = prevRow as Record<string, unknown> | null;
+
+  const prevMeta = (prev?.["meta"] as Record<string, unknown>) ?? {};
+  const kind = (prev?.["kind"] as string) || record.category;
+  const label = (prev?.["label"] as string) || record.title;
+  const trade = (prev?.["trade"] as string | null) ?? record.trade;
+
+  const prevDesc = (prev?.["description"] as string | null) ?? "";
+  const recDesc = record.description ?? "";
+  const description = recDesc.length > prevDesc.length ? recDesc : prevDesc || recDesc;
+
+  // Keep an already-re-sourced confidence; a fresh restore uses the archived
+  // snapshot's value so the concept isn't reborn at zero.
+  const confidence =
+    typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : record.confidence;
+
+  // Preserve a human decision; otherwise a restored concept is unverified.
+  const prevStatus = (prev?.["verification_status"] as string | null) ?? null;
+  const verification =
+    prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified";
+
+  const aliases = growAliases(
+    label,
+    prevMeta,
+    normalizeConcept(record.title) === normalizeConcept(label) ? [] : [record.title],
+  );
+
+  await ensureCompetencyNodes(record.competencyCode ? [record.competencyCode] : []);
+  await upsertNodes([
+    {
+      id: nodeId,
+      kind,
+      label,
+      trade,
+      ref_id: nodeId,
+      description: description || null,
+      confidence,
+      verification_status: verification,
+      meta: {
+        ...prevMeta,
+        category: (prevMeta["category"] as string) || record.category,
+        aliases,
+        // Reviewer-vouched, source-free: survives pruneOrphanKnowledge.
+        curated: true,
+        restoredAt: (prevMeta["restoredAt"] as string) || now,
+      },
+    },
+  ]);
+
+  const hubEdges: EdgeUpsert[] = [];
+  if (trade) {
+    hubEdges.push({
+      id: edgeKey(nodeId, topicNodeId(trade)),
+      source_id: nodeId,
+      target_id: topicNodeId(trade),
+      kind: "topic",
+      weight: 1,
+    });
+  }
+  if (record.competencyCode) {
+    hubEdges.push({
+      id: edgeKey(nodeId, compNodeId(record.competencyCode)),
+      source_id: nodeId,
+      target_id: compNodeId(record.competencyCode),
+      kind: "competency",
+      weight: 1,
+    });
+  }
+  await upsertEdges(hubEdges);
 }
 
 /**

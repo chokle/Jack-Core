@@ -471,6 +471,8 @@ export const KnowledgeCandidateStatus = {
   accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
+  archived: 'archived',
+  restored: 'restored',
 } as const;
 
 export interface KnowledgeCandidate {
@@ -522,7 +524,7 @@ export interface KnowledgeCandidate {
 }
 
 /**
- * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason.
+ * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.
  */
 export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
 
@@ -531,10 +533,11 @@ export const CandidateResolutionInputAction = {
   accept: 'accept',
   merge: 'merge',
   reject: 'reject',
+  restore: 'restore',
 } as const;
 
 export interface CandidateResolutionInput {
-  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason. */
+  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge. */
   action: CandidateResolutionInputAction;
   /** The existing concept to merge into (required for merge). */
   targetNodeId?: string;
@@ -636,6 +639,9 @@ export const ListVideosStatus = {
 } as const;
 
 export type ListKnowledgeCandidatesParams = {
+/**
+ * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.
+ */
 status?: ListKnowledgeCandidatesStatus;
 };
 
@@ -647,5 +653,6 @@ export const ListKnowledgeCandidatesStatus = {
   accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
+  archived: 'archived',
 } as const;
 

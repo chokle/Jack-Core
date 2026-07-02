@@ -14,4 +14,6 @@ export const KnowledgeCandidateStatus = {
   accepted: 'accepted',
   rejected: 'rejected',
   merged: 'merged',
+  archived: 'archived',
+  restored: 'restored',
 } as const;

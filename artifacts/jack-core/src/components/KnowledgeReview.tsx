@@ -8,6 +8,8 @@ import {
   Search,
   ShieldCheck,
   User,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
@@ -36,6 +38,7 @@ const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
   { value: "accepted", label: "Accepted" },
   { value: "merged", label: "Merged" },
   { value: "rejected", label: "Rejected" },
+  { value: "archived", label: "Archived" },
 ];
 
 export function KnowledgeReview() {
@@ -123,6 +126,8 @@ export function KnowledgeReview() {
         <p className="mb-6 text-sm text-muted-foreground">
           Mentor-taught concepts Jack wasn't sure about. Accept to reinforce the
           suggested match, merge into a concept you choose, or reject with a reason.
+          The Archived tab holds knowledge demoted when a mentor was withdrawn —
+          restore it to bring it back as unverified knowledge.
         </p>
 
         {/* Status tabs */}
@@ -201,7 +206,7 @@ function CandidateCard({
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
   onResolve: (
-    action: "accept" | "merge" | "reject",
+    action: "accept" | "merge" | "reject" | "restore",
     extra?: { targetNodeId?: string; reason?: string },
   ) => void;
 }) {
@@ -217,6 +222,7 @@ function CandidateCard({
   const topMatch = candidate.bestMatches[0];
   const topMatchGone = topMatch?.validity === "gone";
   const isPending = candidate.status === "pending";
+  const isArchived = candidate.status === "archived";
 
   const mergeMatches = useMemo(() => {
     const q = mergeSearch.trim().toLowerCase();
@@ -233,7 +239,11 @@ function CandidateCard({
         ? "Merged"
         : candidate.status === "rejected"
           ? "Rejected"
-          : null;
+          : candidate.status === "archived"
+            ? "Archived"
+            : candidate.status === "restored"
+              ? "Restored"
+              : null;
 
   return (
     <div className="rounded-xl border border-border bg-card/60 p-4 backdrop-blur-sm">
@@ -256,7 +266,9 @@ function CandidateCard({
                     ? "bg-red-500/15 text-red-400"
                     : candidate.status === "merged"
                       ? "bg-amber-500/15 text-amber-400"
-                      : "bg-emerald-500/15 text-emerald-400"
+                      : candidate.status === "archived"
+                        ? "bg-muted/60 text-muted-foreground"
+                        : "bg-emerald-500/15 text-emerald-400"
                 }`}
               >
                 {resolvedLabel}
@@ -325,12 +337,35 @@ function CandidateCard({
           {candidate.status === "rejected" && candidate.resolutionReason && (
             <span>Reason: {candidate.resolutionReason}</span>
           )}
-          {candidate.status !== "rejected" && candidate.resolvedTargetId && (
+          {isArchived && (
+            <span className="flex items-center gap-1.5">
+              <Archive className="h-3 w-3" />
+              Demoted out of the live graph when its mentor was withdrawn.
+              Restore to bring it back as unverified knowledge.
+            </span>
+          )}
+          {candidate.status !== "rejected" && !isArchived && candidate.resolvedTargetId && (
             <span className="font-mono">→ {candidate.resolvedTargetId}</span>
           )}
-          {candidate.status !== "rejected" && candidate.redirectReason && (
+          {candidate.status !== "rejected" && !isArchived && candidate.redirectReason && (
             <span className="ml-2 text-amber-400/90">{candidate.redirectReason}</span>
           )}
+        </div>
+      )}
+
+      {/* Restore action for archived (mentor-withdrawn) knowledge */}
+      {isArchived && (
+        <div className="mt-4 border-t border-border/70 pt-3">
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => onResolve("restore")}
+            className="bg-emerald-600 text-white hover:bg-emerald-500"
+            title="Re-mint this concept as attribution-free unverified knowledge"
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            Restore knowledge
+          </Button>
         </div>
       )}
 
