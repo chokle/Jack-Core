@@ -22,7 +22,7 @@ import {
   WithdrawMentorResponse,
 } from "@workspace/api-zod";
 import { requireAdminSession } from "../lib/admin-auth.js";
-import { withdrawMentor } from "../lib/memory-graph.js";
+import { withdrawMentor, verifyAndRecordGraphWrite } from "../lib/memory-graph.js";
 import { aiInterviewLimiter } from "../lib/rate-limit.js";
 import {
   generateNextQuestion,
@@ -66,6 +66,7 @@ function serializeAnswer(answer: Row): Record<string, unknown> {
     topic: (answer["topic"] as string | null) ?? null,
     answerText: (answer["answer_text"] as string | null) ?? null,
     skipped: Boolean(answer["skipped"]),
+    distillationStatus: (answer["distillation_status"] as string | null) ?? "pending",
     createdAt: answer["created_at"],
   };
 }
@@ -245,10 +246,17 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
     if (aErr) throw aErr;
     const answerRow = answer as Row;
 
-    // Best-effort distillation into the shared graph. Failure logs and continues.
+    // Distill into the shared graph, then VERIFY the knowledge actually landed.
+    // The verbatim answer is already saved, so a distillation/verification failure
+    // never loses it — instead we FLAG the answer (distillation_status='failed')
+    // so it surfaces on the admin Graph Health dashboard and can be redistilled,
+    // rather than silently reporting success.
     let extracted: MentorDistilledItem[] = [];
+    let distillationStatus = "verified";
+    let distillationError: string | null = null;
+    const startedAtMs = Date.now();
     try {
-      extracted = await runMentorAnswerDistillation({
+      const result = await runMentorAnswerDistillation({
         mentorProfileId: session["mentor_profile_id"] as string,
         mentorName: mentor["name"] as string,
         answerId: answerRow["id"] as string,
@@ -259,15 +267,28 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
         question,
         answer: answerText,
       });
+      extracted = result.items;
       if (extracted.length > 0) {
         await supabase
           .from("interview_answers")
           .update({ extracted_knowledge: serializeKnowledge(extracted) })
           .eq("id", answerRow["id"]);
       }
+      const verification = await verifyAndRecordGraphWrite(result.manifest, { startedAtMs });
+      if (verification.status !== "verified") {
+        distillationStatus = "failed";
+        distillationError = verification.summary;
+      }
     } catch (err) {
       req.log.error({ err, answerId: answerRow["id"] }, "mentor answer distillation failed");
+      distillationStatus = "failed";
+      distillationError = err instanceof Error ? err.message : String(err);
     }
+    await supabase
+      .from("interview_answers")
+      .update({ distillation_status: distillationStatus, distillation_error: distillationError })
+      .eq("id", answerRow["id"]);
+    answerRow["distillation_status"] = distillationStatus;
 
     const updated = await advanceSession(session, mentor);
     return res.json({
@@ -319,6 +340,94 @@ router.post("/interview/sessions/:id/skip", aiInterviewLimiter, async (req, res)
   } catch (err) {
     req.log.error({ err }, "skipInterviewQuestion error");
     return res.status(500).json({ error: "Failed to skip question" });
+  }
+});
+
+// Admin-gated: re-run distillation + verification for a single answer whose
+// knowledge write previously failed (surfaced on the Graph Health dashboard).
+// Idempotent — the graph write path reconciles onto the same canonical nodes.
+router.post("/interview/answers/:id/redistill", requireAdminSession, async (req, res) => {
+  try {
+    const { data: answer, error: aErr } = await supabase
+      .from("interview_answers")
+      .select("*")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (aErr) throw aErr;
+    if (!answer) return res.status(404).json({ error: "Answer not found" });
+    const answerRow = answer as Row;
+
+    const answerText = (answerRow["answer_text"] as string | null) ?? "";
+    if (Boolean(answerRow["skipped"]) || !answerText.trim()) {
+      return res.status(409).json({ error: "This answer has no content to distill." });
+    }
+
+    const mentorProfileId = answerRow["mentor_profile_id"] as string;
+    const { data: mentor, error: mErr } = await supabase
+      .from("mentor_profiles")
+      .select("name")
+      .eq("id", mentorProfileId)
+      .maybeSingle();
+    if (mErr) throw mErr;
+    if (!mentor) return res.status(404).json({ error: "Mentor not found" });
+
+    const sessionId = (answerRow["session_id"] as string | null) ?? null;
+    let trade: string | null = null;
+    if (sessionId) {
+      const { data: sess } = await supabase
+        .from("interview_sessions")
+        .select("trade")
+        .eq("id", sessionId)
+        .maybeSingle();
+      trade = (sess?.["trade"] as string | null) ?? null;
+    }
+
+    let extracted: MentorDistilledItem[] = [];
+    let distillationStatus = "verified";
+    let distillationError: string | null = null;
+    const startedAtMs = Date.now();
+    try {
+      const result = await runMentorAnswerDistillation({
+        mentorProfileId,
+        mentorName: (mentor as Row)["name"] as string,
+        answerId: answerRow["id"] as string,
+        sessionId,
+        trade,
+        category: (answerRow["category"] as string | null) ?? null,
+        topic: (answerRow["topic"] as string | null) ?? null,
+        question: (answerRow["question"] as string) ?? "",
+        answer: answerText,
+      });
+      extracted = result.items;
+      if (extracted.length > 0) {
+        await supabase
+          .from("interview_answers")
+          .update({ extracted_knowledge: serializeKnowledge(extracted) })
+          .eq("id", answerRow["id"]);
+      }
+      const verification = await verifyAndRecordGraphWrite(result.manifest, { startedAtMs });
+      if (verification.status !== "verified") {
+        distillationStatus = "failed";
+        distillationError = verification.summary;
+      }
+    } catch (err) {
+      req.log.error({ err, answerId: answerRow["id"] }, "mentor answer redistillation failed");
+      distillationStatus = "failed";
+      distillationError = err instanceof Error ? err.message : String(err);
+    }
+    await supabase
+      .from("interview_answers")
+      .update({ distillation_status: distillationStatus, distillation_error: distillationError })
+      .eq("id", answerRow["id"]);
+    answerRow["distillation_status"] = distillationStatus;
+
+    return res.json({
+      answer: serializeAnswer(answerRow),
+      extractedKnowledge: serializeKnowledge(extracted),
+    });
+  } catch (err) {
+    req.log.error({ err }, "redistillInterviewAnswer error");
+    return res.status(500).json({ error: "Failed to redistill answer" });
   }
 });
 

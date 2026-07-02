@@ -13,6 +13,7 @@
  */
 import { supabase } from "./supabase.js";
 import { createEmbedding } from "./openai.js";
+import { logger } from "./logger.js";
 import type { AtomicKnowledge, KnowledgeCategory } from "./distillation.js";
 
 export const GRAPH_CORE_ID = "__jack__";
@@ -1178,7 +1179,7 @@ export async function syncVideoKnowledge(
   videoId: string,
   items: AtomicKnowledge[],
   opts: { model?: string | null; extractedAt?: string } = {},
-): Promise<void> {
+): Promise<GraphWriteManifest> {
   const vNode = videoNodeId(videoId);
   // Extraction provenance for this run: which model distilled it and when. Default
   // model to null (honest "unknown") rather than fabricating one; the distillation
@@ -1208,7 +1209,16 @@ export async function syncVideoKnowledge(
     if (del.error) throw del.error;
     await pruneOrphanKnowledge();
     await recomputeKnowledgeAggregates(priorTargets);
-    return;
+    // Nothing landed (the video is gone) — an empty manifest verifies as an
+    // honest no-op rather than a failed write.
+    return {
+      scope: "video",
+      refId: videoId,
+      sourceNodeId: vNode,
+      expectedNodeIds: [],
+      expectedEdgeIds: [],
+      embeddingNodeIds: [],
+    };
   }
   const trade = (video.trade as string | null) ?? null;
 
@@ -1390,6 +1400,19 @@ export async function syncVideoKnowledge(
   // Reconverge every concept this run touched — the ones it now corroborates and
   // any it dropped — so confidence, provenance, and edge weights stay in sync.
   await recomputeKnowledgeAggregates([...canonicalIds, ...priorTargets]);
+
+  // Report exactly what this write was supposed to land so the caller can verify
+  // it against the persisted graph (see verifyGraphWrite). embeddingNodeIds are
+  // the concepts THIS run newly minted (own their canonical id), which must carry
+  // an embedding for semantic search / duplicate matching.
+  return {
+    scope: "video",
+    refId: videoId,
+    sourceNodeId: vNode,
+    expectedNodeIds: canonicalIds,
+    expectedEdgeIds: provenanceEdges.map((e) => e.id),
+    embeddingNodeIds: resolved.filter((c) => c.embeddingJson !== null).map((c) => c.id),
+  };
 }
 
 /**
@@ -2904,5 +2927,448 @@ export async function getGraph(): Promise<KnowledgeGraph> {
       knowledge: nodes.filter((n) => knowledgeKinds.has(n.kind)).length,
     },
     generatedAt: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge Write Verification
+// ---------------------------------------------------------------------------
+//
+// A successful video upload OR mentor answer must NEVER silently fail to enter
+// the graph. Every write reports a manifest of exactly what it was supposed to
+// land; verifyGraphWrite reads the persisted graph back and confirms it. On a
+// non-verified result the pipeline retries forward (no rollback — the nodes are
+// shared) and never reports success. verifyAndRecordGraphWrite also persists an
+// audit row to knowledge_write_log, the admin Graph Health dashboard's source of
+// truth.
+
+/**
+ * A precise record of what a single knowledge write (one video distillation or
+ * one mentor answer) was SUPPOSED to land in the graph. The writer produces it
+ * from the very ids it upserted, so verification compares intent against the
+ * persisted graph instead of re-deriving the expectation (which would drift).
+ */
+export interface GraphWriteManifest {
+  scope: "video" | "mentor_answer";
+  /** videoId or answerId — the thing whose write we are verifying. */
+  refId: string;
+  /** The provenance source node every expected edge originates from. */
+  sourceNodeId: string;
+  /** Canonical concept node ids this write reinforced or created. */
+  expectedNodeIds: string[];
+  /** Provenance edge ids (sourceNode -> concept) this write wrote. */
+  expectedEdgeIds: string[];
+  /** Concept nodes this write newly minted, which must carry an embedding. */
+  embeddingNodeIds: string[];
+}
+
+/** One verification check's verdict + a human-readable detail for the dashboard. */
+export interface WriteCheck {
+  ok: boolean;
+  detail: string;
+}
+
+/** The five checks that together prove a knowledge write actually landed. */
+export interface GraphWriteChecks {
+  nodesExist: WriteCheck;
+  edgesExist: WriteCheck;
+  provenanceStored: WriteCheck;
+  confidenceUpdated: WriteCheck;
+  searchIndexUpdated: WriteCheck;
+}
+
+export interface GraphWriteVerification {
+  /** verified = all checks passed; partial = some landed; failed = none landed. */
+  status: "verified" | "partial" | "failed";
+  checks: GraphWriteChecks;
+  summary: string;
+}
+
+/**
+ * Build the write manifest for a mentor answer from its distillation outcomes.
+ * Only concepts that actually landed in the live graph (reinforced/created) are
+ * expected — queued candidates live OUTSIDE the graph by design — and 'created'
+ * concepts are the newly minted nodes that must carry an embedding.
+ */
+export function buildMentorAnswerManifest(
+  mentorProfileId: string,
+  answerId: string,
+  outcomes: MentorKnowledgeOutcome[],
+): GraphWriteManifest {
+  const mNode = mentorNodeId(mentorProfileId);
+  const landed = outcomes.filter((o) => o.outcome !== "queued");
+  const expectedNodeIds = [
+    ...new Set(landed.map((o) => o.canonicalId).filter((id): id is string => id !== null)),
+  ];
+  const expectedEdgeIds = expectedNodeIds.map((id) => edgeKey(mNode, id));
+  const embeddingNodeIds = [
+    ...new Set(
+      landed
+        .filter((o) => o.outcome === "created")
+        .map((o) => o.canonicalId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  return {
+    scope: "mentor_answer",
+    refId: answerId,
+    sourceNodeId: mNode,
+    expectedNodeIds,
+    expectedEdgeIds,
+    embeddingNodeIds,
+  };
+}
+
+/**
+ * Confirm the search index this write depends on was updated: newly minted
+ * concept nodes carry an embedding (both scopes), and — for videos — every
+ * transcript segment is embedded and a transcribed video carries a whole-video
+ * embedding (that's what powers citations and related-video discovery). Uses
+ * id-only reads (never fetches the vectors themselves) so the happy path is cheap.
+ */
+async function verifySearchIndex(
+  scope: "video" | "mentor_answer",
+  refId: string,
+  embeddingNodeIds: string[],
+): Promise<WriteCheck> {
+  let missingNodeEmbeddings = 0;
+  if (embeddingNodeIds.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id")
+      .in("id", embeddingNodeIds)
+      .not("embedding", "is", null);
+    if (error) throw error;
+    const withEmbedding = new Set(
+      (data ?? []).map((r) => (r as Record<string, unknown>)["id"]),
+    );
+    missingNodeEmbeddings = embeddingNodeIds.filter((id) => !withEmbedding.has(id)).length;
+  }
+
+  if (scope === "video") {
+    const { data: nullSegs, error: segErr } = await supabase
+      .from("transcript_segments")
+      .select("id")
+      .eq("video_id", refId)
+      .is("embedding", null);
+    if (segErr) throw segErr;
+    const unembeddedSegments = (nullSegs ?? []).length;
+
+    const { data: allSegs, error: allErr } = await supabase
+      .from("transcript_segments")
+      .select("id")
+      .eq("video_id", refId);
+    if (allErr) throw allErr;
+    const hasSegments = (allSegs ?? []).length > 0;
+
+    // A video with transcript segments must carry a whole-video embedding; a
+    // video that legitimately had no transcript is exempt.
+    let videoEmbedded = true;
+    if (hasSegments) {
+      const { data: vid, error: vErr } = await supabase
+        .from("videos")
+        .select("id")
+        .eq("id", refId)
+        .not("embedding", "is", null)
+        .maybeSingle();
+      if (vErr) throw vErr;
+      videoEmbedded = !!vid;
+    }
+
+    const problems: string[] = [];
+    if (unembeddedSegments > 0)
+      problems.push(`${unembeddedSegments} transcript segment(s) not embedded`);
+    if (!videoEmbedded) problems.push("whole-video embedding missing");
+    if (missingNodeEmbeddings > 0)
+      problems.push(`${missingNodeEmbeddings} new concept node(s) not embedded`);
+    return {
+      ok: problems.length === 0,
+      detail: problems.length === 0 ? "search index up to date" : problems.join("; "),
+    };
+  }
+
+  return {
+    ok: missingNodeEmbeddings === 0,
+    detail:
+      missingNodeEmbeddings === 0
+        ? "concept embeddings up to date"
+        : `${missingNodeEmbeddings} new concept node(s) not embedded`,
+  };
+}
+
+/**
+ * Read the persisted graph back and confirm a write landed. Never throws for a
+ * missing artifact — a missing node/edge is a failed CHECK, not an exception —
+ * so the caller always gets a verdict. (A read that itself errors DOES throw;
+ * verifyAndRecordGraphWrite turns that into a 'failed' verdict.)
+ */
+export async function verifyGraphWrite(
+  manifest: GraphWriteManifest,
+): Promise<GraphWriteVerification> {
+  const { scope, refId, expectedNodeIds, expectedEdgeIds, embeddingNodeIds } = manifest;
+
+  // Nodes exist + confidence recomputed (one read serves both).
+  const nodeRows = new Map<string, Record<string, unknown>>();
+  if (expectedNodeIds.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id, confidence")
+      .in("id", expectedNodeIds);
+    if (error) throw error;
+    for (const r of data ?? [])
+      nodeRows.set((r as Record<string, unknown>)["id"] as string, r as Record<string, unknown>);
+  }
+  const missingNodes = expectedNodeIds.filter((id) => !nodeRows.has(id));
+  const nodesExist: WriteCheck = {
+    ok: missingNodes.length === 0,
+    detail:
+      missingNodes.length === 0
+        ? `${expectedNodeIds.length} concept node(s) present`
+        : `${missingNodes.length} of ${expectedNodeIds.length} concept node(s) missing`,
+  };
+  const noConfidence = expectedNodeIds.filter((id) => {
+    const row = nodeRows.get(id);
+    return !row || typeof row["confidence"] !== "number";
+  });
+  const confidenceUpdated: WriteCheck = {
+    ok: noConfidence.length === 0,
+    detail:
+      noConfidence.length === 0
+        ? `confidence set on ${expectedNodeIds.length} node(s)`
+        : `${noConfidence.length} node(s) missing a recomputed confidence`,
+  };
+
+  // Edges exist + provenance stored (one read serves both).
+  const edgeRows = new Map<string, Record<string, unknown>>();
+  if (expectedEdgeIds.length > 0) {
+    const { data, error } = await supabase
+      .from("knowledge_edges")
+      .select("id, source_id, target_id, meta")
+      .in("id", expectedEdgeIds);
+    if (error) throw error;
+    for (const r of data ?? [])
+      edgeRows.set((r as Record<string, unknown>)["id"] as string, r as Record<string, unknown>);
+  }
+  const missingEdges = expectedEdgeIds.filter((id) => !edgeRows.has(id));
+  const edgesExist: WriteCheck = {
+    ok: missingEdges.length === 0,
+    detail:
+      missingEdges.length === 0
+        ? `${expectedEdgeIds.length} provenance edge(s) present`
+        : `${missingEdges.length} of ${expectedEdgeIds.length} provenance edge(s) missing`,
+  };
+  // Provenance = the edge carries the extraction record tying this source to the
+  // concept. Video edges record extractedAt/confidence; mentor edges record this
+  // answerId in their answerIds ledger.
+  let provenanceBad = 0;
+  for (const id of expectedEdgeIds) {
+    const row = edgeRows.get(id);
+    if (!row) {
+      provenanceBad++;
+      continue;
+    }
+    const meta = (row["meta"] as Record<string, unknown>) ?? {};
+    if (scope === "mentor_answer") {
+      const answerIds = Array.isArray(meta["answerIds"]) ? (meta["answerIds"] as unknown[]) : [];
+      if (!answerIds.includes(refId)) provenanceBad++;
+    } else {
+      const hasProv =
+        typeof meta["extractedAt"] === "string" || typeof meta["confidence"] === "number";
+      if (!hasProv) provenanceBad++;
+    }
+  }
+  const provenanceStored: WriteCheck = {
+    ok: provenanceBad === 0,
+    detail:
+      provenanceBad === 0
+        ? `provenance recorded on ${expectedEdgeIds.length} edge(s)`
+        : `${provenanceBad} edge(s) missing provenance metadata`,
+  };
+
+  const searchIndexUpdated = await verifySearchIndex(scope, refId, embeddingNodeIds);
+
+  const checks: GraphWriteChecks = {
+    nodesExist,
+    edgesExist,
+    provenanceStored,
+    confidenceUpdated,
+    searchIndexUpdated,
+  };
+  const failed = Object.entries(checks).filter(([, c]) => !c.ok);
+  // Something landed if any expected node/edge is present. When nothing was
+  // expected (a legit empty write) a check can still fail — that's the search
+  // index — which is a real failure, not a partial.
+  const anyPresent = nodeRows.size > 0 || edgeRows.size > 0;
+  let status: GraphWriteVerification["status"];
+  if (failed.length === 0) status = "verified";
+  else if (anyPresent) status = "partial";
+  else status = "failed";
+  const summary =
+    failed.length === 0
+      ? "All knowledge-write checks passed."
+      : failed.map(([name, c]) => `${name}: ${c.detail}`).join("; ");
+  return { status, checks, summary };
+}
+
+/** Persist (upsert) one audit row for a knowledge write. Best-effort telemetry:
+ * a failure to record the audit row must never mask the verification verdict. */
+async function recordGraphWrite(
+  manifest: GraphWriteManifest,
+  verification: GraphWriteVerification,
+  meta: { attempts?: number; startedAtMs?: number },
+): Promise<void> {
+  try {
+    const id = `wl:${manifest.scope === "video" ? "video" : "answer"}:${manifest.refId}`;
+    const { error } = await supabase.from("knowledge_write_log").upsert(
+      {
+        id,
+        scope: manifest.scope,
+        ref_id: manifest.refId,
+        status: verification.status,
+        checks: verification.checks,
+        error: verification.status === "verified" ? null : verification.summary,
+        duration_ms:
+          typeof meta.startedAtMs === "number" ? Date.now() - meta.startedAtMs : null,
+        attempts: meta.attempts ?? 1,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    );
+    if (error) throw error;
+  } catch (err) {
+    logger.error(
+      { err, scope: manifest.scope, refId: manifest.refId },
+      "failed to record knowledge write log",
+    );
+  }
+}
+
+/**
+ * Verify a knowledge write and record its audit row. Returns the verdict so the
+ * caller can decide whether to report success. A verification READ that itself
+ * fails yields a 'failed' verdict (we can't confirm the write → never claim
+ * success), which the caller treats as retry-forward.
+ */
+export async function verifyAndRecordGraphWrite(
+  manifest: GraphWriteManifest,
+  meta: { attempts?: number; startedAtMs?: number } = {},
+): Promise<GraphWriteVerification> {
+  let verification: GraphWriteVerification;
+  try {
+    verification = await verifyGraphWrite(manifest);
+  } catch (err) {
+    const detail = "verification read failed";
+    verification = {
+      status: "failed",
+      checks: {
+        nodesExist: { ok: false, detail },
+        edgesExist: { ok: false, detail },
+        provenanceStored: { ok: false, detail },
+        confidenceUpdated: { ok: false, detail },
+        searchIndexUpdated: { ok: false, detail },
+      },
+      summary: `Verification read failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  await recordGraphWrite(manifest, verification, meta);
+  return verification;
+}
+
+// ---------------------------------------------------------------------------
+// Graph Health dashboard
+// ---------------------------------------------------------------------------
+
+export interface GraphHealthWrite {
+  id: string;
+  scope: string;
+  refId: string;
+  status: string;
+  error: string | null;
+  durationMs: number | null;
+  attempts: number;
+  updatedAt: string | null;
+  checks: Record<string, WriteCheck>;
+}
+
+export interface GraphHealthReport {
+  counts: { verified: number; partial: number; failed: number; pending: number; total: number };
+  /** Work awaiting a retry: videos in the backoff ladder + answers to redistill. */
+  retryQueue: { videos: number; answers: number; total: number };
+  /** Mean duration of verified writes (ms), or null when none recorded yet. */
+  avgProcessingMs: number | null;
+  recentWrites: GraphHealthWrite[];
+}
+
+/** Coerce a stored checks JSONB blob back into the typed check map defensively. */
+function normalizeChecks(raw: unknown): Record<string, WriteCheck> {
+  const out: Record<string, WriteCheck> = {};
+  if (raw && typeof raw === "object") {
+    for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+      if (val && typeof val === "object") {
+        const v = val as Record<string, unknown>;
+        out[name] = {
+          ok: Boolean(v["ok"]),
+          detail: typeof v["detail"] === "string" ? (v["detail"] as string) : "",
+        };
+      }
+    }
+  }
+  return out;
+}
+
+/** Assemble the admin Graph Health report from the write log + retry sources. */
+export async function getGraphHealth(recentLimit = 25): Promise<GraphHealthReport> {
+  const { data: logs, error } = await supabase
+    .from("knowledge_write_log")
+    .select("id, scope, ref_id, status, error, duration_ms, attempts, checks, updated_at")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  const rows = (logs ?? []) as Array<Record<string, unknown>>;
+
+  const counts = { verified: 0, partial: 0, failed: 0, pending: 0, total: rows.length };
+  let durSum = 0;
+  let durN = 0;
+  for (const r of rows) {
+    const s = String(r["status"] ?? "pending");
+    if (s === "verified") counts.verified++;
+    else if (s === "partial") counts.partial++;
+    else if (s === "failed") counts.failed++;
+    else counts.pending++;
+    if (s === "verified" && typeof r["duration_ms"] === "number") {
+      durSum += r["duration_ms"] as number;
+      durN++;
+    }
+  }
+
+  const { data: vids, error: vErr } = await supabase
+    .from("videos")
+    .select("id")
+    .in("status", ["retrying", "failed"]);
+  if (vErr) throw vErr;
+  const { data: ans, error: aErr } = await supabase
+    .from("interview_answers")
+    .select("id")
+    .eq("distillation_status", "failed");
+  if (aErr) throw aErr;
+  const videoQueue = (vids ?? []).length;
+  const answerQueue = (ans ?? []).length;
+
+  const recentWrites: GraphHealthWrite[] = rows.slice(0, recentLimit).map((r) => ({
+    id: String(r["id"] ?? ""),
+    scope: String(r["scope"] ?? ""),
+    refId: String(r["ref_id"] ?? ""),
+    status: String(r["status"] ?? "pending"),
+    error: (r["error"] as string | null) ?? null,
+    durationMs: typeof r["duration_ms"] === "number" ? (r["duration_ms"] as number) : null,
+    attempts: typeof r["attempts"] === "number" ? (r["attempts"] as number) : 0,
+    updatedAt: (r["updated_at"] as string | null) ?? null,
+    checks: normalizeChecks(r["checks"]),
+  }));
+
+  return {
+    counts,
+    retryQueue: { videos: videoQueue, answers: answerQueue, total: videoQueue + answerQueue },
+    avgProcessingMs: durN > 0 ? Math.round(durSum / durN) : null,
+    recentWrites,
   };
 }

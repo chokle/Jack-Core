@@ -593,6 +593,46 @@ paths:
         "404":
           description: Session not found
 
+  /interview/answers/{id}/redistill:
+    post:
+      operationId: redistillInterviewAnswer
+      tags: [interview]
+      summary: Re-run distillation + verification for a single answer (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The answer with its refreshed distillation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedistillAnswerResult"
+        "401":
+          description: Admin session required
+        "404":
+          description: Answer or mentor not found
+        "409":
+          description: The answer was skipped or has no content to distill
+
+  /graph/health:
+    get:
+      operationId: getGraphHealth
+      tags: [graph]
+      summary: Knowledge-write health — verified/partial/failed counts, retry queue, recent writes (admin only)
+      responses:
+        "200":
+          description: Graph write health report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphHealthReport"
+        "401":
+          description: Admin session required
+
 components:
   schemas:
     HealthStatus:
@@ -1123,6 +1163,13 @@ components:
           type: ["string", "null"]
         skipped:
           type: boolean
+        distillationStatus:
+          type: string
+          enum: [pending, verified, failed]
+          description: >-
+            Whether this answer's knowledge write was verified to have landed in
+            the graph. pending = skipped or not yet distilled; failed = surfaced
+            on the Graph Health dashboard for redistillation.
         createdAt:
           type: string
 
@@ -1348,3 +1395,98 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ExtractedKnowledgeItem"
+
+    RedistillAnswerResult:
+      type: object
+      required: [answer, extractedKnowledge]
+      properties:
+        answer:
+          $ref: "#/components/schemas/InterviewAnswer"
+        extractedKnowledge:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedKnowledgeItem"
+
+    WriteCheck:
+      type: object
+      required: [ok, detail]
+      properties:
+        ok:
+          type: boolean
+        detail:
+          type: string
+
+    GraphWriteChecks:
+      type: object
+      required:
+        [nodesExist, edgesExist, provenanceStored, confidenceUpdated, searchIndexUpdated]
+      properties:
+        nodesExist:
+          $ref: "#/components/schemas/WriteCheck"
+        edgesExist:
+          $ref: "#/components/schemas/WriteCheck"
+        provenanceStored:
+          $ref: "#/components/schemas/WriteCheck"
+        confidenceUpdated:
+          $ref: "#/components/schemas/WriteCheck"
+        searchIndexUpdated:
+          $ref: "#/components/schemas/WriteCheck"
+
+    GraphHealthWrite:
+      type: object
+      required: [id, scope, refId, status, attempts, checks]
+      properties:
+        id:
+          type: string
+        scope:
+          type: string
+        refId:
+          type: string
+        status:
+          type: string
+          enum: [verified, partial, failed, pending]
+        error:
+          type: ["string", "null"]
+        durationMs:
+          type: ["number", "null"]
+        attempts:
+          type: number
+        updatedAt:
+          type: ["string", "null"]
+        checks:
+          $ref: "#/components/schemas/GraphWriteChecks"
+
+    GraphHealthReport:
+      type: object
+      required: [counts, retryQueue, avgProcessingMs, recentWrites]
+      properties:
+        counts:
+          type: object
+          required: [verified, partial, failed, pending, total]
+          properties:
+            verified:
+              type: number
+            partial:
+              type: number
+            failed:
+              type: number
+            pending:
+              type: number
+            total:
+              type: number
+        retryQueue:
+          type: object
+          required: [videos, answers, total]
+          properties:
+            videos:
+              type: number
+            answers:
+              type: number
+            total:
+              type: number
+        avgProcessingMs:
+          type: ["number", "null"]
+        recentWrites:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphHealthWrite"

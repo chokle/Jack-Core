@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   GetGraphResponse,
+  GetGraphHealthResponse,
   ListKnowledgeCandidatesQueryParams,
   ListKnowledgeCandidatesResponse,
   ResolveKnowledgeCandidateParams,
@@ -15,6 +16,7 @@ import {
   setNodeVerification,
   listKnowledgeCandidates,
   resolveKnowledgeCandidate,
+  getGraphHealth,
 } from "../lib/memory-graph.js";
 import { requireAdminSession, isAdminSessionValid } from "../lib/admin-auth.js";
 
@@ -134,6 +136,21 @@ router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, r
   } catch (err) {
     req.log.error({ err }, "setNodeVerification error");
     return res.status(500).json({ error: "Failed to update verification status" });
+  }
+});
+
+// Admin-only Graph Health dashboard: knowledge-write verification counts
+// (verified/partial/failed), the retry queue (videos + answers awaiting a
+// retry), average processing time, and the most recent writes with per-check
+// detail. Gated behind the signed admin session — it exposes internal write
+// telemetry and the API holds the Supabase service-role key.
+router.get("/graph/health", requireAdminSession, async (req, res) => {
+  try {
+    const report = await getGraphHealth();
+    return res.json(GetGraphHealthResponse.parse(report));
+  } catch (err) {
+    req.log.error({ err }, "getGraphHealth error");
+    return res.status(500).json({ error: "Failed to load graph health" });
   }
 });
 

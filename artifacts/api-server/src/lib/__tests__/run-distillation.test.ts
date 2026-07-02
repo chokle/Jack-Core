@@ -20,9 +20,28 @@ vi.mock("../memory-graph.js", async (importOriginal) => {
 });
 
 import { runDistillation } from "../distillation.js";
-import { knowledgeNodeId, syncVideoKnowledge } from "../memory-graph.js";
+import {
+  knowledgeNodeId,
+  syncVideoKnowledge,
+  type GraphWriteManifest,
+} from "../memory-graph.js";
 import { logger } from "../logger.js";
 import { fake, openai, resetMocks } from "./mocks.js";
+
+/**
+ * A sentinel write manifest returned by the mocked syncVideoKnowledge. The real
+ * manifest content is proven in memory-graph's own tests; here we only assert
+ * that runDistillation surfaces whatever the sync step returned (so the indexing
+ * stage can verify it) versus null when there is nothing to distill.
+ */
+const MANIFEST: GraphWriteManifest = {
+  scope: "video",
+  refId: "v1",
+  sourceNodeId: "video:v1",
+  expectedNodeIds: [],
+  expectedEdgeIds: [],
+  embeddingNodeIds: [],
+};
 
 /**
  * The shared mock `openai` singleton is an empty object; give it a spyable
@@ -77,6 +96,7 @@ describe("runDistillation — pipeline step", () => {
     resetMocks();
     createCompletion.mockReset();
     syncMock.mockReset();
+    syncMock.mockResolvedValue(MANIFEST);
   });
 
   afterEach(() => {
@@ -86,7 +106,7 @@ describe("runDistillation — pipeline step", () => {
   it("skips (no model call, no sync) when the video is missing", async () => {
     const infoSpy = vi.spyOn(logger, "info");
 
-    await expect(runDistillation("nope")).resolves.toBeUndefined();
+    await expect(runDistillation("nope")).resolves.toBeNull();
 
     expect(createCompletion).not.toHaveBeenCalled();
     expect(syncMock).not.toHaveBeenCalled();
@@ -99,7 +119,7 @@ describe("runDistillation — pipeline step", () => {
   it("skips when the video has an empty transcript", async () => {
     seedVideo({ id: "v1", title: "Empty", trade: "Welder", transcript: "", status: "ready" });
 
-    await expect(runDistillation("v1")).resolves.toBeUndefined();
+    await expect(runDistillation("v1")).resolves.toBeNull();
 
     expect(createCompletion).not.toHaveBeenCalled();
     expect(syncMock).not.toHaveBeenCalled();
@@ -114,7 +134,7 @@ describe("runDistillation — pipeline step", () => {
       status: "ready",
     });
 
-    await expect(runDistillation("v1")).resolves.toBeUndefined();
+    await expect(runDistillation("v1")).resolves.toBeNull();
 
     expect(createCompletion).not.toHaveBeenCalled();
     expect(syncMock).not.toHaveBeenCalled();
@@ -123,7 +143,7 @@ describe("runDistillation — pipeline step", () => {
   it("skips when transcript is a non-string (null) value", async () => {
     seedVideo({ id: "v1", title: "Null", trade: "Welder", transcript: null, status: "ready" });
 
-    await expect(runDistillation("v1")).resolves.toBeUndefined();
+    await expect(runDistillation("v1")).resolves.toBeNull();
 
     expect(createCompletion).not.toHaveBeenCalled();
     expect(syncMock).not.toHaveBeenCalled();
@@ -212,7 +232,7 @@ describe("runDistillation — pipeline step", () => {
       ),
     );
 
-    await expect(runDistillation("v1")).resolves.toBeUndefined();
+    await expect(runDistillation("v1")).resolves.toBe(MANIFEST);
 
     expect(createCompletion).toHaveBeenCalledTimes(1);
     expect(syncMock).toHaveBeenCalledTimes(1);
@@ -239,7 +259,7 @@ describe("runDistillation — pipeline step", () => {
 
     createCompletion.mockResolvedValue(completionWith(JSON.stringify({ knowledge: [] })));
 
-    await expect(runDistillation("v1")).resolves.toBeUndefined();
+    await expect(runDistillation("v1")).resolves.toBe(MANIFEST);
 
     expect(createCompletion).toHaveBeenCalledTimes(1);
     expect(syncMock).toHaveBeenCalledTimes(1);

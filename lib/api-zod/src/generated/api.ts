@@ -610,6 +610,7 @@ export const SubmitInterviewAnswerResponse = zod.object({
   "topic": zod.string().nullish(),
   "answerText": zod.string().nullish(),
   "skipped": zod.boolean(),
+  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
   "createdAt": zod.string()
 }),
   "extractedKnowledge": zod.array(zod.object({
@@ -653,6 +654,7 @@ export const SkipInterviewQuestionResponse = zod.object({
   "topic": zod.string().nullish(),
   "answerText": zod.string().nullish(),
   "skipped": zod.boolean(),
+  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
   "createdAt": zod.string()
 }),
   "extractedKnowledge": zod.array(zod.object({
@@ -723,6 +725,89 @@ export const FinishInterviewResponse = zod.object({
   "questionCount": zod.number(),
   "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
   "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Re-run distillation + verification for a single answer (admin only)
+ */
+export const RedistillInterviewAnswerParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const RedistillInterviewAnswerResponse = zod.object({
+  "answer": zod.object({
+  "id": zod.string(),
+  "question": zod.string(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "answerText": zod.string().nullish(),
+  "skipped": zod.boolean(),
+  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
+  "createdAt": zod.string()
+}),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
+}))
+})
+
+
+/**
+ * @summary Knowledge-write health — verified/partial/failed counts, retry queue, recent writes (admin only)
+ */
+export const GetGraphHealthResponse = zod.object({
+  "counts": zod.object({
+  "verified": zod.number(),
+  "partial": zod.number(),
+  "failed": zod.number(),
+  "pending": zod.number(),
+  "total": zod.number()
+}),
+  "retryQueue": zod.object({
+  "videos": zod.number(),
+  "answers": zod.number(),
+  "total": zod.number()
+}),
+  "avgProcessingMs": zod.number().nullable(),
+  "recentWrites": zod.array(zod.object({
+  "id": zod.string(),
+  "scope": zod.string(),
+  "refId": zod.string(),
+  "status": zod.enum(['verified', 'partial', 'failed', 'pending']),
+  "error": zod.string().nullish(),
+  "durationMs": zod.number().nullish(),
+  "attempts": zod.number(),
+  "updatedAt": zod.string().nullish(),
+  "checks": zod.object({
+  "nodesExist": zod.object({
+  "ok": zod.boolean(),
+  "detail": zod.string()
+}),
+  "edgesExist": zod.object({
+  "ok": zod.boolean(),
+  "detail": zod.string()
+}),
+  "provenanceStored": zod.object({
+  "ok": zod.boolean(),
+  "detail": zod.string()
+}),
+  "confidenceUpdated": zod.object({
+  "ok": zod.boolean(),
+  "detail": zod.string()
+}),
+  "searchIndexUpdated": zod.object({
+  "ok": zod.boolean(),
+  "detail": zod.string()
+})
+})
+}))
 })
 
 

@@ -5,6 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { InterviewAnswerDistillationStatus } from './interviewAnswerDistillationStatus';
 
 export interface InterviewAnswer {
   id: string;
@@ -16,5 +17,7 @@ export interface InterviewAnswer {
   /** @nullable */
   answerText?: string | null;
   skipped: boolean;
+  /** Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation. */
+  distillationStatus?: InterviewAnswerDistillationStatus;
   createdAt: string;
 }

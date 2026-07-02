@@ -26,6 +26,7 @@ import type {
   ChatMessage,
   ChatResponse,
   Competency,
+  GraphHealthReport,
   HealthStatus,
   InterviewSession,
   InterviewTurnResult,
@@ -38,6 +39,7 @@ import type {
   ListVideosParams,
   MentorList,
   MentorWithdrawalResult,
+  RedistillAnswerResult,
   SearchInput,
   SearchResults,
   StartInterviewInput,
@@ -2149,4 +2151,151 @@ export const useFinishInterview = <TError = ErrorType<void>,
       > => {
       return useMutation(getFinishInterviewMutationOptions(options));
     }
+
+export const getRedistillInterviewAnswerUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/answers/${id}/redistill`
+}
+
+/**
+ * @summary Re-run distillation + verification for a single answer (admin only)
+ */
+export const redistillInterviewAnswer = async (id: string, options?: RequestInit): Promise<RedistillAnswerResult> => {
+
+  return customFetch<RedistillAnswerResult>(getRedistillInterviewAnswerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRedistillInterviewAnswerMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redistillInterviewAnswer>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof redistillInterviewAnswer>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['redistillInterviewAnswer'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof redistillInterviewAnswer>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  redistillInterviewAnswer(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RedistillInterviewAnswerMutationResult = NonNullable<Awaited<ReturnType<typeof redistillInterviewAnswer>>>
+
+    export type RedistillInterviewAnswerMutationError = ErrorType<void>
+
+    /**
+ * @summary Re-run distillation + verification for a single answer (admin only)
+ */
+export const useRedistillInterviewAnswer = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redistillInterviewAnswer>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof redistillInterviewAnswer>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getRedistillInterviewAnswerMutationOptions(options));
+    }
+
+export const getGetGraphHealthUrl = () => {
+
+
+
+
+  return `/api/graph/health`
+}
+
+/**
+ * @summary Knowledge-write health — verified/partial/failed counts, retry queue, recent writes (admin only)
+ */
+export const getGraphHealth = async ( options?: RequestInit): Promise<GraphHealthReport> => {
+
+  return customFetch<GraphHealthReport>(getGetGraphHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGraphHealthQueryKey = () => {
+    return [
+    `/api/graph/health`
+    ] as const;
+    }
+
+
+export const getGetGraphHealthQueryOptions = <TData = Awaited<ReturnType<typeof getGraphHealth>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGraphHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGraphHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGraphHealth>>> = ({ signal }) => getGraphHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGraphHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGraphHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getGraphHealth>>>
+export type GetGraphHealthQueryError = ErrorType<void>
+
+
+/**
+ * @summary Knowledge-write health — verified/partial/failed counts, retry queue, recent writes (admin only)
+ */
+
+export function useGetGraphHealth<TData = Awaited<ReturnType<typeof getGraphHealth>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGraphHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGraphHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

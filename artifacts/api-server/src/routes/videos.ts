@@ -32,7 +32,7 @@ const router = Router();
 
 // Re-exported for callers/tests that historically imported these from the
 // routes module. The implementations now live in the durable job system.
-export { distillGraphSafe, runAnalysis } from "../lib/jobs.js";
+export { runAnalysis } from "../lib/jobs.js";
 
 router.get("/videos", async (req, res) => {
   try {

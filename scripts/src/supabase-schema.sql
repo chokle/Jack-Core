@@ -470,3 +470,43 @@ ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS aliases JSONB NOT NULL
 -- replay-safe.
 ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS requested_target_id TEXT;
 ALTER TABLE knowledge_candidates ADD COLUMN IF NOT EXISTS redirect_reason TEXT;
+
+-- Knowledge Write Verification — one durable audit row per knowledge write (a
+-- video distillation OR a mentor interview answer). A successful upload/answer
+-- MUST verify that its knowledge actually entered the graph: canonical nodes
+-- exist, provenance edges were created, confidence was recomputed, and the search
+-- index was updated. The pipeline NEVER reports success on a failed/partial write
+-- — a failed video re-enters the retry/backoff ladder, and a failed answer is
+-- flagged for admin redistill. This table is the admin Graph Health dashboard's
+-- source of truth. The id is deterministic (wl:video:<id> / wl:answer:<id>) so a
+-- retry/replay converges onto the same row instead of piling up duplicates.
+CREATE TABLE IF NOT EXISTS knowledge_write_log (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL CHECK (scope IN ('video','mentor_answer')),
+  ref_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('verified','partial','failed','pending')),
+  -- Per-check results ({nodesExist, edgesExist, provenanceStored,
+  -- confidenceUpdated, searchIndexUpdated}) surfaced on the dashboard.
+  checks JSONB NOT NULL DEFAULT '{}',
+  error TEXT,
+  duration_ms INTEGER,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_write_log_status ON knowledge_write_log(status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_write_log_scope ON knowledge_write_log(scope);
+CREATE INDEX IF NOT EXISTS idx_knowledge_write_log_updated ON knowledge_write_log(updated_at DESC);
+
+-- interview_answers distillation verification status (idempotent) — mirrors the
+-- write-log verdict onto the answer row so the interview UI can flag an answer
+-- whose knowledge failed to enter the graph and the admin redistill action can
+-- find failed answers. Skipped/pre-feature answers keep the 'pending' default.
+ALTER TABLE interview_answers
+  ADD COLUMN IF NOT EXISTS distillation_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE interview_answers ADD COLUMN IF NOT EXISTS distillation_error TEXT;
+ALTER TABLE interview_answers DROP CONSTRAINT IF EXISTS interview_answers_distillation_status_check;
+ALTER TABLE interview_answers
+  ADD CONSTRAINT interview_answers_distillation_status_check
+  CHECK (distillation_status IN ('pending','verified','failed'));

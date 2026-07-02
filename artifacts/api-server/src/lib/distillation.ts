@@ -26,7 +26,9 @@ import {
   knowledgeNodeId,
   syncVideoKnowledge,
   syncMentorAnswerKnowledge,
+  buildMentorAnswerManifest,
   type MentorConceptOutcome,
+  type GraphWriteManifest,
 } from "./memory-graph.js";
 
 /**
@@ -260,10 +262,11 @@ Respond with a JSON object of the exact shape:
 /**
  * Full pipeline step: read a ready video's transcript, segments, and the
  * competency catalog, distill reusable atomic knowledge, and persist it into the
- * graph (canonical dedup + many-to-many provenance). Throws on failure; callers
- * wrap this best-effort so a distillation failure never downgrades the video.
+ * graph (canonical dedup + many-to-many provenance). Throws on failure. Returns
+ * the write manifest so the indexing stage can verify the knowledge landed, or
+ * null when there was no transcript to distill (an honest no-op, not a failure).
  */
-export async function runDistillation(videoId: string): Promise<void> {
+export async function runDistillation(videoId: string): Promise<GraphWriteManifest | null> {
   const { data: video, error: vErr } = await supabase
     .from("videos")
     .select("id, title, trade, transcript, status")
@@ -274,7 +277,7 @@ export async function runDistillation(videoId: string): Promise<void> {
   const transcript = typeof video?.transcript === "string" ? video.transcript : "";
   if (!video || !transcript.trim()) {
     logger.info({ videoId }, "distillation skipped: no transcript");
-    return;
+    return null;
   }
 
   const { data: segRows, error: sErr } = await supabase
@@ -307,8 +310,9 @@ export async function runDistillation(videoId: string): Promise<void> {
     competencies,
   });
 
-  await syncVideoKnowledge(videoId, items, { model: MODELS.analysis });
+  const manifest = await syncVideoKnowledge(videoId, items, { model: MODELS.analysis });
   logger.info({ videoId, count: items.length }, "distilled atomic knowledge");
+  return manifest;
 }
 
 /**
@@ -410,9 +414,9 @@ export interface MentorDistilledItem extends AtomicKnowledge {
 /**
  * Interview pipeline step: distill one mentor answer's reusable knowledge and
  * persist it into the shared graph as mentor-sourced corroboration. Returns the
- * distilled items so the caller can snapshot them onto the answer row and preview
- * them to the mentor. Throws on failure; callers wrap this best-effort so a
- * distillation failure never loses the verbatim answer.
+ * distilled items (so the caller can snapshot them onto the answer row and
+ * preview them to the mentor) plus the write manifest (so the caller can verify
+ * the knowledge actually landed). Throws on failure.
  */
 export async function runMentorAnswerDistillation(input: {
   mentorProfileId: string;
@@ -424,7 +428,7 @@ export async function runMentorAnswerDistillation(input: {
   topic: string | null;
   question: string;
   answer: string;
-}): Promise<MentorDistilledItem[]> {
+}): Promise<{ items: MentorDistilledItem[]; manifest: GraphWriteManifest }> {
   const { data: comps, error: cErr } = await supabase
     .from("competencies")
     .select("code, name, trade");
@@ -456,8 +460,10 @@ export async function runMentorAnswerDistillation(input: {
     { mentorProfileId: input.mentorProfileId, answerId: input.answerId, count: items.length },
     "distilled mentor answer knowledge",
   );
-  return items.map((k) => {
+  const distilled = items.map((k) => {
     const o = byItemId.get(k.id);
     return { ...k, outcome: o?.outcome ?? "created", matchedLabel: o?.matchedLabel ?? null };
   });
+  const manifest = buildMentorAnswerManifest(input.mentorProfileId, input.answerId, outcomes);
+  return { items: distilled, manifest };
 }

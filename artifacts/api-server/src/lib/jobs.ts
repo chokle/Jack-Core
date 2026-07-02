@@ -26,7 +26,7 @@ import { supabase } from "./supabase.js";
 import { openai, createEmbedding, createEmbeddings, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { transcribeFromUrl } from "./transcription.js";
-import { syncVideoGraph, removeVideoGraph } from "./memory-graph.js";
+import { syncVideoGraph, removeVideoGraph, verifyAndRecordGraphWrite } from "./memory-graph.js";
 import { runDistillation } from "./distillation.js";
 
 // ---------------------------------------------------------------------------
@@ -114,19 +114,6 @@ export async function removeGraphSafe(videoId: string): Promise<void> {
     await removeVideoGraph(videoId);
   } catch (err) {
     logger.error({ err, videoId }, "knowledge graph node removal failed");
-  }
-}
-
-/**
- * Best-effort atomic-knowledge distillation for a processed video. A distillation
- * failure (or LLM/Supabase hiccup) must never downgrade a successfully
- * transcribed/analyzed video, so we log and move on.
- */
-export async function distillGraphSafe(videoId: string): Promise<void> {
-  try {
-    await runDistillation(videoId);
-  } catch (err) {
-    logger.error({ err, videoId }, "atomic knowledge distillation failed");
   }
 }
 
@@ -339,6 +326,7 @@ async function stageAnalyze(videoId: string): Promise<void> {
 }
 
 async function stageIndex(videoId: string): Promise<void> {
+  const startedAtMs = Date.now();
   // 1. Embed every transcript segment (overwrites are idempotent) so semantic
   //    search and Ask Jack can match specific moments — this powers citations.
   const { data: segs } = await supabase
@@ -362,10 +350,12 @@ async function stageIndex(videoId: string): Promise<void> {
   // 2. Whole-video embedding (related-videos discovery).
   const { data: video } = await supabase
     .from("videos")
-    .select("transcript")
+    .select("transcript, attempts")
     .eq("id", videoId)
     .maybeSingle();
   const transcript = ((video?.transcript as string | null) ?? "").trim();
+  const attempts =
+    typeof video?.attempts === "number" ? (video.attempts as number) + 1 : 1;
   const embeddingVec =
     transcript.length > 0
       ? await createEmbedding(transcript.slice(0, 8000), { cache: false })
@@ -376,12 +366,22 @@ async function stageIndex(videoId: string): Promise<void> {
     .eq("id", videoId);
   if (embErr) throw embErr;
 
-  // 3. Mirror into the knowledge graph, then distill atomic knowledge.
-  //    Both are reconciling/deterministic, so re-runs collapse onto the same
-  //    nodes. Distillation stays best-effort — a hiccup there must never fail
-  //    an otherwise-processed video.
-  await syncGraphSafe(videoId);
-  await distillGraphSafe(videoId);
+  // 3. Mirror the video into the knowledge graph, then distill atomic knowledge,
+  //    then VERIFY the knowledge actually landed. Both writes are
+  //    reconciling/deterministic, so re-runs collapse onto the same nodes. This
+  //    is deliberately NOT best-effort: a video must never report `completed`
+  //    while its knowledge silently failed to enter the graph. On a non-verified
+  //    verdict we throw, which routes the video through the normal retry ladder
+  //    (retry-forward — shared nodes are never rolled back) and, on exhaustion,
+  //    leaves it flagged rather than falsely successful.
+  await syncVideoGraph(videoId);
+  const manifest = await runDistillation(videoId);
+  if (manifest) {
+    const verification = await verifyAndRecordGraphWrite(manifest, { attempts, startedAtMs });
+    if (verification.status !== "verified") {
+      throw new Error(`Knowledge write verification ${verification.status}: ${verification.summary}`);
+    }
+  }
 }
 
 const STAGE_RUNNERS: Record<Stage, (videoId: string) => Promise<void>> = {

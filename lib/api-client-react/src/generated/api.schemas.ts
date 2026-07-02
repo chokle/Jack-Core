@@ -394,6 +394,18 @@ export interface InterviewSession {
   createdAt: string;
 }
 
+/**
+ * Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.
+ */
+export type InterviewAnswerDistillationStatus = typeof InterviewAnswerDistillationStatus[keyof typeof InterviewAnswerDistillationStatus];
+
+
+export const InterviewAnswerDistillationStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
 export interface InterviewAnswer {
   id: string;
   question: string;
@@ -404,6 +416,8 @@ export interface InterviewAnswer {
   /** @nullable */
   answerText?: string | null;
   skipped: boolean;
+  /** Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation. */
+  distillationStatus?: InterviewAnswerDistillationStatus;
   createdAt: string;
 }
 
@@ -608,6 +622,71 @@ export interface InterviewTurnResult {
   session: InterviewSession;
   answer: InterviewAnswer;
   extractedKnowledge: ExtractedKnowledgeItem[];
+}
+
+export interface RedistillAnswerResult {
+  answer: InterviewAnswer;
+  extractedKnowledge: ExtractedKnowledgeItem[];
+}
+
+export interface WriteCheck {
+  ok: boolean;
+  detail: string;
+}
+
+export interface GraphWriteChecks {
+  nodesExist: WriteCheck;
+  edgesExist: WriteCheck;
+  provenanceStored: WriteCheck;
+  confidenceUpdated: WriteCheck;
+  searchIndexUpdated: WriteCheck;
+}
+
+export type GraphHealthWriteStatus = typeof GraphHealthWriteStatus[keyof typeof GraphHealthWriteStatus];
+
+
+export const GraphHealthWriteStatus = {
+  verified: 'verified',
+  partial: 'partial',
+  failed: 'failed',
+  pending: 'pending',
+} as const;
+
+export interface GraphHealthWrite {
+  id: string;
+  scope: string;
+  refId: string;
+  status: GraphHealthWriteStatus;
+  /** @nullable */
+  error?: string | null;
+  /** @nullable */
+  durationMs?: number | null;
+  attempts: number;
+  /** @nullable */
+  updatedAt?: string | null;
+  checks: GraphWriteChecks;
+}
+
+export type GraphHealthReportCounts = {
+  verified: number;
+  partial: number;
+  failed: number;
+  pending: number;
+  total: number;
+};
+
+export type GraphHealthReportRetryQueue = {
+  videos: number;
+  answers: number;
+  total: number;
+};
+
+export interface GraphHealthReport {
+  counts: GraphHealthReportCounts;
+  retryQueue: GraphHealthReportRetryQueue;
+  /** @nullable */
+  avgProcessingMs: number | null;
+  recentWrites: GraphHealthWrite[];
 }
 
 export type ListVideosParams = {

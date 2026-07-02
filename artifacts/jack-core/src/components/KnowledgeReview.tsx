@@ -29,6 +29,7 @@ import type {
 } from "@workspace/api-client-react";
 import { AdminLogin } from "./AdminLogin";
 import { MentorWithdrawal } from "./MentorWithdrawal";
+import { GraphHealth } from "./GraphHealth";
 
 /** Scaffold kinds that can never be a merge target. */
 const SCAFFOLD_KINDS = new Set(["core", "topic", "competency", "video", "mentor"]);
@@ -197,6 +198,7 @@ export function KnowledgeReview() {
         )}
 
         {isAdmin === true && <MentorWithdrawal />}
+        {isAdmin === true && <GraphHealth />}
       </div>
     </div>
   );

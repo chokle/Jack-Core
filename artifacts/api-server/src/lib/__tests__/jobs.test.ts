@@ -23,9 +23,13 @@ vi.mock("../openai.js", async () => {
   };
 });
 
+const { verifyAndRecordGraphWrite } = vi.hoisted(() => ({
+  verifyAndRecordGraphWrite: vi.fn(),
+}));
 vi.mock("../memory-graph.js", () => ({
   syncVideoGraph: vi.fn(),
   removeVideoGraph: vi.fn(),
+  verifyAndRecordGraphWrite,
 }));
 
 const { transcribeFromUrl } = vi.hoisted(() => ({ transcribeFromUrl: vi.fn() }));
@@ -96,6 +100,8 @@ beforeEach(() => {
   transcribeFromUrl.mockReset();
   runDistillation.mockReset();
   runDistillation.mockResolvedValue(undefined);
+  verifyAndRecordGraphWrite.mockReset();
+  verifyAndRecordGraphWrite.mockResolvedValue({ status: "verified", checks: {}, summary: "ok" });
   createCompletion.mockReset();
 });
 
@@ -355,5 +361,75 @@ describe("runPipeline — durable failure handling", () => {
     expect(row["claimed_by"]).toBeNull();
     expect(row["processing_stage"]).toBeNull();
     expect(row["analysis"]).toBe("Solid analysis.");
+  });
+});
+
+describe("runPipeline — strict knowledge-write verification at indexing", () => {
+  const manifest = {
+    scope: "video" as const,
+    refId: "v1",
+    sourceNodeId: "video:v1",
+    expectedNodeIds: ["k:concept:root-opening"],
+    expectedEdgeIds: [],
+    embeddingNodeIds: [],
+  };
+
+  it("completes only when the knowledge write verifies", async () => {
+    seedVideo({ id: "v1", status: "analyzing", transcript: "t", attempts: 0 });
+    createCompletion.mockResolvedValue(goodCompletion());
+    runDistillation.mockResolvedValue(manifest);
+    verifyAndRecordGraphWrite.mockResolvedValue({ status: "verified", checks: {}, summary: "ok" });
+
+    await runPipeline("v1", "analyzing");
+
+    expect(verifyAndRecordGraphWrite).toHaveBeenCalledTimes(1);
+    expect(video("v1")["status"]).toBe("completed");
+  });
+
+  it("never reports completed — it retries — when the write is only partial", async () => {
+    seedVideo({ id: "v1", status: "analyzing", transcript: "t", attempts: 0 });
+    createCompletion.mockResolvedValue(goodCompletion());
+    runDistillation.mockResolvedValue(manifest);
+    verifyAndRecordGraphWrite.mockResolvedValue({
+      status: "partial",
+      checks: {},
+      summary: "nodesExist: 1 of 1 concept node(s) missing",
+    });
+
+    await runPipeline("v1", "analyzing");
+
+    const row = video("v1");
+    expect(row["status"]).toBe("retrying");
+    expect(row["processing_stage"]).toBe("indexing");
+    expect(row["attempts"]).toBe(1);
+    expect(row["last_error"]).toMatch(/verification partial/);
+  });
+
+  it("flags the video as failed when the write stays unverified and attempts are exhausted", async () => {
+    seedVideo({ id: "v1", status: "analyzing", transcript: "t", attempts: MAX_ATTEMPTS - 1 });
+    createCompletion.mockResolvedValue(goodCompletion());
+    runDistillation.mockResolvedValue(manifest);
+    verifyAndRecordGraphWrite.mockResolvedValue({
+      status: "failed",
+      checks: {},
+      summary: "nothing landed",
+    });
+
+    await runPipeline("v1", "analyzing");
+
+    const row = video("v1");
+    expect(row["status"]).toBe("failed");
+    expect(row["last_error"]).toMatch(/verification failed/);
+  });
+
+  it("is an honest no-op (completes) when there was nothing to distill", async () => {
+    seedVideo({ id: "v1", status: "analyzing", transcript: "t", attempts: 0 });
+    createCompletion.mockResolvedValue(goodCompletion());
+    runDistillation.mockResolvedValue(null);
+
+    await runPipeline("v1", "analyzing");
+
+    expect(verifyAndRecordGraphWrite).not.toHaveBeenCalled();
+    expect(video("v1")["status"]).toBe("completed");
   });
 });
