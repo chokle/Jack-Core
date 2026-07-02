@@ -788,6 +788,202 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
   });
 });
 
+describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () => {
+  const MENTOR = "bbbbbbbb-0000-0000-0000-000000000001";
+  const ANSWER_1 = "22222222-0000-0000-0000-000000000001";
+  const ANSWER_2 = "22222222-0000-0000-0000-000000000002";
+  const mentorSourceId = `mentor:${MENTOR}`;
+
+  it("a mentor-only concept is NOT orphan-pruned by a rebuild — mentor node, provenance, verification, and aggregates survive", async () => {
+    // A mentor teaches a concept no video has ever taught (novel → created).
+    const conceptId = knowledgeNodeId("concept", "Reading the Puddle by Sound");
+    const outcomes = await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Reading the Puddle by Sound", { confidence: 0.8, competencyCode: "W-2" })],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+    expect(outcomes[0]!.outcome).toBe("created");
+    expect(nodeById(conceptId)).toBeDefined();
+    expect(nodeById(conceptId)!["verification_status"]).toBe("mentor_supplied");
+
+    // A reviewer then verifies the mentor's concept.
+    await setNodeVerification(conceptId, "verified");
+    const beforeHistory = (nodeById(conceptId)!["meta"] as Record<string, unknown>)[
+      "verificationHistory"
+    ] as Array<Record<string, unknown>>;
+    expect(beforeHistory).toHaveLength(1);
+    expect(beforeHistory[0]).toMatchObject({ from: "mentor_supplied", to: "verified" });
+
+    // Routine self-heal: a full rebuild re-syncs videos and prunes orphans.
+    await rebuildGraph();
+
+    // The mentor source node and its provenance edge survive — the concept is
+    // corroborated, not an orphan, even though NO video teaches it.
+    expect(nodeById(mentorSourceId)).toBeDefined();
+    const after = nodeById(conceptId);
+    expect(after).toBeDefined();
+    const prov = provTo(conceptId);
+    expect(prov).toHaveLength(1);
+    expect(prov[0]!["source_id"]).toBe(mentorSourceId);
+
+    // The reviewer's decision and its audit history are intact.
+    expect(after!["verification_status"]).toBe("verified");
+    const afterMeta = after!["meta"] as Record<string, unknown>;
+    expect(afterMeta["verificationHistory"]).toEqual(beforeHistory);
+
+    // Recomputed aggregates still reflect the mentor's contribution.
+    expect(after!["confidence"] as number).toBeCloseTo(0.8, 10);
+    expect(afterMeta["sourceCount"]).toBe(1);
+    expect(afterMeta["sourceVideoIds"]).toEqual([mentorSourceId]);
+
+    // Hub-edge weights count the mentor as a corroborating source.
+    expect(hubEdge(conceptId, topicId(TRADE))!["weight"]).toBe(1);
+    expect(hubEdge(conceptId, compId("W-2"))!["weight"]).toBe(1);
+    // The mentor node stays wired under its trade topic hub.
+    expect(hubEdge(topicId(TRADE), mentorSourceId)).toBeDefined();
+  });
+
+  it("a mixed video+mentor concept keeps the mentor's edge, alias, and corroboration when a rebuild recomputes blanked aggregates", async () => {
+    const v = "vid-mentor-rebuild";
+    await seedVideo(v);
+
+    // Force the mentor's differently-worded answer to embed identically to the
+    // video's concept so it REINFORCES the canonical node and records an alias.
+    const shared = defaultEmbed("__travel_speed_cluster__");
+    embedRegistry.set("Travel Speed Control", shared);
+    embedRegistry.set("Pacing the Bead", shared);
+
+    const canonicalId = knowledgeNodeId("concept", "Travel Speed Control");
+
+    // The video mints the canonical node; the mentor reinforces it.
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Travel Speed Control", {
+        confidence: 0.5,
+        timestamps: [10, 30],
+        competencyCode: "W-2",
+      }),
+    ]);
+    const outcomes = await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [makeItem("concept", "Pacing the Bead", { confidence: 0.8, competencyCode: "W-2" })],
+      { answerId: ANSWER_2, trade: TRADE },
+    );
+    expect(outcomes[0]!.outcome).toBe("reinforced");
+    expect(outcomes[0]!.canonicalId).toBe(canonicalId);
+
+    // A reviewer verifies the mixed-provenance concept.
+    await setNodeVerification(canonicalId, "verified");
+
+    // Preconditions: one video + one mentor source, alias recorded, verified.
+    const before = nodeById(canonicalId)!;
+    const beforeMeta = before["meta"] as Record<string, unknown>;
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    expect(before["verification_status"]).toBe("verified");
+    expect(beforeMeta["aliases"]).toEqual(["Pacing the Bead"]);
+    expect(provTo(canonicalId).map((e) => e["source_id"]).sort()).toEqual(
+      [mentorSourceId, `video:${v}`].sort(),
+    );
+
+    // Simulate stale/corrupted derived state (e.g. a DB written before the
+    // Graph Intelligence layer): blank the node aggregates and hub weights,
+    // leaving only provenance edges as the source of truth.
+    const node = nodeById(canonicalId)!;
+    node["confidence"] = null;
+    node["meta"] = {
+      aliases: beforeMeta["aliases"],
+      verificationHistory: beforeHistory,
+    };
+    hubEdge(canonicalId, topicId(TRADE))!["weight"] = 0;
+    hubEdge(canonicalId, compId("W-2"))!["weight"] = 0;
+
+    await rebuildGraph();
+
+    // The mentor's provenance edge survived the rebuild (re-syncing the video
+    // must not clobber or drop the mentor's independent corroboration).
+    const prov = provTo(canonicalId);
+    expect(prov.map((e) => e["source_id"]).sort()).toEqual(
+      [mentorSourceId, `video:${v}`].sort(),
+    );
+    expect(nodeById(mentorSourceId)).toBeDefined();
+
+    // Human state is intact: verification decision, history, and the mentor's alias.
+    const after = nodeById(canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+    expect(after["verification_status"]).toBe("verified");
+    expect(afterMeta["verificationHistory"]).toEqual(beforeHistory);
+    expect(afterMeta["aliases"]).toEqual(["Pacing the Bead"]);
+
+    // Confidence is re-derived as the noisy-OR of BOTH sources:
+    // 1 - (1-0.5)(1-0.8) = 0.9 — the mentor's contribution is still counted.
+    expect(after["confidence"] as number).toBeCloseTo(0.9, 10);
+    expect(afterMeta["sourceCount"]).toBe(2);
+    expect((afterMeta["sourceVideoIds"] as string[]).slice().sort()).toEqual(
+      [mentorSourceId, v].sort(),
+    );
+    // The video's timeline is preserved; the typed mentor answer adds none.
+    expect(afterMeta["timestamps"]).toEqual([10, 30]);
+
+    // Hub-edge weights are recomputed to include the mentor corroborator.
+    expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
+    expect(hubEdge(canonicalId, compId("W-2"))!["weight"]).toBe(2);
+  });
+
+  it("consecutive rebuilds are idempotent for mentor-backed knowledge (nothing decays or duplicates)", async () => {
+    const v = "vid-mentor-rebuild2";
+    await seedVideo(v);
+
+    const mixedId = knowledgeNodeId("concept", "Tack Spacing");
+    const mentorOnlyId = knowledgeNodeId("concept", "Field Fit-Up Tricks");
+
+    // Mixed concept: video + mentor teach the exact same wording.
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Tack Spacing", { confidence: 0.6, timestamps: [15], competencyCode: "W-3" }),
+    ]);
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [
+        makeItem("concept", "Tack Spacing", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Field Fit-Up Tricks", { confidence: 0.9 }),
+      ],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+
+    const snapshot = () => ({
+      mixedStatus: nodeById(mixedId)!["verification_status"],
+      mixedConfidence: nodeById(mixedId)!["confidence"],
+      mixedMeta: JSON.stringify(nodeById(mixedId)!["meta"]),
+      mixedProv: provTo(mixedId).length,
+      mentorOnlyStatus: nodeById(mentorOnlyId)!["verification_status"],
+      mentorOnlyConfidence: nodeById(mentorOnlyId)!["confidence"],
+      mentorOnlyProv: provTo(mentorOnlyId).length,
+      mentorEdges: edges().filter((e) => e["source_id"] === mentorSourceId).length,
+      nodeCount: nodes().length,
+      edgeCount: edges().length,
+    });
+
+    const before = snapshot();
+    expect(before.mixedStatus).toBe("mentor_supplied");
+    expect(before.mixedProv).toBe(2);
+    expect(before.mentorOnlyProv).toBe(1);
+
+    await rebuildGraph();
+    await rebuildGraph();
+
+    // Two rebuilds later: identical graph — mentor knowledge neither pruned,
+    // decayed, nor duplicated, and the mixed concept still counts both sources.
+    expect(snapshot()).toEqual(before);
+    expect(nodeById(mixedId)!["confidence"] as number).toBeCloseTo(
+      1 - (1 - 0.6) * (1 - 0.7),
+      10,
+    );
+    expect(hubEdge(mixedId, compId("W-3"))!["weight"]).toBe(2);
+    expect(hubEdge(mentorOnlyId, topicId(TRADE))!["weight"]).toBe(1);
+  });
+});
+
 describe("removeVideoGraph — orphan pruning", () => {
   it("prunes concepts left with zero source videos but keeps shared ones", async () => {
     const v1 = "vid-x";
