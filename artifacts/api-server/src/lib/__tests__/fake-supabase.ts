@@ -27,6 +27,19 @@ interface Result<T> {
   error: { message: string } | null;
 }
 
+/**
+ * Columns that are `NOT NULL DEFAULT <x>` in the real schema. PostgREST unifies
+ * the INSERT column list across a bulk upsert to the UNION of keys present on any
+ * row in the batch. A row that OMITS a column another sibling row includes is
+ * then written with an explicit NULL — the DB column DEFAULT does NOT apply — so
+ * a NOT-NULL-with-default column hit this way fails the whole batch. Modeling
+ * this lets tests catch a regression to conditionally omitting weight/meta in a
+ * mixed batch (weighted provenance edges + weightless hub edges).
+ */
+const NOT_NULL_DEFAULT_COLUMNS: Record<string, string[]> = {
+  knowledge_edges: ["weight", "meta"],
+};
+
 function cosine(a: number[], b: number[]): number {
   const len = Math.min(a.length, b.length);
   let dot = 0;
@@ -239,6 +252,37 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
   private runUpsert(): Result<unknown> {
     const now = new Date().toISOString();
+
+    // Model PostgREST's bulk-upsert column unification: the effective INSERT
+    // column list is the UNION of keys present (with a defined value) on ANY row
+    // in the batch — undefined values are dropped in JSON serialization, so they
+    // count as omitted. A row omitting a column that a sibling includes gets an
+    // explicit NULL rather than the DB default, and an explicit NULL always
+    // violates a NOT NULL column. A column uniformly omitted across the batch
+    // falls back to its DB default and is fine.
+    const notNullCols = NOT_NULL_DEFAULT_COLUMNS[this.table];
+    if (notNullCols && this.upsertRows.length > 0) {
+      const union = new Set<string>();
+      for (const r of this.upsertRows) {
+        for (const [k, v] of Object.entries(r)) if (v !== undefined) union.add(k);
+      }
+      for (const col of notNullCols) {
+        const inUnion = union.has(col);
+        for (const r of this.upsertRows) {
+          const v = r[col];
+          const violates = v === null || (v === undefined && inUnion);
+          if (violates) {
+            return {
+              data: null,
+              error: {
+                message: `null value in column "${col}" of relation "${this.table}" violates not-null constraint`,
+              },
+            };
+          }
+        }
+      }
+    }
+
     for (const incoming of this.upsertRows) {
       const id = incoming["id"];
       const existingIdx = this.rows.findIndex((r) => r["id"] === id);
