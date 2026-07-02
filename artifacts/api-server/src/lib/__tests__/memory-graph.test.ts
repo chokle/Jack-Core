@@ -20,6 +20,7 @@ import {
   removeVideoGraph,
   removeMentorGraph,
   withdrawMentor,
+  previewMentorWithdrawal,
   rebuildGraph,
   knowledgeNodeId,
   setNodeVerification,
@@ -1704,6 +1705,110 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     const replay = await withdrawMentor(MENTOR);
     expect(replay).toEqual({ ok: false, code: "not_found" });
     expect(candidates()).toHaveLength(2);
+  });
+
+  it("previewMentorWithdrawal projects exactly what withdrawMentor does — counts and archived-concept names match, and the preview writes nothing", async () => {
+    seedMentorRows(MENTOR, SESSION_1, [ANSWER_1]);
+
+    // A deliberate MIX so retained/archived are both non-trivial:
+    //  - "Travel Speed Control": taught by a video AND the mentor -> RETAINED.
+    //  - "Stick Whip Timing" + "Reading Heat by Color": mentor-only -> ARCHIVED.
+    const v = "vid-preview-parity";
+    await seedVideo(v);
+    const sharedId = knowledgeNodeId("concept", "Travel Speed Control");
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Travel Speed Control", { confidence: 0.6, timestamps: [10], competencyCode: "W-3" }),
+    ]);
+    await syncMentorAnswerKnowledge(
+      MENTOR,
+      "Alice",
+      [
+        makeItem("concept", "Travel Speed Control", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Stick Whip Timing", { confidence: 0.8 }),
+        makeItem("concept", "Reading Heat by Color", { confidence: 0.9, competencyCode: "W-2" }),
+      ],
+      { answerId: ANSWER_1, trade: TRADE },
+    );
+
+    // Candidates owned by the mentor: one pending (would be deleted), one
+    // resolved (would be scrubbed but audited).
+    fake.tables["knowledge_candidates"] ??= [];
+    fake.tables["knowledge_candidates"]!.push(
+      {
+        id: `cand:${ANSWER_1}:k:concept:half-match`,
+        status: "pending",
+        title: "Half Match",
+        category: "concept",
+        mentor_profile_id: MENTOR,
+        mentor_name: "Alice",
+        answer_id: ANSWER_1,
+        session_id: SESSION_1,
+        best_matches: [],
+      },
+      {
+        id: `cand:${ANSWER_1}:k:concept:old-accepted`,
+        status: "accepted",
+        title: "Old Accepted",
+        category: "concept",
+        mentor_profile_id: MENTOR,
+        mentor_name: "Alice",
+        answer_id: ANSWER_1,
+        session_id: SESSION_1,
+        best_matches: [],
+        resolved_target_id: sharedId,
+        resolved_at: "2026-06-01T00:00:00.000Z",
+      },
+    );
+
+    // Snapshot the whole graph + candidate state so we can prove the preview is
+    // a pure read (no drift can hide behind a mutation the preview performed).
+    // The preview writes nothing, so a plain stable-sorted JSON dump suffices.
+    const dump = (rows: Record<string, unknown>[]): string =>
+      JSON.stringify([...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"]))));
+    const beforeNodes = dump(nodes());
+    const beforeEdges = dump(edges());
+    const beforeCandidates = dump(candidates());
+
+    const previewResult = await previewMentorWithdrawal(MENTOR);
+    expect(previewResult.ok).toBe(true);
+    if (!previewResult.ok) throw new Error("unreachable");
+    const { preview } = previewResult;
+
+    // The preview must not have touched anything.
+    expect(dump(nodes())).toBe(beforeNodes);
+    expect(dump(edges())).toBe(beforeEdges);
+    expect(dump(candidates())).toBe(beforeCandidates);
+
+    // Preview projects: 1 retained, 2 archived, 1 pending deleted, 1 scrubbed,
+    // with archived concepts listed by label (sorted).
+    expect(preview.conceptsRetained).toBe(1);
+    expect(preview.conceptsArchived).toBe(2);
+    expect(preview.candidatesDeleted).toBe(1);
+    expect(preview.candidatesScrubbed).toBe(1);
+    const previewArchivedLabels = preview.archivedConcepts.map((c) => c.label);
+    expect(previewArchivedLabels).toEqual(["Reading Heat by Color", "Stick Whip Timing"]);
+
+    // Now do the REAL withdrawal and demand parity with the preview.
+    const result = await withdrawMentor(MENTOR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+
+    // Every count the preview promised equals the summary the action returns.
+    expect(result.summary.conceptsRetained).toBe(preview.conceptsRetained);
+    expect(result.summary.conceptsArchived).toBe(preview.conceptsArchived);
+    expect(result.summary.candidatesDeleted).toBe(preview.candidatesDeleted);
+    expect(result.summary.candidatesScrubbed).toBe(preview.candidatesScrubbed);
+
+    // The concepts the preview named as archived are exactly the ones that
+    // actually left the live graph (now attribution-free archived candidates).
+    const actualArchivedLabels = candidates()
+      .filter((c) => c["status"] === "archived")
+      .map((c) => c["title"] as string)
+      .sort((a, b) => a.localeCompare(b));
+    expect(actualArchivedLabels).toEqual(previewArchivedLabels);
+
+    // And the retained concept is genuinely still alive.
+    expect(nodeById(sharedId)).toBeDefined();
   });
 
   it("a mid-flight failure leaves the withdrawal retryable — the retry converges to the same end state", async () => {
