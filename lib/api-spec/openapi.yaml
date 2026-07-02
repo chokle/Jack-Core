@@ -369,12 +369,13 @@ paths:
           required: false
           schema:
             type: string
-            enum: [pending, accepted, rejected, merged, archived]
+            enum: [pending, accepted, rejected, merged, archived, restored]
             default: pending
           description: >-
             pending is publicly readable; every other status (including
-            archived — mentor-withdrawn concepts held out of the live graph)
-            requires an admin session.
+            archived — mentor-withdrawn concepts held out of the live graph,
+            and restored — archived concepts a reviewer re-minted into the
+            graph) requires an admin session.
       responses:
         "200":
           description: Queued knowledge candidates
@@ -1306,12 +1307,15 @@ components:
       properties:
         action:
           type: string
-          enum: [accept, merge, reject, restore]
+          enum: [accept, merge, reject, restore, rearchive]
           description: >-
             accept — reinforce the top best-match concept; merge — reinforce the
             reviewer-chosen targetNodeId; reject — discard with a required reason;
             restore — re-mint an archived (mentor-withdrawn) concept as
-            attribution-free unverified knowledge.
+            attribution-free unverified knowledge; rearchive — undo a restore,
+            demoting the curated concept back to an archived candidate (removing
+            the sourceless node from the live graph, or dropping only the
+            reviewer's curated vouch if a video/mentor re-taught it meanwhile).
         targetNodeId:
           type: string
           description: The existing concept to merge into (required for merge).

@@ -7,7 +7,7 @@
  */
 
 /**
- * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.
+ * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile).
  */
 export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
 
@@ -17,4 +17,5 @@ export const CandidateResolutionInputAction = {
   merge: 'merge',
   reject: 'reject',
   restore: 'restore',
+  rearchive: 'rearchive',
 } as const;

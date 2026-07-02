@@ -538,7 +538,7 @@ export interface KnowledgeCandidate {
 }
 
 /**
- * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.
+ * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile).
  */
 export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
 
@@ -548,10 +548,11 @@ export const CandidateResolutionInputAction = {
   merge: 'merge',
   reject: 'reject',
   restore: 'restore',
+  rearchive: 'rearchive',
 } as const;
 
 export interface CandidateResolutionInput {
-  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge. */
+  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile). */
   action: CandidateResolutionInputAction;
   /** The existing concept to merge into (required for merge). */
   targetNodeId?: string;
@@ -740,7 +741,7 @@ export const ListVideosStatus = {
 
 export type ListKnowledgeCandidatesParams = {
 /**
- * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.
+ * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
  */
 status?: ListKnowledgeCandidatesStatus;
 };
@@ -754,5 +755,6 @@ export const ListKnowledgeCandidatesStatus = {
   rejected: 'rejected',
   merged: 'merged',
   archived: 'archived',
+  restored: 'restored',
 } as const;
 

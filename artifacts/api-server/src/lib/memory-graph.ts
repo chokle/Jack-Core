@@ -1991,7 +1991,12 @@ export async function listKnowledgeCandidates(
  * candidate; restore re-mints an ARCHIVED (mentor-withdrawn) concept back into
  * the live graph.
  */
-export type CandidateResolutionAction = "accept" | "merge" | "reject" | "restore";
+export type CandidateResolutionAction =
+  | "accept"
+  | "merge"
+  | "reject"
+  | "restore"
+  | "rearchive";
 
 export type CandidateResolutionResult =
   | { ok: true; candidate: KnowledgeCandidateRecord; replayed: boolean }
@@ -2005,6 +2010,7 @@ const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   merge: "merged",
   reject: "rejected",
   restore: "restored",
+  rearchive: "archived",
 };
 
 /**
@@ -2077,6 +2083,13 @@ async function resolveKnowledgeCandidateInner(
   // It never touches the pending accept/merge/reject path below.
   if (action === "restore") {
     return restoreArchivedCandidateInner(record);
+  }
+
+  // Re-archive is the inverse of restore: it undoes a reviewer restore, demoting
+  // the curated concept back to an archived candidate. Like restore it acts on
+  // its own lifecycle (a 'restored' row) and never touches the pending path.
+  if (action === "rearchive") {
+    return rearchiveRestoredCandidateInner(record);
   }
 
   const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
@@ -2524,6 +2537,146 @@ async function restoreArchivedCandidateInner(
   }
 
   return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+}
+
+/**
+ * Undo a reviewer restore — the inverse of restoreArchivedCandidateInner. A
+ * concept restored by mistake stays in the live graph as a curated node; this
+ * demotes it back to an `archived` candidate so reviewers have full control over
+ * withdrawn-mentor knowledge:
+ *
+ *  - The concept node is re-evaluated like a mentor withdrawal: if a video or
+ *    mentor re-taught it AFTER the restore (a live `knowledge` provenance edge
+ *    exists), the node SURVIVES on that evidence — only the reviewer's curated
+ *    vouch is dropped (`meta.curated`/`restoredAt` cleared, aggregates + any
+ *    stale `mentor_supplied` status recomputed). Otherwise it is a sourceless
+ *    curated node and re-archiving means removing it from the live graph; the
+ *    `arch:<nodeId>` candidate row still preserves its content snapshot.
+ *  - Replay-safe like the other resolutions: the graph write happens BEFORE the
+ *    status flip (a mid-flight failure leaves the row 'restored' and a retry
+ *    converges — every step is idempotent), and the flip is compare-and-set on
+ *    `status='restored'` so an already-'archived' row is a no-op success. Pairs
+ *    with restore as a toggle: each action is a no-op on its own end state.
+ */
+async function rearchiveRestoredCandidateInner(
+  record: KnowledgeCandidateRecord,
+): Promise<CandidateResolutionResult> {
+  // Replay: an already-archived candidate is a no-op success.
+  if (record.status === "archived") {
+    return { ok: true, candidate: record, replayed: true };
+  }
+  // Only restored knowledge can be re-archived — refuse any other lifecycle state.
+  if (record.status !== "restored") {
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Only restored knowledge can be re-archived (this candidate is '${record.status}').`,
+    };
+  }
+
+  // Recover the original deterministic concept id from the arch:<nodeId> row id.
+  const nodeId = record.id.startsWith("arch:") ? record.id.slice("arch:".length) : "";
+  if (!nodeId.startsWith("k:")) {
+    return {
+      ok: false,
+      code: "invalid",
+      message: "This record has no recoverable concept id to re-archive.",
+    };
+  }
+
+  // Graph write BEFORE the status flip so a mid-flight failure is retryable.
+  await rearchiveConceptNode(nodeId);
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updErr } = await supabase
+    .from("knowledge_candidates")
+    .update({
+      status: "archived",
+      resolved_target_id: null,
+      resolved_at: null,
+      updated_at: now,
+    })
+    .eq("id", record.id)
+    .eq("status", "restored")
+    .select("*")
+    .maybeSingle();
+  if (updErr) throw updErr;
+
+  if (!updated) {
+    // Lost the compare-and-set race — re-read and report replay/conflict.
+    const { data: current, error: curErr } = await supabase
+      .from("knowledge_candidates")
+      .select("*")
+      .eq("id", record.id)
+      .maybeSingle();
+    if (curErr) throw curErr;
+    if (!current) {
+      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+    }
+    const winner = mapCandidateRow(current as Record<string, unknown>);
+    if (winner.status === "archived") return { ok: true, candidate: winner, replayed: true };
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Candidate was already resolved as '${winner.status}'.`,
+    };
+  }
+
+  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+}
+
+/**
+ * Demote a restored concept node out of its curated state — the graph half of
+ * re-archiving. If the node has gained real provenance since the restore it is
+ * KEPT (only its curated flag is dropped and aggregates recomputed); a still-
+ * sourceless curated node is deleted outright (edges cascade via the foreign
+ * key; the archived candidate row preserves the content). Idempotent: a node
+ * already gone or already un-curated converges on a retry.
+ */
+async function rearchiveConceptNode(nodeId: string): Promise<void> {
+  // Does a video/mentor re-teach this concept? A surviving `knowledge`
+  // provenance edge means the node stands on its own evidence now.
+  const { data: provEdges, error: provErr } = await supabase
+    .from("knowledge_edges")
+    .select("source_id")
+    .eq("kind", "knowledge")
+    .eq("target_id", nodeId);
+  if (provErr) throw provErr;
+  const hasSource = (provEdges ?? []).length > 0;
+
+  if (hasSource) {
+    // Retain: drop only the reviewer's curated vouch, then reconverge the node
+    // from its surviving provenance (like a mentor withdrawal on a corroborated
+    // concept).
+    const { data: nodeRow, error } = await supabase
+      .from("knowledge_nodes")
+      .select("meta")
+      .eq("id", nodeId)
+      .maybeSingle();
+    if (error) throw error;
+    if (nodeRow) {
+      const meta = {
+        ...(((nodeRow as Record<string, unknown>)["meta"] as Record<string, unknown>) ?? {}),
+      };
+      delete meta["curated"];
+      delete meta["restoredAt"];
+      const { error: updErr } = await supabase
+        .from("knowledge_nodes")
+        .update({ meta, updated_at: new Date().toISOString() })
+        .eq("id", nodeId);
+      if (updErr) throw updErr;
+    }
+    await recomputeKnowledgeAggregates([nodeId]);
+    await demoteStaleMentorSupplied([nodeId]);
+    return;
+  }
+
+  // Sourceless curated node: remove it from the live graph. Its hub edges
+  // cascade with the node delete; the arch:<nodeId> candidate row keeps the
+  // content snapshot. A trade hub left anchoring nothing is pruned.
+  const { error: delErr } = await supabase.from("knowledge_nodes").delete().eq("id", nodeId);
+  if (delErr) throw delErr;
+  await pruneOrphanTopics();
 }
 
 /**

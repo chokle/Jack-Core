@@ -186,6 +186,120 @@ describe("restore archived knowledge — survives prune + rebuild", () => {
     expect(candidates().filter((c) => c["id"] === archiveId)).toHaveLength(1);
   });
 
+  it("re-archive undoes a restore: sourceless curated node is removed and the row returns to archived", async () => {
+    const { conceptId, archiveId } = await seedArchivedConcept("Kerf Compensation", 0.75, "W-2");
+
+    const restored = await resolveKnowledgeCandidate(archiveId, "restore");
+    expect(restored.ok).toBe(true);
+    expect(nodeById(conceptId)).toBeDefined();
+
+    // Undo the restore: the sourceless curated node leaves the live graph and the
+    // candidate row goes back to `archived` (its content snapshot is preserved).
+    const rearchived = await resolveKnowledgeCandidate(archiveId, "rearchive");
+    expect(rearchived.ok).toBe(true);
+    if (!rearchived.ok) throw new Error("unreachable");
+    expect(rearchived.replayed).toBe(false);
+    expect(rearchived.candidate.status).toBe("archived");
+
+    expect(nodeById(conceptId)).toBeUndefined();
+    expect(hubEdge(conceptId, topicId(TRADE))).toBeUndefined();
+    expect(hubEdge(conceptId, compId("W-2"))).toBeUndefined();
+    // The archived snapshot still carries the concept content for future review.
+    const row = candidates().find((c) => c["id"] === archiveId)!;
+    expect(row["status"]).toBe("archived");
+    expect(row["title"]).toBe("Kerf Compensation");
+
+    // The archive→restore→archive cycle is a toggle: a fresh restore works again.
+    const restoredAgain = await resolveKnowledgeCandidate(archiveId, "restore");
+    expect(restoredAgain.ok).toBe(true);
+    if (!restoredAgain.ok) throw new Error("unreachable");
+    expect(restoredAgain.replayed).toBe(false);
+    expect(nodeById(conceptId)).toBeDefined();
+  });
+
+  it("re-archive KEEPS a concept re-taught by a video after restore, dropping only the curated vouch", async () => {
+    const { conceptId, archiveId } = await seedArchivedConcept("Root Pass Control", 0.7, "W-3");
+
+    const restored = await resolveKnowledgeCandidate(archiveId, "restore");
+    expect(restored.ok).toBe(true);
+    expect((nodeById(conceptId)!["meta"] as Record<string, unknown>)["curated"]).toBe(true);
+
+    // A video now teaches the SAME concept — it collapses onto the curated node,
+    // adding a real provenance edge.
+    const v = "vid-reteach-1";
+    await seedVideo(v);
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Root Pass Control", { confidence: 0.65, timestamps: [7], competencyCode: "W-3" }),
+    ]);
+    expect(
+      edges().filter((e) => e["target_id"] === conceptId && e["kind"] === "knowledge").length,
+    ).toBeGreaterThan(0);
+
+    // Re-archiving must NOT delete the node — a video now vouches for it. Only the
+    // reviewer's curated flag is dropped; the row still flips back to archived.
+    const rearchived = await resolveKnowledgeCandidate(archiveId, "rearchive");
+    expect(rearchived.ok).toBe(true);
+    if (!rearchived.ok) throw new Error("unreachable");
+    expect(rearchived.candidate.status).toBe("archived");
+
+    const node = nodeById(conceptId);
+    expect(node).toBeDefined();
+    expect((node!["meta"] as Record<string, unknown>)["curated"]).toBeUndefined();
+    expect(hubEdge(conceptId, topicId(TRADE))).toBeDefined();
+  });
+
+  it("re-archive is replay-safe (second re-archive is a no-op success)", async () => {
+    const { conceptId, archiveId } = await seedArchivedConcept("Travel Angle", 0.7, "W-2");
+    await resolveKnowledgeCandidate(archiveId, "restore");
+
+    const first = await resolveKnowledgeCandidate(archiveId, "rearchive");
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error("unreachable");
+    expect(first.replayed).toBe(false);
+
+    const second = await resolveKnowledgeCandidate(archiveId, "rearchive");
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error("unreachable");
+    expect(second.replayed).toBe(true);
+    expect(second.candidate.status).toBe("archived");
+
+    expect(nodeById(conceptId)).toBeUndefined();
+    expect(candidates().filter((c) => c["id"] === archiveId)).toHaveLength(1);
+  });
+
+  it("re-archiving an already-archived candidate is a no-op success (idempotent terminal state)", async () => {
+    // Archived IS re-archive's terminal state, so a re-archive on a withdrawn-
+    // but-never-restored candidate simply reports the end state already holds.
+    const { conceptId, archiveId } = await seedArchivedConcept("Undercut Avoidance", 0.7, "W-3");
+
+    const result = await resolveKnowledgeCandidate(archiveId, "rearchive");
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.replayed).toBe(true);
+    expect(result.candidate.status).toBe("archived");
+    // Nothing was minted or removed — the node stays out of the live graph.
+    expect(nodeById(conceptId)).toBeUndefined();
+  });
+
+  it("refuses to re-archive a pending candidate with a conflict (HTTP 409)", async () => {
+    fake.tables["knowledge_candidates"] ??= [];
+    const pendingId = `cand:${ANSWER_1}:${knowledgeNodeId("concept", "Still Unsure")}`;
+    fake.tables["knowledge_candidates"]!.push({
+      id: pendingId,
+      status: "pending",
+      title: "Still Unsure",
+      category: "concept",
+      trade: TRADE,
+      best_matches: [],
+    });
+
+    const result = await resolveKnowledgeCandidate(pendingId, "rearchive");
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.code).toBe("conflict");
+    expect(candidates().find((c) => c["id"] === pendingId)?.["status"]).toBe("pending");
+  });
+
   it("refuses to restore a non-archived candidate with a conflict (HTTP 409)", async () => {
     // A pending mentor candidate is NOT archived knowledge — restore must refuse.
     fake.tables["knowledge_candidates"] ??= [];

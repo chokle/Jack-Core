@@ -40,6 +40,7 @@ const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
   { value: "merged", label: "Merged" },
   { value: "rejected", label: "Rejected" },
   { value: "archived", label: "Archived" },
+  { value: "restored", label: "Restored" },
 ];
 
 export function KnowledgeReview() {
@@ -136,7 +137,8 @@ export function KnowledgeReview() {
           Mentor-taught concepts Jack wasn't sure about. Accept to reinforce the
           suggested match, merge into a concept you choose, or reject with a reason.
           The Archived tab holds knowledge demoted when a mentor was withdrawn —
-          restore it to bring it back as unverified knowledge.
+          restore it to bring it back as unverified knowledge, or re-archive a
+          restore from the Restored tab if it was a mistake.
         </p>
 
         {/* Status tabs */}
@@ -220,7 +222,7 @@ function CandidateCard({
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
   onResolve: (
-    action: "accept" | "merge" | "reject" | "restore",
+    action: "accept" | "merge" | "reject" | "restore" | "rearchive",
     extra?: { targetNodeId?: string; reason?: string },
   ) => void;
 }) {
@@ -237,6 +239,7 @@ function CandidateCard({
   const topMatchGone = topMatch?.validity === "gone";
   const isPending = candidate.status === "pending";
   const isArchived = candidate.status === "archived";
+  const isRestored = candidate.status === "restored";
 
   const mergeMatches = useMemo(() => {
     const q = mergeSearch.trim().toLowerCase();
@@ -358,7 +361,14 @@ function CandidateCard({
               Restore to bring it back as unverified knowledge.
             </span>
           )}
-          {candidate.status !== "rejected" && !isArchived && candidate.resolvedTargetId && (
+          {isRestored && (
+            <span className="flex items-center gap-1.5">
+              <RotateCcw className="h-3 w-3" />
+              Re-minted into the live graph as unverified curated knowledge.
+              Re-archive it if this restore was a mistake.
+            </span>
+          )}
+          {candidate.status !== "rejected" && !isArchived && !isRestored && candidate.resolvedTargetId && (
             (() => {
               const resolvedId = candidate.resolvedTargetId;
               const requestedId = candidate.requestedTargetId;
@@ -407,6 +417,22 @@ function CandidateCard({
           >
             <RotateCcw className="mr-1.5 h-4 w-4" />
             Restore knowledge
+          </Button>
+        </div>
+      )}
+
+      {/* Undo a restore: demote the curated concept back to archived */}
+      {isRestored && (
+        <div className="mt-4 border-t border-border/70 pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onResolve("rearchive")}
+            title="Undo this restore — move the concept back to archived knowledge"
+          >
+            <Archive className="mr-1.5 h-4 w-4" />
+            Re-archive
           </Button>
         </div>
       )}

@@ -15,4 +15,5 @@ export const ListKnowledgeCandidatesStatus = {
   rejected: 'rejected',
   merged: 'merged',
   archived: 'archived',
+  restored: 'restored',
 } as const;

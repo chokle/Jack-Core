@@ -423,7 +423,7 @@ export const GetGraphResponse = zod.object({
 export const listKnowledgeCandidatesQueryStatusDefault = `pending`;
 
 export const ListKnowledgeCandidatesQueryParams = zod.object({
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived']).default(listKnowledgeCandidatesQueryStatusDefault).describe('pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.')
+  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']).default(listKnowledgeCandidatesQueryStatusDefault).describe('pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.')
 })
 
 export const ListKnowledgeCandidatesResponse = zod.object({
@@ -467,7 +467,7 @@ export const ResolveKnowledgeCandidateParams = zod.object({
 })
 
 export const ResolveKnowledgeCandidateBody = zod.object({
-  "action": zod.enum(['accept', 'merge', 'reject', 'restore']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge.'),
+  "action": zod.enum(['accept', 'merge', 'reject', 'restore', 'rearchive']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer\'s curated vouch if a video\/mentor re-taught it meanwhile).'),
   "targetNodeId": zod.string().optional().describe('The existing concept to merge into (required for merge).'),
   "reason": zod.string().optional().describe('Why the candidate was rejected (required for reject).')
 })

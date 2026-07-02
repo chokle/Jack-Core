@@ -9,7 +9,7 @@ import type { ListKnowledgeCandidatesStatus } from './listKnowledgeCandidatesSta
 
 export type ListKnowledgeCandidatesParams = {
 /**
- * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph) requires an admin session.
+ * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
  */
 status?: ListKnowledgeCandidatesStatus;
 };
