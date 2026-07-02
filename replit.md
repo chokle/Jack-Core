@@ -293,6 +293,7 @@ The SQL above also creates the public **`jack-videos`** storage bucket. (If you 
 - No auth, billing, or multi-page navigation in jack-core — single-page AI engine only
 - Next.js was requested but this monorepo uses React+Vite; architecture is equivalent
 - Supabase is the single source of truth for all persistence
+- Optimize for shipping. Do not create additional work unless it directly supports the requested task. Favor completing fewer tasks completely over discovering many new ones. Minimize reviewer workload.
 
 ## Pointers
 
