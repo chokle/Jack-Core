@@ -510,3 +510,10 @@ ALTER TABLE interview_answers DROP CONSTRAINT IF EXISTS interview_answers_distil
 ALTER TABLE interview_answers
   ADD CONSTRAINT interview_answers_distillation_status_check
   CHECK (distillation_status IN ('pending','verified','failed'));
+
+-- Force PostgREST to reload its schema cache now that the DDL above has run.
+-- Right after a (re)apply, PostgREST serves against a stale cache until it
+-- reloads on its own, so a knowledge write in that window can be mislabelled
+-- "failed" (code PGRST205 / "…schema cache"). Notifying here closes the window
+-- at the source. Works both via setup:supabase and a manual SQL Editor paste.
+NOTIFY pgrst, 'reload schema';

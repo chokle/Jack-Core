@@ -171,6 +171,22 @@ async function applyWithConnection(connectionString: string): Promise<void> {
     console.log("Connected to Supabase Postgres. Applying schema...");
     await client.query(sql);
 
+    // Force PostgREST to reload its schema cache immediately. Right after DDL,
+    // PostgREST's cached schema is stale until it reloads on its own, so a write
+    // in that window can be mislabelled "failed" (code PGRST205). Issuing this
+    // NOTIFY over the direct connection closes the staleness window at the
+    // source instead of waiting it out via the in-app retry.
+    try {
+      await client.query("NOTIFY pgrst, 'reload schema';");
+      console.log("Notified PostgREST to reload its schema cache.");
+    } catch (notifyErr) {
+      console.log(
+        `⚠️  Couldn't notify PostgREST to reload its schema cache (${
+          notifyErr instanceof Error ? notifyErr.message : String(notifyErr)
+        }). The app's in-app retry will absorb the brief staleness window instead.`,
+      );
+    }
+
     const tables = await client.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'public'
