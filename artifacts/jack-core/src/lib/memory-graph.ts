@@ -588,3 +588,44 @@ export function buildGraphModelFromServer(graph: {
     },
   };
 }
+
+/** Loosely-typed view of the GET /graph payload as it actually arrives at
+ *  runtime — the server *should* return a well-formed KnowledgeGraph, but a
+ *  schema drift, partial write, or transport error can yield a truthy object
+ *  that is missing its `nodes`/`edges` arrays. We must never assume they exist. */
+export interface MaybeServerGraph {
+  nodes?: ServerGraphNode[] | null;
+  edges?: ServerGraphEdge[] | null;
+}
+
+/**
+ * Choose the Living Memory model for the current data. The persisted server
+ * graph wins when it actually carries nodes; otherwise we derive the graph
+ * client-side from videos + competencies so the view is never blank.
+ *
+ * This is the single guard between a good server graph and the client fallback.
+ * It tolerates any malformed payload (undefined, {}, or { nodes } without edges)
+ * without throwing, so a bad GET /graph response can never blank the SPA.
+ */
+export function selectMemoryGraphModel(
+  graph: MaybeServerGraph | null | undefined,
+  videos: RawVideo[],
+  competencies: RawCompetency[],
+): GraphModel {
+  // Only trust the server graph when it is *fully* well-formed: both `nodes` and
+  // `edges` are arrays and there is at least one node. A truthy-but-malformed
+  // payload (missing either array) falls back to the client-derived graph.
+  if (
+    Array.isArray(graph?.nodes) &&
+    graph.nodes.length > 0 &&
+    Array.isArray(graph?.edges)
+  ) {
+    return buildGraphModelFromServer({
+      nodes: graph.nodes,
+      edges: graph.edges,
+    });
+  }
+  // Fallback: derive the graph client-side if the persisted graph is empty,
+  // malformed, or unavailable (e.g. schema not yet applied).
+  return buildGraphModel(videos, competencies);
+}

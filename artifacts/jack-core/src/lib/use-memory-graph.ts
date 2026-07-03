@@ -9,9 +9,8 @@ import {
   getGetGraphQueryKey,
 } from "@workspace/api-client-react";
 import {
-  buildGraphModel,
-  buildGraphModelFromServer,
   readUpdatedAt,
+  selectMemoryGraphModel,
   type GraphModel,
   type RawCompetency,
   type RawVideo,
@@ -69,19 +68,12 @@ export function useMemoryGraphData(): MemoryGraphData {
     },
   });
 
-  const model = useMemo(() => {
-    if (graph?.nodes?.length) {
-      return buildGraphModelFromServer({
-        nodes: graph.nodes,
-        edges: graph.edges ?? [],
-      });
-    }
-    // Fallback: derive the graph client-side if the persisted graph is empty or
-    // unavailable (e.g. schema not yet applied) so the view is never blank.
-    return buildGraphModel(videos, competencies);
+  const model = useMemo(
+    () => selectMemoryGraphModel(graph, videos, competencies),
     // Rebuild when the underlying query payloads change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, videoList, competencyList]);
+    [graph, videoList, competencyList],
+  );
 
   const readyCount = videos.filter((v) => v.status === "completed").length;
 
