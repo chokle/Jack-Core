@@ -1019,9 +1019,19 @@ function GrowthCounter({
   );
 }
 
+/** How long a growth toast lingers, counting only time the page is visible. */
+const TOAST_LIFETIME_MS = 18000;
+/** Fade-out duration before the toast is removed from the list. */
+const TOAST_EXIT_MS = 240;
+
 /**
- * A single auto-dismissing "Jack just learned…" toast. Manages its own ~6s
- * lifetime so the parent stays a plain list; clickable when it can focus a node.
+ * A single auto-dismissing "Jack just learned…" toast. Lingers ~18s but only
+ * counts down while the user is actively on the page — the timer pauses whenever
+ * the tab is hidden/backgrounded and resumes with the remaining time on return,
+ * so a toast is never missed while the user is away. The countdown is decoupled
+ * from parent re-renders (it runs once on mount, reading the latest onDismiss via
+ * a ref), then plays a short fade-out before removing itself. Clickable when it
+ * can focus a node.
  */
 function GrowthToast({
   text,
@@ -1034,17 +1044,67 @@ function GrowthToast({
   onDismiss: () => void;
   onClick?: () => void;
 }) {
+  const [exiting, setExiting] = useState(false);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  // Visibility-aware lifetime: only elapses while the tab is visible. Runs once
+  // on mount so frequent parent re-renders (delta polls, count-ups) never reset
+  // the countdown.
   useEffect(() => {
-    const id = window.setTimeout(onDismiss, 6000);
+    let remaining = TOAST_LIFETIME_MS;
+    let startedAt = 0;
+    let timerId: number | undefined;
+    const start = () => {
+      startedAt = Date.now();
+      timerId = window.setTimeout(() => setExiting(true), remaining);
+    };
+    const pause = () => {
+      if (timerId === undefined) return;
+      window.clearTimeout(timerId);
+      timerId = undefined;
+      remaining -= Date.now() - startedAt;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (timerId === undefined && remaining > 0) start();
+      } else {
+        pause();
+      }
+    };
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (timerId !== undefined) window.clearTimeout(timerId);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // Once the lifetime is up, play the fade-out then remove (or remove at once
+  // when the user prefers reduced motion).
+  useEffect(() => {
+    if (!exiting) return;
+    if (reducedMotion) {
+      onDismissRef.current();
+      return;
+    }
+    const id = window.setTimeout(() => onDismissRef.current(), TOAST_EXIT_MS);
     return () => window.clearTimeout(id);
-  }, [onDismiss]);
+  }, [exiting, reducedMotion]);
+
   return (
     <button
       type="button"
       onClick={onClick}
       className={`pointer-events-auto flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-950/70 px-3.5 py-1.5 text-xs font-medium text-emerald-100 shadow-lg shadow-black/40 backdrop-blur transition-colors hover:border-emerald-400/60 ${
         onClick ? "cursor-pointer" : "cursor-default"
-      } ${reducedMotion ? "" : "animate-in fade-in slide-in-from-bottom-2"}`}
+      } ${
+        reducedMotion
+          ? ""
+          : exiting
+            ? "duration-200 fill-mode-forwards animate-out fade-out slide-out-to-bottom-2"
+            : "animate-in fade-in slide-in-from-bottom-2"
+      }`}
     >
       <Activity className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
       {text}
