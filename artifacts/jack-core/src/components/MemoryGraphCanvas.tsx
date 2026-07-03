@@ -28,6 +28,12 @@ export interface MemoryGraphHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
+  /**
+   * Project a node's *current* world position to screen (CSS px, relative to
+   * the canvas) so React can anchor a popover to it and follow it live as the
+   * simulation drifts or the camera pans/zooms. Returns null if the node is gone.
+   */
+  getScreenPos: (id: string) => { x: number; y: number; r: number } | null;
 }
 
 interface Props {
@@ -169,6 +175,16 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         cam.tx = 0;
         cam.ty = 0;
         onZoomChange(100);
+      },
+      getScreenPos: (id: string) => {
+        const n = nodesRef.current.get(id);
+        if (!n) return null;
+        const cam = camRef.current;
+        return {
+          x: n.x * cam.scale + cam.tx,
+          y: n.y * cam.scale + cam.ty,
+          r: n.radius * cam.scale,
+        };
       },
     }));
 

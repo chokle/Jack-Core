@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -14,10 +14,14 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldQuestion,
+  FileText,
+  X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useSetNodeVerification,
+  useGetVideo,
+  getGetVideoQueryKey,
   getGetGraphQueryKey,
 } from "@workspace/api-client-react";
 import type { VerificationUpdateStatus } from "@workspace/api-client-react";
@@ -63,6 +67,12 @@ export function MemoryGraphView({
   const { model, recent, competencies } = data;
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // The graph stage (the canvas' positioning context) and the floating node
+  // popover, so we can anchor the popover to the selected node and keep it there
+  // as the simulation drifts / the camera moves.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const cardSizeRef = useRef({ w: 320, h: 320 });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -157,6 +167,54 @@ export function MemoryGraphView({
 
   const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
 
+  // Keep the floating popover measured (so anchoring never overflows the stage)
+  // without forcing a layout read every animation frame.
+  useEffect(() => {
+    const el = popoverRef.current;
+    if (!el) return;
+    const measure = () => {
+      cardSizeRef.current = { w: el.offsetWidth, h: el.offsetHeight };
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [selectedId]);
+
+  // Anchor the popover to the selected node and follow it live. Positioning is
+  // done imperatively (transform on a ref) so the constant node drift never
+  // triggers React re-renders. Prefers the node's right side, flips to the left
+  // near the edge, and clamps within the stage so it is reachable at any size.
+  useEffect(() => {
+    if (!selectedId) return;
+    let raf = 0;
+    const place = () => {
+      const el = popoverRef.current;
+      const stage = stageRef.current;
+      const pos = canvasRef.current?.getScreenPos(selectedId);
+      if (el && stage) {
+        if (pos) {
+          const sw = stage.clientWidth;
+          const sh = stage.clientHeight;
+          const { w, h } = cardSizeRef.current;
+          const gap = pos.r + 16;
+          let left = pos.x + gap;
+          if (left + w > sw - 8) left = pos.x - gap - w;
+          left = Math.max(8, Math.min(left, Math.max(8, sw - w - 8)));
+          let top = pos.y - h / 2;
+          top = Math.max(8, Math.min(top, Math.max(8, sh - h - 8)));
+          el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+          el.style.visibility = "visible";
+        } else {
+          el.style.visibility = "hidden";
+        }
+      }
+      raf = requestAnimationFrame(place);
+    };
+    raf = requestAnimationFrame(place);
+    return () => cancelAnimationFrame(raf);
+  }, [selectedId]);
+
   const toggleFullscreen = () => {
     const el = containerRef.current;
     if (!document.fullscreenElement) el?.requestFullscreen?.().catch(() => {});
@@ -166,7 +224,7 @@ export function MemoryGraphView({
   return (
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
       {/* Graph stage */}
-      <div className="relative flex-1 overflow-hidden">
+      <div ref={stageRef} className="relative flex-1 overflow-hidden">
         <MemoryGraphCanvas
           ref={canvasRef}
           model={model}
@@ -278,35 +336,39 @@ export function MemoryGraphView({
             {locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
           </IconButton>
         </div>
+
+        {/* Node popover — anchored at the clicked node, works at every width */}
+        {selected && (
+          <NodePopover
+            ref={popoverRef}
+            node={selected}
+            degree={model.degree[selected.id] ?? 0}
+            relatedVideoCount={relatedVideoCount(selected, model)}
+            nodeById={nodeById}
+            adjacency={adjacency}
+            knowledgeByVideoId={knowledgeByVideoId}
+            compByCode={compByCode}
+            competencies={competencies}
+            onOpenVideo={onOpenVideo}
+            onJumpToTimestamp={onJumpToTimestamp}
+            onSelectNode={setSelectedId}
+            onClose={() => setSelectedId(null)}
+            isAdmin={isAdmin}
+            isUpdatingVerification={setVerification.isPending}
+            onSetVerification={(id, status) =>
+              setVerification.mutate({ id, data: { status } })
+            }
+          />
+        )}
       </div>
 
-      {/* Right rail */}
+      {/* Right rail — ambient panels only; per-node detail lives in the popover */}
       <aside className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-sidebar/85 p-4 backdrop-blur-md lg:flex">
         <LiveFeed
           recent={recent}
           colorByTrade={colorByTrade}
           onSelect={(id) => setSelectedId(`video:${id}`)}
         />
-        <KnowledgeInspector
-          node={selected}
-          degree={selected ? model.degree[selected.id] ?? 0 : 0}
-          relatedVideoCount={relatedVideoCount(selected, model)}
-          nodeById={nodeById}
-          adjacency={adjacency}
-          knowledgeByVideoId={knowledgeByVideoId}
-          compByCode={compByCode}
-          onOpenVideo={onOpenVideo}
-          onJumpToTimestamp={onJumpToTimestamp}
-          onSelectNode={setSelectedId}
-          isAdmin={isAdmin}
-          isUpdatingVerification={setVerification.isPending}
-          onSetVerification={(id, status) =>
-            setVerification.mutate({ id, data: { status } })
-          }
-        />
-        {selected && !isKnowledgeKind(selected.kind) && (
-          <RelatedCompetencies node={selected} competencies={competencies} />
-        )}
         <PendingKnowledgePanel />
       </aside>
     </div>
@@ -468,7 +530,211 @@ function formatTimestamp(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function KnowledgeInspector({
+interface NodeDetailProps {
+  node: MemoryNode;
+  degree: number;
+  relatedVideoCount: number;
+  nodeById: Map<string, MemoryNode>;
+  adjacency: Map<string, Set<string>>;
+  knowledgeByVideoId: Map<string, MemoryNode[]>;
+  compByCode: Map<string, string>;
+  competencies: MemoryGraphData["competencies"];
+  onOpenVideo: (id: string) => void;
+  onJumpToTimestamp: (videoId: string, startTime: number) => void;
+  onSelectNode: (id: string) => void;
+  isAdmin: boolean;
+  isUpdatingVerification: boolean;
+  onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
+}
+
+/**
+ * Floating card anchored to the clicked node (positioned by the parent via ref).
+ * This is the primary "click a node → see its captured data" surface and works
+ * at every viewport width, replacing the easy-to-miss right-rail inspector.
+ */
+const NodePopover = forwardRef<HTMLDivElement, NodeDetailProps & { onClose: () => void }>(
+  function NodePopover({ onClose, ...props }, ref) {
+    const { node } = props;
+    const knowledge = isKnowledgeKind(node.kind);
+    const kLabel = kindLabelFor(node.kind);
+    const subtitle =
+      node.kind === "core"
+        ? undefined
+        : knowledge
+          ? node.meta.trade
+            ? `${kLabel} · ${node.meta.trade}`
+            : kLabel
+          : node.meta.trade;
+
+    return (
+      <div
+        ref={ref}
+        style={{ visibility: "hidden" }}
+        className="absolute left-0 top-0 z-20 flex max-h-[min(74vh,34rem)] w-[min(92vw,21rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/95 shadow-2xl shadow-black/60 backdrop-blur-md"
+      >
+        <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span
+              className="mt-1 h-3 w-3 shrink-0 rounded-full"
+              style={{
+                background: rgbCss(node.color),
+                boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
+              }}
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold leading-snug text-foreground">
+                {node.label}
+              </div>
+              <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
+                {subtitle ?? kLabel}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+            className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <NodeDetailBody {...props} />
+        </div>
+      </div>
+    );
+  },
+);
+
+/**
+ * Renders the actual captured data Jack holds for a node: verbatim transcript
+ * passages (a concept's cited moments, or a video's opening lines) plus a
+ * video's summary/key points — fetched live from the source video.
+ */
+function CapturedContent({
+  node,
+  onJumpToTimestamp,
+}: {
+  node: MemoryNode;
+  onJumpToTimestamp: (videoId: string, startTime: number) => void;
+}) {
+  const knowledge = isKnowledgeKind(node.kind);
+  const isVideo = node.kind === "video";
+
+  // Which source video holds the verbatim capture, and which moments matter.
+  let videoId = "";
+  let stamps: number[] = [];
+  if (isVideo) {
+    videoId = node.id.replace("video:", "");
+  } else if (knowledge) {
+    const sources = [...(node.meta.sources ?? [])].sort(
+      (a, b) =>
+        b.timestamps.length - a.timestamps.length || b.confidence - a.confidence,
+    );
+    videoId = sources[0]?.videoId ?? "";
+    stamps = sources[0]?.timestamps ?? [];
+  }
+
+  const enabled = videoId.length > 0;
+  const { data: video, isLoading } = useGetVideo(videoId, {
+    query: { enabled, queryKey: getGetVideoQueryKey(videoId) },
+  });
+
+  if (!enabled) return null;
+
+  const segments = video?.segments ?? [];
+
+  // Pull the transcript line at each cited moment (concept) or the opening
+  // lines (video). Verbatim — this is what Jack actually captured.
+  const passages: { key: string; time: number; text: string }[] = [];
+  const seen = new Set<string>();
+  const pushSegmentNear = (t: number) => {
+    if (segments.length === 0 || passages.length >= 4) return;
+    let best = segments[0];
+    let bestScore = Infinity;
+    for (const s of segments) {
+      const within = t >= s.startTime && t <= s.endTime;
+      const score = within ? -1 : Math.abs(s.startTime - t);
+      if (score < bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    const key = String(best.id ?? best.startTime);
+    if (seen.has(key) || !best.text?.trim()) return;
+    seen.add(key);
+    passages.push({ key, time: best.startTime, text: best.text.trim() });
+  };
+
+  if (knowledge && stamps.length > 0) {
+    for (const t of stamps) pushSegmentNear(t);
+  } else {
+    for (const s of segments.slice(0, isVideo ? 3 : 2)) {
+      const key = String(s.id ?? s.startTime);
+      if (seen.has(key) || !s.text?.trim()) continue;
+      seen.add(key);
+      passages.push({ key, time: s.startTime, text: s.text.trim() });
+    }
+  }
+
+  const hasContent =
+    passages.length > 0 ||
+    (isVideo && Boolean(video?.analysis)) ||
+    (isVideo && (video?.keyPoints?.length ?? 0) > 0);
+
+  return (
+    <div className="mb-3 rounded-lg border border-border/60 bg-black/20 p-3">
+      <div className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <FileText className="h-3 w-3" /> Captured Content
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>
+      ) : !hasContent ? (
+        <p className="text-xs text-muted-foreground">
+          No transcript captured yet — this source is still processing.
+        </p>
+      ) : (
+        <div className="space-y-2.5">
+          {isVideo && video?.analysis && (
+            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">
+              {video.analysis}
+            </p>
+          )}
+          {isVideo && video?.keyPoints && video.keyPoints.length > 0 && (
+            <ul className="list-disc space-y-1 pl-4 text-xs text-foreground/80">
+              {video.keyPoints.slice(0, 5).map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          )}
+          {passages.length > 0 && (
+            <div className="space-y-2">
+              {passages.map((p) => (
+                <blockquote
+                  key={p.key}
+                  className="border-l-2 border-primary/50 pl-2.5 text-xs leading-relaxed text-foreground/85"
+                >
+                  <button
+                    onClick={() => onJumpToTimestamp(videoId, p.time)}
+                    className="mb-0.5 inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                  >
+                    <Play className="h-2.5 w-2.5" />
+                    {formatTimestamp(p.time)}
+                  </button>
+                  <span className="block">&ldquo;{p.text}&rdquo;</span>
+                </blockquote>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NodeDetailBody({
   node,
   degree,
   relatedVideoCount,
@@ -476,48 +742,15 @@ function KnowledgeInspector({
   adjacency,
   knowledgeByVideoId,
   compByCode,
+  competencies,
   onOpenVideo,
   onJumpToTimestamp,
   onSelectNode,
   isAdmin,
   isUpdatingVerification,
   onSetVerification,
-}: {
-  node: MemoryNode | null;
-  degree: number;
-  relatedVideoCount: number;
-  nodeById: Map<string, MemoryNode>;
-  adjacency: Map<string, Set<string>>;
-  knowledgeByVideoId: Map<string, MemoryNode[]>;
-  compByCode: Map<string, string>;
-  onOpenVideo: (id: string) => void;
-  onJumpToTimestamp: (videoId: string, startTime: number) => void;
-  onSelectNode: (id: string) => void;
-  isAdmin: boolean;
-  isUpdatingVerification: boolean;
-  onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
-}) {
-  if (!node) {
-    return (
-      <Panel title="Knowledge Inspector">
-        <p className="text-xs text-muted-foreground">
-          Click any node in the graph to inspect what Jack knows about it.
-        </p>
-      </Panel>
-    );
-  }
-
+}: NodeDetailProps) {
   const knowledge = isKnowledgeKind(node.kind);
-  const kLabel = kindLabelFor(node.kind);
-
-  const subtitle =
-    node.kind === "core"
-      ? undefined
-      : knowledge
-        ? node.meta.trade
-          ? `${kLabel} · ${node.meta.trade}`
-          : kLabel
-        : node.meta.trade;
 
   const description =
     node.meta.description ??
@@ -575,28 +808,12 @@ function KnowledgeInspector({
   }
 
   return (
-    <Panel title="Knowledge Inspector">
-      <div className="mb-3 flex items-start gap-2.5">
-        <span
-          className="mt-1 h-3 w-3 shrink-0 rounded-full"
-          style={{
-            background: rgbCss(node.color),
-            boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
-          }}
-        />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold leading-snug text-foreground">
-            {node.label}
-          </div>
-          <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
-            {subtitle ?? kLabel}
-          </div>
-        </div>
-      </div>
-
+    <>
       <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
         {description}
       </p>
+
+      <CapturedContent node={node} onJumpToTimestamp={onJumpToTimestamp} />
 
       {knowledge && confidence !== undefined && (
         <div className="mb-3">
@@ -786,7 +1003,13 @@ function KnowledgeInspector({
           Open video <ArrowUpRight className="h-3.5 w-3.5" />
         </button>
       )}
-    </Panel>
+
+      {!knowledge && (
+        <div className="mt-4">
+          <RelatedCompetencies node={node} competencies={competencies} />
+        </div>
+      )}
+    </>
   );
 }
 

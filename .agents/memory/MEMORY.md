@@ -5,6 +5,7 @@
 - [Restore/re-archive toggle](candidate-restore-toggle.md) — restore⇄rearchive are inverse candidate actions; each is a no-op on its own terminal state (re-archiving an archived row is success, not conflict).
 - [express-rate-limit IPv6](express-rate-limit-ipv6.md) — custom keyGenerator must wrap req.ip with ipKeyGenerator or v8 throws ERR_ERL_KEY_GEN_IPV6 and IPv6 clients evade limits.
 - [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.
+- [Orval useQuery queryKey](orval-usequery-querykey.md) — generated hooks require an explicit `queryKey` in the `query` options object (TS2741); use `getGet<Op>QueryKey(id)`.
 - [Project task dependency editing](project-task-dependencies.md) — dependsOn is only editable while a task is a draft; after acceptance, enforce ordering via self-contained plan text.
 - [Supabase Storage upload limits](supabase-storage-limits.md) — project-level file-size cap 413s big uploads regardless of app cap; storage-js ≥2.108 streams Node ReadStreams natively.
 - [PostgREST bulk upsert NULLs](postgrest-bulk-upsert-nulls.md) — mixed-key rows in one supabase upsert insert explicit NULL for omitted cols, bypassing NOT NULL DEFAULT; always set weight/meta explicitly.
