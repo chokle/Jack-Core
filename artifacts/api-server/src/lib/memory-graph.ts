@@ -3481,6 +3481,52 @@ export async function verifyGraphWrite(
   return { status, checks, summary };
 }
 
+/**
+ * PostgREST keeps an in-memory schema cache that can go briefly stale right
+ * after a DDL change or on a fresh connection — a read/write to a real table
+ * then fails with "Could not find the table '…' in the schema cache" (code
+ * PGRST205) or the column variant PGRST204. This is transient: the cache
+ * reloads within moments. We MUST NOT let this false alarm flip a knowledge
+ * write that actually landed to 'failed', so callers retry these distinctly
+ * from a genuine missing-node/missing-edge verdict.
+ */
+export function isTransientSchemaCacheError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === "PGRST205" || code === "PGRST204" || code === "PGRST202") return true;
+  const message = (err as { message?: unknown }).message;
+  return typeof message === "string" && /schema cache/i.test(message);
+}
+
+/**
+ * Run a Supabase operation, retrying only when it fails with a transient
+ * PostgREST schema-cache error (see isTransientSchemaCacheError). A short delay
+ * gives PostgREST time to reload its cache before the retry. Any other error is
+ * rethrown immediately — this never masks a real failure.
+ */
+async function withSchemaCacheRetry<T>(
+  op: () => Promise<T>,
+  { attempts = 3, delayMs = 400 }: { attempts?: number; delayMs?: number } = {},
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await op();
+    } catch (err) {
+      if (!isTransientSchemaCacheError(err)) throw err;
+      lastErr = err;
+      if (i < attempts - 1) {
+        logger.warn(
+          { err, attempt: i + 1 },
+          "transient PostgREST schema-cache error; retrying after reload window",
+        );
+        await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** Persist (upsert) one audit row for a knowledge write. Best-effort telemetry:
  * a failure to record the audit row must never mask the verification verdict. */
 async function recordGraphWrite(
@@ -3490,22 +3536,24 @@ async function recordGraphWrite(
 ): Promise<void> {
   try {
     const id = `wl:${manifest.scope === "video" ? "video" : "answer"}:${manifest.refId}`;
-    const { error } = await supabase.from("knowledge_write_log").upsert(
-      {
-        id,
-        scope: manifest.scope,
-        ref_id: manifest.refId,
-        status: verification.status,
-        checks: verification.checks,
-        error: verification.status === "verified" ? null : verification.summary,
-        duration_ms:
-          typeof meta.startedAtMs === "number" ? Date.now() - meta.startedAtMs : null,
-        attempts: meta.attempts ?? 1,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    );
-    if (error) throw error;
+    await withSchemaCacheRetry(async () => {
+      const { error } = await supabase.from("knowledge_write_log").upsert(
+        {
+          id,
+          scope: manifest.scope,
+          ref_id: manifest.refId,
+          status: verification.status,
+          checks: verification.checks,
+          error: verification.status === "verified" ? null : verification.summary,
+          duration_ms:
+            typeof meta.startedAtMs === "number" ? Date.now() - meta.startedAtMs : null,
+          attempts: meta.attempts ?? 1,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      );
+      if (error) throw error;
+    });
   } catch (err) {
     logger.error(
       { err, scope: manifest.scope, refId: manifest.refId },
@@ -3526,7 +3574,10 @@ export async function verifyAndRecordGraphWrite(
 ): Promise<GraphWriteVerification> {
   let verification: GraphWriteVerification;
   try {
-    verification = await verifyGraphWrite(manifest);
+    // Retry only transient PostgREST schema-cache staleness — a genuine
+    // missing-node/edge is not an exception (verifyGraphWrite returns a verdict),
+    // so a landed write is never mislabelled 'failed' because the cache was cold.
+    verification = await withSchemaCacheRetry(() => verifyGraphWrite(manifest));
   } catch (err) {
     const detail = "verification read failed";
     verification = {

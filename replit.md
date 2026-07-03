@@ -102,6 +102,7 @@ The script is idempotent, so it is safe to re-run. If `SUPABASE_DB_URL` is not s
 - Jack's RAG always searches internally first; `usedInternalKnowledge: false` in chat responses means no matching segments were found
 - The knowledge graph needs the `knowledge_nodes`/`knowledge_edges` tables applied too (they are part of the canonical schema) — until then `GET /graph` returns 500 and the frontend silently falls back to a client-derived graph
 - Knowledge-write verification needs the `knowledge_write_log` table + the `interview_answers.distillation_status` column applied (both in the canonical schema) — re-run `setup:supabase` after upgrading. Until then `GET /graph/health` returns 500 and the Graph Health dashboard shows a load error
+- Knowledge-write verification is resilient to transient PostgREST schema-cache staleness (code `PGRST205`/"…schema cache", common right after a DDL change or a fresh connection): both the verification reads and the `knowledge_write_log` audit write retry briefly (`withSchemaCacheRetry` in `memory-graph.ts`), so a write that actually landed is never mislabelled `failed`. A genuine missing node/edge is still a real `failed`/`partial` verdict (it returns a verdict, not an exception, so it is never retried away)
 
 ## User preferences
 
