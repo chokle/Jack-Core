@@ -40,6 +40,13 @@ export interface MemoryGraphHandle {
    * moves the camera.
    */
   focusNode: (id: string) => void;
+  /**
+   * Smoothly pan the node into a comfortable viewing area ONLY if it currently
+   * sits too close to an edge (behind the header/inspector); a no-op when the
+   * node is already well-framed, so single-click selection rarely nudges the
+   * camera. The pan is eased over several frames, never a hard jump.
+   */
+  ensureVisible: (id: string) => void;
 }
 
 interface Props {
@@ -167,6 +174,10 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const topicsRef = useRef(model.topics);
     const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
     const camRef = useRef({ scale: 1, tx: 0, ty: 0 });
+    // Pending eased pan target (world-independent screen translation). Set by
+    // ensureVisible, consumed + cleared by the frame loop; any user-driven camera
+    // move (drag/wheel/zoom/reset/focus) cancels it so it never fights the user.
+    const camTargetRef = useRef<{ tx: number; ty: number } | null>(null);
     const reducedRef = useRef(false);
     const selectedRef = useRef<string | null>(selectedId);
     const searchRef = useRef("");
@@ -188,6 +199,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
     // ----- imperative zoom controls (wired to the on-screen buttons) --------
     const applyZoom = (factor: number, cx?: number, cy?: number) => {
+      camTargetRef.current = null;
       const cam = camRef.current;
       const { w, h } = sizeRef.current;
       const px = cx ?? w / 2;
@@ -206,6 +218,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       zoomIn: () => applyZoom(1.2),
       zoomOut: () => applyZoom(1 / 1.2),
       reset: () => {
+        camTargetRef.current = null;
         const cam = camRef.current;
         cam.scale = 1;
         cam.tx = 0;
@@ -223,6 +236,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         };
       },
       focusNode: (id: string) => {
+        camTargetRef.current = null;
         const n = nodesRef.current.get(id);
         if (!n) return;
         const cam = camRef.current;
@@ -234,6 +248,27 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         cam.tx = w / 2 - n.x * scale;
         cam.ty = h / 2 - n.y * scale;
         onZoomChange(Math.round(scale * 100));
+      },
+      ensureVisible: (id: string) => {
+        const n = nodesRef.current.get(id);
+        if (!n) return;
+        const cam = camRef.current;
+        const { w, h } = sizeRef.current;
+        const sx = n.x * cam.scale + cam.tx;
+        const sy = n.y * cam.scale + cam.ty;
+        const margin = Math.min(w, h) * 0.18;
+        // The top edge is busier (header + breadcrumb overlay), so keep a larger
+        // clearance there than the other three sides.
+        const topMargin = Math.max(margin, 96);
+        let tx = cam.tx;
+        let ty = cam.ty;
+        if (sx < margin) tx += margin - sx;
+        else if (sx > w - margin) tx -= sx - (w - margin);
+        if (sy < topMargin) ty += topMargin - sy;
+        else if (sy > h - margin) ty -= sy - (h - margin);
+        // Already comfortably framed — don't nudge the camera at all.
+        if (Math.abs(tx - cam.tx) < 0.5 && Math.abs(ty - cam.ty) < 0.5) return;
+        camTargetRef.current = { tx, ty };
       },
     }));
 
@@ -417,6 +452,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
       const onPointerDown = (e: PointerEvent) => {
         if (locked) return;
+        camTargetRef.current = null;
         dragging = true;
         moved = 0;
         last = localXY(e);
@@ -518,6 +554,49 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
               b.vy -= fy;
             }
           }
+        } else {
+          // Large graph: fall back to spatial-grid repulsion so cost stays near
+          // O(n) instead of O(n²). Each node only feels neighbors in its own and
+          // adjacent cells; force is applied to `p` alone (the symmetric partner
+          // gets its own pass), which avoids per-pair dedup bookkeeping.
+          const CELL = 90;
+          const grid = new Map<number, P[]>();
+          const cols = 100000;
+          const cellKey = (gx: number, gy: number) => gx * cols + gy;
+          for (const p of nodes) {
+            if (p.kind === "core") continue;
+            const k = cellKey(Math.floor(p.x / CELL), Math.floor(p.y / CELL));
+            const arr = grid.get(k);
+            if (arr) arr.push(p);
+            else grid.set(k, [p]);
+          }
+          for (const p of nodes) {
+            if (p.kind === "core") continue;
+            const gx = Math.floor(p.x / CELL);
+            const gy = Math.floor(p.y / CELL);
+            for (let ox = -1; ox <= 1; ox++) {
+              for (let oy = -1; oy <= 1; oy++) {
+                const arr = grid.get(cellKey(gx + ox, gy + oy));
+                if (!arr) continue;
+                for (const b of arr) {
+                  if (b === p || b.kind === "core") continue;
+                  let dx = p.x - b.x;
+                  let dy = p.y - b.y;
+                  let d2 = dx * dx + dy * dy;
+                  if (d2 < 0.01) {
+                    dx = Math.random() - 0.5;
+                    dy = Math.random() - 0.5;
+                    d2 = 0.01;
+                  }
+                  const sameHub = p.topicId && p.topicId === b.topicId;
+                  const force = (REPULSION * (sameHub ? 0.5 : 1)) / d2;
+                  const d = Math.sqrt(d2);
+                  p.vx += (dx / d) * force;
+                  p.vy += (dy / d) * force;
+                }
+              }
+            }
+          }
         }
 
         for (const node of nodes) {
@@ -602,6 +681,16 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         ctx.translate(cam.tx, cam.ty);
         ctx.scale(cam.scale, cam.scale);
 
+        // Viewport bounds in WORLD space, padded to cover glow radius, so we can
+        // skip anything off-screen. Keeps large graphs cheap when zoomed in.
+        const cullPad = 80;
+        const viewMinX = (0 - cam.tx) / cam.scale - cullPad;
+        const viewMinY = (0 - cam.ty) / cam.scale - cullPad;
+        const viewMaxX = (w - cam.tx) / cam.scale + cullPad;
+        const viewMaxY = (h - cam.ty) / cam.scale + cullPad;
+        const offscreen = (n: P): boolean =>
+          n.x < viewMinX || n.x > viewMaxX || n.y < viewMinY || n.y > viewMaxY;
+
         const related =
           sel && adj.has(sel) ? (adj.get(sel) as Set<string>) : null;
         const dimmed = (id: string, topicId?: string): boolean => {
@@ -638,6 +727,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const a = map.get(e.a);
           const b = map.get(e.b);
           if (!a || !b) continue;
+          if (offscreen(a) && offscreen(b)) continue;
           const isSel =
             sel && (e.a === sel || e.b === sel);
           const faded = dimmed(e.a, a.topicId) && dimmed(e.b, b.topicId);
@@ -664,12 +754,17 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         ctx.globalCompositeOperation = "lighter";
         for (const node of map.values()) {
           if (node.kind === "core") continue;
+          if (offscreen(node)) continue;
+          const emphasized = node.id === sel || node.id === active;
+          // LOD: when zoomed far out, skip the (costly) additive glow on small,
+          // unremarkable nodes — hubs and emphasized nodes always keep theirs.
+          if (cam.scale < 0.55 && !emphasized && node.kind !== "topic") continue;
           drawNodeGlow(
             ctx,
             node,
             time,
             dimmed(node.id, node.topicId),
-            node.id === sel || node.id === active,
+            emphasized,
           );
         }
         ctx.globalCompositeOperation = "source-over";
@@ -677,6 +772,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         // Crisp node bodies + selection/hover/active rings.
         for (const node of map.values()) {
           if (node.kind === "core") continue;
+          if (offscreen(node)) continue;
           drawNodeBody(
             ctx,
             node,
@@ -703,6 +799,29 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             hub.x,
             hub.y - hub.radius - 10 / cam.scale,
           );
+          // Cluster composition line under the hub — only when zoomed in enough
+          // to read it, so far-out views stay clean.
+          if (cam.scale >= 0.7) {
+            const m = t.metrics;
+            const parts: string[] = [];
+            if (m.knowledge)
+              parts.push(`${m.knowledge} concept${m.knowledge === 1 ? "" : "s"}`);
+            if (m.videos)
+              parts.push(`${m.videos} video${m.videos === 1 ? "" : "s"}`);
+            if (m.conversations)
+              parts.push(
+                `${m.conversations} mentor${m.conversations === 1 ? "" : "s"}`,
+              );
+            if (parts.length > 0) {
+              ctx.font = `500 ${8.5 / cam.scale}px 'Space Mono', monospace`;
+              ctx.fillStyle = rgba([200, 214, 245], faded ? 0.18 : 0.5);
+              ctx.fillText(
+                parts.join("  ·  "),
+                hub.x,
+                hub.y + hub.radius + 13 / cam.scale,
+              );
+            }
+          }
         }
 
         // The JACK hexagon core, drawn last so it sits on top.
@@ -716,6 +835,21 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const dt = Math.min(2, (t - lastT) / 16.67);
         lastT = t;
         if (!document.hidden) {
+          // Ease an in-flight ensureVisible pan toward its target before drawing.
+          const target = camTargetRef.current;
+          if (target) {
+            const cam = camRef.current;
+            cam.tx += (target.tx - cam.tx) * 0.14;
+            cam.ty += (target.ty - cam.ty) * 0.14;
+            if (
+              Math.abs(target.tx - cam.tx) < 0.5 &&
+              Math.abs(target.ty - cam.ty) < 0.5
+            ) {
+              cam.tx = target.tx;
+              cam.ty = target.ty;
+              camTargetRef.current = null;
+            }
+          }
           step(dt);
           draw(t);
         }

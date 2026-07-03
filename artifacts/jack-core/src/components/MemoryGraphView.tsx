@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -37,6 +37,14 @@ import {
 } from "./MemoryGraphCanvas";
 import { FloatingNodeInspector } from "./FloatingNodeInspector";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./ui/breadcrumb";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
 import {
   rgbCss,
@@ -45,10 +53,14 @@ import {
   readCreatedAt,
   isKnowledgeKind,
   kindLabel as kindLabelFor,
+  nodeFreshness,
   KNOWLEDGE_KIND_META,
+  CORE_ID,
   type MemoryNode,
   type NodeSource,
   type RGB,
+  type FreshnessInfo,
+  type ClusterMetrics,
 } from "../lib/memory-graph";
 
 interface MemoryGraphViewProps {
@@ -145,6 +157,14 @@ export function MemoryGraphView({
     return m;
   }, [model]);
 
+  // Per-topic cluster rollups (knowledge/video/mentor/… counts), keyed by the
+  // topic hub node id, for the hover preview and inspector cluster summary.
+  const metricsByTopicId = useMemo(() => {
+    const m = new Map<string, ClusterMetrics>();
+    for (const t of model.topics) m.set(t.id, t.metrics);
+    return m;
+  }, [model]);
+
   const adjacency = useMemo(() => {
     const m = new Map<string, Set<string>>();
     for (const e of model.edges) {
@@ -215,6 +235,17 @@ export function MemoryGraphView({
 
   const onSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Escape clears the search first (and stops bubbling so the window-level
+      // Escape doesn't ALSO close the inspector). A second Escape on an empty
+      // field falls through to that listener as a familiar exit.
+      if (e.key === "Escape") {
+        if (search) {
+          e.preventDefault();
+          e.stopPropagation();
+          setSearch("");
+        }
+        return;
+      }
       if (matchIds.length === 0) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -231,7 +262,7 @@ export function MemoryGraphView({
         }
       }
     },
-    [matchIds, activeMatch],
+    [matchIds, activeMatch, search],
   );
 
   // Drop selection / hover / pins that point at nodes no longer in the graph.
@@ -251,6 +282,23 @@ export function MemoryGraphView({
 
   const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
   const hovered = hoveredId ? nodeById.get(hoveredId) ?? null : null;
+
+  // Breadcrumb trail for the current selection: Jack › Trade hub › Node. Each
+  // crumb is a live node the reviewer can jump back to, so exploration always
+  // has an "up" path even after diving deep into a cluster.
+  const trail = useMemo(() => {
+    if (!selected) return [] as { id: string; label: string }[];
+    const items: { id: string; label: string }[] = [{ id: CORE_ID, label: "Jack" }];
+    if (selected.kind !== "core") {
+      const topicId = selected.topicId;
+      if (topicId && topicId !== selected.id) {
+        const t = nodeById.get(topicId);
+        if (t) items.push({ id: t.id, label: t.label });
+      }
+      items.push({ id: selected.id, label: selected.label });
+    }
+    return items;
+  }, [selected, nodeById]);
 
   const togglePin = useCallback((id: string) => {
     setPinnedIds((prev) => {
@@ -304,6 +352,14 @@ export function MemoryGraphView({
     return () => cancelAnimationFrame(raf);
   }, [hoveredId, selectedId]);
 
+  // Gently pan a freshly-selected node into view when it sits too close to an
+  // edge (the canvas no-ops when it's already comfortably framed), so following
+  // a search hit or breadcrumb never leaves the target under the inspector.
+  useEffect(() => {
+    if (!selectedId) return;
+    canvasRef.current?.ensureVisible(selectedId);
+  }, [selectedId]);
+
   const toggleFullscreen = () => {
     const el = containerRef.current;
     if (!document.fullscreenElement) el?.requestFullscreen?.().catch(() => {});
@@ -317,6 +373,10 @@ export function MemoryGraphView({
         degree: model.degree[selected.id] ?? 0,
         videoCount: inspectorVideoCount(selected, model),
         relatedVideoCount: relatedVideoCount(selected, model),
+        clusterMetrics:
+          selected.kind === "topic"
+            ? metricsByTopicId.get(selected.id)
+            : undefined,
         nodeById,
         adjacency,
         knowledgeByVideoId,
@@ -408,6 +468,42 @@ export function MemoryGraphView({
           </div>
         </div>
 
+        {/* Breadcrumb trail — the "you are here" path for the current selection.
+            Desktop overlay only; mobile gets context from the bottom-sheet header. */}
+        {selected && trail.length > 1 && (
+          <div className="pointer-events-auto absolute left-1/2 top-6 z-20 hidden -translate-x-1/2 md:block">
+            <Breadcrumb className="rounded-lg border border-white/10 bg-black/50 px-3 py-1.5 backdrop-blur">
+              <BreadcrumbList className="text-white/60">
+                {trail.map((item, i) => {
+                  const last = i === trail.length - 1;
+                  return (
+                    <Fragment key={item.id}>
+                      <BreadcrumbItem>
+                        {last ? (
+                          <BreadcrumbPage className="max-w-[14rem] truncate text-white">
+                            {item.label}
+                          </BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedId(item.id)}
+                              className="max-w-[10rem] truncate text-white/60 transition-colors hover:text-white"
+                            >
+                              {item.label}
+                            </button>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                      {!last && <BreadcrumbSeparator className="text-white/30" />}
+                    </Fragment>
+                  );
+                })}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        )}
+
         {/* Legend */}
         {showLegend && model.topics.length > 0 && (
           <div className="absolute bottom-6 left-6 max-w-[60%] rounded-xl border border-white/10 bg-black/45 p-3 backdrop-blur">
@@ -493,15 +589,49 @@ export function MemoryGraphView({
                 {hovered.label}
               </span>
             </div>
-            <div
-              className="mt-0.5 pl-4.5 font-mono text-[10px] uppercase tracking-wide"
-              style={{ color: rgba(hovered.color, 0.95) }}
-            >
-              {kindLabelFor(hovered.kind)}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-4.5">
+              <span
+                className="font-mono text-[10px] uppercase tracking-wide"
+                style={{ color: rgba(hovered.color, 0.95) }}
+              >
+                {kindLabelFor(hovered.kind)}
+              </span>
+              {hovered.kind !== "topic" && (
+                <FreshnessBadge info={nodeFreshness(hovered)} />
+              )}
             </div>
             <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-white/70">
               {describeNode(hovered)}
             </p>
+            {hovered.kind === "topic" ? (
+              <div className="mt-2 border-t border-white/10 pt-2">
+                <ClusterMetricsRow
+                  metrics={metricsByTopicId.get(hovered.id)}
+                  tone="light"
+                />
+              </div>
+            ) : (
+              <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-white/60">
+                {hovered.meta.trade && (
+                  <span className="max-w-[8rem] truncate">{hovered.meta.trade}</span>
+                )}
+                <span>
+                  <b className="font-semibold tabular-nums text-white/85">
+                    {model.degree[hovered.id] ?? 0}
+                  </b>{" "}
+                  conn
+                </span>
+                <span>
+                  <b className="font-semibold tabular-nums text-white/85">
+                    {inspectorVideoCount(hovered, model)}
+                  </b>{" "}
+                  vid
+                </span>
+                {hovered.meta.updatedAt && (
+                  <span>Updated {timeAgo(hovered.meta.updatedAt)}</span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -752,11 +882,72 @@ function formatTimestamp(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** A small colored pill communicating node health (Fresh / Needs Attention /
+ *  Knowledge Gap), shared by the hover preview and the inspector header. */
+function FreshnessBadge({ info }: { info: FreshnessInfo }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-1.5 py-[1px] text-[10px] font-semibold"
+      style={{
+        color: rgbCss(info.color),
+        background: rgba(info.color, 0.14),
+        border: `1px solid ${rgba(info.color, 0.4)}`,
+      }}
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ background: rgbCss(info.color) }}
+      />
+      {info.label}
+    </span>
+  );
+}
+
+const CLUSTER_METRIC_FIELDS: { key: keyof ClusterMetrics; label: string }[] = [
+  { key: "knowledge", label: "Concepts" },
+  { key: "videos", label: "Videos" },
+  { key: "conversations", label: "Mentors" },
+  { key: "procedures", label: "Procedures" },
+  { key: "competencies", label: "Competencies" },
+];
+
+/** Compact composition line for a trade cluster (concept/video/mentor/… counts).
+ *  `tone="light"` targets the dark hover card; the default targets the card UI. */
+function ClusterMetricsRow({
+  metrics,
+  tone = "default",
+}: {
+  metrics?: ClusterMetrics;
+  tone?: "default" | "light";
+}) {
+  if (!metrics) return null;
+  const items = CLUSTER_METRIC_FIELDS.filter((f) => metrics[f.key] > 0);
+  if (items.length === 0) return null;
+  const valueClass = tone === "light" ? "text-white/85" : "text-foreground";
+  const rowClass =
+    tone === "light"
+      ? "flex flex-wrap gap-x-2.5 gap-y-1 text-[10px] text-white/60"
+      : "flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground";
+  return (
+    <div className={rowClass}>
+      {items.map((f) => (
+        <span key={f.key}>
+          <b className={`font-semibold tabular-nums ${valueClass}`}>
+            {metrics[f.key]}
+          </b>{" "}
+          {f.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 interface NodeDetailProps {
   node: MemoryNode;
   degree: number;
   videoCount: number;
   relatedVideoCount: number;
+  clusterMetrics?: ClusterMetrics;
   nodeById: Map<string, MemoryNode>;
   adjacency: Map<string, Set<string>>;
   knowledgeByVideoId: Map<string, MemoryNode[]>;
@@ -789,6 +980,7 @@ function NodeInspectorPanel({
   const { node, degree, videoCount } = props;
   const knowledge = isKnowledgeKind(node.kind);
   const kLabel = kindLabelFor(node.kind);
+  const freshness = node.kind === "core" ? null : nodeFreshness(node);
   const subtitle =
     node.kind === "core"
       ? kLabel
@@ -813,8 +1005,11 @@ function NodeInspectorPanel({
             <div className="text-sm font-semibold leading-snug text-foreground">
               {node.label}
             </div>
-            <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
-              {subtitle}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
+                {subtitle}
+              </span>
+              {freshness && <FreshnessBadge info={freshness} />}
             </div>
             {/* High-level stats first — details live in collapsible sections. */}
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -1101,6 +1296,7 @@ function NodeDetailBody({
   node,
   degree,
   relatedVideoCount,
+  clusterMetrics,
   nodeById,
   adjacency,
   knowledgeByVideoId,
@@ -1197,6 +1393,14 @@ function NodeDetailBody({
 
   return (
     <>
+      {/* Cluster rollup for trade hubs — the size + composition of the knowledge
+          orbiting this trade at a glance. Shared by the desktop floating card and
+          the mobile bottom sheet, so it renders once here rather than per-shell. */}
+      {node.kind === "topic" && clusterMetrics && (
+        <div className="mb-3 border-b border-border/60 pb-3">
+          <ClusterMetricsRow metrics={clusterMetrics} />
+        </div>
+      )}
       {description && (
         <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
           {description}

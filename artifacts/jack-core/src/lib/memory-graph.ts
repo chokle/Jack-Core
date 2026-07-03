@@ -107,6 +107,41 @@ export interface MemoryNode {
     /** Alternate wordings that collapse onto this canonical node (capped 25). */
     aliases?: string[];
   };
+  /**
+   * Future-proof capture blob — present (possibly empty) on EVERY node so the
+   * UI never has to be restructured as Jack's memory grows richer. Populated by
+   * `finalizeModel`; read via `nodeCapture(node)` which falls back to deriving
+   * it on the fly for any node that predates finalization.
+   */
+  capture?: NodeCapture;
+}
+
+/**
+ * The full knowledge a node can eventually carry. Every field is always present
+ * (empty when unknown) so downstream UI can bind to a stable shape today and
+ * light up automatically as the backend starts supplying each field.
+ */
+export interface NodeCapture {
+  summary: string;
+  transcript: string;
+  videoIds: string[];
+  sourceConversations: string[];
+  procedures: string[];
+  fieldTips: string[];
+  commonMistakes: string[];
+  citations: NodeSource[];
+  embeddings: number[];
+  relatedCompetencies: string[];
+  metadata: Record<string, unknown>;
+}
+
+/** Per-trade cluster rollup, shown on/near each hub before drilling in. */
+export interface ClusterMetrics {
+  knowledge: number;
+  videos: number;
+  conversations: number;
+  procedures: number;
+  competencies: number;
 }
 
 export interface MemoryEdge {
@@ -149,6 +184,8 @@ export interface Topic {
   trade: string;
   label: string;
   color: RGB;
+  /** Cluster rollup for this trade, filled by `finalizeModel`. */
+  metrics: ClusterMetrics;
 }
 
 export interface GraphModel {
@@ -232,6 +269,140 @@ function topicIdForTrade(trade: string): string {
   return `topic:${trade}`;
 }
 
+/** An all-zero cluster rollup, overwritten by `finalizeModel`. */
+export function emptyMetrics(): ClusterMetrics {
+  return { knowledge: 0, videos: 0, conversations: 0, procedures: 0, competencies: 0 };
+}
+
+/**
+ * Derive the future-proof capture blob for a node from the data it already
+ * carries. Everything is always present (empty when unknown) so the UI binds to
+ * a stable shape and lights up automatically as the backend enriches nodes.
+ */
+export function deriveCapture(node: MemoryNode): NodeCapture {
+  const m = node.meta;
+  const citations = m.sources ?? [];
+  const videoIds = new Set<string>();
+  for (const s of citations) videoIds.add(s.videoId);
+  for (const id of m.sourceVideoIds ?? []) videoIds.add(id);
+  if (node.kind === "video") videoIds.add(node.id.replace("video:", ""));
+  return {
+    summary: m.description ?? "",
+    transcript: "",
+    videoIds: [...videoIds],
+    sourceConversations: [],
+    procedures: [],
+    fieldTips: [],
+    commonMistakes: [],
+    citations,
+    embeddings: [],
+    relatedCompetencies: m.competencyCodes ?? [],
+    metadata: {},
+  };
+}
+
+/** Read a node's capture, deriving one on the fly if it predates finalization. */
+export function nodeCapture(node: MemoryNode): NodeCapture {
+  return node.capture ?? deriveCapture(node);
+}
+
+export type FreshnessState = "fresh" | "attention" | "gap";
+
+export interface FreshnessInfo {
+  state: FreshnessState;
+  label: string;
+  color: RGB;
+}
+
+const FRESH_WINDOW_MS = 1000 * 60 * 60 * 24 * 30;
+
+const FRESHNESS: Record<FreshnessState, FreshnessInfo> = {
+  fresh: { state: "fresh", label: "Fresh", color: [99, 214, 142] },
+  attention: { state: "attention", label: "Needs Attention", color: [245, 197, 66] },
+  gap: { state: "gap", label: "Knowledge Gap", color: [148, 163, 184] },
+};
+
+/**
+ * Health of a single node: Knowledge Gap (no corroborating source data yet),
+ * Needs Attention (has data but hasn't been touched in a while), or Fresh.
+ * Scaffold roots (core/topic) always read Fresh — their health is the cluster's.
+ */
+export function nodeFreshness(node: MemoryNode): FreshnessInfo {
+  if (node.kind === "core" || node.kind === "topic") return FRESHNESS.fresh;
+
+  const cap = nodeCapture(node);
+  const hasData =
+    node.kind === "competency"
+      ? (node.meta.videoCount ?? 0) > 0
+      : cap.citations.length > 0 ||
+        cap.videoIds.length > 0 ||
+        cap.sourceConversations.length > 0 ||
+        cap.summary.trim().length > 0;
+  if (!hasData) return FRESHNESS.gap;
+
+  const iso = node.meta.updatedAt ?? node.meta.createdAt;
+  if (!iso) return FRESHNESS.fresh;
+  const age = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(age)) return FRESHNESS.fresh;
+  return age <= FRESH_WINDOW_MS ? FRESHNESS.fresh : FRESHNESS.attention;
+}
+
+/**
+ * Finalize a freshly-built model: attach the future-proof capture blob to every
+ * node, roll up per-trade cluster metrics onto each topic, and compute degree +
+ * counts. Both the client-derived and server-derived builders route through here
+ * so the two paths produce an identical, fully-populated shape.
+ */
+function finalizeModel(
+  topics: Topic[],
+  rawNodes: MemoryNode[],
+  edges: MemoryEdge[],
+): GraphModel {
+  const nodes = rawNodes.map((n) =>
+    n.capture ? n : { ...n, capture: deriveCapture(n) },
+  );
+
+  const degree: Record<string, number> = {};
+  for (const e of edges) {
+    degree[e.a] = (degree[e.a] ?? 0) + 1;
+    degree[e.b] = (degree[e.b] ?? 0) + 1;
+  }
+
+  const metricsByTrade = new Map<string, ClusterMetrics>();
+  for (const t of topics) metricsByTrade.set(t.trade, emptyMetrics());
+  for (const n of nodes) {
+    const trade = n.meta.trade;
+    if (!trade) continue;
+    const m = metricsByTrade.get(trade);
+    if (!m) continue;
+    if (n.kind === "video") m.videos += 1;
+    else if (n.kind === "competency") m.competencies += 1;
+    else if (n.kind === "mentor") m.conversations += 1;
+    else if (isKnowledgeKind(n.kind)) {
+      m.knowledge += 1;
+      if (n.kind === "procedure") m.procedures += 1;
+    }
+  }
+  const topicsWithMetrics = topics.map((t) => ({
+    ...t,
+    metrics: metricsByTrade.get(t.trade) ?? emptyMetrics(),
+  }));
+
+  return {
+    topics: topicsWithMetrics,
+    nodes,
+    edges,
+    degree,
+    counts: {
+      nodes: nodes.length,
+      connections: edges.length,
+      topics: topicsWithMetrics.length,
+      videos: nodes.filter((n) => n.kind === "video").length,
+      knowledge: nodes.filter((n) => isKnowledgeKind(n.kind)).length,
+    },
+  };
+}
+
 /**
  * Build the full graph model from the data Jack actually has.
  */
@@ -250,6 +421,7 @@ export function buildGraphModel(
     trade,
     label: trade,
     color: TOPIC_PALETTE[i % TOPIC_PALETTE.length]!,
+    metrics: emptyMetrics(),
   }));
   const topicByTrade = new Map(topics.map((t) => [t.trade, t]));
 
@@ -329,26 +501,7 @@ export function buildGraphModel(
     }
   }
 
-  // 6. Degree (connection count) per node.
-  const degree: Record<string, number> = {};
-  for (const e of edges) {
-    degree[e.a] = (degree[e.a] ?? 0) + 1;
-    degree[e.b] = (degree[e.b] ?? 0) + 1;
-  }
-
-  return {
-    topics,
-    nodes,
-    edges,
-    degree,
-    counts: {
-      nodes: nodes.length,
-      connections: edges.length,
-      topics: topics.length,
-      videos: videos.length,
-      knowledge: nodes.filter((n) => isKnowledgeKind(n.kind)).length,
-    },
-  };
+  return finalizeModel(topics, nodes, edges);
 }
 
 /** Minimal shape of a node/edge returned by GET /graph (server-persisted). */
@@ -453,6 +606,7 @@ export function buildGraphModelFromServer(graph: {
     trade: n.trade ?? n.label,
     label: n.label,
     color: TOPIC_PALETTE[i % TOPIC_PALETTE.length]!,
+    metrics: emptyMetrics(),
   }));
   const colorByTopicId = new Map(topics.map((t) => [t.id, t.color]));
   const colorByTrade = new Map(topics.map((t) => [t.trade, t.color]));
@@ -568,28 +722,7 @@ export function buildGraphModelFromServer(graph: {
     kind: e.kind || "video",
   }));
 
-  const degree: Record<string, number> = {};
-  for (const e of edges) {
-    degree[e.a] = (degree[e.a] ?? 0) + 1;
-    degree[e.b] = (degree[e.b] ?? 0) + 1;
-  }
-
-  const videos = nodes.filter((n) => n.kind === "video").length;
-  const knowledge = nodes.filter((n) => isKnowledgeKind(n.kind)).length;
-
-  return {
-    topics,
-    nodes,
-    edges,
-    degree,
-    counts: {
-      nodes: nodes.length,
-      connections: edges.length,
-      topics: topics.length,
-      videos,
-      knowledge,
-    },
-  };
+  return finalizeModel(topics, nodes, edges);
 }
 
 /** Loosely-typed view of the GET /graph payload as it actually arrives at
