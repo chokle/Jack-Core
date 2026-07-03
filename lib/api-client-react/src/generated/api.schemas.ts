@@ -406,21 +406,6 @@ export const InterviewAnswerDistillationStatus = {
   failed: 'failed',
 } as const;
 
-export interface InterviewAnswer {
-  id: string;
-  question: string;
-  /** @nullable */
-  category?: string | null;
-  /** @nullable */
-  topic?: string | null;
-  /** @nullable */
-  answerText?: string | null;
-  skipped: boolean;
-  /** Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation. */
-  distillationStatus?: InterviewAnswerDistillationStatus;
-  createdAt: string;
-}
-
 /**
  * How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.
  */
@@ -448,6 +433,32 @@ export interface ExtractedKnowledgeItem {
      * @nullable
      */
   matchedLabel?: string | null;
+}
+
+export interface InterviewAnswer {
+  id: string;
+  question: string;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  topic?: string | null;
+  /** @nullable */
+  answerText?: string | null;
+  skipped: boolean;
+  /** Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation. */
+  distillationStatus?: InterviewAnswerDistillationStatus;
+  /** Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed. */
+  extractedKnowledge?: ExtractedKnowledgeItem[];
+  createdAt: string;
+}
+
+/**
+ * An interview session together with its ordered prior answers, so a client can rebuild the running transcript and resume an interrupted interview.
+ */
+export interface InterviewSessionDetail {
+  session: InterviewSession;
+  /** The session's answers in ask order (oldest first). */
+  answers: InterviewAnswer[];
 }
 
 /**

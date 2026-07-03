@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Mic,
   SkipForward,
@@ -21,8 +21,10 @@ import {
   useSubmitInterviewAnswer,
   useSkipInterviewQuestion,
   useFinishInterview,
+  getInterviewSession,
   getGetGraphQueryKey,
   type InterviewSession,
+  type InterviewAnswer,
   type ExtractedKnowledgeItem,
   type InterviewAnswerDistillationStatus,
 } from "@workspace/api-client-react";
@@ -39,6 +41,60 @@ const TRADE_OPTIONS = [
 ] as const;
 
 type Stage = "intake" | "interviewing" | "complete";
+
+/**
+ * Browser-storage key for the active interview session id. Resume is best-effort
+ * within the same browser: the session id is unguessable and there is no user
+ * auth (consistent with the rest of the app), so persisting it locally lets an
+ * interrupted interview (tab refresh, dropped network, navigation) pick up right
+ * where the mentor left off.
+ */
+const ACTIVE_SESSION_KEY = "jack.interview.activeSessionId";
+
+function saveActiveSessionId(id: string) {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, id);
+  } catch {
+    // Storage unavailable (private mode / blocked) — resume is best-effort only.
+  }
+}
+
+function clearActiveSessionId() {
+  try {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+  } catch {
+    // Ignore — nothing to clear if storage is unavailable.
+  }
+}
+
+function readActiveSessionId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** True when a fetch error is a definite "not found" (safe to drop stored id). */
+function isNotFound(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    (err as { status: unknown }).status === 404
+  );
+}
+
+/** Rebuild a transcript turn from a persisted answer row (for resume). */
+function turnFromAnswer(a: InterviewAnswer): Turn {
+  return {
+    question: a.question,
+    answer: a.answerText ?? null,
+    skipped: a.skipped,
+    knowledge: a.extractedKnowledge ?? [],
+    distillationStatus: a.distillationStatus ?? (a.skipped ? "pending" : "verified"),
+  };
+}
 
 /** One captured turn shown in the running transcript. */
 interface Turn {
@@ -61,6 +117,9 @@ export function InterviewMode() {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [transcript, setTranscript] = useState<Turn[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // True while we attempt to resume a stored session on mount, so the intake
+  // form doesn't flash before we know whether an interview is still in progress.
+  const [resuming, setResuming] = useState(() => readActiveSessionId() !== null);
 
   // Intake form state.
   const [name, setName] = useState("");
@@ -89,6 +148,7 @@ export function InterviewMode() {
     queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
 
   const resetAll = () => {
+    clearActiveSessionId();
     setStage("intake");
     setSession(null);
     setTranscript([]);
@@ -102,6 +162,50 @@ export function InterviewMode() {
     setRegion("");
     setBackground("");
   };
+
+  // Resume an interrupted interview: on mount, if a session id is stored, fetch
+  // it and its prior answers, rebuild the transcript, and drop the mentor back
+  // into the conversation. A completed session or a definite not-found clears the
+  // stored id and shows the intake form; a transient network error keeps the id
+  // so a later reload can still resume.
+  const didRehydrate = useRef(false);
+  useEffect(() => {
+    if (didRehydrate.current) return;
+    didRehydrate.current = true;
+
+    const storedId = readActiveSessionId();
+    if (!storedId) {
+      setResuming(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await getInterviewSession(storedId);
+        if (cancelled) return;
+        if (detail.session.complete) {
+          // Finished (or wrapped up) elsewhere — nothing to resume.
+          clearActiveSessionId();
+          return;
+        }
+        setSession(detail.session);
+        setTranscript(detail.answers.map(turnFromAnswer));
+        setStage("interviewing");
+      } catch (err) {
+        if (cancelled) return;
+        // Only drop the stored id when the session is definitively gone; keep it
+        // on a transient failure so a transient outage doesn't lose the resume.
+        if (isNotFound(err)) clearActiveSessionId();
+      } finally {
+        if (!cancelled) setResuming(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,6 +238,10 @@ export function InterviewMode() {
       {
         onSuccess: (s) => {
           setSession(s);
+          // Persist so an interrupted interview can resume in this browser.
+          // A session that started already complete has nothing to resume.
+          if (s.complete) clearActiveSessionId();
+          else saveActiveSessionId(s.id);
           setStage(s.complete ? "complete" : "interviewing");
         },
         onError: () => setError("Couldn't start the interview. Please try again."),
@@ -165,7 +273,10 @@ export function InterviewMode() {
           setSession(result.session);
           setAnswer("");
           refreshGraph();
-          if (result.session.complete) setStage("complete");
+          if (result.session.complete) {
+            clearActiveSessionId();
+            setStage("complete");
+          }
         },
         onError: () => setError("Couldn't save that answer. Please try again."),
       },
@@ -193,7 +304,10 @@ export function InterviewMode() {
           ]);
           setSession(result.session);
           setAnswer("");
-          if (result.session.complete) setStage("complete");
+          if (result.session.complete) {
+            clearActiveSessionId();
+            setStage("complete");
+          }
         },
         onError: () => setError("Couldn't skip. Please try again."),
       },
@@ -206,6 +320,7 @@ export function InterviewMode() {
       { id: session.id },
       {
         onSuccess: (s) => {
+          clearActiveSessionId();
           setSession(s);
           setStage("complete");
           refreshGraph();
@@ -238,7 +353,16 @@ export function InterviewMode() {
 
       <ScrollArea className="flex-1">
         <div className="mx-auto w-full max-w-2xl px-5 py-6 md:px-8 md:py-10">
-          {stage === "intake" && (
+          {resuming && (
+            <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="font-mono text-xs uppercase tracking-[0.18em]">
+                Resuming interview…
+              </p>
+            </div>
+          )}
+
+          {!resuming && stage === "intake" && (
             <IntakeForm
               name={name}
               setName={setName}

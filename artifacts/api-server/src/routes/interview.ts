@@ -65,6 +65,7 @@ function serializeSession(session: Row, mentorName: string): Record<string, unkn
 
 /** Shape an answer row into the API InterviewAnswer response. */
 function serializeAnswer(answer: Row): Record<string, unknown> {
+  const snapshot = answer["extracted_knowledge"];
   return {
     id: answer["id"],
     question: answer["question"],
@@ -73,6 +74,7 @@ function serializeAnswer(answer: Row): Record<string, unknown> {
     answerText: (answer["answer_text"] as string | null) ?? null,
     skipped: Boolean(answer["skipped"]),
     distillationStatus: (answer["distillation_status"] as string | null) ?? "pending",
+    extractedKnowledge: Array.isArray(snapshot) ? snapshot : [],
     createdAt: answer["created_at"],
   };
 }
@@ -203,7 +205,20 @@ router.get("/interview/sessions/:id", async (req, res) => {
   try {
     const loaded = await loadSession(req.params.id);
     if (!loaded) return res.status(404).json({ error: "Interview session not found" });
-    return res.json(serializeSession(loaded.session, loaded.mentor["name"] as string));
+
+    // Return the ordered prior answers alongside the session so the client can
+    // rebuild the running transcript and resume an interrupted interview.
+    const { data: answers, error: aErr } = await supabase
+      .from("interview_answers")
+      .select("*")
+      .eq("session_id", loaded.session["id"])
+      .order("created_at", { ascending: true });
+    if (aErr) throw aErr;
+
+    return res.json({
+      session: serializeSession(loaded.session, loaded.mentor["name"] as string),
+      answers: (answers ?? []).map((a: Row) => serializeAnswer(a)),
+    });
   } catch (err) {
     req.log.error({ err }, "getInterviewSession error");
     return res.status(500).json({ error: "Failed to load interview session" });

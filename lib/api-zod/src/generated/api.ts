@@ -564,6 +564,7 @@ export const GetInterviewSessionParams = zod.object({
 })
 
 export const GetInterviewSessionResponse = zod.object({
+  "session": zod.object({
   "id": zod.string(),
   "mentorProfileId": zod.string(),
   "mentorName": zod.string(),
@@ -575,7 +576,28 @@ export const GetInterviewSessionResponse = zod.object({
   "questionCount": zod.number(),
   "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
   "createdAt": zod.string()
-})
+}),
+  "answers": zod.array(zod.object({
+  "id": zod.string(),
+  "question": zod.string(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "answerText": zod.string().nullish(),
+  "skipped": zod.boolean(),
+  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
+})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
+  "createdAt": zod.string()
+})).describe('The session\'s answers in ask order (oldest first).')
+}).describe('An interview session together with its ordered prior answers, so a client can rebuild the running transcript and resume an interrupted interview.')
 
 
 /**
@@ -611,6 +633,16 @@ export const SubmitInterviewAnswerResponse = zod.object({
   "answerText": zod.string().nullish(),
   "skipped": zod.boolean(),
   "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
+})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
   "createdAt": zod.string()
 }),
   "extractedKnowledge": zod.array(zod.object({
@@ -655,6 +687,16 @@ export const SkipInterviewQuestionResponse = zod.object({
   "answerText": zod.string().nullish(),
   "skipped": zod.boolean(),
   "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
+})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
   "createdAt": zod.string()
 }),
   "extractedKnowledge": zod.array(zod.object({
@@ -765,6 +807,16 @@ export const RedistillInterviewAnswerResponse = zod.object({
   "answerText": zod.string().nullish(),
   "skipped": zod.boolean(),
   "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
+  "extractedKnowledge": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().optional(),
+  "category": zod.string(),
+  "confidence": zod.number(),
+  "competencyCode": zod.string().nullish(),
+  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
+  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
+})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
   "createdAt": zod.string()
 }),
   "extractedKnowledge": zod.array(zod.object({

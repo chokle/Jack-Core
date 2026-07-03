@@ -5,6 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { ExtractedKnowledgeItem } from './extractedKnowledgeItem';
 import type { InterviewAnswerDistillationStatus } from './interviewAnswerDistillationStatus';
 
 export interface InterviewAnswer {
@@ -19,5 +20,7 @@ export interface InterviewAnswer {
   skipped: boolean;
   /** Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation. */
   distillationStatus?: InterviewAnswerDistillationStatus;
+  /** Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed. */
+  extractedKnowledge?: ExtractedKnowledgeItem[];
   createdAt: string;
 }

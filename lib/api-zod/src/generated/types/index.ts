@@ -28,6 +28,7 @@ export * from './healthStatus';
 export * from './interviewAnswer';
 export * from './interviewAnswerDistillationStatus';
 export * from './interviewSession';
+export * from './interviewSessionDetail';
 export * from './interviewSessionStatus';
 export * from './interviewTurnResult';
 export * from './jobStatus';

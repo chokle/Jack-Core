@@ -29,6 +29,7 @@ import type {
   GraphHealthReport,
   HealthStatus,
   InterviewSession,
+  InterviewSessionDetail,
   InterviewTurnResult,
   JobStatus,
   KnowledgeCandidate,
@@ -1729,9 +1730,9 @@ export const getGetInterviewSessionUrl = (id: string,) => {
 /**
  * @summary Get the current state of an interview session
  */
-export const getInterviewSession = async (id: string, options?: RequestInit): Promise<InterviewSession> => {
+export const getInterviewSession = async (id: string, options?: RequestInit): Promise<InterviewSessionDetail> => {
 
-  return customFetch<InterviewSession>(getGetInterviewSessionUrl(id),
+  return customFetch<InterviewSessionDetail>(getGetInterviewSessionUrl(id),
   {
     ...options,
     method: 'GET'
