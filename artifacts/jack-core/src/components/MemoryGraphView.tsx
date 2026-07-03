@@ -61,6 +61,9 @@ import {
   type RGB,
   type FreshnessInfo,
   type ClusterMetrics,
+  type GraphDelta,
+  type MemoryVitality,
+  type Topic,
 } from "../lib/memory-graph";
 
 interface MemoryGraphViewProps {
@@ -89,12 +92,62 @@ function useIsDesktop() {
   return isDesktop;
 }
 
+/** Respects the OS "reduce motion" setting; gates every non-essential animation. */
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
+
+/**
+ * Eases a displayed number toward `target` over ~900ms. When `animate` is false
+ * (reduced motion), it snaps instantly so the counter is still correct/readable.
+ */
+function useCountUp(target: number, animate: boolean) {
+  const [display, setDisplay] = useState(target);
+  const fromRef = useRef(target);
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!animate) {
+      setDisplay(target);
+      fromRef.current = target;
+      return;
+    }
+    const from = fromRef.current;
+    if (from === target) return;
+    const start = performance.now();
+    const DUR = 900;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / DUR);
+      const ease = 1 - Math.pow(1 - p, 3);
+      setDisplay(Math.round(from + (target - from) * ease));
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else fromRef.current = target;
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      fromRef.current = target;
+    };
+  }, [target, animate]);
+  return display;
+}
+
 export function MemoryGraphView({
   data,
   onOpenVideo,
   onJumpToTimestamp,
 }: MemoryGraphViewProps) {
-  const { model, recent, competencies } = data;
+  const { model, recent, competencies, delta, vitality } = data;
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // The graph stage is the positioning context for the floating hover preview,
@@ -110,6 +163,35 @@ export function MemoryGraphView({
   const [zoomPct, setZoomPct] = useState(100);
   const [showLegend, setShowLegend] = useState(true);
   const isDesktop = useIsDesktop();
+  const reducedMotion = usePrefersReducedMotion();
+
+  // Non-intrusive "Jack just learned…" toasts, driven by real graph deltas.
+  // Keyed on delta.seq (which only advances on an actual change) so a re-render
+  // or canvas re-sim never re-fires them.
+  const [toasts, setToasts] = useState<
+    { id: number; text: string; nodeId?: string }[]
+  >([]);
+  const lastToastSeqRef = useRef(0);
+  useEffect(() => {
+    if (delta.seq <= lastToastSeqRef.current) return;
+    lastToastSeqRef.current = delta.seq;
+    if (delta.addedKnowledgeCount <= 0) return;
+    const groups = delta.addedByTrade.length
+      ? delta.addedByTrade
+      : [{ trade: "the library", count: delta.addedKnowledgeCount }];
+    const fresh = groups.slice(0, 3).map((g, i) => ({
+      id: delta.seq * 100 + i,
+      text: `Jack just learned ${g.count} new concept${
+        g.count === 1 ? "" : "s"
+      } in ${g.trade}`,
+      nodeId: delta.newestNodeId,
+    }));
+    setToasts((prev) => [...prev, ...fresh].slice(-4));
+  }, [delta]);
+  const dismissToast = useCallback(
+    (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)),
+    [],
+  );
 
   // Search: which nodes match, and an arrow-key "cursor" over them. Typing dims
   // everything else on the canvas; Enter jumps to the active match and opens it.
@@ -407,6 +489,7 @@ export function MemoryGraphView({
           search={search}
           activeMatchId={activeMatchId}
           locked={locked}
+          delta={delta}
           onZoomChange={setZoomPct}
         />
 
@@ -419,6 +502,12 @@ export function MemoryGraphView({
             <p className="mt-1 font-mono text-xs text-white/55">
               Click any node for its full capture · double-click to pin
             </p>
+            <GrowthCounter
+              knowledge={model.counts.knowledge}
+              connections={model.counts.connections}
+              delta={delta}
+              reducedMotion={reducedMotion}
+            />
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             <div className="relative">
@@ -570,6 +659,29 @@ export function MemoryGraphView({
           </IconButton>
         </div>
 
+        {/* Growth toasts — non-intrusive, auto-dismissing, tap to focus newest */}
+        {toasts.length > 0 && (
+          <div className="pointer-events-none absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
+            {toasts.map((t) => (
+              <GrowthToast
+                key={t.id}
+                text={t.text}
+                reducedMotion={reducedMotion}
+                onDismiss={() => dismissToast(t.id)}
+                onClick={
+                  t.nodeId
+                    ? () => {
+                        setSelectedId(t.nodeId!);
+                        canvasRef.current?.focusNode(t.nodeId!);
+                        dismissToast(t.id);
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+
         {/* Hover preview — a quick glance before committing to the full inspector */}
         {hovered && !selectedId && hovered.kind !== "core" && (
           <div
@@ -670,6 +782,8 @@ export function MemoryGraphView({
 
       {/* Right rail — ambient panels only; per-node detail lives in the inspector */}
       <aside className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-sidebar/85 p-4 backdrop-blur-md lg:flex">
+        <VitalityPanel vitality={vitality} reducedMotion={reducedMotion} />
+        <HubMaturityPanel topics={model.topics} onSelect={setSelectedId} />
         <LiveFeed
           recent={recent}
           colorByTrade={colorByTrade}
@@ -848,6 +962,230 @@ function LiveFeed({
           })}
         </ul>
       )}
+    </Panel>
+  );
+}
+
+/**
+ * Header "knowledge growth" read-out: total concepts + connections, count-up
+ * animated, with a transient "+N" flash whenever new knowledge lands.
+ */
+function GrowthCounter({
+  knowledge,
+  connections,
+  delta,
+  reducedMotion,
+}: {
+  knowledge: number;
+  connections: number;
+  delta: GraphDelta;
+  reducedMotion: boolean;
+}) {
+  const kDisplay = useCountUp(knowledge, !reducedMotion);
+  const cDisplay = useCountUp(connections, !reducedMotion);
+
+  // A brief "+N" badge that appears on a real delta and fades out.
+  const [pulse, setPulse] = useState<{ n: number; key: number } | null>(null);
+  const seenSeqRef = useRef(0);
+  useEffect(() => {
+    if (delta.seq <= seenSeqRef.current) return;
+    seenSeqRef.current = delta.seq;
+    if (delta.addedKnowledgeCount <= 0) return;
+    setPulse({ n: delta.addedKnowledgeCount, key: delta.seq });
+    const id = window.setTimeout(() => setPulse(null), 2600);
+    return () => window.clearTimeout(id);
+  }, [delta]);
+
+  return (
+    <div className="mt-2.5 flex items-center gap-2">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 font-mono text-xs text-white/80 backdrop-blur">
+        <span className="font-semibold tabular-nums text-white">{kDisplay}</span>
+        concepts
+        <span className="text-white/30">·</span>
+        <span className="font-semibold tabular-nums text-white">{cDisplay}</span>
+        connections
+      </span>
+      {pulse && (
+        <span
+          key={pulse.key}
+          className={`font-mono text-xs font-bold text-emerald-400 ${
+            reducedMotion ? "" : "animate-in fade-in slide-in-from-bottom-1"
+          }`}
+        >
+          +{pulse.n}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A single auto-dismissing "Jack just learned…" toast. Manages its own ~6s
+ * lifetime so the parent stays a plain list; clickable when it can focus a node.
+ */
+function GrowthToast({
+  text,
+  reducedMotion,
+  onDismiss,
+  onClick,
+}: {
+  text: string;
+  reducedMotion: boolean;
+  onDismiss: () => void;
+  onClick?: () => void;
+}) {
+  useEffect(() => {
+    const id = window.setTimeout(onDismiss, 6000);
+    return () => window.clearTimeout(id);
+  }, [onDismiss]);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`pointer-events-auto flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-950/70 px-3.5 py-1.5 text-xs font-medium text-emerald-100 shadow-lg shadow-black/40 backdrop-blur transition-colors hover:border-emerald-400/60 ${
+        onClick ? "cursor-pointer" : "cursor-default"
+      } ${reducedMotion ? "" : "animate-in fade-in slide-in-from-bottom-2"}`}
+    >
+      <Activity className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+      {text}
+    </button>
+  );
+}
+
+/** Compact 0..100 label for a 0..1 share/score. */
+function pct(n: number): string {
+  return `${Math.round(n * 100)}%`;
+}
+
+/**
+ * Ambient whole-graph "vitality" indicator: a headline score plus the trust
+ * signals behind it (confidence, corroboration, verification).
+ */
+function VitalityPanel({
+  vitality,
+  reducedMotion,
+}: {
+  vitality: MemoryVitality;
+  reducedMotion: boolean;
+}) {
+  const score = useCountUp(Math.round(vitality.score * 100), !reducedMotion);
+  const label =
+    vitality.score >= 0.66
+      ? "Thriving"
+      : vitality.score >= 0.33
+        ? "Growing"
+        : "Nascent";
+  const hue: RGB =
+    vitality.score >= 0.66
+      ? [99, 214, 142]
+      : vitality.score >= 0.33
+        ? [245, 197, 66]
+        : [130, 170, 255];
+  const rows: { label: string; value: number }[] = [
+    { label: "Avg confidence", value: vitality.avgConfidence },
+    { label: "Corroborated", value: vitality.corroboratedShare },
+    { label: "Verified", value: vitality.verifiedShare },
+  ];
+  return (
+    <Panel
+      title="Memory Vitality"
+      badge={
+        <span
+          className="font-mono text-[10px] font-semibold"
+          style={{ color: rgbCss(hue) }}
+        >
+          {label}
+        </span>
+      }
+    >
+      <div className="mb-3 flex items-baseline gap-2">
+        <span
+          className="font-mono text-3xl font-extrabold tabular-nums"
+          style={{ color: rgbCss(hue) }}
+        >
+          {score}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          / 100 · {vitality.knowledgeCount} concept
+          {vitality.knowledgeCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div key={r.label}>
+            <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{r.label}</span>
+              <span className="font-mono tabular-nums text-foreground">
+                {pct(r.value)}
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className={reducedMotion ? "" : "transition-[width] duration-700"}
+                style={{
+                  width: pct(r.value),
+                  height: "100%",
+                  background: rgbCss(hue),
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Per-hub cluster-maturity roll-up so each trade's "grown-up-ness" is legible. */
+function HubMaturityPanel({
+  topics,
+  onSelect,
+}: {
+  topics: Topic[];
+  onSelect: (id: string) => void;
+}) {
+  const ranked = [...topics]
+    .filter((t) => t.metrics.knowledge > 0)
+    .sort((a, b) => b.metrics.maturity - a.metrics.maturity)
+    .slice(0, 8);
+  if (ranked.length === 0) return null;
+  return (
+    <Panel title="Cluster Maturity">
+      <ul className="space-y-2.5">
+        {ranked.map((t) => (
+          <li key={t.id}>
+            <button
+              type="button"
+              onClick={() => onSelect(t.id)}
+              className="group w-full text-left"
+            >
+              <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                <span className="flex items-center gap-1.5 truncate">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: rgbCss(t.color) }}
+                  />
+                  <span className="truncate text-foreground group-hover:text-primary">
+                    {t.label}
+                  </span>
+                </span>
+                <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+                  {pct(t.metrics.maturity)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  style={{
+                    width: pct(t.metrics.maturity),
+                    height: "100%",
+                    background: rgbCss(t.color),
+                  }}
+                />
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
     </Panel>
   );
 }

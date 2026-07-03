@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   useListVideos,
   useListCompetencies,
@@ -9,9 +9,14 @@ import {
   getGetGraphQueryKey,
 } from "@workspace/api-client-react";
 import {
+  computeGraphDelta,
+  computeVitality,
   readUpdatedAt,
   selectMemoryGraphModel,
+  EMPTY_DELTA,
+  type GraphDelta,
   type GraphModel,
+  type MemoryVitality,
   type RawCompetency,
   type RawVideo,
 } from "./memory-graph";
@@ -25,6 +30,12 @@ export interface MemoryGraphData {
   readyCount: number;
   lastUpdated?: string;
   isLoading: boolean;
+  /** Whole-graph vitality read-out for the ambient health indicator. */
+  vitality: MemoryVitality;
+  /** What changed since the previous /graph snapshot (births, strengthening). */
+  delta: GraphDelta;
+  /** Server snapshot timestamp; the delta only re-fires when this changes. */
+  generatedAt?: string;
 }
 
 /**
@@ -75,6 +86,27 @@ export function useMemoryGraphData(): MemoryGraphData {
     [graph, videoList, competencyList],
   );
 
+  const generatedAt = (graph as { generatedAt?: string } | undefined)
+    ?.generatedAt;
+
+  const vitality = useMemo(() => computeVitality(model), [model]);
+
+  // Diff the current snapshot against the previous one. Keyed on the model +
+  // server timestamp so it only re-fires on a real data change (never on
+  // re-render or canvas re-simulation). First load yields an empty delta.
+  const prevModelRef = useRef<GraphModel | null>(null);
+  const seqRef = useRef(0);
+  const delta = useMemo(() => {
+    const prev = prevModelRef.current;
+    const d = computeGraphDelta(prev, model, seqRef.current + 1, generatedAt);
+    // Only advance the shared sequence when something actually changed, so
+    // toast/animation effects can dedupe on `delta.seq`.
+    if (d.seq > seqRef.current) seqRef.current = d.seq;
+    prevModelRef.current = model;
+    return d;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, generatedAt]);
+
   const readyCount = videos.filter((v) => v.status === "completed").length;
 
   const lastUpdated = useMemo(() => {
@@ -100,5 +132,8 @@ export function useMemoryGraphData(): MemoryGraphData {
     readyCount,
     lastUpdated,
     isLoading,
+    vitality,
+    delta,
+    generatedAt,
   };
 }

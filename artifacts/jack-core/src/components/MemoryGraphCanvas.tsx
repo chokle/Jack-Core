@@ -8,6 +8,7 @@ import {
   CORE_ID,
   isKnowledgeKind,
   rgba,
+  type GraphDelta,
   type GraphModel,
   type MemoryNode,
   type NodeKind,
@@ -62,6 +63,8 @@ interface Props {
   /** Currently-highlighted search result (arrow-key navigation cursor). */
   activeMatchId?: string | null;
   locked: boolean;
+  /** Per-poll snapshot diff — drives node births + edge-strengthen pulses. */
+  delta?: GraphDelta | null;
   onZoomChange: (pct: number) => void;
 }
 
@@ -128,6 +131,10 @@ function nodeRadius(n: MemoryNode, degree: number): number {
   return base * (1 + weight * 1.3);
 }
 
+/** How long a node's birth glow burst and an edge's strengthen pulse last (ms). */
+const BIRTH_MS = 1600;
+const STRENGTHEN_MS = 1100;
+
 const REPULSION = 1600;
 const DAMP = 0.86;
 const DRIFT = 0.04;
@@ -162,6 +169,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       search,
       activeMatchId,
       locked,
+      delta,
       onZoomChange,
     },
     ref,
@@ -170,6 +178,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const nodesRef = useRef<Map<string, P>>(new Map());
     const edgesRef = useRef(model.edges);
     const edgeBornRef = useRef<Map<string, number>>(new Map());
+    // Birth glow bursts (nodeId → stamp) and edge-strengthen pulses (edgeKey →
+    // stamp), populated from the shared delta and consumed by the draw loop.
+    const birthGlowRef = useRef<Map<string, number>>(new Map());
+    const strengthenRef = useRef<Map<string, number>>(new Map());
+    const lockedRef = useRef(locked);
     const adjacencyRef = useRef<Map<string, Set<string>>>(new Map());
     const topicsRef = useRef(model.topics);
     const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
@@ -191,6 +204,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const onTogglePinRef = useRef(onTogglePin);
 
     selectedRef.current = selectedId;
+    lockedRef.current = locked;
     searchRef.current = search.trim().toLowerCase();
     activeMatchRef.current = activeMatchId ?? null;
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
@@ -356,6 +370,22 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         if (!liveEdgeKeys.has(key)) born.delete(key);
       }
     }, [model]);
+
+    // Stamp birth bursts + edge-strengthen pulses from the shared snapshot diff.
+    // Declared after the build effect so new nodes already exist in nodesRef.
+    // Suppressed entirely when the view is locked or the user prefers reduced
+    // motion, so opting out of motion truly means no new motion.
+    useEffect(() => {
+      if (!delta) return;
+      const reduced =
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      if (reduced || lockedRef.current) return;
+      if (!delta.addedNodeIds.length && !delta.strengthenedEdgeKeys.length) return;
+      const now = performance.now();
+      for (const id of delta.addedNodeIds) birthGlowRef.current.set(id, now);
+      for (const key of delta.strengthenedEdgeKeys)
+        strengthenRef.current.set(key, now);
+    }, [delta]);
 
     // ----- render + simulation loop -----------------------------------------
     useEffect(() => {
@@ -723,6 +753,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
         // Edges.
         const bornMap = edgeBornRef.current;
+        const strengthenMap = strengthenRef.current;
         for (const e of edgesRef.current) {
           const a = map.get(e.a);
           const b = map.get(e.b);
@@ -739,10 +770,20 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           if (isSel) alpha = 0.55;
           else if (faded) alpha = 0.03;
           // Fade freshly-added connections in, and grow the line toward the target.
-          const bornAt = bornMap.get(`${e.a}->${e.b}:${e.kind}`);
+          const key = `${e.a}->${e.b}:${e.kind}`;
+          const bornAt = bornMap.get(key);
           const grow = bornAt == null ? 1 : Math.min(1, (time - bornAt) / 700);
-          ctx.strokeStyle = rgba(col, alpha * grow);
-          ctx.lineWidth = (isSel ? 1.4 : 0.7) / cam.scale;
+          // A recently-strengthened edge (corroboration weight rose) pulses
+          // brighter + thicker, then settles — reinforcement reads as "alive".
+          let boost = 0;
+          const strAt = strengthenMap.get(key);
+          if (strAt != null) {
+            const sp = (time - strAt) / STRENGTHEN_MS;
+            if (sp >= 1) strengthenMap.delete(key);
+            else boost = (1 - sp) * (0.5 + 0.5 * Math.sin(time * 0.02));
+          }
+          ctx.strokeStyle = rgba(col, Math.min(0.85, (alpha + boost * 0.5) * grow));
+          ctx.lineWidth = ((isSel ? 1.4 : 0.7) + boost * 1.8) / cam.scale;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(a.x + (b.x - a.x) * grow, a.y + (b.y - a.y) * grow);
@@ -752,6 +793,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         // Node glows (additive). Selected + active search match get a pulsing,
         // emphasized glow so relationships (and the search cursor) pop.
         ctx.globalCompositeOperation = "lighter";
+        const birthMap = birthGlowRef.current;
         for (const node of map.values()) {
           if (node.kind === "core") continue;
           if (offscreen(node)) continue;
@@ -766,6 +808,14 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             dimmed(node.id, node.topicId),
             emphasized,
           );
+          // Organic birth burst for a genuinely-new node: an expanding halo +
+          // brief flare that decays out over BIRTH_MS.
+          const bAt = birthMap.get(node.id);
+          if (bAt != null) {
+            const bp = (time - bAt) / BIRTH_MS;
+            if (bp >= 1) birthMap.delete(node.id);
+            else drawBirthBurst(ctx, node, bp);
+          }
         }
         ctx.globalCompositeOperation = "source-over";
 
@@ -820,6 +870,18 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
                 hub.x,
                 hub.y + hub.radius + 13 / cam.scale,
               );
+              // A slim cluster-maturity bar under the composition line so a hub's
+              // "how grown-up am I" reads at a glance without opening it.
+              if (m.knowledge > 0) {
+                const barW = 34 / cam.scale;
+                const barH = 2.4 / cam.scale;
+                const bx = hub.x - barW / 2;
+                const by = hub.y + hub.radius + 20 / cam.scale;
+                ctx.fillStyle = rgba([255, 255, 255], faded ? 0.05 : 0.14);
+                ctx.fillRect(bx, by, barW, barH);
+                ctx.fillStyle = rgba(t.color, faded ? 0.3 : 0.9);
+                ctx.fillRect(bx, by, barW * m.maturity, barH);
+              }
             }
           }
         }
@@ -832,7 +894,10 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       let raf = 0;
       let lastT = performance.now();
       const frame = (t: number) => {
-        const dt = Math.min(2, (t - lastT) / 16.67);
+        // Floor at 0: a first-frame timestamp can precede our performance.now()
+        // baseline, and a negative dt would ease node radii backwards (into
+        // negative values) and crash the arc draws.
+        const dt = Math.min(2, Math.max(0, (t - lastT) / 16.67));
         lastT = t;
         if (!document.hidden) {
           // Ease an in-flight ensureVisible pan toward its target before drawing.
@@ -938,6 +1003,35 @@ function nodeIntensity(node: P, time: number): number {
   return 1;
 }
 
+/**
+ * A one-shot "a new memory just formed" flare: a bright core flash plus an
+ * expanding, fading ring. `p` runs 0→1 over the burst's lifetime.
+ */
+function drawBirthBurst(c: CanvasRenderingContext2D, node: P, p: number) {
+  const ease = 1 - (1 - p) * (1 - p); // ease-out
+  const col = node.color;
+  // Expanding ring.
+  const ringR = node.radius * (1.5 + ease * 6);
+  c.strokeStyle = rgba(col, (1 - p) * 0.7);
+  c.lineWidth = (1 - p) * 2 + 0.4;
+  c.beginPath();
+  c.arc(node.x, node.y, ringR, 0, Math.PI * 2);
+  c.stroke();
+  // Bright central flash that fades quickly.
+  const flash = Math.max(0, 1 - p * 1.6);
+  if (flash > 0) {
+    const glowR = node.radius * 4.5;
+    const g = c.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
+    g.addColorStop(0, rgba(col, 0.75 * flash));
+    g.addColorStop(0.5, rgba(col, 0.2 * flash));
+    g.addColorStop(1, rgba(col, 0));
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(node.x, node.y, glowR, 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
 function drawNodeGlow(
   c: CanvasRenderingContext2D,
   node: P,
@@ -1002,7 +1096,7 @@ function drawNodeBody(
     c.strokeStyle = rgba(col, (1 - p) * 0.6);
     c.lineWidth = (1.2 * (1 - p) + 0.3) / scale;
     c.beginPath();
-    c.arc(node.x, node.y, r + p * 40, 0, Math.PI * 2);
+    c.arc(node.x, node.y, Math.max(0, r + p * 40), 0, Math.PI * 2);
     c.stroke();
   }
 

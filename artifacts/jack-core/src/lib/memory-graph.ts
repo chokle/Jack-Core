@@ -142,12 +142,188 @@ export interface ClusterMetrics {
   conversations: number;
   procedures: number;
   competencies: number;
+  /** Mean confidence across this hub's knowledge nodes (0..1). */
+  avgConfidence: number;
+  /** Share of knowledge nodes taught by ≥2 sources (0..1). */
+  corroboratedShare: number;
+  /** Composite 0..1 "how grown-up is this cluster" score (size + trust). */
+  maturity: number;
 }
 
 export interface MemoryEdge {
   a: string;
   b: string;
   kind: string;
+  /** Corroboration weight from the server (hub edges); undefined client-side. */
+  weight?: number;
+}
+
+/** Stable key for an edge, shared with the canvas so births/strengthening line up. */
+export function edgeKey(e: MemoryEdge): string {
+  return `${e.a}->${e.b}:${e.kind}`;
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * Composite "how grown-up is this cluster" score (0..1): a cluster with more
+ * concepts, higher average confidence, and more cross-corroborated knowledge
+ * reads as more mature. Size is capped so a large hub can't drown out trust.
+ */
+export function clusterMaturity(m: ClusterMetrics): number {
+  const size = clamp01(m.knowledge / 12);
+  return clamp01(0.4 * size + 0.3 * m.avgConfidence + 0.3 * m.corroboratedShare);
+}
+
+/** A whole-graph vitality read-out, derived entirely from the public graph. */
+export interface MemoryVitality {
+  knowledgeCount: number;
+  /** Share verified or mentor-corroborated by a human/mentor (0..1). */
+  verifiedShare: number;
+  /** Share taught by ≥2 sources (0..1). */
+  corroboratedShare: number;
+  avgConfidence: number;
+  /** Composite 0..1 health score used for the ambient indicator. */
+  score: number;
+}
+
+/** Roll the knowledge layer up into a single vitality snapshot. */
+export function computeVitality(model: GraphModel): MemoryVitality {
+  let knowledgeCount = 0;
+  let confSum = 0;
+  let verified = 0;
+  let corroborated = 0;
+  for (const n of model.nodes) {
+    if (!isKnowledgeKind(n.kind)) continue;
+    knowledgeCount += 1;
+    confSum += typeof n.meta.confidence === "number" ? n.meta.confidence : 0.5;
+    const status = (n.meta.verificationStatus ?? "").toLowerCase();
+    if (status === "verified" || status === "mentor_supplied") verified += 1;
+    if ((n.meta.sourceCount ?? 0) >= 2) corroborated += 1;
+  }
+  const avgConfidence = knowledgeCount ? confSum / knowledgeCount : 0;
+  const verifiedShare = knowledgeCount ? verified / knowledgeCount : 0;
+  const corroboratedShare = knowledgeCount ? corroborated / knowledgeCount : 0;
+  const score = clamp01(
+    0.45 * avgConfidence + 0.3 * corroboratedShare + 0.25 * verifiedShare,
+  );
+  return {
+    knowledgeCount,
+    verifiedShare,
+    corroboratedShare,
+    avgConfidence,
+    score,
+  };
+}
+
+/**
+ * What changed between two graph snapshots. Consumed by the canvas (to birth
+ * new nodes / pulse strengthened edges) and the view (growth counter + toasts).
+ * `seq` only advances on a *real* change so effects can dedupe.
+ */
+export interface GraphDelta {
+  seq: number;
+  generatedAt?: string;
+  addedNodeIds: string[];
+  removedNodeIds: string[];
+  newEdgeKeys: string[];
+  /** Edges whose corroboration weight rose since the last snapshot. */
+  strengthenedEdgeKeys: string[];
+  /** Count of genuinely-new knowledge (concept/tool/hazard/…) nodes. */
+  addedKnowledgeCount: number;
+  /** New knowledge grouped by trade, for the "learned N in <Trade>" toast. */
+  addedByTrade: { trade: string; count: number }[];
+  /** Best node to focus when a toast is tapped (newest knowledge, else any). */
+  newestNodeId?: string;
+}
+
+export const EMPTY_DELTA: GraphDelta = {
+  seq: 0,
+  addedNodeIds: [],
+  removedNodeIds: [],
+  newEdgeKeys: [],
+  strengthenedEdgeKeys: [],
+  addedKnowledgeCount: 0,
+  addedByTrade: [],
+};
+
+/**
+ * Diff two built models. `prev === null` (first load) yields an empty delta so
+ * the whole graph never "births" on initial render — only genuinely-new nodes
+ * that appear in a later snapshot animate in.
+ */
+export function computeGraphDelta(
+  prev: GraphModel | null,
+  next: GraphModel,
+  seq: number,
+  generatedAt?: string,
+): GraphDelta {
+  if (!prev) return { ...EMPTY_DELTA, seq, generatedAt };
+
+  const prevNodeIds = new Set(prev.nodes.map((n) => n.id));
+  const nextById = new Map(next.nodes.map((n) => [n.id, n]));
+
+  const addedNodeIds: string[] = [];
+  for (const n of next.nodes) if (!prevNodeIds.has(n.id)) addedNodeIds.push(n.id);
+  const nextNodeIds = new Set(nextById.keys());
+  const removedNodeIds: string[] = [];
+  for (const id of prevNodeIds) if (!nextNodeIds.has(id)) removedNodeIds.push(id);
+
+  const prevEdgeW = new Map<string, number>();
+  for (const e of prev.edges) prevEdgeW.set(edgeKey(e), e.weight ?? 1);
+  const newEdgeKeys: string[] = [];
+  const strengthenedEdgeKeys: string[] = [];
+  for (const e of next.edges) {
+    const key = edgeKey(e);
+    const before = prevEdgeW.get(key);
+    if (before === undefined) newEdgeKeys.push(key);
+    else if ((e.weight ?? 1) > before + 1e-6) strengthenedEdgeKeys.push(key);
+  }
+
+  // Summarize the new *knowledge* for the toast, grouped by trade.
+  const byTrade = new Map<string, number>();
+  let addedKnowledgeCount = 0;
+  let newestNodeId: string | undefined;
+  let newestAt = -Infinity;
+  for (const id of addedNodeIds) {
+    const n = nextById.get(id);
+    if (!n) continue;
+    if (isKnowledgeKind(n.kind)) {
+      addedKnowledgeCount += 1;
+      const trade = n.meta.trade ?? "General";
+      byTrade.set(trade, (byTrade.get(trade) ?? 0) + 1);
+      const t = Date.parse(n.meta.createdAt ?? n.meta.updatedAt ?? "");
+      if (Number.isFinite(t) ? t >= newestAt : newestAt === -Infinity) {
+        newestAt = Number.isFinite(t) ? t : newestAt;
+        newestNodeId = id;
+      }
+    }
+  }
+  if (!newestNodeId && addedNodeIds.length) newestNodeId = addedNodeIds[0];
+
+  const addedByTrade = [...byTrade.entries()]
+    .map(([trade, count]) => ({ trade, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const changed =
+    addedNodeIds.length > 0 ||
+    removedNodeIds.length > 0 ||
+    newEdgeKeys.length > 0 ||
+    strengthenedEdgeKeys.length > 0;
+
+  return {
+    seq: changed ? seq : seq - 1,
+    generatedAt,
+    addedNodeIds,
+    removedNodeIds,
+    newEdgeKeys,
+    strengthenedEdgeKeys,
+    addedKnowledgeCount,
+    addedByTrade,
+    newestNodeId,
+  };
 }
 
 /** Human-facing label + signature color for every knowledge kind, so atomic
@@ -271,7 +447,16 @@ function topicIdForTrade(trade: string): string {
 
 /** An all-zero cluster rollup, overwritten by `finalizeModel`. */
 export function emptyMetrics(): ClusterMetrics {
-  return { knowledge: 0, videos: 0, conversations: 0, procedures: 0, competencies: 0 };
+  return {
+    knowledge: 0,
+    videos: 0,
+    conversations: 0,
+    procedures: 0,
+    competencies: 0,
+    avgConfidence: 0,
+    corroboratedShare: 0,
+    maturity: 0,
+  };
 }
 
 /**
@@ -369,7 +554,14 @@ function finalizeModel(
   }
 
   const metricsByTrade = new Map<string, ClusterMetrics>();
-  for (const t of topics) metricsByTrade.set(t.trade, emptyMetrics());
+  // Per-trade accumulators for the maturity roll-up, kept alongside the counts.
+  const confSumByTrade = new Map<string, number>();
+  const corroboratedByTrade = new Map<string, number>();
+  for (const t of topics) {
+    metricsByTrade.set(t.trade, emptyMetrics());
+    confSumByTrade.set(t.trade, 0);
+    corroboratedByTrade.set(t.trade, 0);
+  }
   for (const n of nodes) {
     const trade = n.meta.trade;
     if (!trade) continue;
@@ -381,7 +573,21 @@ function finalizeModel(
     else if (isKnowledgeKind(n.kind)) {
       m.knowledge += 1;
       if (n.kind === "procedure") m.procedures += 1;
+      confSumByTrade.set(
+        trade,
+        (confSumByTrade.get(trade) ?? 0) +
+          (typeof n.meta.confidence === "number" ? n.meta.confidence : 0.5),
+      );
+      if ((n.meta.sourceCount ?? 0) >= 2)
+        corroboratedByTrade.set(trade, (corroboratedByTrade.get(trade) ?? 0) + 1);
     }
+  }
+  for (const [trade, m] of metricsByTrade) {
+    if (m.knowledge > 0) {
+      m.avgConfidence = (confSumByTrade.get(trade) ?? 0) / m.knowledge;
+      m.corroboratedShare = (corroboratedByTrade.get(trade) ?? 0) / m.knowledge;
+    }
+    m.maturity = clusterMaturity(m);
   }
   const topicsWithMetrics = topics.map((t) => ({
     ...t,
@@ -720,6 +926,7 @@ export function buildGraphModelFromServer(graph: {
     a: e.source,
     b: e.target,
     kind: e.kind || "video",
+    weight: typeof e.weight === "number" ? e.weight : undefined,
   }));
 
   return finalizeModel(topics, nodes, edges);
