@@ -1,0 +1,176 @@
+=== JACK CORE — Sprint 2 ===
+
+Good work on the Living Memory implementation.
+
+Now let's evolve it from a graph viewer into an actual cognition interface.
+
+---------------------------------------
+TASK 1 — Contextual Floating Inspector
+Priority: HIGH
+---------------------------------------
+
+Replace the bottom drawer.
+
+Desktop:
+- Floating contextual card
+- Smart positioning near selected node
+- Never spans the full width
+- Never hides the graph
+
+Mobile:
+- Bottom sheet remains.
+
+---------------------------------------
+TASK 2 — Knowledge Preview
+Priority: HIGH
+---------------------------------------
+
+Hover over a node:
+
+Display a lightweight tooltip:
+
+Trade
+Node count
+Video count
+Last updated
+
+Do not require clicking just to inspect.
+
+---------------------------------------
+TASK 3 — Animated Exploration
+Priority: HIGH
+---------------------------------------
+
+Selecting a node should:
+
+• brighten connected edges
+• fade unrelated nodes
+• pulse selected node
+• smoothly pan if node is near viewport edge
+
+Everything should feel alive.
+
+---------------------------------------
+TASK 4 — Breadcrumb Trail
+Priority: MEDIUM
+---------------------------------------
+
+Example:
+
+Jack
+>
+Plumber
+>
+Fuel Gas Piping
+>
+Combustion Air
+
+Allow users to instantly jump backward.
+
+---------------------------------------
+TASK 5 — Search Experience
+Priority: HIGH
+---------------------------------------
+
+Typing into search:
+
+- live filtering
+- highlight matching nodes
+- Enter jumps to node
+- Arrow keys navigate matches
+- Escape clears search
+
+---------------------------------------
+TASK 6 — Cluster Metrics
+Priority: MEDIUM
+---------------------------------------
+
+Every trade cluster should display:
+
+Knowledge Nodes
+Videos
+Captured Conversations
+Procedures
+Competencies
+
+This makes the graph informative before clicking.
+
+---------------------------------------
+TASK 7 — Node Health
+Priority: LOW
+---------------------------------------
+
+Show freshness.
+
+Example:
+
+Fresh
+Updated yesterday
+
+Needs Attention
+Last updated 8 months ago
+
+Knowledge Gap
+
+No source data
+
+This becomes important once Jack grows.
+
+---------------------------------------
+TASK 8 — Future Proof Data Model
+Priority: HIGH
+---------------------------------------
+
+Every node should support:
+
+summary
+transcript
+video ids
+source conversations
+procedures
+field tips
+common mistakes
+citations
+embeddings
+related competencies
+metadata
+
+Even if some are empty today.
+
+Don't paint ourselves into a corner.
+
+---------------------------------------
+TASK 9 — Performance
+Priority: HIGH
+---------------------------------------
+
+Goal:
+
+10,000+ nodes
+
+without noticeable lag.
+
+Use virtualization and lazy loading wherever possible.
+
+---------------------------------------
+TASK 10 — Delight
+Priority: BONUS
+---------------------------------------
+
+The graph should feel like you're exploring a living brain.
+
+Small particles.
+
+Soft motion.
+
+Gentle glow.
+
+Nothing flashy.
+
+Just enough life that users instinctively keep clicking.
+
+---------------------------------------
+
+Success Metric:
+
+Someone who has never seen Jack before should spend 10–15 minutes exploring the graph simply because it feels interesting to navigate.
