@@ -37,10 +37,15 @@ import type {
   KnowledgeGraph,
   KnowledgeNode,
   ListKnowledgeCandidatesParams,
+  ListParkedThoughtsParams,
   ListVideosParams,
+  MentorActiveSession,
   MentorList,
   MentorWithdrawalPreview,
   MentorWithdrawalResult,
+  ParkThoughtInput,
+  ParkedThought,
+  ParkedThoughtList,
   RedistillAnswerResult,
   SearchInput,
   SearchResults,
@@ -2014,6 +2019,83 @@ export function useListMentors<TData = Awaited<ReturnType<typeof listMentors>>, 
 
 
 
+export const getGetMentorActiveSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/interview/mentors/${id}/active-session`
+}
+
+/**
+ * @summary Get a mentor's in-progress (incomplete) interview session, if any
+ */
+export const getMentorActiveSession = async (id: string, options?: RequestInit): Promise<MentorActiveSession> => {
+
+  return customFetch<MentorActiveSession>(getGetMentorActiveSessionUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMentorActiveSessionQueryKey = (id: string,) => {
+    return [
+    `/api/interview/mentors/${id}/active-session`
+    ] as const;
+    }
+
+
+export const getGetMentorActiveSessionQueryOptions = <TData = Awaited<ReturnType<typeof getMentorActiveSession>>, TError = ErrorType<unknown>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMentorActiveSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMentorActiveSessionQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMentorActiveSession>>> = ({ signal }) => getMentorActiveSession(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMentorActiveSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMentorActiveSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getMentorActiveSession>>>
+export type GetMentorActiveSessionQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get a mentor's in-progress (incomplete) interview session, if any
+ */
+
+export function useGetMentorActiveSession<TData = Awaited<ReturnType<typeof getMentorActiveSession>>, TError = ErrorType<unknown>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMentorActiveSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMentorActiveSessionQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getWithdrawMentorUrl = (id: string,) => {
 
 
@@ -2377,4 +2459,299 @@ export function useGetGraphHealth<TData = Awaited<ReturnType<typeof getGraphHeal
 
 
 
+
+export const getParkThoughtUrl = () => {
+
+
+
+
+  return `/api/parking-lot`
+}
+
+/**
+ * @summary Save a snapshot of an interrupted chat or interview thought
+ */
+export const parkThought = async (parkThoughtInput: ParkThoughtInput, options?: RequestInit): Promise<ParkedThought> => {
+
+  return customFetch<ParkedThought>(getParkThoughtUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(parkThoughtInput)
+  }
+);}
+
+
+
+
+export const getParkThoughtMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parkThought>>, TError,{data: BodyType<ParkThoughtInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof parkThought>>, TError,{data: BodyType<ParkThoughtInput>}, TContext> => {
+
+const mutationKey = ['parkThought'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof parkThought>>, {data: BodyType<ParkThoughtInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  parkThought(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ParkThoughtMutationResult = NonNullable<Awaited<ReturnType<typeof parkThought>>>
+    export type ParkThoughtMutationBody = BodyType<ParkThoughtInput>
+    export type ParkThoughtMutationError = ErrorType<void>
+
+    /**
+ * @summary Save a snapshot of an interrupted chat or interview thought
+ */
+export const useParkThought = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parkThought>>, TError,{data: BodyType<ParkThoughtInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof parkThought>>,
+        TError,
+        {data: BodyType<ParkThoughtInput>},
+        TContext
+      > => {
+      return useMutation(getParkThoughtMutationOptions(options));
+    }
+
+export const getListParkedThoughtsUrl = (params?: ListParkedThoughtsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/parking-lot?${stringifiedParams}` : `/api/parking-lot`
+}
+
+/**
+ * Chat-sourced rows are scoped to the caller's jack_session cookie; interview-sourced rows are public, consistent with the rest of the app's interview/mentor data.
+ * @summary List parked thoughts visible to the caller
+ */
+export const listParkedThoughts = async (params?: ListParkedThoughtsParams, options?: RequestInit): Promise<ParkedThoughtList> => {
+
+  return customFetch<ParkedThoughtList>(getListParkedThoughtsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListParkedThoughtsQueryKey = (params?: ListParkedThoughtsParams,) => {
+    return [
+    `/api/parking-lot`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListParkedThoughtsQueryOptions = <TData = Awaited<ReturnType<typeof listParkedThoughts>>, TError = ErrorType<unknown>>(params?: ListParkedThoughtsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listParkedThoughts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListParkedThoughtsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listParkedThoughts>>> = ({ signal }) => listParkedThoughts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listParkedThoughts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListParkedThoughtsQueryResult = NonNullable<Awaited<ReturnType<typeof listParkedThoughts>>>
+export type ListParkedThoughtsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List parked thoughts visible to the caller
+ */
+
+export function useListParkedThoughts<TData = Awaited<ReturnType<typeof listParkedThoughts>>, TError = ErrorType<unknown>>(
+ params?: ListParkedThoughtsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listParkedThoughts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListParkedThoughtsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getResumeParkedThoughtUrl = (id: string,) => {
+
+
+
+
+  return `/api/parking-lot/${id}/resume`
+}
+
+/**
+ * @summary Mark a parked thought resumed and return it for context restore
+ */
+export const resumeParkedThought = async (id: string, options?: RequestInit): Promise<ParkedThought> => {
+
+  return customFetch<ParkedThought>(getResumeParkedThoughtUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResumeParkedThoughtMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeParkedThought>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeParkedThought>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['resumeParkedThought'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeParkedThought>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  resumeParkedThought(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeParkedThoughtMutationResult = NonNullable<Awaited<ReturnType<typeof resumeParkedThought>>>
+
+    export type ResumeParkedThoughtMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark a parked thought resumed and return it for context restore
+ */
+export const useResumeParkedThought = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeParkedThought>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeParkedThought>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getResumeParkedThoughtMutationOptions(options));
+    }
+
+export const getArchiveParkedThoughtUrl = (id: string,) => {
+
+
+
+
+  return `/api/parking-lot/${id}/archive`
+}
+
+/**
+ * @summary Mark a parked thought resolved
+ */
+export const archiveParkedThought = async (id: string, options?: RequestInit): Promise<ParkedThought> => {
+
+  return customFetch<ParkedThought>(getArchiveParkedThoughtUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getArchiveParkedThoughtMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveParkedThought>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof archiveParkedThought>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['archiveParkedThought'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof archiveParkedThought>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  archiveParkedThought(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ArchiveParkedThoughtMutationResult = NonNullable<Awaited<ReturnType<typeof archiveParkedThought>>>
+
+    export type ArchiveParkedThoughtMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark a parked thought resolved
+ */
+export const useArchiveParkedThought = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof archiveParkedThought>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof archiveParkedThought>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getArchiveParkedThoughtMutationOptions(options));
+    }
 

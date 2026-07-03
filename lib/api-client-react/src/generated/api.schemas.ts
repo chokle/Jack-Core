@@ -462,6 +462,13 @@ export interface InterviewSessionDetail {
 }
 
 /**
+ * A mentor's active (incomplete) interview session, if one exists. `session` is omitted when the mentor has no interview in progress.
+ */
+export interface MentorActiveSession {
+  session?: InterviewSession;
+}
+
+/**
  * Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail.
  */
 export type KnowledgeCandidateMatchValidity = typeof KnowledgeCandidateMatchValidity[keyof typeof KnowledgeCandidateMatchValidity];
@@ -722,6 +729,115 @@ export interface GraphHealthReport {
   recentWrites: GraphHealthWrite[];
 }
 
+export type ParkedThoughtContextItemRole = typeof ParkedThoughtContextItemRole[keyof typeof ParkedThoughtContextItemRole];
+
+
+export const ParkedThoughtContextItemRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ParkedThoughtContextItem {
+  role: ParkedThoughtContextItemRole;
+  /** @maxLength 2000 */
+  text: string;
+  /** @nullable */
+  at?: string | null;
+}
+
+export type ParkThoughtInputSource = typeof ParkThoughtInputSource[keyof typeof ParkThoughtInputSource];
+
+
+export const ParkThoughtInputSource = {
+  chat: 'chat',
+  interview: 'interview',
+} as const;
+
+export interface ParkThoughtInput {
+  source: ParkThoughtInputSource;
+  /**
+     * Required when source is "interview"; ignored otherwise. The server derives mentorProfileId/trade/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.
+     * @nullable
+     */
+  interviewSessionId?: string | null;
+  /**
+     * Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.
+     * @maxItems 5
+     */
+  context: ParkedThoughtContextItem[];
+  /**
+     * @maxLength 2000
+     * @nullable
+     */
+  unfinishedThought?: string | null;
+  /**
+     * @maxLength 500
+     * @nullable
+     */
+  reason?: string | null;
+  /**
+     * Chat-sourced only; ignored for interview (derived from the session).
+     * @maxLength 200
+     * @nullable
+     */
+  topic?: string | null;
+  /**
+     * Chat-sourced only; ignored for interview (derived from the session).
+     * @maxLength 200
+     * @nullable
+     */
+  category?: string | null;
+}
+
+export type ParkedThoughtSource = typeof ParkedThoughtSource[keyof typeof ParkedThoughtSource];
+
+
+export const ParkedThoughtSource = {
+  chat: 'chat',
+  interview: 'interview',
+} as const;
+
+export type ParkedThoughtStatus = typeof ParkedThoughtStatus[keyof typeof ParkedThoughtStatus];
+
+
+export const ParkedThoughtStatus = {
+  parked: 'parked',
+  resumed: 'resumed',
+  resolved: 'resolved',
+} as const;
+
+export interface ParkedThought {
+  id: string;
+  source: ParkedThoughtSource;
+  /** @nullable */
+  interviewSessionId?: string | null;
+  /** @nullable */
+  mentorProfileId?: string | null;
+  /** @nullable */
+  mentorName?: string | null;
+  /** @nullable */
+  trade?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  topic?: string | null;
+  title: string;
+  summary: string;
+  /** @nullable */
+  unfinishedThought?: string | null;
+  /** @nullable */
+  reason?: string | null;
+  context?: ParkedThoughtContextItem[];
+  status: ParkedThoughtStatus;
+  createdAt: string;
+  /** @nullable */
+  updatedAt?: string | null;
+}
+
+export interface ParkedThoughtList {
+  items: ParkedThought[];
+}
+
 export type ListVideosParams = {
 /**
  * Filter by trade category
@@ -767,5 +883,19 @@ export const ListKnowledgeCandidatesStatus = {
   merged: 'merged',
   archived: 'archived',
   restored: 'restored',
+} as const;
+
+export type ListParkedThoughtsParams = {
+status?: ListParkedThoughtsStatus;
+mentorProfileId?: string;
+};
+
+export type ListParkedThoughtsStatus = typeof ListParkedThoughtsStatus[keyof typeof ListParkedThoughtsStatus];
+
+
+export const ListParkedThoughtsStatus = {
+  parked: 'parked',
+  resumed: 'resumed',
+  resolved: 'resolved',
 } as const;
 

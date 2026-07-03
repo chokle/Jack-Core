@@ -28,6 +28,14 @@ import {
   type ExtractedKnowledgeItem,
   type InterviewAnswerDistillationStatus,
 } from "@workspace/api-client-react";
+import {
+  ParkThisThoughtButton,
+  consumeInterviewResumeNote,
+  type InterviewResumeNote,
+  type ParkContextItem,
+} from "@/components/ParkedThoughts";
+import { timeAgo } from "@/lib/memory-graph";
+import { Bookmark, X as XIcon } from "lucide-react";
 
 /** The interview trade options, mirrored from the server vocabulary. */
 const TRADE_OPTIONS = [
@@ -85,6 +93,20 @@ function isNotFound(err: unknown): boolean {
   );
 }
 
+/** Last few Q&A turns (plus the question in flight) as Park-a-thought context. */
+function buildInterviewParkContext(
+  transcript: Turn[],
+  currentQuestion: string | null | undefined,
+): ParkContextItem[] {
+  const items: ParkContextItem[] = [];
+  for (const t of transcript) {
+    items.push({ role: "assistant", text: t.question });
+    if (!t.skipped && t.answer) items.push({ role: "user", text: t.answer });
+  }
+  if (currentQuestion) items.push({ role: "assistant", text: currentQuestion });
+  return items.slice(-5);
+}
+
 /** Rebuild a transcript turn from a persisted answer row (for resume). */
 function turnFromAnswer(a: InterviewAnswer): Turn {
   return {
@@ -120,6 +142,9 @@ export function InterviewMode() {
   // True while we attempt to resume a stored session on mount, so the intake
   // form doesn't flash before we know whether an interview is still in progress.
   const [resuming, setResuming] = useState(() => readActiveSessionId() !== null);
+  // Set only when this session was reopened via a Parking Lot "Resume" — shows
+  // a one-time reorientation banner, then is cleared.
+  const [resumeNote, setResumeNote] = useState<InterviewResumeNote | null>(null);
 
   // Intake form state.
   const [name, setName] = useState("");
@@ -192,6 +217,7 @@ export function InterviewMode() {
         setSession(detail.session);
         setTranscript(detail.answers.map(turnFromAnswer));
         setStage("interviewing");
+        setResumeNote(consumeInterviewResumeNote(storedId));
       } catch (err) {
         if (cancelled) return;
         // Only drop the stored id when the session is definitively gone; keep it
@@ -396,6 +422,28 @@ export function InterviewMode() {
                 </div>
               </div>
 
+              {resumeNote && (
+                <div className="flex items-start justify-between gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5">
+                  <div className="flex items-start gap-2">
+                    <Bookmark className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                    <p className="text-xs leading-relaxed text-amber-200/90">
+                      Picking up where you left off — parked {timeAgo(resumeNote.createdAt)}
+                      {resumeNote.reason ? `: "${resumeNote.reason}"` : "."}
+                      {resumeNote.unfinishedThought
+                        ? ` You still wanted to cover: "${resumeNote.unfinishedThought}"`
+                        : ""}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setResumeNote(null)}
+                    aria-label="Dismiss"
+                    className="shrink-0 text-amber-300/70 hover:text-amber-200"
+                  >
+                    <XIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* Current question */}
               <div className="rounded-2xl border border-primary/25 bg-card/70 p-5 shadow-lg">
                 {session.currentCategory && (
@@ -444,6 +492,12 @@ export function InterviewMode() {
                     >
                       Wrap up
                     </Button>
+                    <ParkThisThoughtButton
+                      source="interview"
+                      interviewSessionId={session.id}
+                      context={buildInterviewParkContext(transcript, session.currentQuestion)}
+                      disabled={busy}
+                    />
                   </div>
                   <Button
                     type="submit"

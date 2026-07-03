@@ -511,6 +511,42 @@ ALTER TABLE interview_answers
   ADD CONSTRAINT interview_answers_distillation_status_check
   CHECK (distillation_status IN ('pending','verified','failed'));
 
+-- Parking Lot — lightweight bookmarks for an interrupted thought during an Ask
+-- Jack chat conversation or a mentor interview. No AI-generated titles or
+-- summaries (deterministic truncation only) — this is a bookmark, not a new
+-- distillation surface. `chat_session_id` ties a chat-sourced row to the SAME
+-- HttpOnly jack_session cookie used for chat privacy (routes/chat.ts) so it is
+-- only ever listed/resumed/archived by its owner; `interview_session_id` /
+-- `mentor_profile_id` are set for interview-sourced rows and, unlike chat, are
+-- public — consistent with the rest of the app's interview/mentor data having
+-- no privacy boundary. `context_snapshot` holds up to 5 recent turns
+-- ([{role, text, at}]) captured at park time.
+CREATE TABLE IF NOT EXISTS parked_thoughts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source TEXT NOT NULL CHECK (source IN ('chat','interview')),
+  chat_session_id TEXT,
+  interview_session_id UUID REFERENCES interview_sessions(id) ON DELETE CASCADE,
+  mentor_profile_id UUID REFERENCES mentor_profiles(id) ON DELETE CASCADE,
+  mentor_name TEXT,
+  trade TEXT,
+  category TEXT,
+  topic TEXT,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  unfinished_thought TEXT,
+  reason TEXT,
+  context_snapshot JSONB NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'parked' CHECK (status IN ('parked','resumed','resolved')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_parked_thoughts_status ON parked_thoughts(status);
+CREATE INDEX IF NOT EXISTS idx_parked_thoughts_chat_session ON parked_thoughts(chat_session_id);
+CREATE INDEX IF NOT EXISTS idx_parked_thoughts_mentor ON parked_thoughts(mentor_profile_id);
+-- Idempotent migration for databases where parked_thoughts was created before
+-- mentor_name was denormalized onto the row (mirrors knowledge_candidates).
+ALTER TABLE parked_thoughts ADD COLUMN IF NOT EXISTS mentor_name TEXT;
+
 -- Force PostgREST to reload its schema cache now that the DDL above has run.
 -- Right after a (re)apply, PostgREST serves against a stale cache until it
 -- reloads on its own, so a knowledge write in that window can be mislabelled

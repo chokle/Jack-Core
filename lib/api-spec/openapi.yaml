@@ -20,6 +20,8 @@ tags:
     description: Red Seal competency mapping
   - name: interview
     description: Jack Interview Mode — conversational knowledge capture from mentors
+  - name: parking-lot
+    description: Park an interrupted thought during a chat or interview and resume it later
 
 paths:
   /healthz:
@@ -552,6 +554,28 @@ paths:
         "401":
           description: Admin session required
 
+  /interview/mentors/{id}/active-session:
+    get:
+      operationId: getMentorActiveSession
+      tags: [interview]
+      summary: Get a mentor's in-progress (incomplete) interview session, if any
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >-
+            The mentor's active (incomplete) interview session, or an empty
+            object when they have none — used to offer "Resume Interview" on
+            their node in the Living Memory graph.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MentorActiveSession"
+
   /interview/mentors/{id}/withdraw:
     post:
       operationId: withdrawMentor
@@ -656,6 +680,98 @@ paths:
                 $ref: "#/components/schemas/GraphHealthReport"
         "401":
           description: Admin session required
+
+  /parking-lot:
+    post:
+      operationId: parkThought
+      tags: [parking-lot]
+      summary: Save a snapshot of an interrupted chat or interview thought
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParkThoughtInput"
+      responses:
+        "201":
+          description: The saved parked thought
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParkedThought"
+        "400":
+          description: Invalid input, or interviewSessionId missing/unknown for an interview-sourced thought
+        "429":
+          description: Too many requests
+    get:
+      operationId: listParkedThoughts
+      tags: [parking-lot]
+      summary: List parked thoughts visible to the caller
+      description: >-
+        Chat-sourced rows are scoped to the caller's jack_session cookie;
+        interview-sourced rows are public, consistent with the rest of the
+        app's interview/mentor data.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [parked, resumed, resolved]
+        - name: mentorProfileId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Parked thoughts, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParkedThoughtList"
+
+  /parking-lot/{id}/resume:
+    post:
+      operationId: resumeParkedThought
+      tags: [parking-lot]
+      summary: Mark a parked thought resumed and return it for context restore
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The parked thought, now resumed (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParkedThought"
+        "404":
+          description: Not found (or a chat-sourced thought owned by a different session)
+
+  /parking-lot/{id}/archive:
+    post:
+      operationId: archiveParkedThought
+      tags: [parking-lot]
+      summary: Mark a parked thought resolved
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The parked thought, now resolved (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParkedThought"
+        "404":
+          description: Not found (or a chat-sourced thought owned by a different session)
 
 components:
   schemas:
@@ -1220,6 +1336,15 @@ components:
           items:
             $ref: "#/components/schemas/InterviewAnswer"
 
+    MentorActiveSession:
+      type: object
+      description: >-
+        A mentor's active (incomplete) interview session, if one exists.
+        `session` is omitted when the mentor has no interview in progress.
+      properties:
+        session:
+          $ref: "#/components/schemas/InterviewSession"
+
     ExtractedKnowledgeItem:
       type: object
       required: [id, title, category, confidence]
@@ -1584,3 +1709,103 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/GraphHealthWrite"
+
+    ParkedThoughtContextItem:
+      type: object
+      required: [role, text]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        text:
+          type: string
+          maxLength: 2000
+        at:
+          type: ["string", "null"]
+
+    ParkThoughtInput:
+      type: object
+      required: [source, context]
+      properties:
+        source:
+          type: string
+          enum: [chat, interview]
+        interviewSessionId:
+          type: ["string", "null"]
+          description: >-
+            Required when source is "interview"; ignored otherwise. The server
+            derives mentorProfileId/trade/topic from this session — client-
+            supplied values for those fields are never trusted for
+            interview-sourced rows.
+        context:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/ParkedThoughtContextItem"
+          description: >-
+            Recent turns captured at park time. Capped to 5 items of up to
+            2000 characters each.
+        unfinishedThought:
+          type: ["string", "null"]
+          maxLength: 2000
+        reason:
+          type: ["string", "null"]
+          maxLength: 500
+        topic:
+          type: ["string", "null"]
+          maxLength: 200
+          description: Chat-sourced only; ignored for interview (derived from the session).
+        category:
+          type: ["string", "null"]
+          maxLength: 200
+          description: Chat-sourced only; ignored for interview (derived from the session).
+
+    ParkedThought:
+      type: object
+      required: [id, source, title, summary, status, createdAt]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          enum: [chat, interview]
+        interviewSessionId:
+          type: ["string", "null"]
+        mentorProfileId:
+          type: ["string", "null"]
+        mentorName:
+          type: ["string", "null"]
+        trade:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        topic:
+          type: ["string", "null"]
+        title:
+          type: string
+        summary:
+          type: string
+        unfinishedThought:
+          type: ["string", "null"]
+        reason:
+          type: ["string", "null"]
+        context:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParkedThoughtContextItem"
+        status:
+          type: string
+          enum: [parked, resumed, resolved]
+        createdAt:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+
+    ParkedThoughtList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParkedThought"

@@ -54,3 +54,19 @@ export const aiInterviewLimiter = rateLimit({
   message: { error: "Too many interview requests — please slow down." },
   keyGenerator,
 });
+
+/**
+ * Rate limiter for POST /parking-lot. This endpoint calls no paid model, but
+ * it is a public write that stores caller-supplied jsonb into Supabase —
+ * unbounded calls could still grow storage without limit. 30 requests per 15
+ * minutes per IP is generous for legitimate "park this thought" use while
+ * blocking automated flooding.
+ */
+export const parkingLotLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many requests — please try again later." },
+  keyGenerator,
+});

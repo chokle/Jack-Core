@@ -225,6 +225,49 @@ router.get("/interview/sessions/:id", async (req, res) => {
   }
 });
 
+/**
+ * The mentor's in-progress (incomplete) interview session, if any — powers the
+ * "Resume Interview" action on their node in the Living Memory graph. Progress
+ * is durable on the session/answer rows, so an interrupted interview (tab
+ * closed, network dropped, different device) can be picked up exactly where it
+ * left off. Public, like `GET /interview/sessions/:id`: the app has no auth and
+ * the session id is only actionable through the existing resume flow. Returns
+ * `{}` (not 404) when there is nothing to resume, so the client hook stays on
+ * its success path.
+ */
+router.get("/interview/mentors/:id/active-session", async (req, res) => {
+  try {
+    const id = String(req.params.id ?? "");
+    if (!UUID_RE.test(id)) return res.json({});
+
+    const { data: session, error } = await supabase
+      .from("interview_sessions")
+      .select("*")
+      .eq("mentor_profile_id", id)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!session) return res.json({});
+
+    const { data: mentor, error: mErr } = await supabase
+      .from("mentor_profiles")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle();
+    if (mErr) throw mErr;
+    if (!mentor) return res.json({});
+
+    return res.json({
+      session: serializeSession(session as Row, (mentor as Row)["name"] as string),
+    });
+  } catch (err) {
+    req.log.error({ err }, "getMentorActiveSession error");
+    return res.status(500).json({ error: "Failed to load mentor session" });
+  }
+});
+
 router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, res) => {
   try {
     const parsed = SubmitInterviewAnswerBody.safeParse(req.body);

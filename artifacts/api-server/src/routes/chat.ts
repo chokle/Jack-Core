@@ -2,40 +2,12 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { openai, createEmbedding, MODELS } from "../lib/openai.js";
 import { AskJackBody } from "@workspace/api-zod";
-import { randomUUID } from "crypto";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
+import { SESSION_COOKIE, resolveSession } from "../lib/session.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 
 const router = Router();
-
-// Session cookie name and configuration. The cookie is HttpOnly so JavaScript
-// cannot read or overwrite it, and SameSite=Strict prevents cross-site use.
-const SESSION_COOKIE = "jack_session";
-const COOKIE_OPTS = {
-  httpOnly: true,
-  sameSite: "strict" as const,
-  // Scope to /api so the session cookie is never sent to the frontend origin.
-  path: "/api",
-  // 30-day lifetime — long enough to feel persistent, bounded for cleanup.
-  maxAge: 60 * 60 * 24 * 30,
-  // Only set Secure in production so local dev works over http.
-  secure: process.env["NODE_ENV"] === "production",
-};
-
-/**
- * Read the caller's session ID from the HttpOnly cookie.
- * If none exists, mint a new UUID, set the cookie, and return the new value.
- * The session ID is NEVER read from the request body or query string so that
- * no caller can impersonate or hijack another user's conversation.
- */
-function resolveSession(req: Parameters<Parameters<ReturnType<typeof Router>["post"]>[1]>[0], res: Parameters<Parameters<ReturnType<typeof Router>["post"]>[1]>[1]): string {
-  const existing = req.cookies?.[SESSION_COOKIE];
-  if (typeof existing === "string" && existing.length > 0) return existing;
-  const fresh = randomUUID();
-  res.cookie(SESSION_COOKIE, fresh, COOKIE_OPTS);
-  return fresh;
-}
 
 router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {

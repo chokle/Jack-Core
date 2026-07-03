@@ -1,11 +1,18 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, X, Loader2, Sparkles } from "lucide-react";
+import { Send, Bot, User, X, Loader2, Sparkles, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAskJack, useGetChatHistory, ChatMessage } from "@workspace/api-client-react";
+import {
+  useAskJack,
+  useGetChatHistory,
+  ChatMessage,
+  type ParkedThought,
+} from "@workspace/api-client-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { StructuredAnswer } from "@/components/StructuredAnswer";
+import { ParkThisThoughtButton } from "@/components/ParkedThoughts";
+import { timeAgo } from "@/lib/memory-graph";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
@@ -18,11 +25,20 @@ interface AskJackProps {
   onClose: () => void;
   initialContext?: string;
   onCitationClick: (videoId: string, startTime: number) => void;
+  /** Set when the drawer was opened via "Resume" on a parked thought. */
+  resumedThought?: ParkedThought;
 }
 
-export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: AskJackProps) {
+export function AskJack({
+  isOpen,
+  onClose,
+  initialContext,
+  onCitationClick,
+  resumedThought,
+}: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
@@ -30,6 +46,10 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
   const askJack = useAskJack?.();
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [resumedThought?.id]);
 
   useEffect(() => {
     if (history && history.length > 0 && messages.length === 0) {
@@ -111,6 +131,25 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
             </Button>
           </div>
 
+          {resumedThought && !bannerDismissed && (
+            <div className="flex items-start justify-between gap-2 border-b border-amber-400/30 bg-amber-400/10 px-4 py-2.5">
+              <div className="flex items-start gap-2">
+                <Bookmark className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <p className="text-xs leading-relaxed text-amber-200/90">
+                  Picking up where you left off — parked {timeAgo(resumedThought.createdAt)}
+                  {resumedThought.reason ? `: "${resumedThought.reason}"` : "."}
+                </p>
+              </div>
+              <button
+                onClick={() => setBannerDismissed(true)}
+                aria-label="Dismiss"
+                className="shrink-0 text-amber-300/70 hover:text-amber-200"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           <ScrollArea className="flex-1 p-4" ref={scrollRef}>
             <div className="space-y-6 pb-4">
               {messages.length === 0 ? (
@@ -163,7 +202,18 @@ export function AskJack({ isOpen, onClose, initialContext, onCitationClick }: As
             </div>
           </ScrollArea>
 
-          <div className="p-4 bg-sidebar-primary/5 border-t border-sidebar-border">
+          <div className="p-4 bg-sidebar-primary/5 border-t border-sidebar-border space-y-2">
+            {messages.length > 0 && (
+              <div className="flex justify-end">
+                <ParkThisThoughtButton
+                  source="chat"
+                  context={messages.slice(-5).map((m) => ({
+                    role: m.role === "assistant" ? "assistant" : "user",
+                    text: m.content,
+                  }))}
+                />
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="relative">
               <Input
                 value={input}

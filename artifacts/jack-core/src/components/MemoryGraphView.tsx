@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Activity,
   Play,
+  PlayCircle,
   Pin,
   PinOff,
   ShieldCheck,
@@ -27,16 +28,22 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useSetNodeVerification,
   useGetVideo,
+  useGetMentorActiveSession,
   getGetVideoQueryKey,
   getGetGraphQueryKey,
+  getGetMentorActiveSessionQueryKey,
 } from "@workspace/api-client-react";
-import type { VerificationUpdateStatus } from "@workspace/api-client-react";
+import type {
+  VerificationUpdateStatus,
+  ParkedThought,
+} from "@workspace/api-client-react";
 import {
   MemoryGraphCanvas,
   type MemoryGraphHandle,
 } from "./MemoryGraphCanvas";
 import { FloatingNodeInspector } from "./FloatingNodeInspector";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
+import { ParkedThoughtsList } from "./ParkedThoughts";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -71,6 +78,10 @@ interface MemoryGraphViewProps {
   onOpenVideo: (id: string) => void;
   /** Open a source video and seek to a transcript timestamp (seconds). */
   onJumpToTimestamp: (videoId: string, startTime: number) => void;
+  /** Resume an interrupted interview (by session id) from a mentor node. */
+  onResumeInterview: (sessionId: string) => void;
+  /** Resume a parked Ask Jack conversation, opening the drawer with context. */
+  onResumeChat: (thought: ParkedThought) => void;
 }
 
 /**
@@ -146,6 +157,8 @@ export function MemoryGraphView({
   data,
   onOpenVideo,
   onJumpToTimestamp,
+  onResumeInterview,
+  onResumeChat,
 }: MemoryGraphViewProps) {
   const { model, recent, competencies, delta, vitality } = data;
   const canvasRef = useRef<MemoryGraphHandle>(null);
@@ -467,6 +480,8 @@ export function MemoryGraphView({
         onOpenVideo,
         onJumpToTimestamp,
         onSelectNode: setSelectedId,
+        onResumeInterview,
+        onResumeChat,
         isAdmin,
         isUpdatingVerification: setVerification.isPending,
         onSetVerification: (id, status) =>
@@ -795,6 +810,11 @@ export function MemoryGraphView({
           }}
         />
         <PendingKnowledgePanel />
+        <ParkedThoughtsList
+          limit={5}
+          onResumeChat={onResumeChat}
+          onResumeInterview={onResumeInterview}
+        />
       </aside>
     </div>
   );
@@ -1354,6 +1374,8 @@ interface NodeDetailProps {
   onOpenVideo: (id: string) => void;
   onJumpToTimestamp: (videoId: string, startTime: number) => void;
   onSelectNode: (id: string) => void;
+  onResumeInterview: (sessionId: string) => void;
+  onResumeChat: (thought: ParkedThought) => void;
   isAdmin: boolean;
   isUpdatingVerification: boolean;
   onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
@@ -1690,6 +1712,49 @@ function TranscriptContent({
   );
 }
 
+/**
+ * Resume-interview affordance shown on a mentor (person) node. Looks up that
+ * mentor's in-progress interview and, when one exists, offers a one-click resume
+ * that reconnects Interview Mode exactly where they left off (progress is
+ * persisted server-side, so it survives refreshes and new devices). Isolated as
+ * its own component so the lookup only fires when a mentor node is actually
+ * inspected — not for every selected node.
+ */
+function MentorResumeAction({
+  mentorId,
+  mentorName,
+  onResumeInterview,
+}: {
+  mentorId: string;
+  mentorName: string;
+  onResumeInterview: (sessionId: string) => void;
+}) {
+  const { data } = useGetMentorActiveSession(mentorId, {
+    query: {
+      enabled: mentorId.length > 0,
+      queryKey: getGetMentorActiveSessionQueryKey(mentorId),
+    },
+  });
+  const session = data?.session;
+  if (!session || session.complete) return null;
+  const asked = session.questionCount;
+  const firstName = mentorName.trim().split(/\s+/)[0] || mentorName;
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => onResumeInterview(session.id)}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500/15 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/25"
+      >
+        <PlayCircle className="h-3.5 w-3.5" /> Resume Interview
+      </button>
+      <p className="mt-1 text-center text-[11px] text-muted-foreground">
+        Interview in progress — pick up where {firstName} left off
+        {asked > 0 ? ` (${asked} question${asked === 1 ? "" : "s"} in)` : ""}
+      </p>
+    </div>
+  );
+}
+
 function NodeDetailBody({
   node,
   degree,
@@ -1703,6 +1768,8 @@ function NodeDetailBody({
   onOpenVideo,
   onJumpToTimestamp,
   onSelectNode,
+  onResumeInterview,
+  onResumeChat,
   isAdmin,
   isUpdatingVerification,
   onSetVerification,
@@ -1807,6 +1874,24 @@ function NodeDetailBody({
 
       {/* Primary action — one click to the originating moment/video. This row is
           the home for future per-node actions, so it always reserves its slot. */}
+      {node.kind === "mentor" && (
+        <>
+          <MentorResumeAction
+            mentorId={node.id.replace("mentor:", "")}
+            mentorName={node.label}
+            onResumeInterview={onResumeInterview}
+          />
+          <div className="mb-3 border-b border-border/60 pb-3">
+            <ParkedThoughtsList
+              mentorProfileId={node.id.replace("mentor:", "")}
+              title="Parked for this mentor"
+              emptyMessage="Nothing parked for this mentor."
+              onResumeChat={onResumeChat}
+              onResumeInterview={onResumeInterview}
+            />
+          </div>
+        </>
+      )}
       {isVideo && (
         <button
           onClick={() => onOpenVideo(node.id.replace("video:", ""))}

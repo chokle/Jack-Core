@@ -733,6 +733,30 @@ export const ListMentorsResponse = zod.object({
 
 
 /**
+ * @summary Get a mentor's in-progress (incomplete) interview session, if any
+ */
+export const GetMentorActiveSessionParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetMentorActiveSessionResponse = zod.object({
+  "session": zod.object({
+  "id": zod.string(),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string(),
+  "trade": zod.string().nullish(),
+  "status": zod.enum(['active', 'completed']),
+  "currentQuestion": zod.string().nullish(),
+  "currentCategory": zod.string().nullish(),
+  "currentTopic": zod.string().nullish(),
+  "questionCount": zod.number(),
+  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
+  "createdAt": zod.string()
+}).optional()
+}).describe('A mentor\'s active (incomplete) interview session, if one exists. `session` is omitted when the mentor has no interview in progress.')
+
+
+/**
  * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
  */
 export const WithdrawMentorParams = zod.object({
@@ -881,6 +905,174 @@ export const GetGraphHealthResponse = zod.object({
 })
 })
 }))
+})
+
+
+/**
+ * @summary Save a snapshot of an interrupted chat or interview thought
+ */
+export const parkThoughtBodyContextItemTextMax = 2000;
+
+export const parkThoughtBodyContextMax = 5;
+
+export const parkThoughtBodyUnfinishedThoughtMax = 2000;
+
+export const parkThoughtBodyReasonMax = 500;
+
+export const parkThoughtBodyTopicMax = 200;
+
+export const parkThoughtBodyCategoryMax = 200;
+
+
+
+export const ParkThoughtBody = zod.object({
+  "source": zod.enum(['chat', 'interview']),
+  "interviewSessionId": zod.string().nullish().describe('Required when source is \"interview\"; ignored otherwise. The server derives mentorProfileId\/trade\/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.'),
+  "context": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "text": zod.string().max(parkThoughtBodyContextItemTextMax),
+  "at": zod.string().nullish()
+})).max(parkThoughtBodyContextMax).describe('Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.'),
+  "unfinishedThought": zod.string().max(parkThoughtBodyUnfinishedThoughtMax).nullish(),
+  "reason": zod.string().max(parkThoughtBodyReasonMax).nullish(),
+  "topic": zod.string().max(parkThoughtBodyTopicMax).nullish().describe('Chat-sourced only; ignored for interview (derived from the session).'),
+  "category": zod.string().max(parkThoughtBodyCategoryMax).nullish().describe('Chat-sourced only; ignored for interview (derived from the session).')
+})
+
+export const parkThoughtResponseContextItemTextMax = 2000;
+
+
+
+export const ParkThoughtResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['chat', 'interview']),
+  "interviewSessionId": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "trade": zod.string().nullish(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "title": zod.string(),
+  "summary": zod.string(),
+  "unfinishedThought": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "context": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "text": zod.string().max(parkThoughtResponseContextItemTextMax),
+  "at": zod.string().nullish()
+})).optional(),
+  "status": zod.enum(['parked', 'resumed', 'resolved']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string().nullish()
+})
+
+
+/**
+ * Chat-sourced rows are scoped to the caller's jack_session cookie; interview-sourced rows are public, consistent with the rest of the app's interview/mentor data.
+ * @summary List parked thoughts visible to the caller
+ */
+export const ListParkedThoughtsQueryParams = zod.object({
+  "status": zod.enum(['parked', 'resumed', 'resolved']).optional(),
+  "mentorProfileId": zod.coerce.string().optional()
+})
+
+export const listParkedThoughtsResponseItemsItemContextItemTextMax = 2000;
+
+
+
+export const ListParkedThoughtsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['chat', 'interview']),
+  "interviewSessionId": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "trade": zod.string().nullish(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "title": zod.string(),
+  "summary": zod.string(),
+  "unfinishedThought": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "context": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "text": zod.string().max(listParkedThoughtsResponseItemsItemContextItemTextMax),
+  "at": zod.string().nullish()
+})).optional(),
+  "status": zod.enum(['parked', 'resumed', 'resolved']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Mark a parked thought resumed and return it for context restore
+ */
+export const ResumeParkedThoughtParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const resumeParkedThoughtResponseContextItemTextMax = 2000;
+
+
+
+export const ResumeParkedThoughtResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['chat', 'interview']),
+  "interviewSessionId": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "trade": zod.string().nullish(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "title": zod.string(),
+  "summary": zod.string(),
+  "unfinishedThought": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "context": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "text": zod.string().max(resumeParkedThoughtResponseContextItemTextMax),
+  "at": zod.string().nullish()
+})).optional(),
+  "status": zod.enum(['parked', 'resumed', 'resolved']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Mark a parked thought resolved
+ */
+export const ArchiveParkedThoughtParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const archiveParkedThoughtResponseContextItemTextMax = 2000;
+
+
+
+export const ArchiveParkedThoughtResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['chat', 'interview']),
+  "interviewSessionId": zod.string().nullish(),
+  "mentorProfileId": zod.string().nullish(),
+  "mentorName": zod.string().nullish(),
+  "trade": zod.string().nullish(),
+  "category": zod.string().nullish(),
+  "topic": zod.string().nullish(),
+  "title": zod.string(),
+  "summary": zod.string(),
+  "unfinishedThought": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "context": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "text": zod.string().max(archiveParkedThoughtResponseContextItemTextMax),
+  "at": zod.string().nullish()
+})).optional(),
+  "status": zod.enum(['parked', 'resumed', 'resolved']),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string().nullish()
 })
 
 

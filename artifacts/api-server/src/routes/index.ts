@@ -7,6 +7,7 @@ import chatRouter from "./chat.js";
 import competenciesRouter from "./competencies.js";
 import graphRouter from "./graph.js";
 import interviewRouter from "./interview.js";
+import parkingLotRouter from "./parking-lot.js";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(chatRouter);
 router.use(competenciesRouter);
 router.use(graphRouter);
 router.use(interviewRouter);
+router.use(parkingLotRouter);
 
 export default router;
