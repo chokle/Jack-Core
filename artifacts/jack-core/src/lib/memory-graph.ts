@@ -104,6 +104,8 @@ export interface MemoryNode {
     sourceVideoIds?: string[];
     timestamps?: number[];
     sources?: NodeSource[];
+    /** Alternate wordings that collapse onto this canonical node (capped 25). */
+    aliases?: string[];
   };
 }
 
@@ -543,6 +545,7 @@ export function buildGraphModelFromServer(graph: {
           sourceVideoIds: metaStrArray(n.meta, "sourceVideoIds"),
           timestamps: metaNumArray(n.meta, "timestamps"),
           sources,
+          aliases: metaStrArray(n.meta, "aliases"),
           createdAt: n.createdAt,
           updatedAt: n.updatedAt,
         },

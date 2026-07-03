@@ -41,6 +41,10 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onHover?: (id: string | null) => void;
+  /** Double-click a node to toggle its pinned (parked-in-place) state. */
+  onTogglePin?: (id: string) => void;
+  /** Ids the user has pinned; pinned nodes stop drifting and get a marker. */
+  pinnedIds?: Set<string>;
   search: string;
   locked: boolean;
   onZoomChange: (pct: number) => void;
@@ -116,6 +120,9 @@ const MAX_SPEED = 3.2;
 const MIN_SCALE = 0.35;
 const MAX_SCALE = 3;
 
+/** Stable empty set so an omitted `pinnedIds` prop never re-triggers effects. */
+const EMPTY_PINNED: Set<string> = new Set();
+
 function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
   c.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -130,7 +137,17 @@ function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number)
 
 export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
   function MemoryGraphCanvas(
-    { model, selectedId, onSelect, onHover, search, locked, onZoomChange },
+    {
+      model,
+      selectedId,
+      onSelect,
+      onHover,
+      onTogglePin,
+      pinnedIds,
+      search,
+      locked,
+      onZoomChange,
+    },
     ref,
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,9 +163,17 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const searchRef = useRef("");
     const hoverRef = useRef<string | null>(null);
     const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
+    // Pinned ids + latest callbacks kept in refs so the (locked-only) sim effect
+    // always sees current values without re-subscribing its listeners each render.
+    const pinnedRef = useRef<Set<string>>(EMPTY_PINNED);
+    const onHoverRef = useRef(onHover);
+    const onTogglePinRef = useRef(onTogglePin);
 
     selectedRef.current = selectedId;
     searchRef.current = search.trim().toLowerCase();
+    pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
+    onHoverRef.current = onHover;
+    onTogglePinRef.current = onTogglePin;
 
     // ----- imperative zoom controls (wired to the on-screen buttons) --------
     const applyZoom = (factor: number, cx?: number, cy?: number) => {
@@ -387,7 +412,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const id = hit?.id ?? null;
           if (id !== hoverRef.current) {
             hoverRef.current = id;
-            onHover?.(id);
+            onHoverRef.current?.(id);
             canvas.style.cursor = id ? "pointer" : locked ? "default" : "grab";
           }
         }
@@ -416,14 +441,22 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const onLeave = () => {
         if (hoverRef.current !== null) {
           hoverRef.current = null;
-          onHover?.(null);
+          onHoverRef.current?.(null);
         }
+      };
+      // Double-click pins/unpins the node under the cursor so it stops drifting.
+      const onDblClick = (e: MouseEvent) => {
+        if (locked) return;
+        const rect = canvas.getBoundingClientRect();
+        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
+        if (hit && hit.kind !== "core") onTogglePinRef.current?.(hit.id);
       };
 
       canvas.addEventListener("pointerdown", onPointerDown);
       canvas.addEventListener("pointermove", onPointerMove);
       canvas.addEventListener("pointerup", onPointerUp);
       canvas.addEventListener("pointerleave", onLeave);
+      canvas.addEventListener("dblclick", onDblClick);
       canvas.addEventListener("wheel", onWheel, { passive: false });
 
       // ----- simulation ------------------------------------------------------
@@ -465,6 +498,12 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
         for (const node of nodes) {
           if (node.kind === "core") {
+            node.vx = 0;
+            node.vy = 0;
+            continue;
+          }
+          // Pinned nodes stay exactly where the user parked them (double-click).
+          if (pinnedRef.current.has(node.id)) {
             node.vx = 0;
             node.vy = 0;
             continue;
@@ -614,6 +653,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             dimmed(node.id, node.topicId),
             node.id === sel,
             node.id === hoverRef.current,
+            pinnedRef.current.has(node.id),
           );
         }
 
@@ -657,6 +697,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         canvas.removeEventListener("pointermove", onPointerMove);
         canvas.removeEventListener("pointerup", onPointerUp);
         canvas.removeEventListener("pointerleave", onLeave);
+        canvas.removeEventListener("dblclick", onDblClick);
         canvas.removeEventListener("wheel", onWheel);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -763,6 +804,7 @@ function drawNodeBody(
   dim: boolean,
   selected: boolean,
   hovered: boolean,
+  pinned: boolean,
 ) {
   const age = time - node.bornAt;
   const grow = Math.min(1, age / 600);
@@ -794,6 +836,18 @@ function drawNodeBody(
     c.beginPath();
     c.arc(node.x, node.y, r + 5 / scale, 0, Math.PI * 2);
     c.stroke();
+  }
+
+  // Pinned marker: a dashed ring so a parked node reads as intentionally fixed.
+  if (pinned) {
+    c.save();
+    c.strokeStyle = rgba(col, 0.95);
+    c.lineWidth = 1.4 / scale;
+    c.setLineDash([3 / scale, 2.5 / scale]);
+    c.beginPath();
+    c.arc(node.x, node.y, r + 9 / scale, 0, Math.PI * 2);
+    c.stroke();
+    c.restore();
   }
 }
 

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -8,12 +8,15 @@ import {
   Minus,
   Lock,
   Unlock,
-  ArrowUpRight,
+  ExternalLink,
   Activity,
   Play,
+  Pin,
+  PinOff,
   ShieldCheck,
   ShieldAlert,
   ShieldQuestion,
+  UserCheck,
   FileText,
   X,
 } from "lucide-react";
@@ -51,14 +54,6 @@ interface MemoryGraphViewProps {
   onJumpToTimestamp: (videoId: string, startTime: number) => void;
 }
 
-const STATUS_COLOR: Record<string, RGB> = {
-  ready: [99, 214, 142],
-  error: [239, 90, 90],
-  pending: [245, 197, 66],
-  transcribing: [245, 197, 66],
-  analyzing: [245, 197, 66],
-};
-
 export function MemoryGraphView({
   data,
   onOpenVideo,
@@ -67,14 +62,14 @@ export function MemoryGraphView({
   const { model, recent, competencies } = data;
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // The graph stage (the canvas' positioning context) and the floating node
-  // popover, so we can anchor the popover to the selected node and keep it there
-  // as the simulation drifts / the camera moves.
+  // The graph stage is the positioning context for the floating hover preview,
+  // which we anchor to the hovered node and keep there as the sim drifts.
   const stageRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const cardSizeRef = useRef({ w: 320, h: 320 });
+  const hoverCardRef = useRef<HTMLDivElement>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [locked, setLocked] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
@@ -161,47 +156,63 @@ export function MemoryGraphView({
     return m;
   }, [model]);
 
+  // Drop selection / hover / pins that point at nodes no longer in the graph.
   useEffect(() => {
     if (selectedId && !nodeById.has(selectedId)) setSelectedId(null);
-  }, [selectedId, nodeById]);
+    if (hoveredId && !nodeById.has(hoveredId)) setHoveredId(null);
+    setPinnedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (nodeById.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedId, hoveredId, nodeById]);
 
   const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
+  const hovered = hoveredId ? nodeById.get(hoveredId) ?? null : null;
 
-  // Keep the floating popover measured (so anchoring never overflows the stage)
-  // without forcing a layout read every animation frame.
-  useEffect(() => {
-    const el = popoverRef.current;
-    if (!el) return;
-    const measure = () => {
-      cardSizeRef.current = { w: el.offsetWidth, h: el.offsetHeight };
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [selectedId]);
+  const togglePin = useCallback((id: string) => {
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
-  // Anchor the popover to the selected node and follow it live. Positioning is
-  // done imperatively (transform on a ref) so the constant node drift never
-  // triggers React re-renders. Prefers the node's right side, flips to the left
-  // near the edge, and clamps within the stage so it is reachable at any size.
+  // Escape closes the inspector — a familiar, always-available exit.
   useEffect(() => {
     if (!selectedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
+
+  // Anchor the lightweight hover preview to the hovered node and follow it live.
+  // Positioned imperatively (transform on a ref) so node drift never re-renders
+  // React. Suppressed while the inspector is open to avoid clutter.
+  useEffect(() => {
+    if (!hoveredId || selectedId) return;
     let raf = 0;
     const place = () => {
-      const el = popoverRef.current;
+      const el = hoverCardRef.current;
       const stage = stageRef.current;
-      const pos = canvasRef.current?.getScreenPos(selectedId);
+      const pos = canvasRef.current?.getScreenPos(hoveredId);
       if (el && stage) {
         if (pos) {
           const sw = stage.clientWidth;
           const sh = stage.clientHeight;
-          const { w, h } = cardSizeRef.current;
-          const gap = pos.r + 16;
-          let left = pos.x + gap;
-          if (left + w > sw - 8) left = pos.x - gap - w;
+          const w = el.offsetWidth;
+          const h = el.offsetHeight;
+          let left = pos.x - w / 2;
           left = Math.max(8, Math.min(left, Math.max(8, sw - w - 8)));
-          let top = pos.y - h / 2;
+          let top = pos.y - pos.r - h - 10;
+          if (top < 8) top = pos.y + pos.r + 10;
           top = Math.max(8, Math.min(top, Math.max(8, sh - h - 8)));
           el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
           el.style.visibility = "visible";
@@ -213,7 +224,7 @@ export function MemoryGraphView({
     };
     raf = requestAnimationFrame(place);
     return () => cancelAnimationFrame(raf);
-  }, [selectedId]);
+  }, [hoveredId, selectedId]);
 
   const toggleFullscreen = () => {
     const el = containerRef.current;
@@ -230,6 +241,9 @@ export function MemoryGraphView({
           model={model}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          onHover={setHoveredId}
+          onTogglePin={togglePin}
+          pinnedIds={pinnedIds}
           search={search}
           locked={locked}
           onZoomChange={setZoomPct}
@@ -242,7 +256,7 @@ export function MemoryGraphView({
               JACK'S LIVING MEMORY
             </h1>
             <p className="mt-1 font-mono text-xs text-white/55">
-              Every connection is knowledge. Every node is experience.
+              Click any node for its full capture · double-click to pin
             </p>
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
@@ -337,10 +351,47 @@ export function MemoryGraphView({
           </IconButton>
         </div>
 
-        {/* Node popover — anchored at the clicked node, works at every width */}
+        {/* Hover preview — a quick glance before committing to the full inspector */}
+        {hovered && !selectedId && hovered.kind !== "core" && (
+          <div
+            ref={hoverCardRef}
+            style={{ visibility: "hidden" }}
+            className="pointer-events-none absolute left-0 top-0 z-20 w-[min(80vw,17rem)] rounded-lg border border-white/10 bg-black/85 p-2.5 shadow-xl shadow-black/50 backdrop-blur"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{
+                  background: rgbCss(hovered.color),
+                  boxShadow: `0 0 6px ${rgba(hovered.color, 0.9)}`,
+                }}
+              />
+              <span className="truncate text-sm font-semibold text-white">
+                {hovered.label}
+              </span>
+            </div>
+            <div
+              className="mt-0.5 pl-4.5 font-mono text-[10px] uppercase tracking-wide"
+              style={{ color: rgba(hovered.color, 0.95) }}
+            >
+              {kindLabelFor(hovered.kind)}
+            </div>
+            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-white/70">
+              {describeNode(hovered)}
+            </p>
+          </div>
+        )}
+
+        {/* Non-blocking dim so the inspector reads as focused while the graph
+            behind it stays clickable (switch nodes, click empty space to close). */}
         {selected && (
-          <NodePopover
-            ref={popoverRef}
+          <div className="pointer-events-none absolute inset-0 z-10 bg-black/45 backdrop-blur-[1px]" />
+        )}
+
+        {/* Inspector — reliably docked (bottom sheet on mobile, right rail on
+            desktop) so clicking any node ALWAYS shows its full captured data. */}
+        {selected && (
+          <NodeInspectorPanel
             node={selected}
             degree={model.degree[selected.id] ?? 0}
             relatedVideoCount={relatedVideoCount(selected, model)}
@@ -353,6 +404,8 @@ export function MemoryGraphView({
             onJumpToTimestamp={onJumpToTimestamp}
             onSelectNode={setSelectedId}
             onClose={() => setSelectedId(null)}
+            pinned={pinnedIds.has(selected.id)}
+            onTogglePin={() => togglePin(selected.id)}
             isAdmin={isAdmin}
             isUpdatingVerification={setVerification.isPending}
             onSetVerification={(id, status) =>
@@ -362,12 +415,17 @@ export function MemoryGraphView({
         )}
       </div>
 
-      {/* Right rail — ambient panels only; per-node detail lives in the popover */}
+      {/* Right rail — ambient panels only; per-node detail lives in the inspector */}
       <aside className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-sidebar/85 p-4 backdrop-blur-md lg:flex">
         <LiveFeed
           recent={recent}
           colorByTrade={colorByTrade}
-          onSelect={(id) => setSelectedId(`video:${id}`)}
+          onSelect={(id) => {
+            // Prefer opening the node in-graph; fall back to the video page for
+            // items not yet materialized as graph nodes (e.g. still processing).
+            if (nodeById.has(`video:${id}`)) setSelectedId(`video:${id}`);
+            else onOpenVideo(id);
+          }}
         />
         <PendingKnowledgePanel />
       </aside>
@@ -389,6 +447,27 @@ function relatedVideoCount(
   }
   if (node.kind === "video") return Math.max(0, n - 1);
   return n;
+}
+
+/** Human-readable summary for a node, reused by the hover card and inspector. */
+function describeNode(node: MemoryNode): string {
+  if (node.meta.description) return node.meta.description;
+  switch (node.kind) {
+    case "video":
+      return node.status === "completed"
+        ? "Transcribed and indexed into Jack's memory."
+        : `Currently ${node.status ?? "queued"} — Jack is still learning from this.`;
+    case "topic":
+      return "A cluster of Jack's knowledge for this trade.";
+    case "competency":
+      return "A Red Seal competency mapped from Jack's videos.";
+    case "mentor":
+      return "An experienced tradesperson whose Interview Mode answers reinforce Jack's memory.";
+    case "core":
+      return "The core of Jack's living memory.";
+    default:
+      return "An atomic unit of knowledge distilled from Jack's videos.";
+  }
 }
 
 function IconButton({
@@ -521,6 +600,11 @@ const VERIFICATION_META: Record<
   verified: { label: "Verified", color: [99, 214, 142], Icon: ShieldCheck },
   unverified: { label: "Unverified", color: [245, 197, 66], Icon: ShieldQuestion },
   rejected: { label: "Rejected", color: [239, 90, 90], Icon: ShieldAlert },
+  mentor_supplied: {
+    label: "Mentor-supplied",
+    color: [255, 205, 120],
+    Icon: UserCheck,
+  },
 };
 
 function formatTimestamp(sec: number): string {
@@ -548,69 +632,95 @@ interface NodeDetailProps {
 }
 
 /**
- * Floating card anchored to the clicked node (positioned by the parent via ref).
- * This is the primary "click a node → see its captured data" surface and works
- * at every viewport width, replacing the easy-to-miss right-rail inspector.
+ * The primary "click a node → see its captured data" surface. Docked reliably
+ * (bottom sheet on mobile, right rail on desktop) rather than anchored to the
+ * node's live position, so it can never fail to appear. The graph behind it
+ * stays interactive (the dim is pointer-events-none), so switching nodes and
+ * click-away-to-close keep working.
  */
-const NodePopover = forwardRef<HTMLDivElement, NodeDetailProps & { onClose: () => void }>(
-  function NodePopover({ onClose, ...props }, ref) {
-    const { node } = props;
-    const knowledge = isKnowledgeKind(node.kind);
-    const kLabel = kindLabelFor(node.kind);
-    const subtitle =
-      node.kind === "core"
-        ? undefined
-        : knowledge
-          ? node.meta.trade
-            ? `${kLabel} · ${node.meta.trade}`
-            : kLabel
-          : node.meta.trade;
+function NodeInspectorPanel({
+  onClose,
+  pinned,
+  onTogglePin,
+  ...props
+}: NodeDetailProps & {
+  onClose: () => void;
+  pinned: boolean;
+  onTogglePin: () => void;
+}) {
+  const { node } = props;
+  const knowledge = isKnowledgeKind(node.kind);
+  const kLabel = kindLabelFor(node.kind);
+  const subtitle =
+    node.kind === "core"
+      ? kLabel
+      : knowledge
+        ? node.meta.trade
+          ? `${kLabel} · ${node.meta.trade}`
+          : kLabel
+        : node.meta.trade ?? kLabel;
 
-    return (
-      <div
-        ref={ref}
-        style={{ visibility: "hidden" }}
-        className="absolute left-0 top-0 z-20 flex max-h-[min(74vh,34rem)] w-[min(92vw,21rem)] flex-col overflow-hidden rounded-xl border border-border bg-card/95 shadow-2xl shadow-black/60 backdrop-blur-md"
-      >
-        <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <span
-              className="mt-1 h-3 w-3 shrink-0 rounded-full"
-              style={{
-                background: rgbCss(node.color),
-                boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
-              }}
-            />
-            <div className="min-w-0">
-              <div className="text-sm font-semibold leading-snug text-foreground">
-                {node.label}
-              </div>
-              <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
-                {subtitle ?? kLabel}
-              </div>
+  return (
+    <div
+      role="dialog"
+      aria-label={`${node.label} details`}
+      className="pointer-events-auto absolute left-2 right-2 bottom-2 z-20 flex max-h-[74dvh] flex-col overflow-hidden rounded-xl border border-border bg-card/95 shadow-2xl shadow-black/60 backdrop-blur-md sm:left-auto sm:right-4 sm:top-24 sm:bottom-6 sm:w-[27rem] sm:max-h-none"
+    >
+      <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span
+            className="mt-1 h-3 w-3 shrink-0 rounded-full"
+            style={{
+              background: rgbCss(node.color),
+              boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
+            }}
+          />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-snug text-foreground">
+              {node.label}
+            </div>
+            <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
+              {subtitle}
             </div>
           </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {node.kind !== "core" && (
+            <button
+              onClick={onTogglePin}
+              title={pinned ? "Unpin node" : "Pin node in place"}
+              aria-label={pinned ? "Unpin node" : "Pin node in place"}
+              className={`-mt-1 flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                pinned
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
+              }`}
+            >
+              {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+            </button>
+          )}
           <button
             onClick={onClose}
             title="Close"
             aria-label="Close"
-            className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            className="-mr-1 -mt-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <NodeDetailBody {...props} />
-        </div>
       </div>
-    );
-  },
-);
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <NodeDetailBody {...props} />
+      </div>
+    </div>
+  );
+}
 
 /**
- * Renders the actual captured data Jack holds for a node: verbatim transcript
- * passages (a concept's cited moments, or a video's opening lines) plus a
- * video's summary/key points — fetched live from the source video.
+ * Renders the actual captured data Jack holds for a node: for a video, the full
+ * summary, key points, and complete verbatim transcript; for a concept, the
+ * verbatim transcript passages at each cited moment — fetched live from the
+ * source video. Every timestamp jumps straight to that moment in the player.
  */
 function CapturedContent({
   node,
@@ -645,43 +755,36 @@ function CapturedContent({
 
   const segments = video?.segments ?? [];
 
-  // Pull the transcript line at each cited moment (concept) or the opening
-  // lines (video). Verbatim — this is what Jack actually captured.
+  // For a concept, pull the transcript line at each cited moment — verbatim,
+  // exactly what Jack captured. Capped generously so nothing meaningful is lost.
   const passages: { key: string; time: number; text: string }[] = [];
-  const seen = new Set<string>();
-  const pushSegmentNear = (t: number) => {
-    if (segments.length === 0 || passages.length >= 4) return;
-    let best = segments[0];
-    let bestScore = Infinity;
-    for (const s of segments) {
-      const within = t >= s.startTime && t <= s.endTime;
-      const score = within ? -1 : Math.abs(s.startTime - t);
-      if (score < bestScore) {
-        bestScore = score;
-        best = s;
+  if (knowledge && stamps.length > 0 && segments.length > 0) {
+    const seen = new Set<string>();
+    for (const t of stamps) {
+      if (passages.length >= 24) break;
+      let best = segments[0];
+      let bestScore = Infinity;
+      for (const s of segments) {
+        const within = t >= s.startTime && t <= s.endTime;
+        const score = within ? -1 : Math.abs(s.startTime - t);
+        if (score < bestScore) {
+          bestScore = score;
+          best = s;
+        }
       }
-    }
-    const key = String(best.id ?? best.startTime);
-    if (seen.has(key) || !best.text?.trim()) return;
-    seen.add(key);
-    passages.push({ key, time: best.startTime, text: best.text.trim() });
-  };
-
-  if (knowledge && stamps.length > 0) {
-    for (const t of stamps) pushSegmentNear(t);
-  } else {
-    for (const s of segments.slice(0, isVideo ? 3 : 2)) {
-      const key = String(s.id ?? s.startTime);
-      if (seen.has(key) || !s.text?.trim()) continue;
+      const key = String(best.id ?? best.startTime);
+      if (seen.has(key) || !best.text?.trim()) continue;
       seen.add(key);
-      passages.push({ key, time: s.startTime, text: s.text.trim() });
+      passages.push({ key, time: best.startTime, text: best.text.trim() });
     }
   }
 
   const hasContent =
-    passages.length > 0 ||
-    (isVideo && Boolean(video?.analysis)) ||
-    (isVideo && (video?.keyPoints?.length ?? 0) > 0);
+    (isVideo &&
+      (Boolean(video?.analysis) ||
+        (video?.keyPoints?.length ?? 0) > 0 ||
+        segments.length > 0)) ||
+    passages.length > 0;
 
   return (
     <div className="mb-3 rounded-lg border border-border/60 bg-black/20 p-3">
@@ -696,21 +799,52 @@ function CapturedContent({
           No transcript captured yet — this source is still processing.
         </p>
       ) : (
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {isVideo && video?.analysis && (
             <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">
               {video.analysis}
             </p>
           )}
           {isVideo && video?.keyPoints && video.keyPoints.length > 0 && (
-            <ul className="list-disc space-y-1 pl-4 text-xs text-foreground/80">
-              {video.keyPoints.slice(0, 5).map((p, i) => (
-                <li key={i}>{p}</li>
-              ))}
-            </ul>
+            <div>
+              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                Key Points
+              </div>
+              <ul className="list-disc space-y-1 pl-4 text-xs text-foreground/80">
+                {video.keyPoints.map((p, i) => (
+                  <li key={i}>{p}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {isVideo && segments.length > 0 && (
+            <div>
+              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                Full Transcript
+              </div>
+              <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                {segments.map((s, i) => (
+                  <div key={s.id ?? i} className="flex gap-2 text-xs leading-relaxed">
+                    <button
+                      onClick={() => onJumpToTimestamp(videoId, s.startTime)}
+                      className="mt-px inline-flex h-fit shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                    >
+                      <Play className="h-2.5 w-2.5" />
+                      {formatTimestamp(s.startTime)}
+                    </button>
+                    <span className="text-foreground/85">{s.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
           {passages.length > 0 && (
             <div className="space-y-2">
+              {video?.title && (
+                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Cited in {video.title}
+                </div>
+              )}
               {passages.map((p) => (
                 <blockquote
                   key={p.key}
@@ -752,17 +886,7 @@ function NodeDetailBody({
 }: NodeDetailProps) {
   const knowledge = isKnowledgeKind(node.kind);
 
-  const description =
-    node.meta.description ??
-    (node.kind === "video"
-      ? node.status === "completed"
-        ? "Transcribed and indexed into Jack's memory."
-        : `Currently ${node.status ?? "queued"} — Jack is still learning from this.`
-      : node.kind === "topic"
-        ? "A cluster of Jack's knowledge for this trade."
-        : node.kind === "core"
-          ? "The core of Jack's living memory."
-          : "An atomic unit of knowledge distilled from Jack's videos.");
+  const description = describeNode(node);
 
   const confidence =
     typeof node.meta.confidence === "number"
@@ -773,6 +897,16 @@ function NodeDetailBody({
   const verify = VERIFICATION_META[verifyKey];
 
   const sources: NodeSource[] = knowledge ? node.meta.sources ?? [] : [];
+  const aliases = knowledge ? node.meta.aliases ?? [] : [];
+
+  // The originating source: a concept's most-cited video, or the video itself.
+  const primarySource = knowledge
+    ? [...sources].sort(
+        (a, b) =>
+          b.timestamps.length - a.timestamps.length ||
+          b.confidence - a.confidence,
+      )[0]
+    : undefined;
 
   // Concepts co-taught with this one (share ≥1 source video).
   const related: { node: MemoryNode; shared: number }[] = [];
@@ -797,15 +931,23 @@ function NodeDetailBody({
     }
   }
 
-  // Competencies directly linked to a knowledge node (via competency edges).
+  // Competencies + mentors directly linked to a knowledge node (via edges).
   const linkedComps: { code: string; name: string }[] = [];
+  const linkedMentors: MemoryNode[] = [];
   if (knowledge) {
     for (const id of adjacency.get(node.id) ?? []) {
-      if (!id.startsWith("comp:")) continue;
-      const code = nodeById.get(id)?.meta.code ?? id.replace("comp:", "");
-      linkedComps.push({ code, name: compByCode.get(code) ?? "" });
+      if (id.startsWith("comp:")) {
+        const code = nodeById.get(id)?.meta.code ?? id.replace("comp:", "");
+        linkedComps.push({ code, name: compByCode.get(code) ?? "" });
+      } else if (id.startsWith("mentor:")) {
+        const mn = nodeById.get(id);
+        if (mn) linkedMentors.push(mn);
+      }
     }
   }
+  const mentorSupplied =
+    knowledge &&
+    (verifyKey === "mentor_supplied" || linkedMentors.length > 0);
 
   return (
     <>
@@ -813,7 +955,63 @@ function NodeDetailBody({
         {description}
       </p>
 
+      {/* View Original Source — one click to the originating moment/video. */}
+      {node.kind === "video" && (
+        <button
+          onClick={() => onOpenVideo(node.id.replace("video:", ""))}
+          className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> View Original Source
+        </button>
+      )}
+      {knowledge && primarySource && (
+        <button
+          onClick={() =>
+            onJumpToTimestamp(
+              primarySource.videoId,
+              primarySource.timestamps[0] ?? 0,
+            )
+          }
+          className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> View Original Source
+        </button>
+      )}
+
       <CapturedContent node={node} onJumpToTimestamp={onJumpToTimestamp} />
+
+      {mentorSupplied && (
+        <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+            <UserCheck className="h-3.5 w-3.5" /> Mentor-supplied knowledge
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80">
+            {linkedMentors.length > 0
+              ? `Corroborated by ${linkedMentors
+                  .map((m) => m.label)
+                  .join(", ")} during Interview Mode.`
+              : "Contributed by an experienced tradesperson during Interview Mode."}
+          </p>
+        </div>
+      )}
+
+      {aliases.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Also called
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {aliases.map((a) => (
+              <span
+                key={a}
+                className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+              >
+                {a}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {knowledge && confidence !== undefined && (
         <div className="mb-3">
@@ -859,6 +1057,9 @@ function NodeDetailBody({
               </span>
             }
           />
+        )}
+        {node.kind === "video" && node.status && (
+          <Row label="Status" value={node.status} />
         )}
         {knowledge && sources.length > 0 && (
           <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
@@ -993,15 +1194,6 @@ function NodeDetailBody({
             ))}
           </div>
         </div>
-      )}
-
-      {node.kind === "video" && (
-        <button
-          onClick={() => onOpenVideo(node.id.replace("video:", ""))}
-          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
-        >
-          Open video <ArrowUpRight className="h-3.5 w-3.5" />
-        </button>
       )}
 
       {!knowledge && (
