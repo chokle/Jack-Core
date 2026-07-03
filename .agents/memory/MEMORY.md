@@ -9,3 +9,4 @@
 - [Supabase Storage upload limits](supabase-storage-limits.md) — project-level file-size cap 413s big uploads regardless of app cap; storage-js ≥2.108 streams Node ReadStreams natively.
 - [PostgREST bulk upsert NULLs](postgrest-bulk-upsert-nulls.md) — mixed-key rows in one supabase upsert insert explicit NULL for omitted cols, bypassing NOT NULL DEFAULT; always set weight/meta explicitly.
 - [Workflow names](workflow-names.md) — restart_workflow needs the exact `artifacts/<dir>: <title>` name; call listWorkflows() first instead of guessing.
+- [Leaf typecheck vs composite libs](leaf-typecheck-composite-libs.md) — leaf `tsc --noEmit` doesn't build lib refs; stale/missing dist yields misleading "no exported member"/TS6305; build refs first.
