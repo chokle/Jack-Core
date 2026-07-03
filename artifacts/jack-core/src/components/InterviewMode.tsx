@@ -83,6 +83,50 @@ function readActiveSessionId(): string | null {
   }
 }
 
+/**
+ * Browser-storage key prefix for the in-progress (not-yet-submitted) answer
+ * draft, keyed by session id. Auto-saving the draft as the mentor types means a
+ * refresh / nav-away / dropped tab during a long, thoughtful answer resumes with
+ * the text intact. The draft stores the question it was typed against so a stale
+ * draft can never land on a different question after the interview advances.
+ */
+const DRAFT_KEY_PREFIX = "jack.interview.draft.";
+
+function draftKey(sessionId: string) {
+  return `${DRAFT_KEY_PREFIX}${sessionId}`;
+}
+
+function saveDraft(sessionId: string, question: string, text: string) {
+  try {
+    localStorage.setItem(draftKey(sessionId), JSON.stringify({ question, text }));
+  } catch {
+    // Storage unavailable (private mode / blocked) — draft save is best-effort.
+  }
+}
+
+/** Return the saved draft only if it was typed against the current question. */
+function readDraft(sessionId: string, question: string): string | null {
+  try {
+    const raw = localStorage.getItem(draftKey(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { question?: string; text?: string };
+    if (parsed && parsed.question === question && typeof parsed.text === "string") {
+      return parsed.text;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(sessionId: string) {
+  try {
+    localStorage.removeItem(draftKey(sessionId));
+  } catch {
+    // Ignore — nothing to clear if storage is unavailable.
+  }
+}
+
 /** True when a fetch error is a definite "not found" (safe to drop stored id). */
 function isNotFound(err: unknown): boolean {
   return (
@@ -216,6 +260,10 @@ export function InterviewMode() {
         }
         setSession(detail.session);
         setTranscript(detail.answers.map(turnFromAnswer));
+        // Restore the in-progress draft for the CURRENT question only, so a
+        // stale draft never lands on a question the mentor already advanced past.
+        const draft = readDraft(storedId, detail.session.currentQuestion ?? "");
+        if (draft) setAnswer(draft);
         setStage("interviewing");
         setResumeNote(consumeInterviewResumeNote(storedId));
       } catch (err) {
@@ -232,6 +280,19 @@ export function InterviewMode() {
       cancelled = true;
     };
   }, []);
+
+  // Auto-save the in-progress answer to localStorage as the mentor types, keyed
+  // by session id + current question. Cleared automatically when the box empties
+  // (submit/skip reset it), so only the active question ever has a saved draft.
+  useEffect(() => {
+    if (stage !== "interviewing" || !session) return;
+    const question = session.currentQuestion ?? "";
+    if (answer.trim()) {
+      saveDraft(session.id, question, answer);
+    } else {
+      clearDraft(session.id);
+    }
+  }, [answer, session, stage]);
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
@@ -347,6 +408,7 @@ export function InterviewMode() {
       {
         onSuccess: (s) => {
           clearActiveSessionId();
+          clearDraft(session.id);
           setSession(s);
           setStage("complete");
           refreshGraph();
