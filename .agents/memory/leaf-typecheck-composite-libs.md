@@ -19,4 +19,4 @@ Incremental, so it's a fast no-op under the root gate (libs already built by `ty
 
 **Why:** `tsc --build --noEmit` doesn't work here — `--noEmit` propagates to the composite refs and throws `TS6310: Referenced project may not disable emit`. So build refs and noEmit-check the leaf as two steps.
 
-**Note:** this diverges from the pnpm-workspace skill convention (leaf = plain `tsc -p tsconfig.json --noEmit`); other artifacts (e.g. jack-core) still have the standalone-fragile plain script.
+**Note:** this diverges from the pnpm-workspace skill convention (leaf = plain `tsc -p tsconfig.json --noEmit`). Every artifact that references composite libs now builds its refs first: `api-server` builds `../../lib/api-zod ../../lib/db`, `jack-core` builds `../../lib/api-client-react`. `mockup-sandbox` has no composite-lib references (and imports no `@workspace/*` lib), so it keeps the plain script and is self-contained as-is. When adding a NEW artifact that imports a composite lib, give its `typecheck` the same `tsc --build <that lib> && tsc -p tsconfig.json --noEmit` shape.
