@@ -35,6 +35,7 @@ import {
   MemoryGraphCanvas,
   type MemoryGraphHandle,
 } from "./MemoryGraphCanvas";
+import { FloatingNodeInspector } from "./FloatingNodeInspector";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
 import {
@@ -88,9 +89,6 @@ export function MemoryGraphView({
   // which we anchor to the hovered node and keep there as the sim drifts.
   const stageRef = useRef<HTMLDivElement>(null);
   const hoverCardRef = useRef<HTMLDivElement>(null);
-  // Positioner for the floating inspector card — imperatively transformed to sit
-  // beside the selected node (desktop only). Unused in the mobile bottom sheet.
-  const inspectorRef = useRef<HTMLDivElement>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -306,55 +304,33 @@ export function MemoryGraphView({
     return () => cancelAnimationFrame(raf);
   }, [hoveredId, selectedId]);
 
-  // Anchor the inspector to the selected node on desktop and follow it live — a
-  // contextual card (think Google Maps / Figma), not a docked drawer. Prefers
-  // the right of the node, flips left when it won't fit, and clamps inside the
-  // stage so it never spills off-screen or over the header. Positioned
-  // imperatively via transform so node drift never re-renders React. Mobile uses
-  // a static bottom sheet, so this is a no-op there.
-  useEffect(() => {
-    if (!selectedId || !isDesktop) return;
-    let raf = 0;
-    const place = () => {
-      const el = inspectorRef.current;
-      const stage = stageRef.current;
-      const pos = canvasRef.current?.getScreenPos(selectedId);
-      if (el && stage) {
-        if (pos) {
-          const sw = stage.clientWidth;
-          const sh = stage.clientHeight;
-          const w = el.offsetWidth;
-          const h = el.offsetHeight;
-          const gap = 18;
-          const pad = 12;
-          const topPad = 76; // clear the title + search header overlay
-          // Prefer the right of the node; flip to the left if it won't fit.
-          let left = pos.x + pos.r + gap;
-          if (left + w > sw - pad) {
-            const leftAlt = pos.x - pos.r - gap - w;
-            left = leftAlt >= pad ? leftAlt : sw - w - pad;
-          }
-          left = Math.max(pad, Math.min(left, Math.max(pad, sw - w - pad)));
-          // Vertically center on the node, then clamp within the stage.
-          let top = pos.y - h / 2;
-          top = Math.max(topPad, Math.min(top, Math.max(topPad, sh - h - pad)));
-          el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
-          el.style.visibility = "visible";
-        } else {
-          el.style.visibility = "hidden";
-        }
-      }
-      raf = requestAnimationFrame(place);
-    };
-    raf = requestAnimationFrame(place);
-    return () => cancelAnimationFrame(raf);
-  }, [selectedId, isDesktop]);
-
   const toggleFullscreen = () => {
     const el = containerRef.current;
     if (!document.fullscreenElement) el?.requestFullscreen?.().catch(() => {});
     else document.exitFullscreen?.().catch(() => {});
   };
+
+  // Detail props shared by the desktop floating card and the mobile bottom sheet.
+  const detailProps: NodeDetailProps | null = selected
+    ? {
+        node: selected,
+        degree: model.degree[selected.id] ?? 0,
+        videoCount: inspectorVideoCount(selected, model),
+        relatedVideoCount: relatedVideoCount(selected, model),
+        nodeById,
+        adjacency,
+        knowledgeByVideoId,
+        compByCode,
+        competencies,
+        onOpenVideo,
+        onJumpToTimestamp,
+        onSelectNode: setSelectedId,
+        isAdmin,
+        isUpdatingVerification: setVerification.isPending,
+        onSetVerification: (id, status) =>
+          setVerification.mutate({ id, data: { status } }),
+      }
+    : null;
 
   return (
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
@@ -535,33 +511,29 @@ export function MemoryGraphView({
           <div className="pointer-events-none absolute inset-0 z-10 bg-black/40 md:hidden" />
         )}
 
-        {/* Inspector — contextual card anchored to the node on desktop, bottom
-            sheet on mobile — so clicking any node ALWAYS shows its captured data
-            without ever covering the graph edge-to-edge. */}
-        {selected && (
-          <NodeInspectorPanel
-            anchorRef={inspectorRef}
-            isDesktop={isDesktop}
+        {/* Inspector — a standalone floating contextual card beside the node on
+            desktop, a bottom sheet on mobile — so clicking any node ALWAYS shows
+            its captured data without ever covering the graph edge-to-edge. */}
+        {selected && detailProps && isDesktop && (
+          <FloatingNodeInspector
             node={selected}
-            degree={model.degree[selected.id] ?? 0}
-            videoCount={inspectorVideoCount(selected, model)}
-            relatedVideoCount={relatedVideoCount(selected, model)}
-            nodeById={nodeById}
-            adjacency={adjacency}
-            knowledgeByVideoId={knowledgeByVideoId}
-            compByCode={compByCode}
-            competencies={competencies}
-            onOpenVideo={onOpenVideo}
-            onJumpToTimestamp={onJumpToTimestamp}
-            onSelectNode={setSelectedId}
+            degree={detailProps.degree}
+            videoCount={detailProps.videoCount}
+            pinned={pinnedIds.has(selected.id)}
+            onTogglePin={() => togglePin(selected.id)}
+            onClose={() => setSelectedId(null)}
+            stageRef={stageRef}
+            getScreenPos={(id) => canvasRef.current?.getScreenPos(id) ?? null}
+          >
+            <NodeDetailBody {...detailProps} />
+          </FloatingNodeInspector>
+        )}
+        {selected && detailProps && !isDesktop && (
+          <NodeInspectorPanel
+            {...detailProps}
             onClose={() => setSelectedId(null)}
             pinned={pinnedIds.has(selected.id)}
             onTogglePin={() => togglePin(selected.id)}
-            isAdmin={isAdmin}
-            isUpdatingVerification={setVerification.isPending}
-            onSetVerification={(id, status) =>
-              setVerification.mutate({ id, data: { status } })
-            }
           />
         )}
       </div>
@@ -799,25 +771,17 @@ interface NodeDetailProps {
 }
 
 /**
- * The primary "click a node → see its captured data" surface. On desktop it is a
- * compact contextual card (~26rem, content-height, max 70vh) anchored beside the
- * selected node by the parent (via `anchorRef`) — think Google Maps info card or
- * Figma comment bubble, never a full-width drawer, so the graph stays the hero
- * and is never pushed or covered edge-to-edge. On mobile it drops to a bottom
- * sheet. Either way the shell stays MOUNTED while switching nodes — only the
- * inner scroll container is keyed by node id — so the open animation plays once
- * and zoom/position are preserved.
+ * Mobile / narrow-viewport node inspector — a bottom sheet. On desktop the
+ * inspector is the standalone `FloatingNodeInspector` contextual card instead;
+ * this component is only rendered below the desktop breakpoint, where a
+ * full-width sheet anchored to the bottom is the appropriate pattern.
  */
 function NodeInspectorPanel({
-  anchorRef,
-  isDesktop,
   onClose,
   pinned,
   onTogglePin,
   ...props
 }: NodeDetailProps & {
-  anchorRef: React.RefObject<HTMLDivElement | null>;
-  isDesktop: boolean;
   onClose: () => void;
   pinned: boolean;
   onTogglePin: () => void;
@@ -908,36 +872,14 @@ function NodeInspectorPanel({
     </>
   );
 
-  // Mobile: a bottom sheet — full width is acceptable on narrow screens.
-  if (!isDesktop) {
-    return (
-      <div
-        role="dialog"
-        aria-label={`${node.label} details`}
-        className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 flex max-h-[80dvh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-card/95 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in fade-in-0 slide-in-from-bottom-4"
-      >
-        {content}
-      </div>
-    );
-  }
-
-  // Desktop: floating contextual card. The outer positioner is transformed by
-  // the parent to sit beside the node (starts hidden until first placed); the
-  // inner card owns the visuals + one-shot open animation. Kept separate so the
-  // positioning transform never fights the zoom-in animation's transform.
+  // A bottom sheet — full width is acceptable on narrow / mobile screens.
   return (
     <div
-      ref={anchorRef}
-      style={{ visibility: "hidden" }}
-      className="pointer-events-none absolute left-0 top-0 z-30 w-[26rem] max-w-[92vw]"
+      role="dialog"
+      aria-label={`${node.label} details`}
+      className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 flex max-h-[80dvh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-card/95 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in fade-in-0 slide-in-from-bottom-4"
     >
-      <div
-        role="dialog"
-        aria-label={`${node.label} details`}
-        className="pointer-events-auto flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-card/95 shadow-2xl shadow-black/70 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in fade-in-0 zoom-in-95"
-      >
-        {content}
-      </div>
+      {content}
     </div>
   );
 }
