@@ -21,6 +21,21 @@ import {
   type RawVideo,
 } from "./memory-graph";
 import { IN_FLIGHT_STATUSES } from "./video-status";
+import { buildSyntheticServerGraph } from "./graph-stress";
+
+/**
+ * Dev-only stress harness: `?graphStress=N` seeds the canvas with a synthetic
+ * N-node graph so the large-graph fast paths (spatial-grid repulsion, viewport
+ * culling, glow LOD) can be exercised at node counts the small production data
+ * set never reaches. Use the on-canvas zoom controls to sweep across the LOD
+ * thresholds. Ignored outside dev and when N <= 0.
+ */
+function readStressCount(): number {
+  if (!import.meta.env.DEV || typeof window === "undefined") return 0;
+  const raw = new URLSearchParams(window.location.search).get("graphStress");
+  const n = raw ? Number.parseInt(raw, 10) : 0;
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 5000) : 0;
+}
 
 export interface MemoryGraphData {
   model: GraphModel;
@@ -79,11 +94,19 @@ export function useMemoryGraphData(): MemoryGraphData {
     },
   });
 
+  const stressCount = readStressCount();
   const model = useMemo(
-    () => selectMemoryGraphModel(graph, videos, competencies),
+    () =>
+      stressCount > 0
+        ? selectMemoryGraphModel(
+            buildSyntheticServerGraph(stressCount),
+            videos,
+            competencies,
+          )
+        : selectMemoryGraphModel(graph, videos, competencies),
     // Rebuild when the underlying query payloads change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [graph, videoList, competencyList],
+    [graph, videoList, competencyList, stressCount],
   );
 
   const generatedAt = (graph as { generatedAt?: string } | undefined)

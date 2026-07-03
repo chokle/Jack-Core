@@ -14,6 +14,15 @@ import {
   type NodeKind,
   type RGB,
 } from "../lib/memory-graph";
+import {
+  cullBounds,
+  glowVisible,
+  gridCellKey,
+  gridCoord,
+  isOffscreen,
+  showTopicMetrics,
+  useGridRepulsion,
+} from "../lib/graph-perf";
 
 /**
  * MemoryGraphCanvas — the interactive centerpiece of the Memory Graph view.
@@ -557,7 +566,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const n = nodes.length;
 
         // Pairwise repulsion (capped — current data is comfortably under this).
-        if (n <= 700) {
+        if (!useGridRepulsion(n)) {
           for (let i = 0; i < n; i++) {
             const a = nodes[i]!;
             if (a.kind === "core") continue;
@@ -589,24 +598,21 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           // O(n) instead of O(n²). Each node only feels neighbors in its own and
           // adjacent cells; force is applied to `p` alone (the symmetric partner
           // gets its own pass), which avoids per-pair dedup bookkeeping.
-          const CELL = 90;
           const grid = new Map<number, P[]>();
-          const cols = 100000;
-          const cellKey = (gx: number, gy: number) => gx * cols + gy;
           for (const p of nodes) {
             if (p.kind === "core") continue;
-            const k = cellKey(Math.floor(p.x / CELL), Math.floor(p.y / CELL));
+            const k = gridCellKey(gridCoord(p.x), gridCoord(p.y));
             const arr = grid.get(k);
             if (arr) arr.push(p);
             else grid.set(k, [p]);
           }
           for (const p of nodes) {
             if (p.kind === "core") continue;
-            const gx = Math.floor(p.x / CELL);
-            const gy = Math.floor(p.y / CELL);
+            const gx = gridCoord(p.x);
+            const gy = gridCoord(p.y);
             for (let ox = -1; ox <= 1; ox++) {
               for (let oy = -1; oy <= 1; oy++) {
-                const arr = grid.get(cellKey(gx + ox, gy + oy));
+                const arr = grid.get(gridCellKey(gx + ox, gy + oy));
                 if (!arr) continue;
                 for (const b of arr) {
                   if (b === p || b.kind === "core") continue;
@@ -713,13 +719,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
         // Viewport bounds in WORLD space, padded to cover glow radius, so we can
         // skip anything off-screen. Keeps large graphs cheap when zoomed in.
-        const cullPad = 80;
-        const viewMinX = (0 - cam.tx) / cam.scale - cullPad;
-        const viewMinY = (0 - cam.ty) / cam.scale - cullPad;
-        const viewMaxX = (w - cam.tx) / cam.scale + cullPad;
-        const viewMaxY = (h - cam.ty) / cam.scale + cullPad;
-        const offscreen = (n: P): boolean =>
-          n.x < viewMinX || n.x > viewMaxX || n.y < viewMinY || n.y > viewMaxY;
+        const bounds = cullBounds(cam, w, h);
+        const offscreen = (n: P): boolean => isOffscreen(n.x, n.y, bounds);
 
         const related =
           sel && adj.has(sel) ? (adj.get(sel) as Set<string>) : null;
@@ -800,7 +801,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const emphasized = node.id === sel || node.id === active;
           // LOD: when zoomed far out, skip the (costly) additive glow on small,
           // unremarkable nodes — hubs and emphasized nodes always keep theirs.
-          if (cam.scale < 0.55 && !emphasized && node.kind !== "topic") continue;
+          if (!glowVisible(cam.scale, node.kind, emphasized)) continue;
           drawNodeGlow(
             ctx,
             node,
@@ -851,7 +852,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           );
           // Cluster composition line under the hub — only when zoomed in enough
           // to read it, so far-out views stay clean.
-          if (cam.scale >= 0.7) {
+          if (showTopicMetrics(cam.scale)) {
             const m = t.metrics;
             const parts: string[] = [];
             if (m.knowledge)

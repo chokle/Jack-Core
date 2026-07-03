@@ -31,6 +31,8 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/lib/openai.ts` — OpenAI client
 - `artifacts/api-server/src/lib/jobs.ts` — resilient job system (stage claiming, pipeline driver, retry/backoff, startup recovery sweep + watchdog)
 - `artifacts/jack-core/src/lib/video-status.ts` — shared client-side IN_FLIGHT_STATUSES set (drives polling + UI states)
+- `artifacts/jack-core/src/lib/graph-perf.ts` — pure, unit-tested perf-path geometry for the Living Memory canvas (spatial-grid repulsion threshold + cell math, padded viewport cull bounds, glow/topic LOD thresholds); `MemoryGraphCanvas` imports these so drawn and tested behavior can't drift
+- `artifacts/jack-core/src/lib/graph-stress.ts` — `buildSyntheticServerGraph(n)`: synthetic large graph for exercising the canvas large-graph paths; used by the dev-only `?graphStress=N` toggle (in `use-memory-graph.ts`, DEV-gated, capped 5000) and by `graph-perf.test.ts`
 - `scripts/src/setup-supabase.ts` — Supabase schema setup script/reference
 - `artifacts/api-server/src/lib/memory-graph.ts` — knowledge-graph persistence (node/edge sync, self-heal, rebuild)
 - `artifacts/api-server/src/routes/graph.ts` — `GET /graph` (persisted Living Memory graph)
