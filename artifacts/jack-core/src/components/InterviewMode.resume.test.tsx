@@ -17,6 +17,7 @@ import type {
  */
 
 const ACTIVE_SESSION_KEY = "jack.interview.activeSessionId";
+const DRAFT_KEY_PREFIX = "jack.interview.draft.";
 
 // Controllable mocks, hoisted so the vi.mock factories below can close over them.
 const h = vi.hoisted(() => ({
@@ -133,6 +134,53 @@ describe("InterviewMode resume flow", () => {
 
     // Fetched using the stored id.
     expect(h.getInterviewSession).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("does NOT apply a saved draft typed against a different (stale) question on resume", async () => {
+    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    // A draft was typed against question A, but the session has since advanced to
+    // the current question B — the stale draft must never land on question B.
+    localStorage.setItem(
+      `${DRAFT_KEY_PREFIX}sess-1`,
+      JSON.stringify({
+        question: "An older question the mentor already answered?",
+        text: "Half-typed answer to the OLD question.",
+      }),
+    );
+    h.getInterviewSession.mockResolvedValue({
+      session: makeSession(),
+      answers: [makeAnswer()],
+    } satisfies InterviewSessionDetail);
+
+    renderInterviewMode();
+
+    // Back on the current question B, not the intake form.
+    expect(await screen.findByText(CURRENT_QUESTION)).toBeTruthy();
+
+    // The answer box is empty — the stale draft was rejected.
+    const box = screen.getByPlaceholderText(/Answer in your own words/i) as HTMLTextAreaElement;
+    expect(box.value).toBe("");
+  });
+
+  it("restores a saved draft typed against the current question on resume", async () => {
+    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    const draftText = "Half-typed answer to the CURRENT question.";
+    localStorage.setItem(
+      `${DRAFT_KEY_PREFIX}sess-1`,
+      JSON.stringify({ question: CURRENT_QUESTION, text: draftText }),
+    );
+    h.getInterviewSession.mockResolvedValue({
+      session: makeSession(),
+      answers: [makeAnswer()],
+    } satisfies InterviewSessionDetail);
+
+    renderInterviewMode();
+
+    expect(await screen.findByText(CURRENT_QUESTION)).toBeTruthy();
+
+    // The matching draft is restored into the answer box.
+    const box = screen.getByPlaceholderText(/Answer in your own words/i) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.value).toBe(draftText));
   });
 
   it("clears the stored session when the interview is wrapped up", async () => {
