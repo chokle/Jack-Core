@@ -70,8 +70,11 @@ export function useMemoryGraphData(): MemoryGraphData {
   });
 
   const model = useMemo(() => {
-    if (graph && graph.nodes.length > 0) {
-      return buildGraphModelFromServer({ nodes: graph.nodes, edges: graph.edges });
+    if (graph?.nodes?.length) {
+      return buildGraphModelFromServer({
+        nodes: graph.nodes,
+        edges: graph.edges ?? [],
+      });
     }
     // Fallback: derive the graph client-side if the persisted graph is empty or
     // unavailable (e.g. schema not yet applied) so the view is never blank.
