@@ -34,6 +34,12 @@ export interface MemoryGraphHandle {
    * simulation drifts or the camera pans/zooms. Returns null if the node is gone.
    */
   getScreenPos: (id: string) => { x: number; y: number; r: number } | null;
+  /**
+   * Pan (and gently zoom in if very zoomed out) so the node sits at the center
+   * of the stage. Used by search Enter-to-jump; single-click selection never
+   * moves the camera.
+   */
+  focusNode: (id: string) => void;
 }
 
 interface Props {
@@ -46,6 +52,8 @@ interface Props {
   /** Ids the user has pinned; pinned nodes stop drifting and get a marker. */
   pinnedIds?: Set<string>;
   search: string;
+  /** Currently-highlighted search result (arrow-key navigation cursor). */
+  activeMatchId?: string | null;
   locked: boolean;
   onZoomChange: (pct: number) => void;
 }
@@ -145,6 +153,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       onTogglePin,
       pinnedIds,
       search,
+      activeMatchId,
       locked,
       onZoomChange,
     },
@@ -161,6 +170,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const reducedRef = useRef(false);
     const selectedRef = useRef<string | null>(selectedId);
     const searchRef = useRef("");
+    const activeMatchRef = useRef<string | null>(null);
     const hoverRef = useRef<string | null>(null);
     const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
     // Pinned ids + latest callbacks kept in refs so the (locked-only) sim effect
@@ -171,6 +181,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
 
     selectedRef.current = selectedId;
     searchRef.current = search.trim().toLowerCase();
+    activeMatchRef.current = activeMatchId ?? null;
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
     onHoverRef.current = onHover;
     onTogglePinRef.current = onTogglePin;
@@ -210,6 +221,19 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           y: n.y * cam.scale + cam.ty,
           r: n.radius * cam.scale,
         };
+      },
+      focusNode: (id: string) => {
+        const n = nodesRef.current.get(id);
+        if (!n) return;
+        const cam = camRef.current;
+        const { w, h } = sizeRef.current;
+        // Gently zoom in if the user was scanning from far out, but never zoom
+        // back out — jumping should reveal the node, not disrupt their framing.
+        const scale = Math.min(MAX_SCALE, Math.max(cam.scale, 1.15));
+        cam.scale = scale;
+        cam.tx = w / 2 - n.x * scale;
+        cam.ty = h / 2 - n.y * scale;
+        onZoomChange(Math.round(scale * 100));
       },
     }));
 
@@ -555,6 +579,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const map = nodesRef.current;
         const sel = selectedRef.current;
         const q = searchRef.current;
+        const active = activeMatchRef.current;
         const adj = adjacencyRef.current;
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -634,15 +659,22 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           ctx.stroke();
         }
 
-        // Node glows (additive).
+        // Node glows (additive). Selected + active search match get a pulsing,
+        // emphasized glow so relationships (and the search cursor) pop.
         ctx.globalCompositeOperation = "lighter";
         for (const node of map.values()) {
           if (node.kind === "core") continue;
-          drawNodeGlow(ctx, node, time, dimmed(node.id, node.topicId));
+          drawNodeGlow(
+            ctx,
+            node,
+            time,
+            dimmed(node.id, node.topicId),
+            node.id === sel || node.id === active,
+          );
         }
         ctx.globalCompositeOperation = "source-over";
 
-        // Crisp node bodies + selection/hover rings.
+        // Crisp node bodies + selection/hover/active rings.
         for (const node of map.values()) {
           if (node.kind === "core") continue;
           drawNodeBody(
@@ -654,6 +686,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             node.id === sel,
             node.id === hoverRef.current,
             pinnedRef.current.has(node.id),
+            node.id === active,
           );
         }
 
@@ -776,16 +809,23 @@ function drawNodeGlow(
   node: P,
   time: number,
   dim: boolean,
+  emphasized = false,
 ) {
   const age = time - node.bornAt;
   const grow = Math.min(1, age / 600);
   const r = node.radius * (0.4 + 0.6 * grow);
-  const intensity = nodeIntensity(node, time) * (dim ? 0.25 : 1);
+  let intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1);
+  let glowR = r * 5;
+  // A slow pulse on the focused node so it reads as "alive" without distracting.
+  if (emphasized) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    intensity *= 1.35 + 0.55 * pulse;
+    glowR *= 1.15 + 0.15 * pulse;
+  }
   const col =
     node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
       : node.color;
-  const glowR = r * 5;
   const g = c.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
   g.addColorStop(0, rgba(col, 0.5 * intensity));
   g.addColorStop(0.4, rgba(col, 0.12 * intensity));
@@ -805,11 +845,13 @@ function drawNodeBody(
   selected: boolean,
   hovered: boolean,
   pinned: boolean,
+  active = false,
 ) {
   const age = time - node.bornAt;
   const grow = Math.min(1, age / 600);
   const r = node.radius * (0.4 + 0.6 * grow);
-  const intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1);
+  // Unrelated nodes fade to ~40% so the selection's neighborhood stands out.
+  const intensity = nodeIntensity(node, time) * (dim ? 0.4 : 1);
   const col =
     node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
@@ -827,6 +869,27 @@ function drawNodeBody(
     c.lineWidth = (1.2 * (1 - p) + 0.3) / scale;
     c.beginPath();
     c.arc(node.x, node.y, r + p * 40, 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  // Pulsing halo ring on the selected node — a subtle "you are here" beacon.
+  if (selected) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    c.strokeStyle = rgba([255, 255, 255], 0.22 + 0.33 * pulse);
+    c.lineWidth = (1 + pulse) / scale;
+    c.beginPath();
+    c.arc(node.x, node.y, r + (8 + pulse * 6) / scale, 0, Math.PI * 2);
+    c.stroke();
+  }
+
+  // The active search-result cursor gets its own bright color-matched ring so
+  // arrow-key navigation is visible before the user commits with Enter.
+  if (active && !selected) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.008);
+    c.strokeStyle = rgba(col, 0.55 + 0.35 * pulse);
+    c.lineWidth = 1.6 / scale;
+    c.beginPath();
+    c.arc(node.x, node.y, r + (6 + pulse * 5) / scale, 0, Math.PI * 2);
     c.stroke();
   }
 

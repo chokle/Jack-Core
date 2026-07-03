@@ -17,7 +17,10 @@ import {
   ShieldAlert,
   ShieldQuestion,
   UserCheck,
-  FileText,
+  ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  CornerDownLeft,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -74,6 +77,11 @@ export function MemoryGraphView({
   const [locked, setLocked] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
   const [showLegend, setShowLegend] = useState(true);
+
+  // Search: which nodes match, and an arrow-key "cursor" over them. Typing dims
+  // everything else on the canvas; Enter jumps to the active match and opens it.
+  const [activeMatch, setActiveMatch] = useState(0);
+  const query = search.trim().toLowerCase();
 
   // Reviewers with a valid admin session can verify/reject distilled concepts.
   // We reuse the same signed session that gates library ingestion; the PATCH
@@ -155,6 +163,55 @@ export function MemoryGraphView({
     }
     return m;
   }, [model]);
+
+  // Nodes whose label matches the search, ranked (exact > prefix > substring,
+  // then by connectedness) and capped so the arrow-key cursor stays snappy.
+  const matchIds = useMemo(() => {
+    if (!query) return [] as string[];
+    const scored: { id: string; score: number }[] = [];
+    for (const n of model.nodes) {
+      if (n.kind === "core") continue;
+      const label = n.label.toLowerCase();
+      const at = label.indexOf(query);
+      if (at === -1) continue;
+      let score = label === query ? 3 : at === 0 ? 2 : 1;
+      score += Math.min(1, (model.degree[n.id] ?? 0) / 20);
+      scored.push({ id: n.id, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 60).map((s) => s.id);
+  }, [query, model]);
+
+  // Reset the cursor to the top result whenever the query changes.
+  useEffect(() => {
+    setActiveMatch(0);
+  }, [query]);
+
+  const activeMatchId =
+    matchIds.length > 0
+      ? matchIds[Math.min(activeMatch, matchIds.length - 1)] ?? null
+      : null;
+
+  const onSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (matchIds.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveMatch((i) => (i + 1) % matchIds.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveMatch((i) => (i - 1 + matchIds.length) % matchIds.length);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const id = matchIds[Math.min(activeMatch, matchIds.length - 1)];
+        if (id) {
+          setSelectedId(id);
+          canvasRef.current?.focusNode(id);
+        }
+      }
+    },
+    [matchIds, activeMatch],
+  );
 
   // Drop selection / hover / pins that point at nodes no longer in the graph.
   useEffect(() => {
@@ -245,6 +302,7 @@ export function MemoryGraphView({
           onTogglePin={togglePin}
           pinnedIds={pinnedIds}
           search={search}
+          activeMatchId={activeMatchId}
           locked={locked}
           onZoomChange={setZoomPct}
         />
@@ -265,9 +323,31 @@ export function MemoryGraphView({
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={onSearchKeyDown}
                 placeholder="Search the graph..."
-                className="h-9 w-56 rounded-lg border border-white/10 bg-black/40 pl-9 pr-3 text-sm text-white outline-none backdrop-blur placeholder:text-white/40 focus:border-primary/60"
+                className="h-9 w-56 rounded-lg border border-white/10 bg-black/40 pl-9 pr-16 text-sm text-white outline-none backdrop-blur placeholder:text-white/40 focus:border-primary/60"
               />
+              {query && (
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tabular-nums text-white/50">
+                  {matchIds.length > 0
+                    ? `${Math.min(activeMatch, matchIds.length - 1) + 1}/${matchIds.length}`
+                    : "0/0"}
+                </span>
+              )}
+              {/* Arrow-key navigation hint — only while matches exist. */}
+              {matchIds.length > 0 && (
+                <div className="pointer-events-none absolute left-0 top-full mt-1.5 flex items-center gap-2 rounded-md border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] text-white/60 backdrop-blur">
+                  <span className="flex items-center gap-0.5">
+                    <ArrowUp className="h-3 w-3" />
+                    <ArrowDown className="h-3 w-3" />
+                    cycle
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <CornerDownLeft className="h-3 w-3" />
+                    jump
+                  </span>
+                </div>
+              )}
             </div>
             <IconButton
               title={showLegend ? "Hide legend" : "Show legend"}
@@ -382,18 +462,19 @@ export function MemoryGraphView({
           </div>
         )}
 
-        {/* Non-blocking dim so the inspector reads as focused while the graph
-            behind it stays clickable (switch nodes, click empty space to close). */}
+        {/* Mobile-only scrim behind the bottom sheet. On desktop the graph stays
+            FULLY visible — the floating inspector never dims or covers it. */}
         {selected && (
-          <div className="pointer-events-none absolute inset-0 z-10 bg-black/45 backdrop-blur-[1px]" />
+          <div className="pointer-events-none absolute inset-0 z-10 bg-black/40 sm:hidden" />
         )}
 
-        {/* Inspector — reliably docked (bottom sheet on mobile, right rail on
-            desktop) so clicking any node ALWAYS shows its full captured data. */}
+        {/* Inspector — floating right-docked panel on desktop, bottom sheet on
+            mobile — so clicking any node ALWAYS shows its full captured data. */}
         {selected && (
           <NodeInspectorPanel
             node={selected}
             degree={model.degree[selected.id] ?? 0}
+            videoCount={inspectorVideoCount(selected, model)}
             relatedVideoCount={relatedVideoCount(selected, model)}
             nodeById={nodeById}
             adjacency={adjacency}
@@ -447,6 +528,21 @@ function relatedVideoCount(
   }
   if (node.kind === "video") return Math.max(0, n - 1);
   return n;
+}
+
+/**
+ * "Videos" count for the inspector header: distinct source videos for a
+ * knowledge concept, otherwise the related-video count for scaffold nodes.
+ */
+function inspectorVideoCount(
+  node: MemoryNode | null,
+  model: MemoryGraphData["model"],
+): number {
+  if (!node) return 0;
+  if (isKnowledgeKind(node.kind)) {
+    return node.meta.sourceCount ?? node.meta.sources?.length ?? 0;
+  }
+  return relatedVideoCount(node, model);
 }
 
 /** Human-readable summary for a node, reused by the hover card and inspector. */
@@ -617,6 +713,7 @@ function formatTimestamp(sec: number): string {
 interface NodeDetailProps {
   node: MemoryNode;
   degree: number;
+  videoCount: number;
   relatedVideoCount: number;
   nodeById: Map<string, MemoryNode>;
   adjacency: Map<string, Set<string>>;
@@ -648,7 +745,7 @@ function NodeInspectorPanel({
   pinned: boolean;
   onTogglePin: () => void;
 }) {
-  const { node } = props;
+  const { node, degree, videoCount } = props;
   const knowledge = isKnowledgeKind(node.kind);
   const kLabel = kindLabelFor(node.kind);
   const subtitle =
@@ -661,10 +758,14 @@ function NodeInspectorPanel({
         : node.meta.trade ?? kLabel;
 
   return (
+    // Floating right-docked on desktop (graph stays fully visible), bottom sheet
+    // on mobile. The panel stays MOUNTED while switching nodes — only the inner
+    // scroll container is keyed by node id — so the open animation plays once,
+    // never re-firing on each click, and zoom/position are preserved.
     <div
       role="dialog"
       aria-label={`${node.label} details`}
-      className="pointer-events-auto absolute left-2 right-2 bottom-2 z-20 flex max-h-[74dvh] flex-col overflow-hidden rounded-xl border border-border bg-card/95 shadow-2xl shadow-black/60 backdrop-blur-md sm:left-auto sm:right-4 sm:top-24 sm:bottom-6 sm:w-[27rem] sm:max-h-none"
+      className="pointer-events-auto absolute left-2 right-2 bottom-2 z-20 flex max-h-[74dvh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-card/90 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in fade-in-0 zoom-in-95 sm:left-auto sm:right-4 sm:top-1/2 sm:bottom-auto sm:max-h-none sm:h-[78vh] sm:w-[27rem] sm:-translate-y-1/2 sm:slide-in-from-right-4"
     >
       <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
         <div className="flex min-w-0 items-start gap-2.5">
@@ -681,6 +782,24 @@ function NodeInspectorPanel({
             </div>
             <div className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
               {subtitle}
+            </div>
+            {/* High-level stats first — details live in collapsible sections. */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span>
+                <b className="font-semibold tabular-nums text-foreground">
+                  {degree}
+                </b>{" "}
+                Connection{degree === 1 ? "" : "s"}
+              </span>
+              <span aria-hidden className="text-white/20">
+                ·
+              </span>
+              <span>
+                <b className="font-semibold tabular-nums text-foreground">
+                  {videoCount}
+                </b>{" "}
+                Video{videoCount === 1 ? "" : "s"}
+              </span>
             </div>
           </div>
         </div>
@@ -709,7 +828,12 @@ function NodeInspectorPanel({
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      {/* Keyed by node id: switching nodes resets scroll + collapsibles to the
+          high-level view WITHOUT remounting (and re-animating) the panel shell. */}
+      <div
+        key={node.id}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
+      >
         <NodeDetailBody {...props} />
       </div>
     </div>
@@ -717,12 +841,103 @@ function NodeInspectorPanel({
 }
 
 /**
- * Renders the actual captured data Jack holds for a node: for a video, the full
- * summary, key points, and complete verbatim transcript; for a concept, the
- * verbatim transcript passages at each cited moment — fetched live from the
- * source video. Every timestamp jumps straight to that moment in the player.
+ * Independently-collapsible inspector section. Default collapsed so the panel
+ * opens on high-level info only — the user expands what they care about.
  */
-function CapturedContent({
+function Section({
+  title,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-t border-border/50 first:border-t-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 py-2.5 text-left"
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <span className="flex-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+          {title}
+        </span>
+        {count != null && count > 0 && (
+          <span className="rounded-full bg-white/5 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground/80">
+            {count}
+          </span>
+        )}
+      </button>
+      {open && <div className="pb-3">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * Video analysis + key points Jack distilled. Fetched lazily — only mounts (and
+ * fetches) when the "Captured Knowledge" section is expanded.
+ */
+function AnalysisContent({ node }: { node: MemoryNode }) {
+  const videoId = node.kind === "video" ? node.id.replace("video:", "") : "";
+  const enabled = videoId.length > 0;
+  const { data: video, isLoading } = useGetVideo(videoId, {
+    query: { enabled, queryKey: getGetVideoQueryKey(videoId) },
+  });
+
+  if (!enabled) return null;
+  if (isLoading) {
+    return <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>;
+  }
+
+  const hasContent =
+    Boolean(video?.analysis) || (video?.keyPoints?.length ?? 0) > 0;
+  if (!hasContent) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No analysis captured yet — this source is still processing.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {video?.analysis && (
+        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">
+          {video.analysis}
+        </p>
+      )}
+      {video?.keyPoints && video.keyPoints.length > 0 && (
+        <div>
+          <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Key Points
+          </div>
+          <ul className="list-disc space-y-1 pl-4 text-xs text-foreground/80">
+            {video.keyPoints.map((p, i) => (
+              <li key={i}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The verbatim transcript Jack captured: the full transcript for a video, or the
+ * transcript line at each cited moment for a concept — fetched live from the
+ * source video. Lazily mounted with the "Transcript" section; every timestamp
+ * jumps straight to that moment in the player.
+ */
+function TranscriptContent({
   node,
   onJumpToTimestamp,
 }: {
@@ -779,89 +994,59 @@ function CapturedContent({
     }
   }
 
-  const hasContent =
-    (isVideo &&
-      (Boolean(video?.analysis) ||
-        (video?.keyPoints?.length ?? 0) > 0 ||
-        segments.length > 0)) ||
-    passages.length > 0;
+  if (isLoading) {
+    return <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>;
+  }
+
+  const hasContent = (isVideo && segments.length > 0) || passages.length > 0;
+  if (!hasContent) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No transcript captured yet — this source is still processing.
+      </p>
+    );
+  }
 
   return (
-    <div className="mb-3 rounded-lg border border-border/60 bg-black/20 p-3">
-      <div className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-        <FileText className="h-3 w-3" /> Captured Content
-      </div>
-
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>
-      ) : !hasContent ? (
-        <p className="text-xs text-muted-foreground">
-          No transcript captured yet — this source is still processing.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {isVideo && video?.analysis && (
-            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">
-              {video.analysis}
-            </p>
-          )}
-          {isVideo && video?.keyPoints && video.keyPoints.length > 0 && (
-            <div>
-              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Key Points
-              </div>
-              <ul className="list-disc space-y-1 pl-4 text-xs text-foreground/80">
-                {video.keyPoints.map((p, i) => (
-                  <li key={i}>{p}</li>
-                ))}
-              </ul>
+    <div className="space-y-3">
+      {isVideo && segments.length > 0 && (
+        <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+          {segments.map((s, i) => (
+            <div key={s.id ?? i} className="flex gap-2 text-xs leading-relaxed">
+              <button
+                onClick={() => onJumpToTimestamp(videoId, s.startTime)}
+                className="mt-px inline-flex h-fit shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+              >
+                <Play className="h-2.5 w-2.5" />
+                {formatTimestamp(s.startTime)}
+              </button>
+              <span className="text-foreground/85">{s.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {passages.length > 0 && (
+        <div className="space-y-2">
+          {video?.title && (
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Cited in {video.title}
             </div>
           )}
-          {isVideo && segments.length > 0 && (
-            <div>
-              <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Full Transcript
-              </div>
-              <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
-                {segments.map((s, i) => (
-                  <div key={s.id ?? i} className="flex gap-2 text-xs leading-relaxed">
-                    <button
-                      onClick={() => onJumpToTimestamp(videoId, s.startTime)}
-                      className="mt-px inline-flex h-fit shrink-0 items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
-                    >
-                      <Play className="h-2.5 w-2.5" />
-                      {formatTimestamp(s.startTime)}
-                    </button>
-                    <span className="text-foreground/85">{s.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {passages.length > 0 && (
-            <div className="space-y-2">
-              {video?.title && (
-                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                  Cited in {video.title}
-                </div>
-              )}
-              {passages.map((p) => (
-                <blockquote
-                  key={p.key}
-                  className="border-l-2 border-primary/50 pl-2.5 text-xs leading-relaxed text-foreground/85"
-                >
-                  <button
-                    onClick={() => onJumpToTimestamp(videoId, p.time)}
-                    className="mb-0.5 inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
-                  >
-                    <Play className="h-2.5 w-2.5" />
-                    {formatTimestamp(p.time)}
-                  </button>
-                  <span className="block">&ldquo;{p.text}&rdquo;</span>
-                </blockquote>
-              ))}
-            </div>
-          )}
+          {passages.map((p) => (
+            <blockquote
+              key={p.key}
+              className="border-l-2 border-primary/50 pl-2.5 text-xs leading-relaxed text-foreground/85"
+            >
+              <button
+                onClick={() => onJumpToTimestamp(videoId, p.time)}
+                className="mb-0.5 inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+              >
+                <Play className="h-2.5 w-2.5" />
+                {formatTimestamp(p.time)}
+              </button>
+              <span className="block">&ldquo;{p.text}&rdquo;</span>
+            </blockquote>
+          ))}
         </div>
       )}
     </div>
@@ -949,14 +1134,34 @@ function NodeDetailBody({
     knowledge &&
     (verifyKey === "mentor_supplied" || linkedMentors.length > 0);
 
+  const isVideo = node.kind === "video";
+  // Which collapsible sections are worth offering for this node.
+  const relComp = knowledge ? null : relatedCompetencyList(node, competencies);
+  const showCompetencies = knowledge
+    ? linkedComps.length > 0
+    : (relComp?.list.length ?? 0) > 0;
+  const hasCaptured =
+    isVideo || (knowledge && (confidence !== undefined || aliases.length > 0));
+  const hasTranscript = isVideo || (knowledge && sources.length > 0);
+  // Union of the individual Metadata row conditions — avoids an empty box on
+  // scaffold nodes (topic/core) that have none of the detail rows.
+  const hasMetadata =
+    knowledge ||
+    node.kind === "video" ||
+    node.kind === "competency" ||
+    Boolean(node.meta.updatedAt);
+
   return (
     <>
-      <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-        {description}
-      </p>
+      {description && (
+        <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      )}
 
-      {/* View Original Source — one click to the originating moment/video. */}
-      {node.kind === "video" && (
+      {/* Primary action — one click to the originating moment/video. This row is
+          the home for future per-node actions, so it always reserves its slot. */}
+      {isVideo && (
         <button
           onClick={() => onOpenVideo(node.id.replace("video:", ""))}
           className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
@@ -978,8 +1183,6 @@ function NodeDetailBody({
         </button>
       )}
 
-      <CapturedContent node={node} onJumpToTimestamp={onJumpToTimestamp} />
-
       {mentorSupplied && (
         <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
@@ -995,223 +1198,241 @@ function NodeDetailBody({
         </div>
       )}
 
-      {aliases.length > 0 && (
-        <div className="mb-3">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Also called
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {aliases.map((a) => (
-              <span
-                key={a}
-                className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-              >
-                {a}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {knowledge && confidence !== undefined && (
-        <div className="mb-3">
-          <div className="mb-1 flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground">Confidence</span>
-            <span className="font-mono font-semibold tabular-nums text-foreground">
-              {Math.round(confidence * 100)}%
-            </span>
-          </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.round(confidence * 100)}%`,
-                background: rgbCss(node.color),
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="divide-y divide-border/60 border-y border-border/60">
-        {knowledge && (
-          <Row
-            label="Knowledge ID"
-            value={
-              <span className="max-w-[10rem] truncate" title={node.meta.refId ?? node.id}>
-                {node.meta.refId ?? node.id}
-              </span>
-            }
-          />
-        )}
-        {knowledge && verify && (
-          <Row
-            label="Verification"
-            value={
-              <span
-                className="inline-flex items-center gap-1"
-                style={{ color: rgbCss(verify.color) }}
-              >
-                <verify.Icon className="h-3.5 w-3.5" />
-                {verify.label}
-              </span>
-            }
-          />
-        )}
-        {node.kind === "video" && node.status && (
-          <Row label="Status" value={node.status} />
-        )}
-        {knowledge && sources.length > 0 && (
-          <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
-        )}
-        <Row label="Connections" value={degree} />
-        {(node.kind === "video" || node.kind === "competency") && (
-          <Row label="Related Videos" value={relatedVideoCount} />
-        )}
-        {node.kind === "topic" && <Row label="Videos" value={relatedVideoCount} />}
-        {node.meta.updatedAt && (
-          <Row label="Last Updated" value={timeAgo(node.meta.updatedAt)} />
-        )}
-        {node.kind === "competency" && node.meta.code && (
-          <Row label="Code" value={node.meta.code} />
-        )}
-      </div>
-
-      {knowledge && isAdmin && (
-        <div className="mt-3">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Review
-          </div>
-          <div className="flex gap-1.5">
-            {(
-              [
-                { status: "verified", label: "Verify", Icon: ShieldCheck, color: [99, 214, 142] as RGB },
-                { status: "rejected", label: "Reject", Icon: ShieldAlert, color: [239, 90, 90] as RGB },
-                { status: "unverified", label: "Reset", Icon: ShieldQuestion, color: [245, 197, 66] as RGB },
-              ] satisfies { status: VerificationUpdateStatus; label: string; Icon: typeof ShieldCheck; color: RGB }[]
-            ).map(({ status, label, Icon, color }) => {
-              const active = verifyKey === status;
-              return (
-                <button
-                  key={status}
-                  disabled={isUpdatingVerification || active}
-                  onClick={() => onSetVerification(node.id, status)}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{
-                    borderColor: rgba(color, active ? 0.9 : 0.35),
-                    color: rgbCss(color),
-                    background: active ? rgba(color, 0.18) : "transparent",
-                  }}
-                  title={active ? `Already ${label.toLowerCase()}ed` : label}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {knowledge && sources.length > 0 && (
-        <div className="mt-3">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Source Videos
-          </div>
-          <ul className="space-y-2.5">
-            {sources.map((s) => {
-              const vNode = nodeById.get(`video:${s.videoId}`);
-              const title = vNode?.label ?? "Untitled video";
-              const stamps = s.timestamps.length ? s.timestamps : [0];
-              return (
-                <li key={s.videoId}>
+      {/* Everything below is independently collapsible; sections open on demand
+          so the panel leads with the high-level view (name + header stats). */}
+      <div className="-mx-1 px-1">
+        {showCompetencies && (
+          <Section
+            title="Competencies"
+            count={knowledge ? linkedComps.length : relComp?.list.length}
+          >
+            {knowledge ? (
+              <div className="flex flex-wrap gap-1.5">
+                {linkedComps.map((c) => (
                   <button
-                    onClick={() => onOpenVideo(s.videoId)}
-                    className="block w-full truncate text-left text-xs font-medium text-foreground hover:text-primary"
-                    title={title}
+                    key={c.code}
+                    onClick={() => onSelectNode(`comp:${c.code}`)}
+                    className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-primary/20 hover:text-primary"
+                    title={c.name}
                   >
-                    {title}
+                    {c.code}
+                    {c.name ? ` · ${c.name}` : ""}
                   </button>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {stamps.map((t, i) => (
-                      <button
-                        key={`${t}-${i}`}
-                        onClick={() => onJumpToTimestamp(s.videoId, t)}
-                        className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                ))}
+              </div>
+            ) : (
+              relComp && (
+                <RelatedCompetencies
+                  node={node}
+                  list={relComp.list}
+                  mapped={relComp.mapped}
+                  onSelectNode={onSelectNode}
+                />
+              )
+            )}
+          </Section>
+        )}
+
+        {related.length > 0 && (
+          <Section title="Related Nodes" count={related.length}>
+            <div className="flex flex-wrap gap-1.5">
+              {related.map(({ node: rn, shared }) => (
+                <button
+                  key={rn.id}
+                  onClick={() => onSelectNode(rn.id)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[11px] font-medium text-white/80 transition-colors hover:border-primary/50 hover:text-primary"
+                  title={shared > 0 ? `Shares ${shared} source${shared === 1 ? "" : "s"}` : kindLabelFor(rn.kind)}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: rgbCss(rn.color) }}
+                  />
+                  <span className="max-w-[8rem] truncate">{rn.label}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {hasCaptured && (
+          <Section title="Captured Knowledge">
+            <div className="space-y-3">
+              {isVideo && <AnalysisContent node={node} />}
+              {knowledge && confidence !== undefined && (
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Confidence</span>
+                    <span className="font-mono font-semibold tabular-nums text-foreground">
+                      {Math.round(confidence * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.round(confidence * 100)}%`,
+                        background: rgbCss(node.color),
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {knowledge && aliases.length > 0 && (
+                <div>
+                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    Also called
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {aliases.map((a) => (
+                      <span
+                        key={a}
+                        className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
                       >
-                        <Play className="h-2.5 w-2.5" />
-                        {formatTimestamp(t)}
-                      </button>
+                        {a}
+                      </span>
                     ))}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+                </div>
+              )}
+            </div>
+          </Section>
+        )}
 
-      {knowledge && linkedComps.length > 0 && (
-        <div className="mt-3">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Competencies
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {linkedComps.map((c) => (
-              <button
-                key={c.code}
-                onClick={() => onSelectNode(`comp:${c.code}`)}
-                className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-primary/20 hover:text-primary"
-                title={c.name}
-              >
-                {c.code}
-                {c.name ? ` · ${c.name}` : ""}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        {hasTranscript && (
+          <Section title="Transcript">
+            <TranscriptContent node={node} onJumpToTimestamp={onJumpToTimestamp} />
+          </Section>
+        )}
 
-      {related.length > 0 && (
-        <div className="mt-3">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Related Nodes
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {related.map(({ node: rn, shared }) => (
-              <button
-                key={rn.id}
-                onClick={() => onSelectNode(rn.id)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[11px] font-medium text-white/80 transition-colors hover:border-primary/50 hover:text-primary"
-                title={shared > 0 ? `Shares ${shared} source${shared === 1 ? "" : "s"}` : kindLabelFor(rn.kind)}
-              >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: rgbCss(rn.color) }}
-                />
-                <span className="max-w-[8rem] truncate">{rn.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        {knowledge && sources.length > 0 && (
+          <Section title="Source Videos" count={sources.length}>
+            <ul className="space-y-2.5">
+              {sources.map((s) => {
+                const vNode = nodeById.get(`video:${s.videoId}`);
+                const title = vNode?.label ?? "Untitled video";
+                const stamps = s.timestamps.length ? s.timestamps : [0];
+                return (
+                  <li key={s.videoId}>
+                    <button
+                      onClick={() => onOpenVideo(s.videoId)}
+                      className="block w-full truncate text-left text-xs font-medium text-foreground hover:text-primary"
+                      title={title}
+                    >
+                      {title}
+                    </button>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {stamps.map((t, i) => (
+                        <button
+                          key={`${t}-${i}`}
+                          onClick={() => onJumpToTimestamp(s.videoId, t)}
+                          className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                        >
+                          <Play className="h-2.5 w-2.5" />
+                          {formatTimestamp(t)}
+                        </button>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
+        )}
 
-      {!knowledge && (
-        <div className="mt-4">
-          <RelatedCompetencies node={node} competencies={competencies} />
-        </div>
-      )}
+        {hasMetadata && (
+        <Section title="Metadata">
+          <div className="divide-y divide-border/60 rounded-lg border border-border/60">
+            {knowledge && (
+              <Row
+                label="Knowledge ID"
+                value={
+                  <span className="max-w-[10rem] truncate" title={node.meta.refId ?? node.id}>
+                    {node.meta.refId ?? node.id}
+                  </span>
+                }
+              />
+            )}
+            {knowledge && verify && (
+              <Row
+                label="Verification"
+                value={
+                  <span
+                    className="inline-flex items-center gap-1"
+                    style={{ color: rgbCss(verify.color) }}
+                  >
+                    <verify.Icon className="h-3.5 w-3.5" />
+                    {verify.label}
+                  </span>
+                }
+              />
+            )}
+            {node.kind === "video" && node.status && (
+              <Row label="Status" value={node.status} />
+            )}
+            {knowledge && sources.length > 0 && (
+              <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
+            )}
+            {(node.kind === "video" || node.kind === "competency") && (
+              <Row label="Related Videos" value={relatedVideoCount} />
+            )}
+            {node.meta.updatedAt && (
+              <Row label="Last Updated" value={timeAgo(node.meta.updatedAt)} />
+            )}
+            {node.kind === "competency" && node.meta.code && (
+              <Row label="Code" value={node.meta.code} />
+            )}
+          </div>
+        </Section>
+        )}
+
+        {knowledge && isAdmin && (
+          <Section title="Review" defaultOpen>
+            <div className="flex gap-1.5">
+              {(
+                [
+                  { status: "verified", label: "Verify", Icon: ShieldCheck, color: [99, 214, 142] as RGB },
+                  { status: "rejected", label: "Reject", Icon: ShieldAlert, color: [239, 90, 90] as RGB },
+                  { status: "unverified", label: "Reset", Icon: ShieldQuestion, color: [245, 197, 66] as RGB },
+                ] satisfies { status: VerificationUpdateStatus; label: string; Icon: typeof ShieldCheck; color: RGB }[]
+              ).map(({ status, label, Icon, color }) => {
+                const active = verifyKey === status;
+                return (
+                  <button
+                    key={status}
+                    disabled={isUpdatingVerification || active}
+                    onClick={() => onSetVerification(node.id, status)}
+                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      borderColor: rgba(color, active ? 0.9 : 0.35),
+                      color: rgbCss(color),
+                      background: active ? rgba(color, 0.18) : "transparent",
+                    }}
+                    title={active ? `Already ${label.toLowerCase()}ed` : label}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+      </div>
     </>
   );
 }
 
-function RelatedCompetencies({
-  node,
-  competencies,
-}: {
-  node: MemoryNode | null;
-  competencies: MemoryGraphData["competencies"];
-}) {
+type Competency = MemoryGraphData["competencies"][number];
+
+/**
+ * The competencies most relevant to a scaffold node (topic/video), mapped-first.
+ * Returned separately so the inspector can both size the section header (count)
+ * and render the list without duplicating the ranking logic.
+ */
+function relatedCompetencyList(
+  node: MemoryNode | null,
+  competencies: MemoryGraphData["competencies"],
+): { list: Competency[]; mapped: Set<string> } {
   const trade = node?.meta.trade;
   const mapped = new Set(node?.meta.competencyCodes ?? []);
 
@@ -1223,41 +1444,52 @@ function RelatedCompetencies({
   list = [...list].sort(
     (a, b) => Number(mapped.has(b.code)) - Number(mapped.has(a.code)),
   );
-  list = list.slice(0, 6);
+  return { list: list.slice(0, 6), mapped };
+}
 
+function RelatedCompetencies({
+  node,
+  list,
+  mapped,
+  onSelectNode,
+}: {
+  node: MemoryNode | null;
+  list: Competency[];
+  mapped: Set<string>;
+  onSelectNode: (id: string) => void;
+}) {
+  void node;
+  if (list.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">No competencies linked yet.</p>
+    );
+  }
   return (
-    <Panel title="Related Competencies">
-      {list.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No competencies linked yet.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {list.map((c) => (
-            <li
-              key={c.code}
-              className="flex items-center justify-between gap-2"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-foreground">
-                  {c.code} · {c.name}
-                </span>
-              </span>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${
-                  mapped.has(c.code)
-                    ? "bg-primary/20 text-primary"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {mapped.has(c.code)
-                  ? "mapped"
-                  : `${c.videoCount ?? 0} vid${(c.videoCount ?? 0) === 1 ? "" : "s"}`}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
+    <ul className="space-y-2">
+      {list.map((c) => (
+        <li key={c.code} className="flex items-center justify-between gap-2">
+          <button
+            onClick={() => onSelectNode(`comp:${c.code}`)}
+            className="min-w-0 flex-1 text-left"
+            title={c.name}
+          >
+            <span className="block truncate text-sm font-medium text-foreground transition-colors hover:text-primary">
+              {c.code} · {c.name}
+            </span>
+          </button>
+          <span
+            className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${
+              mapped.has(c.code)
+                ? "bg-primary/20 text-primary"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {mapped.has(c.code)
+              ? "mapped"
+              : `${c.videoCount ?? 0} vid${(c.videoCount ?? 0) === 1 ? "" : "s"}`}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

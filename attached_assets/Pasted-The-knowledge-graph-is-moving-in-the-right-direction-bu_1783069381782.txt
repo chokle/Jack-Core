@@ -1,0 +1,109 @@
+The knowledge graph is moving in the right direction, but the node inspector is dominating the experience. The graph should always be the hero of the page, not the details panel.
+
+## Desktop UX Redesign
+
+Replace the full-width bottom drawer with a floating inspector panel docked to the right side of the screen.
+
+Specifications:
+- Width: 400–450px
+- Height: 75–80vh
+- Rounded corners
+- Independent scrolling
+- Subtle glass/shadow styling consistent with Jack Core
+- Open/close animation should be quick and non-intrusive
+
+The graph should remain fully visible while exploring nodes.
+
+## Node Interaction
+
+Single-click:
+- Highlight selected node
+- Open (or update) the inspector instantly
+- Do NOT reanimate or rebuild the panel every click
+- Preserve current zoom and graph position
+
+Double-click:
+- Pin node
+- Keep inspector open while exploring other nearby nodes
+
+## Inspector Layout
+
+Only show high-level information initially.
+
+Example:
+
+Plumber
+
+• 7 Connections
+• 0 Videos
+
+▼ Competencies
+▼ Related Nodes
+▼ Captured Knowledge
+▼ Transcript
+▼ Source Videos
+▼ Metadata
+
+Each section expands independently.
+
+Do not dump every piece of information at once.
+
+## Graph Experience
+
+The graph should never disappear behind the inspector.
+
+Users should always be able to:
+
+- see nearby nodes
+- understand relationships
+- continue exploring without closing the inspector
+
+The inspector should feel like a companion, not the primary screen.
+
+## Future Features
+
+Reserve room in the inspector for:
+
+- Open Transcript
+- Play Source Video
+- View Original Conversation
+- AI Summary
+- Ask Jack About This Node
+- Related Competencies
+- Similar Knowledge
+
+These will eventually become the primary actions.
+
+## Search
+
+Typing into search should:
+
+- highlight matching nodes
+- dim unrelated nodes
+- allow arrow-key navigation
+- pressing Enter jumps to the selected node and opens its inspector
+
+## Visual Polish
+
+When a node is selected:
+
+- slightly brighten connected edges
+- fade unrelated nodes to ~40% opacity
+- animate the selected node with a subtle pulse/glow
+
+This makes relationships immediately obvious.
+
+## Design Inspiration
+
+Aim for the usability of:
+
+- Obsidian Graph View
+- Microsoft GraphRAG
+- Neo4j Bloom
+- Apple's Finder Inspector
+
+The graph is always the primary workspace.
+
+The inspector is simply a contextual window into whatever knowledge the user is currently exploring.
+
+This change should make Jack's Living Memory feel less like a database viewer and more like a true interactive knowledge graph.
