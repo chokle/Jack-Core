@@ -86,29 +86,58 @@ export function SystemHealthWidget({ className }: { className?: string }) {
     const draw = (tSec: number) => {
       ctx.clearRect(0, 0, w, h);
       const centerY = h * 0.58;
-      ctx.beginPath();
-      if (offlineRef.current) {
-        // Backend unreachable → flatline.
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(w, centerY);
-      } else {
-        const amp = h * 0.42;
-        const cyclesShown = 1.8;
-        const beatsPerSec = bpmRef.current / 60;
-        for (let x = 0; x <= w; x++) {
-          const phase = frac(tSec * beatsPerSec - ((w - x) / w) * cyclesShown);
-          const y = centerY - ecg(phase) * amp;
-          if (x === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-      }
-      ctx.strokeStyle = colorRef.current;
       ctx.lineWidth = 1.5;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
+      ctx.strokeStyle = colorRef.current;
+
+      if (offlineRef.current) {
+        // Backend unreachable → flatline, no flowing pulse.
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(w, centerY);
+        ctx.shadowColor = colorRef.current;
+        ctx.shadowBlur = 4;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        return;
+      }
+
+      const amp = h * 0.42;
+      const cyclesShown = 1.8;
+      const beatsPerSec = bpmRef.current / 60;
+      const ys: number[] = new Array(w + 1);
+      ctx.beginPath();
+      for (let x = 0; x <= w; x++) {
+        const phase = frac(tSec * beatsPerSec - ((w - x) / w) * cyclesShown);
+        const y = centerY - ecg(phase) * amp;
+        ys[x] = y;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      // Dim base trace so the traveling pulse stands out against it.
+      ctx.globalAlpha = 0.45;
       ctx.shadowColor = colorRef.current;
-      ctx.shadowBlur = 4;
+      ctx.shadowBlur = 3;
       ctx.stroke();
+
+      // A bright glowing "pulse" that flows left→right (heart → label) along the
+      // trace, brightest at its head and fading out along a short trail.
+      const sweepSpeed = 1 / 1.4; // ~1.4s to cross the bar
+      const head = frac(tSec * sweepSpeed) * w;
+      const trail = w * 0.42;
+      ctx.shadowBlur = 6;
+      const startX = Math.max(1, Math.ceil(head - trail));
+      const endX = Math.floor(head);
+      for (let x = startX; x <= endX; x++) {
+        const d = (x - (head - trail)) / trail; // 0 at tail → 1 at head
+        ctx.globalAlpha = d * d;
+        ctx.beginPath();
+        ctx.moveTo(x - 1, ys[x - 1]);
+        ctx.lineTo(x, ys[x]);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
     };
     drawRef.current = draw;
