@@ -352,6 +352,72 @@ VALUES ('jack-videos', 'jack-videos', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
+-- Knowledge Entries — generic, NON-video knowledge assets (written field notes,
+-- sketches, photos, etc.). This proves Jack can retrieve knowledge that did not
+-- originate from a video: Ask Jack embeds each entry and surfaces it as a
+-- citation (with its image) alongside video transcript matches. Entries are
+-- created out-of-band for now (seed script / direct insert) — there is no
+-- ingestion UI yet. The retrieval path is generic/table-driven, not hardcoded
+-- to any specific entry.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS knowledge_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  description TEXT,
+  trade TEXT,
+  category TEXT,
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  body TEXT NOT NULL DEFAULT '',
+  -- images: [{ "url": "...", "caption": "..." }]; the first image is surfaced
+  -- as the citation thumbnail in Ask Jack.
+  images JSONB NOT NULL DEFAULT '[]',
+  -- optional links back into the video library
+  related_video_ids UUID[] NOT NULL DEFAULT '{}',
+  -- related_timestamps: [{ "videoId": "...", "time": 0, "label": "..." }]
+  related_timestamps JSONB NOT NULL DEFAULT '[]',
+  -- attachments (future): [{ "url": "...", "kind": "...", "name": "..." }]
+  attachments JSONB NOT NULL DEFAULT '[]',
+  metadata JSONB NOT NULL DEFAULT '{}',
+  -- JSON-serialized text-embedding-3-small vector of (title + description +
+  -- body), stored like videos.embedding / transcript_segments.embedding.
+  -- Nullable so a row can be inserted first and embedded later, but semantic
+  -- retrieval requires it.
+  embedding vector(1536),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_entries_trade ON knowledge_entries(trade);
+CREATE INDEX IF NOT EXISTS idx_knowledge_entries_embedding_hnsw
+  ON knowledge_entries USING hnsw (embedding vector_cosine_ops);
+
+-- match_knowledge_entries — semantic retrieval of non-video knowledge for Ask
+-- Jack. Mirrors match_transcript_segments (same threshold/count/filter_trade
+-- contract) so the chat route can call both with one query embedding.
+CREATE OR REPLACE FUNCTION match_knowledge_entries(
+  query_embedding vector(1536),
+  match_threshold float,
+  match_count int,
+  filter_trade text DEFAULT NULL
+)
+RETURNS TABLE (
+  id uuid, title text, description text, trade text, category text,
+  tags text[], body text, images jsonb, similarity float
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+  SET LOCAL hnsw.ef_search = 100;
+  RETURN QUERY
+  SELECT ke.id, ke.title, ke.description, ke.trade, ke.category, ke.tags, ke.body, ke.images,
+    1 - (ke.embedding <=> query_embedding) AS similarity
+  FROM knowledge_entries ke
+  WHERE ke.embedding IS NOT NULL
+    AND 1 - (ke.embedding <=> query_embedding) > match_threshold
+    AND (filter_trade IS NULL OR ke.trade = filter_trade)
+  ORDER BY ke.embedding <=> query_embedding LIMIT match_count;
+END; $$;
+
+-- ============================================================================
 -- Interview Mode — mentor profiles, interview sessions, and verbatim answers.
 --
 -- An experienced tradesperson ("mentor") is interviewed conversationally by

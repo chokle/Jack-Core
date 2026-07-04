@@ -7,6 +7,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
 - `pnpm --filter @workspace/jack-core run dev` — run the frontend (port 22659)
 - `pnpm --filter @workspace/scripts run setup:supabase` — apply the Supabase schema (tables, functions, seed data, storage bucket)
+- `pnpm --filter @workspace/api-server run seed:knowledge` — seed the sample non-video Knowledge Entry (uploads its sketch, embeds it, upserts by a stable id; idempotent)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 
@@ -32,6 +33,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `artifacts/api-server/src/routes/` — Express route handlers (videos, search, chat, competencies)
 - `artifacts/api-server/src/lib/supabase.ts` — Supabase client
 - `artifacts/api-server/src/lib/openai.ts` — OpenAI client
+- `knowledge_entries` (table + `match_knowledge_entries` RPC in `scripts/src/supabase-schema.sql`) — generic, NON-video knowledge assets (written field notes, sketches, photos). Retrieval is table-driven, not hardcoded. `chat.ts` searches it with the SAME query embedding as transcripts and merges hits into Ask Jack's context + citations; `artifacts/api-server/src/scripts/seed-knowledge-entry.ts` is the (data-driven) manual create path — there is no ingestion UI
 - `artifacts/api-server/src/lib/jobs.ts` — resilient job system (stage claiming, pipeline driver, retry/backoff, startup recovery sweep + watchdog)
 - `artifacts/jack-core/src/lib/video-status.ts` — shared client-side IN_FLIGHT_STATUSES set (drives polling + UI states)
 - `artifacts/jack-core/src/lib/graph-perf.ts` — pure, unit-tested perf-path geometry for the Living Memory canvas (spatial-grid repulsion threshold + cell math, padded viewport cull bounds, glow/topic LOD thresholds); `MemoryGraphCanvas` imports these so drawn and tested behavior can't drift
@@ -74,6 +76,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - **AI Analysis** — GPT-4o generates summaries, key points, and Red Seal competency mappings
 - **Semantic Search** — RAG over transcript segments with pgvector; falls back to text search if no embeddings
 - **Ask Jack** — Conversational AI that searches the internal library first, answers with timestamp citations
+- **Knowledge Entries** — generic, NON-video knowledge assets (written field notes, sketches, photos) with a title/description/trade/category/tags/body/images/metadata (and optional related videos/timestamps). Ask Jack retrieves them semantically alongside video transcripts and cites them (image + snippet, "Field note" badge, no clip to jump to). Proves Jack can answer from knowledge that never came from a video. Created out-of-band via a seed script (no ingestion UI); retrieval is table-driven
 - **Related Videos** — Vector similarity to surface related content after watching
 - **Interview Mode** — Jack conversationally interviews experienced tradespeople one plainspoken question at a time (skippable); answers are saved verbatim, distilled with the same engine as videos, and reinforce the SAME shared knowledge graph as `mentor_supplied` corroboration. An interrupted interview can be picked up later via a **Resume Interview** action that appears on that mentor's node in the Living Memory graph whenever they have an incomplete session (progress is durable server-side, so it survives refreshes/new devices)
 - **Knowledge Review** — admin-gated curation of queued mentor-concept candidates: Accept (green, reinforce the suggested best match), Merge (amber, reinforce a reviewer-chosen concept), Reject (red, required reason); replay-safe, with pending/accepted/merged/rejected tabs

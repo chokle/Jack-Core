@@ -210,32 +210,60 @@ export function StructuredAnswer({
             <Film className="h-3.5 w-3.5 text-primary flex-shrink-0" />
             <span className="text-[10px] font-mono uppercase tracking-wider text-primary">Source</span>
           </div>
-          {cites.map((c, i) => (
-            <div key={i} className={i > 0 ? "space-y-2 border-t border-border pt-3" : "space-y-2"}>
-              <div className="flex gap-2">
-                <div className="h-10 w-16 flex-shrink-0 overflow-hidden rounded bg-zinc-800">
+          {cites.map((c, i) => {
+            const sep = i > 0 ? "space-y-2 border-t border-border pt-3" : "space-y-2";
+            // A "knowledge" citation is a non-video Knowledge Entry: surface its
+            // image and snippet, with no clip to jump to.
+            if (c.sourceType === "knowledge") {
+              return (
+                <div key={i} className={sep}>
+                  <div className="flex items-center gap-2">
+                    <BookMarked className="h-4 w-4 flex-shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1 truncate text-sm font-semibold leading-tight text-white">
+                      {c.videoTitle}
+                    </div>
+                    <span className="flex-shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-primary">
+                      Field note
+                    </span>
+                  </div>
+                  {c.text && (
+                    <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{c.text}</div>
+                  )}
                   {c.thumbnailUrl && (
-                    <img src={c.thumbnailUrl} className="h-full w-full object-cover" alt="" />
+                    <div className="overflow-hidden rounded-lg border border-border bg-zinc-900">
+                      <img src={c.thumbnailUrl} className="max-h-56 w-full object-contain" alt={c.videoTitle} />
+                    </div>
                   )}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold leading-tight text-white">{c.videoTitle}</div>
-                  <div className="font-mono text-xs text-primary">
-                    {fmtTime(c.startTime)}–{fmtTime(c.endTime)}
+              );
+            }
+            return (
+              <div key={i} className={sep}>
+                <div className="flex gap-2">
+                  <div className="h-10 w-16 flex-shrink-0 overflow-hidden rounded bg-zinc-800">
+                    {c.thumbnailUrl && (
+                      <img src={c.thumbnailUrl} className="h-full w-full object-cover" alt="" />
+                    )}
                   </div>
-                  {c.text && <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{c.text}</div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold leading-tight text-white">{c.videoTitle}</div>
+                    <div className="font-mono text-xs text-primary">
+                      {fmtTime(c.startTime)}–{fmtTime(c.endTime)}
+                    </div>
+                    {c.text && <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{c.text}</div>}
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => onCitationClick(c.videoId, c.startTime)}
+                  className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <PlayCircle className="h-4 w-4" />
+                  Jump to Clip
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => onCitationClick(c.videoId, c.startTime)}
-                className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                <PlayCircle className="h-4 w-4" />
-                Jump to Clip
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

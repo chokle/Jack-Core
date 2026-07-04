@@ -1083,6 +1083,19 @@ components:
           type: string
         thumbnailUrl:
           type: ["string", "null"]
+        sourceType:
+          type: string
+          enum: [video, knowledge]
+          description: >-
+            Origin of the citation. "video" (the default when omitted) cites a
+            transcript segment. "knowledge" cites a non-video Knowledge Entry —
+            for these, videoTitle carries the entry title, text carries a
+            snippet, thumbnailUrl carries the entry image, startTime/endTime are
+            0, entryId identifies the entry, and videoId is empty (there is no
+            clip to jump to).
+        entryId:
+          type: ["string", "null"]
+          description: Knowledge Entry id when sourceType is "knowledge".
 
     ChatMessage:
       type: object

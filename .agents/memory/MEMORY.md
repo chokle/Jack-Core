@@ -17,3 +17,4 @@
 - [Deploy healthcheck base path](deploy-healthcheck-base-path.md) — platform/uptime check pings bare /api (not /api/healthz); base path must return a shallow (no-DB) 200 or it reads as an outage; redeploy to take effect.
 - [PostgREST .or() filter injection](postgrest-or-filter-injection.md) — never inline a client-controlled value (e.g. a session cookie) into `.or()`; validate as UUID first or use `.eq()`.
 - [Queued-job heartbeat](job-heartbeat-while-queued.md) — a claimed row deferred behind an async gate must keep heartbeating while queued, or the watchdog reclaims it as stale → double-run + false-fail.
+- [Citation field reuse](citation-source-reuse.md) — one flat citation shape for video + knowledge; knowledge reuses videoTitle/text/thumbnailUrl with videoId=""; new consumers must branch on sourceType.

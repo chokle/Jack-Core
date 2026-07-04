@@ -333,7 +333,9 @@ export const AskJackResponse = zod.object({
   "startTime": zod.number(),
   "endTime": zod.number(),
   "text": zod.string(),
-  "thumbnailUrl": zod.string().nullish()
+  "thumbnailUrl": zod.string().nullish(),
+  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
+  "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".')
 })),
   "usedInternalKnowledge": zod.boolean().optional()
 })
@@ -352,7 +354,9 @@ export const GetChatHistoryResponseItem = zod.object({
   "startTime": zod.number(),
   "endTime": zod.number(),
   "text": zod.string(),
-  "thumbnailUrl": zod.string().nullish()
+  "thumbnailUrl": zod.string().nullish(),
+  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
+  "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".')
 })).optional(),
   "createdAt": zod.string()
 })

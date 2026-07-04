@@ -5,6 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { CitationSourceType } from './citationSourceType';
 
 export interface Citation {
   videoId: string;
@@ -14,4 +15,11 @@ export interface Citation {
   text: string;
   /** @nullable */
   thumbnailUrl?: string | null;
+  /** Origin of the citation. "video" (the default when omitted) cites a transcript segment. "knowledge" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to). */
+  sourceType?: CitationSourceType;
+  /**
+     * Knowledge Entry id when sourceType is "knowledge".
+     * @nullable
+     */
+  entryId?: string | null;
 }
