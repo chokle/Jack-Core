@@ -1,6 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
+import { Heart } from "lucide-react";
 import { useSystemHealth } from "../hooks/use-system-health";
 import type { SystemHealthSnapshotPulseColor } from "@workspace/api-client-react";
+
+/** The heart icon is ALWAYS this red, independent of operating state. */
+const HEART_RED = "#ef4444";
 
 /**
  * SystemHealthWidget — the telemetry-driven "heartbeat" that replaces the old
@@ -151,6 +155,10 @@ export function SystemHealthWidget({ className }: { className?: string }) {
     }
   }, [snapshot.pulseColor, snapshot.heartbeatBPM, isOffline]);
 
+  // Beat duration for the heart icon, derived from BPM (clamped to sane bounds).
+  const bpmForBeat = Math.max(30, Math.min(200, snapshot.heartbeatBPM));
+  const beatDuration = `${(60 / bpmForBeat).toFixed(2)}s`;
+
   const statusLabel = isOffline ? "Offline" : snapshot.status;
   const ariaLabel = isOffline
     ? "Systems health: offline, backend unreachable"
@@ -166,6 +174,17 @@ export function SystemHealthWidget({ className }: { className?: string }) {
       aria-label={ariaLabel}
       title={title}
     >
+      <Heart
+        className={`h-3.5 w-3.5 shrink-0 ${isOffline ? "" : "jack-heart-beat"}`}
+        style={
+          {
+            color: HEART_RED,
+            fill: HEART_RED,
+            "--jack-beat-duration": beatDuration,
+          } as CSSProperties
+        }
+        aria-hidden="true"
+      />
       <canvas ref={canvasRef} className="h-4 w-11 shrink-0" aria-hidden="true" />
       <span
         className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline"

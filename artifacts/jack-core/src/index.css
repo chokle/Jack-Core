@@ -302,3 +302,32 @@
     inset: -1px;
   }
 }
+
+/* Systems Health widget — always-red heart that beats at the reported BPM
+   (duration is set inline via --jack-beat-duration). Motion is dropped for
+   users who prefer reduced motion. */
+@keyframes jack-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  12% {
+    transform: scale(1.22);
+  }
+  24% {
+    transform: scale(0.97);
+  }
+  38% {
+    transform: scale(1);
+  }
+}
+.jack-heart-beat {
+  animation: jack-heartbeat var(--jack-beat-duration, 0.9s) ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jack-heart-beat {
+    animation: none;
+  }
+}
