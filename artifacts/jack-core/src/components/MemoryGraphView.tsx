@@ -456,9 +456,13 @@ export function MemoryGraphView({
   }, [selectedId]);
 
   const toggleFullscreen = () => {
-    const el = containerRef.current;
-    if (!document.fullscreenElement) el?.requestFullscreen?.().catch(() => {});
-    else document.exitFullscreen?.().catch(() => {});
+    // Fullscreen the whole app (not just the graph container) so the left nav
+    // sidebar stays visible in fullscreen instead of being clipped out.
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
   };
 
   // Detail props shared by the desktop floating card and the mobile bottom sheet.
