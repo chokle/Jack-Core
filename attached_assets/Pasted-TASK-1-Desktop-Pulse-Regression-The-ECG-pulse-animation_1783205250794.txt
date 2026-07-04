@@ -1,0 +1,120 @@
+TASK 1 — Desktop Pulse Regression
+
+The ECG pulse animation works correctly on mobile but not on desktop.
+
+Please investigate this as a regression.
+
+Requirements:
+
+- Compare the mobile and desktop Pulse implementations.
+- Determine why the traveling pulse renders on mobile but not desktop.
+- Do not rewrite the component.
+- Reuse the working mobile implementation where possible.
+- Verify it works in:
+  - Desktop
+  - Fullscreen
+  - Builder
+- Check for:
+  - media queries
+  - conditional rendering
+  - CSS animation classes
+  - overflow/clip-path/mask issues
+  - z-index/layering
+  - desktop-only component variants
+
+This is a regression fix only.
+Do not redesign the component.
+
+---
+
+TASK 2 — Knowledge-Aware Neuron Firing
+
+Update the neuron firing animation so it reflects Jack's actual knowledge state.
+
+Current issue:
+Neurons currently fire toward trade branches even when those branches contain zero knowledge.
+
+This creates the wrong impression.
+
+Requirements:
+
+- Only branches containing knowledge may receive neuron firing.
+- Empty branches should remain visible but dormant.
+- Use a subtle idle glow for empty branches.
+- Do not make empty branches appear broken.
+- Determine branch state dynamically from the knowledge count.
+
+Behavior:
+
+contentCount > 0
+→ Eligible for neuron firing.
+
+contentCount === 0
+→ Dormant only.
+
+First Contribution:
+
+When the first knowledge object is added to an empty branch:
+
+- Play a one-time activation animation.
+- Light the branch briefly.
+- Then permanently enable normal neuron firing for that branch.
+
+Do not redesign the graph.
+
+Only change the neuron targeting logic.
+
+---
+
+TASK 3 — Living Brain Growth
+
+Update the Memory Graph so branch size reflects the amount of knowledge stored.
+
+Requirements:
+
+- Branches with more knowledge should appear larger or more developed.
+- Branches with less knowledge remain smaller.
+- Branches with zero knowledge remain visible but dormant.
+- Scale should feel organic, like a living brain growing.
+- Use real knowledge counts from the database.
+- No hardcoded values.
+
+Example:
+
+0 objects
+→ Dormant node
+
+1–5 objects
+→ Small branch
+
+6–15 objects
+→ Medium branch
+
+16–40 objects
+→ Large branch
+
+40+
+→ Mature branch
+
+The graph should update automatically as new knowledge is added.
+
+The goal is for users to literally watch Jack's brain evolve over time.
+
+---
+
+TASK 4 — Brain Statistics (Developer Only)
+
+Generate a live report showing Jack's current knowledge distribution.
+
+Return:
+
+- Total knowledge objects
+- Knowledge objects by trade
+- Largest trade
+- Smallest populated trade
+- Trades with zero knowledge
+- Total populated trades
+- Total dormant trades
+
+Developer tool only.
+Do not modify the database.

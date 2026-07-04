@@ -1,0 +1,56 @@
+TASK — Move Knowledge Toasts Out of the Graph + Activity-Based Dismiss Timer
+
+The green “Jack just learned…” toast bubbles are visually blocking the Memory Graph.
+
+Please relocate them and adjust their dismissal behavior.
+
+Current issue:
+- Toasts appear over the graph workspace.
+- They block the user’s view and get in the way during interaction.
+- They disappear too quickly/awkwardly depending on user activity.
+
+Requirements:
+
+1. Move Toast Location
+- Move the green knowledge update toasts out of the main graph interaction area.
+- Preferred placement:
+  - Right side panel, under “Recent Knowledge Added”
+  - OR bottom-right corner inside the right sidebar area
+- Do not place them over graph nodes, clusters, controls, or the legend.
+- They should remain visible but not obstruct interaction.
+
+2. Set 20-Second Timer
+- Each toast should remain visible for 20 seconds.
+- After 20 seconds, fade out smoothly.
+
+3. Activity-Based Timer Trigger
+- The 20-second countdown should only start when the user is actively on the Memory Graph screen.
+- If the user is on another screen/tab/view, do not start or continue the countdown.
+- If the browser tab is inactive or hidden, pause the countdown.
+- Resume countdown only when:
+  - user returns to Memory Graph
+  - browser tab is visible again
+
+4. Multiple Toasts
+- Stack multiple toasts neatly.
+- Newest toast on top.
+- Maximum visible at once: 3.
+- Older toasts should collapse into Recent Knowledge Added or disappear after their timer.
+
+5. Styling
+- Keep current green styling.
+- Keep the “Jack just learned…” language.
+- Reduce visual weight slightly so they feel like notifications, not main content.
+- Smooth enter/exit animation.
+
+6. Do Not
+- Do not redesign the Memory Graph.
+- Do not move the graph legend.
+- Do not change knowledge import logic.
+- Do not change the right sidebar cards except where needed for placement.
+
+Success criteria:
+- Toasts no longer block the graph.
+- Toasts stay visible for 20 seconds.
+- Timer pauses when user leaves the Memory Graph or browser tab is inactive.
+- Toasts feel helpful instead of intrusive.
