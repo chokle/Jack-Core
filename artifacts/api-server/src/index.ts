@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startJobSystem } from "./lib/jobs";
+import { startVitalitySampler } from "./lib/vitality";
 
 const rawPort = process.env["PORT"];
 
@@ -19,6 +20,10 @@ if (Number.isNaN(port) || port <= 0) {
 // Recover any jobs stranded by a previous process life BEFORE accepting new
 // work, then keep a runtime watchdog sweeping for stale/hung jobs.
 startJobSystem();
+
+// Begin sampling CPU/RAM for the Systems Health heartbeat. Started here (not on
+// import) so importing the vitality module in tests never spins up a timer.
+startVitalitySampler();
 
 app.listen(port, (err) => {
   if (err) {

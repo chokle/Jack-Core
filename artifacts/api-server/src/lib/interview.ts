@@ -14,7 +14,7 @@
  * server is authoritative for the pending question; the model never sees or
  * controls stored state directly.
  */
-import { openai, MODELS } from "./openai.js";
+import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 
 /** The trades a mentor can be interviewed for (UI selection list). */
@@ -274,7 +274,7 @@ ${transcript}
 ${lastAnswered ? "Decide whether to follow up on their last answer or move to a new theme, then ask the next single question." : "Ask a warm, simple opening question."}`;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await chatCompletion({
       model: MODELS.chat,
       messages: [
         { role: "system", content: system },

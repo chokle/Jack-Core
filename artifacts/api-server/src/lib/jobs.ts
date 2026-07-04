@@ -23,7 +23,8 @@
 
 import { randomUUID } from "node:crypto";
 import { supabase } from "./supabase.js";
-import { openai, createEmbedding, createEmbeddings, MODELS } from "./openai.js";
+import { chatCompletion, createEmbedding, createEmbeddings, MODELS } from "./openai.js";
+import { trackJob, trackMemoryWrite } from "./vitality.js";
 import { logger } from "./logger.js";
 import { transcribeFromUrl } from "./transcription.js";
 import { syncVideoGraph, removeVideoGraph, verifyAndRecordGraphWrite } from "./memory-graph.js";
@@ -282,7 +283,7 @@ async function stageAnalyze(videoId: string): Promise<void> {
     .map((c: Record<string, string>) => `${c["code"]}: ${c["name"]} (${c["trade"]})`)
     .join("\n");
 
-  const completion = await openai.chat.completions.create({
+  const completion = await chatCompletion({
     model: MODELS.analysis,
     messages: [
       {
@@ -374,14 +375,16 @@ async function stageIndex(videoId: string): Promise<void> {
   //    verdict we throw, which routes the video through the normal retry ladder
   //    (retry-forward — shared nodes are never rolled back) and, on exhaustion,
   //    leaves it flagged rather than falsely successful.
-  await syncVideoGraph(videoId);
-  const manifest = await runDistillation(videoId);
-  if (manifest) {
-    const verification = await verifyAndRecordGraphWrite(manifest, { attempts, startedAtMs });
-    if (verification.status !== "verified") {
-      throw new Error(`Knowledge write verification ${verification.status}: ${verification.summary}`);
+  await trackMemoryWrite(async () => {
+    await syncVideoGraph(videoId);
+    const manifest = await runDistillation(videoId);
+    if (manifest) {
+      const verification = await verifyAndRecordGraphWrite(manifest, { attempts, startedAtMs });
+      if (verification.status !== "verified") {
+        throw new Error(`Knowledge write verification ${verification.status}: ${verification.summary}`);
+      }
     }
-  }
+  });
 }
 
 const STAGE_RUNNERS: Record<Stage, (videoId: string) => Promise<void>> = {
@@ -514,25 +517,28 @@ export async function runPipeline(
   videoId: string,
   fromStage: Stage = "transcribing",
 ): Promise<void> {
-  const startIdx = STAGE_ORDER.indexOf(fromStage);
-  for (const stage of STAGE_ORDER.slice(startIdx)) {
-    await enterStage(videoId, stage);
-    logger.info({ videoId, stage }, "pipeline stage started");
-    const stopHeartbeat = startHeartbeat(videoId);
-    try {
-      await withTimeout(STAGE_RUNNERS[stage](videoId), STAGE_TIMEOUT_MS[stage], stage);
-    } catch (err) {
-      const outcome = await handleStageFailure(videoId, stage, err);
-      if (outcome === "stopped") {
-        await syncGraphSafe(videoId);
-        return;
+  // Report ingestion as heavy activity ("Writing Memory") for the whole run.
+  await trackJob(async () => {
+    const startIdx = STAGE_ORDER.indexOf(fromStage);
+    for (const stage of STAGE_ORDER.slice(startIdx)) {
+      await enterStage(videoId, stage);
+      logger.info({ videoId, stage }, "pipeline stage started");
+      const stopHeartbeat = startHeartbeat(videoId);
+      try {
+        await withTimeout(STAGE_RUNNERS[stage](videoId), STAGE_TIMEOUT_MS[stage], stage);
+      } catch (err) {
+        const outcome = await handleStageFailure(videoId, stage, err);
+        if (outcome === "stopped") {
+          await syncGraphSafe(videoId);
+          return;
+        }
+      } finally {
+        stopHeartbeat();
       }
-    } finally {
-      stopHeartbeat();
     }
-  }
-  await completePipeline(videoId);
-  await syncGraphSafe(videoId);
+    await completePipeline(videoId);
+    await syncGraphSafe(videoId);
+  });
 }
 
 /** Fire-and-forget enqueue of a pipeline run on the next tick. */

@@ -8,6 +8,7 @@ import competenciesRouter from "./competencies.js";
 import graphRouter from "./graph.js";
 import interviewRouter from "./interview.js";
 import parkingLotRouter from "./parking-lot.js";
+import systemHealthRouter from "./system-health.js";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(competenciesRouter);
 router.use(graphRouter);
 router.use(interviewRouter);
 router.use(parkingLotRouter);
+router.use(systemHealthRouter);
 
 export default router;

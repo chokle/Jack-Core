@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
+import { SystemHealthWidget } from "./SystemHealthWidget";
 
 export type JackView = "graph" | "library" | "interview" | "review";
 
@@ -66,6 +67,7 @@ export function JackShell({
           <span className="text-lg font-extrabold tracking-tight">JACK</span>
           <span className="text-lg font-extrabold tracking-tight text-primary">CORE</span>
         </button>
+        <SystemHealthWidget />
         <button
           type="button"
           onClick={() => setIsPanelOpen(true)}
@@ -113,14 +115,11 @@ export function JackShell({
               CORE
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Memory Graph
             </span>
-            <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE
-            </span>
+            <SystemHealthWidget />
           </div>
         </button>
 

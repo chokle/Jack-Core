@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
-import { openai, createEmbedding, MODELS } from "../lib/openai.js";
+import { chatCompletion, createEmbedding, MODELS } from "../lib/openai.js";
+import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { SESSION_COOKIE, resolveSession } from "../lib/session.js";
@@ -38,6 +39,8 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     if (rpcError) {
       req.log.error({ err: rpcError }, "match_transcript_segments RPC failed");
     }
+    // Report the RAG lookup to the Vitality Engine ("Searching Memory").
+    publish({ type: "memory:search" });
 
     const citations: Array<{
       videoId: string;
@@ -84,7 +87,7 @@ ${usedInternalKnowledge ? `Relevant content from the internal knowledge library:
       { role: "user", content: message },
     ];
 
-    const completion = await openai.chat.completions.create({
+    const completion = await chatCompletion({
       model: MODELS.chat,
       messages,
       max_tokens: 1024,

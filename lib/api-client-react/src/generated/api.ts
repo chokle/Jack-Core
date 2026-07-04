@@ -51,6 +51,7 @@ import type {
   SearchResults,
   StartInterviewInput,
   SubmitAnswerInput,
+  SystemHealthSnapshot,
   UploadUrlRequest,
   UploadUrlResponse,
   VerificationUpdate,
@@ -154,6 +155,84 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSystemHealthUrl = () => {
+
+
+
+
+  return `/api/system-health`
+}
+
+/**
+ * Coarse, DB-free telemetry snapshot for the heartbeat widget. Returns only presentation-level fields (no raw CPU/RAM/queue internals).
+ * @summary Live Systems Health snapshot
+ */
+export const getSystemHealth = async ( options?: RequestInit): Promise<SystemHealthSnapshot> => {
+
+  return customFetch<SystemHealthSnapshot>(getGetSystemHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSystemHealthQueryKey = () => {
+    return [
+    `/api/system-health`
+    ] as const;
+    }
+
+
+export const getGetSystemHealthQueryOptions = <TData = Awaited<ReturnType<typeof getSystemHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSystemHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSystemHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSystemHealth>>> = ({ signal }) => getSystemHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSystemHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSystemHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getSystemHealth>>>
+export type GetSystemHealthQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Live Systems Health snapshot
+ */
+
+export function useGetSystemHealth<TData = Awaited<ReturnType<typeof getSystemHealth>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSystemHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSystemHealthQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

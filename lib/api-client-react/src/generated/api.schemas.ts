@@ -9,6 +9,57 @@ export interface HealthStatus {
   status: string;
 }
 
+export type SystemHealthSnapshotPulseColor = typeof SystemHealthSnapshotPulseColor[keyof typeof SystemHealthSnapshotPulseColor];
+
+
+export const SystemHealthSnapshotPulseColor = {
+  green: 'green',
+  purple: 'purple',
+  orange: 'orange',
+  red: 'red',
+} as const;
+
+export type SystemHealthSnapshotStatus = typeof SystemHealthSnapshotStatus[keyof typeof SystemHealthSnapshotStatus];
+
+
+export const SystemHealthSnapshotStatus = {
+  Healthy: 'Healthy',
+  Listening: 'Listening',
+  Searching_Memory: 'Searching Memory',
+  Reasoning: 'Reasoning',
+  Writing_Memory: 'Writing Memory',
+  Warning: 'Warning',
+} as const;
+
+export type SystemHealthSnapshotState = typeof SystemHealthSnapshotState[keyof typeof SystemHealthSnapshotState];
+
+
+export const SystemHealthSnapshotState = {
+  idle: 'idle',
+  listening: 'listening',
+  searching: 'searching',
+  reasoning: 'reasoning',
+  writing: 'writing',
+  error: 'error',
+} as const;
+
+/**
+ * Coarse Systems Health telemetry for the heartbeat widget.
+ */
+export interface SystemHealthSnapshot {
+  /**
+     * 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
+     * @minimum 0
+     * @maximum 100
+     */
+  vitalityScore: number;
+  /** Beats per minute for the animated heartbeat. */
+  heartbeatBPM: number;
+  pulseColor: SystemHealthSnapshotPulseColor;
+  status: SystemHealthSnapshotStatus;
+  state: SystemHealthSnapshotState;
+}
+
 export type VideoStatus = typeof VideoStatus[keyof typeof VideoStatus];
 
 

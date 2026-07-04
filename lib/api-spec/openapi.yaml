@@ -22,6 +22,8 @@ tags:
     description: Jack Interview Mode — conversational knowledge capture from mentors
   - name: parking-lot
     description: Park an interrupted thought during a chat or interview and resume it later
+  - name: system
+    description: Live Systems Health telemetry (heartbeat widget)
 
 paths:
   /healthz:
@@ -36,6 +38,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /system-health:
+    get:
+      operationId: getSystemHealth
+      tags: [system]
+      summary: Live Systems Health snapshot
+      description: >-
+        Coarse, DB-free telemetry snapshot for the heartbeat widget. Returns
+        only presentation-level fields (no raw CPU/RAM/queue internals).
+      responses:
+        "200":
+          description: Current Systems Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemHealthSnapshot"
 
   /videos:
     get:
@@ -781,6 +799,29 @@ components:
         status:
           type: string
       required: [status]
+
+    SystemHealthSnapshot:
+      type: object
+      description: Coarse Systems Health telemetry for the heartbeat widget.
+      required: [vitalityScore, heartbeatBPM, pulseColor, status, state]
+      properties:
+        vitalityScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
+        heartbeatBPM:
+          type: integer
+          description: Beats per minute for the animated heartbeat.
+        pulseColor:
+          type: string
+          enum: [green, purple, orange, red]
+        status:
+          type: string
+          enum: [Healthy, Listening, Searching Memory, Reasoning, Writing Memory, Warning]
+        state:
+          type: string
+          enum: [idle, listening, searching, reasoning, writing, error]
 
     Video:
       type: object

@@ -19,7 +19,7 @@
  * and text fields are HTML-stripped at write time (defense-in-depth against
  * stored XSS, consistent with the rest of the pipeline).
  */
-import { openai, MODELS } from "./openai.js";
+import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
 import {
@@ -197,7 +197,7 @@ export async function distillTranscript(input: {
       ? competencies.map((c) => `${c.code}: ${c.name} (${c.trade})`).join("\n")
       : "(none)";
 
-  const completion = await openai.chat.completions.create({
+  const completion = await chatCompletion({
     model: MODELS.analysis,
     messages: [
       {
@@ -340,7 +340,7 @@ export async function distillAnswer(input: {
 
   const topicLine = [category, topic].filter(Boolean).join(" / ") || "general";
 
-  const completion = await openai.chat.completions.create({
+  const completion = await chatCompletion({
     model: MODELS.analysis,
     messages: [
       {

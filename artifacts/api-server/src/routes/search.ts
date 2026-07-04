@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { createEmbedding } from "../lib/openai.js";
+import { publish } from "../lib/vitality.js";
 import { SemanticSearchBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
 
@@ -29,6 +30,8 @@ router.post("/search", aiQueryLimiter, async (req, res) => {
       match_count: limit,
       filter_trade: trade ?? null,
     });
+    // Report the RAG lookup to the Vitality Engine ("Searching Memory").
+    publish({ type: "memory:search" });
 
     if (error || !segments?.length) {
       const { data: textResults } = await supabase

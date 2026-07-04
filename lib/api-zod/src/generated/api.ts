@@ -17,6 +17,24 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Coarse, DB-free telemetry snapshot for the heartbeat widget. Returns only presentation-level fields (no raw CPU/RAM/queue internals).
+ * @summary Live Systems Health snapshot
+ */
+export const getSystemHealthResponseVitalityScoreMin = 0;
+export const getSystemHealthResponseVitalityScoreMax = 100;
+
+
+
+export const GetSystemHealthResponse = zod.object({
+  "vitalityScore": zod.number().min(getSystemHealthResponseVitalityScoreMin).max(getSystemHealthResponseVitalityScoreMax).describe('0..100 health index (100 = healthy). Activity is conveyed by state\/BPM.'),
+  "heartbeatBPM": zod.number().describe('Beats per minute for the animated heartbeat.'),
+  "pulseColor": zod.enum(['green', 'purple', 'orange', 'red']),
+  "status": zod.enum(['Healthy', 'Listening', 'Searching Memory', 'Reasoning', 'Writing Memory', 'Warning']),
+  "state": zod.enum(['idle', 'listening', 'searching', 'reasoning', 'writing', 'error'])
+}).describe('Coarse Systems Health telemetry for the heartbeat widget.')
+
+
+/**
  * @summary List all videos in the knowledge library
  */
 export const listVideosQueryLimitDefault = 20;

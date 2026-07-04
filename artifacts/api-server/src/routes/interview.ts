@@ -24,6 +24,7 @@ import {
   WithdrawMentorResponse,
 } from "@workspace/api-zod";
 import { requireAdminSession } from "../lib/admin-auth.js";
+import { publish } from "../lib/vitality.js";
 import {
   previewMentorWithdrawal,
   withdrawMentor,
@@ -319,6 +320,7 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
     let distillationStatus = "verified";
     let distillationError: string | null = null;
     const startedAtMs = Date.now();
+    publish({ type: "memory:write:start" });
     try {
       const result = await runMentorAnswerDistillation({
         mentorProfileId: session["mentor_profile_id"] as string,
@@ -342,11 +344,15 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
       if (verification.status !== "verified") {
         distillationStatus = "failed";
         distillationError = verification.summary;
+        publish({ type: "error" });
       }
     } catch (err) {
       req.log.error({ err, answerId: answerRow["id"] }, "mentor answer distillation failed");
       distillationStatus = "failed";
       distillationError = err instanceof Error ? err.message : String(err);
+      publish({ type: "error" });
+    } finally {
+      publish({ type: "memory:write:end" });
     }
     await supabase
       .from("interview_answers")
@@ -450,6 +456,7 @@ router.post("/interview/answers/:id/redistill", requireAdminSession, async (req,
     let distillationStatus = "verified";
     let distillationError: string | null = null;
     const startedAtMs = Date.now();
+    publish({ type: "memory:write:start" });
     try {
       const result = await runMentorAnswerDistillation({
         mentorProfileId,
@@ -473,11 +480,15 @@ router.post("/interview/answers/:id/redistill", requireAdminSession, async (req,
       if (verification.status !== "verified") {
         distillationStatus = "failed";
         distillationError = verification.summary;
+        publish({ type: "error" });
       }
     } catch (err) {
       req.log.error({ err, answerId: answerRow["id"] }, "mentor answer redistillation failed");
       distillationStatus = "failed";
       distillationError = err instanceof Error ? err.message : String(err);
+      publish({ type: "error" });
+    } finally {
+      publish({ type: "memory:write:end" });
     }
     await supabase
       .from("interview_answers")

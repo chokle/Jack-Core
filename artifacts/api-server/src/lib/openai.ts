@@ -1,10 +1,23 @@
 import OpenAI from "openai";
 import { createHash } from "crypto";
+import { trackInference } from "./vitality.js";
 
 const apiKey = process.env["OPENAI_API_KEY"];
 if (!apiKey) throw new Error("OPENAI_API_KEY is required");
 
 export const openai = new OpenAI({ apiKey });
+
+/**
+ * Chat-completion wrapper that reports "reasoning" activity to the Vitality
+ * Engine (llm:start/end, plus an error signal on failure). Use this instead of
+ * `openai.chat.completions.create` directly so the heartbeat widget reflects
+ * every model call. Non-streaming only — Jack does not stream completions.
+ */
+export function chatCompletion(
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+  return trackInference(() => openai.chat.completions.create(params));
+}
 
 /**
  * Cost-efficient model defaults. These are the only models the app uses by
@@ -56,7 +69,7 @@ export async function createEmbedding(
   }
 
   const request = (async () => {
-    const res = await openai.embeddings.create({ model, input });
+    const res = await trackInference(() => openai.embeddings.create({ model, input }));
     const embedding = res.data[0]?.embedding ?? [];
 
     if (useCache && embedding.length > 0) {
@@ -96,7 +109,7 @@ export async function createEmbeddings(
 
   for (let i = 0; i < inputs.length; i += batchSize) {
     const batch = inputs.slice(i, i + batchSize);
-    const res = await openai.embeddings.create({ model, input: batch });
+    const res = await trackInference(() => openai.embeddings.create({ model, input: batch }));
     // The API may return items out of order — sort by `index` to realign them
     // with the inputs before appending.
     const ordered = [...res.data].sort((a, b) => a.index - b.index);
