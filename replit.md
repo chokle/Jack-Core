@@ -7,7 +7,7 @@ Jack is a single-page AI Trade Intelligence Engine for skilled trades workers �
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
 - `pnpm --filter @workspace/jack-core run dev` — run the frontend (port 22659)
 - `pnpm --filter @workspace/scripts run setup:supabase` — apply the Supabase schema (tables, functions, seed data, storage bucket)
-- `pnpm --filter @workspace/api-server run seed:knowledge` — seed the sample non-video Knowledge Entry (uploads its sketch, embeds it, upserts by a stable id; idempotent)
+- `pnpm --filter @workspace/api-server run seed:knowledge` — seed the sample non-video Knowledge Entries (data-driven `ENTRIES` array across trades; uploads any images, embeds, upserts by stable ids; idempotent)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 

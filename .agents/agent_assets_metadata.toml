@@ -6,3 +6,9 @@ id = "DSVDbGaYiwY4xH_DGr6nt"
 uri = "file://JACK_CONSTITUTION.md"
 type = "text"
 title = "Jack Constitution"
+
+[[outputs]]
+id = "IcZMUsb1ppoFAhth3mbJX"
+uri = "file://attached_assets/stock_images/hvac_manifold_gauges.jpg"
+type = "image"
+title = "HVAC refrigeration manifold gauge set blue and red gauges connected to air conditioning unit"
