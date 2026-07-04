@@ -23,6 +23,8 @@ import {
   showTopicMetrics,
   useGridRepulsion,
 } from "../lib/graph-perf";
+import { MemoryGraphPulseController } from "../lib/memory-graph-pulse";
+import { useSystemHealth } from "../hooks/use-system-health";
 
 /**
  * MemoryGraphCanvas — the interactive centerpiece of the Memory Graph view.
@@ -154,6 +156,17 @@ const MAX_SCALE = 3;
 /** Stable empty set so an omitted `pinnedIds` prop never re-triggers effects. */
 const EMPTY_PINNED: Set<string> = new Set();
 
+/**
+ * Neural-flow pulse color per Systems Health state. Green is both "healthy /
+ * idle" and the fallback when no state is detected (offline / unknown).
+ */
+const PULSE_STATE_RGB: Record<string, RGB> = {
+  green: [110, 231, 183], // healthy / idle
+  purple: [167, 139, 250], // reasoning
+  orange: [251, 146, 60], // learning / memory write
+  red: [248, 113, 113], // error
+};
+
 function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
   c.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -219,6 +232,21 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
     onHoverRef.current = onHover;
     onTogglePinRef.current = onTogglePin;
+
+    // ----- neural flow ("thinking") ----------------------------------------
+    // A live pulse controller drives ambient Core → hub → cluster pulses. Its
+    // color follows the shared Systems Health snapshot (deduped with the
+    // heartbeat widget), defaulting to green when offline / no state is known.
+    const { snapshot, isOffline } = useSystemHealth();
+    const pulseColor: RGB = isOffline
+      ? PULSE_STATE_RGB.green
+      : PULSE_STATE_RGB[snapshot.pulseColor] ?? PULSE_STATE_RGB.green;
+    const pulseColorRef = useRef<RGB>(pulseColor);
+    pulseColorRef.current = pulseColor;
+    const pulseCtrlRef = useRef<MemoryGraphPulseController | null>(null);
+    if (!pulseCtrlRef.current) {
+      pulseCtrlRef.current = new MemoryGraphPulseController();
+    }
 
     // ----- imperative zoom controls (wired to the on-screen buttons) --------
     const applyZoom = (factor: number, cx?: number, cy?: number) => {
@@ -308,6 +336,30 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         adj.get(e.b)!.add(e.a);
       }
       adjacencyRef.current = adj;
+
+      // Derive the neural-flow topology from the LIVE graph (never hardcoded to
+      // specific trades): hubs are the topic cluster-heads bridged to the core,
+      // and a hub's members are its non-core, non-topic neighbors. New clusters
+      // therefore light up automatically as the graph grows.
+      const topicIds = new Set(model.topics.map((t) => t.id));
+      const coreNeighbors = adj.get(CORE_ID);
+      const hubIds: string[] = [];
+      const membersByHub: Record<string, string[]> = {};
+      for (const t of model.topics) {
+        if (!coreNeighbors?.has(t.id)) continue;
+        hubIds.push(t.id);
+        const members: string[] = [];
+        for (const nb of adj.get(t.id) ?? []) {
+          if (nb === CORE_ID || topicIds.has(nb)) continue;
+          members.push(nb);
+        }
+        membersByHub[t.id] = members;
+      }
+      pulseCtrlRef.current?.setTopology({
+        coreId: CORE_ID,
+        hubIds,
+        membersByHub,
+      });
 
       // Measure the canvas directly so layout is correct even when we mount
       // with already-cached data (before the ResizeObserver first fires).
@@ -404,6 +456,9 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       if (!ctx) return;
       reducedRef.current =
         window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      // Neural flow is ambient motion: suppress it under reduced-motion or a
+      // locked view, mirroring how birth / edge-strengthen bursts are gated.
+      pulseCtrlRef.current?.setEnabled(!reducedRef.current && !locked);
 
       const seedStars = (w: number, h: number) => {
         const count = Math.round((w * h) / 7000);
@@ -837,6 +892,51 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           );
         }
 
+        // Neural-flow pulses (ambient "thinking"): a draw-only overlay in world
+        // space, so it rides pan/zoom and never touches pointer handling. Each
+        // pulse is resolved against LIVE node positions every frame, so it stays
+        // glued to nodes as the simulation drifts.
+        const pulseCtrl = pulseCtrlRef.current;
+        if (pulseCtrl && pulseCtrl.hasActivity()) {
+          const pcol = pulseCtrl.getColor();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.lineCap = "round";
+          for (const p of pulseCtrl.getPulses()) {
+            const a = map.get(p.fromId);
+            const b = map.get(p.toId);
+            if (!a || !b) continue;
+            if (offscreen(a) && offscreen(b)) continue;
+            const isPrimary = p.kind === "primary";
+            const hx = a.x + (b.x - a.x) * p.t;
+            const hy = a.y + (b.y - a.y) * p.t;
+            // A short trailing comet toward where it came from reads as a signal
+            // moving through the network rather than a static blinking dot.
+            const tailT = Math.max(0, p.t - (isPrimary ? 0.16 : 0.11));
+            const tx = a.x + (b.x - a.x) * tailT;
+            const ty = a.y + (b.y - a.y) * tailT;
+            const trail = ctx.createLinearGradient(tx, ty, hx, hy);
+            trail.addColorStop(0, rgba(pcol, 0));
+            trail.addColorStop(1, rgba(pcol, isPrimary ? 0.5 : 0.32));
+            ctx.strokeStyle = trail;
+            ctx.lineWidth = (isPrimary ? 2.2 : 1.4) / cam.scale;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+            // Soft glowing head.
+            const headR = isPrimary ? 3.4 : 2.1;
+            const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, headR * 2.4);
+            glow.addColorStop(0, rgba(pcol, isPrimary ? 0.6 : 0.42));
+            glow.addColorStop(1, rgba(pcol, 0));
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(hx, hy, headR * 2.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.lineCap = "butt";
+          ctx.globalCompositeOperation = "source-over";
+        }
+
         // Topic labels.
         ctx.textAlign = "center";
         for (const t of topicsRef.current) {
@@ -917,6 +1017,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             }
           }
           step(dt);
+          const pulse = pulseCtrlRef.current;
+          if (pulse) {
+            pulse.setColor(pulseColorRef.current);
+            pulse.update(t);
+          }
           draw(t);
         }
         raf = requestAnimationFrame(frame);
