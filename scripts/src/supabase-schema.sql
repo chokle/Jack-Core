@@ -377,6 +377,14 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   related_timestamps JSONB NOT NULL DEFAULT '[]',
   -- attachments (future): [{ "url": "...", "kind": "...", "name": "..." }]
   attachments JSONB NOT NULL DEFAULT '[]',
+  -- metadata: free-form JSON bag. Beyond bookkeeping keys (origin, entryNumber),
+  -- it may ALSO carry richer OPTIONAL Knowledge Object fields — discipline,
+  -- skillLevel, environment, scenario, problem, symptoms, rootCause, solution,
+  -- fieldTip, commonMistake, safetyNote, whenNotToUse, alternatives, confidence,
+  -- evidenceCount, conflictingAdvice, verifiedBy, sourceQuality, yearsExperience,
+  -- failureCost, apprenticeStage, relatedKnowledge, originalSource,
+  -- supportingQuote. All optional; no migration needed (this column already
+  -- exists). Schema of record: artifacts/api-server/src/lib/knowledge-schema.ts
   metadata JSONB NOT NULL DEFAULT '{}',
   -- JSON-serialized text-embedding-3-small vector of (title + description +
   -- body), stored like videos.embedding / transcript_segments.embedding.

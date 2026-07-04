@@ -3,6 +3,7 @@ import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase } from "../lib/supabase.js";
 import { createEmbedding } from "../lib/openai.js";
+import type { KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
 
 /**
  * Seed the sample Knowledge Entries — NON-video knowledge assets (written field
@@ -40,7 +41,13 @@ interface Entry {
   body: string;
   /** Optional — an entry with no image renders as a text-only field note. */
   image?: EntryImage;
-  metadata: Record<string, unknown>;
+  /**
+   * Bookkeeping keys (origin, entryNumber, …) plus any of the richer OPTIONAL
+   * Knowledge Object fields (scenario, rootCause, safetyNote, confidence, …).
+   * Every richer field is optional, so existing entries need no change.
+   * See `../lib/knowledge-schema.ts` for the full schema.
+   */
+  metadata: KnowledgeObjectMeta;
 }
 
 const ENTRIES: Entry[] = [
