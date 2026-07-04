@@ -79,6 +79,21 @@ describe("useSystemHealth — offline threshold", () => {
     const { result } = renderHook(() => useSystemHealth());
     expect(result.current.isOffline).toBe(true);
   });
+
+  it("recovers to online once a poll succeeds after going offline", () => {
+    // Drive it offline first (React Query has accumulated failed polls).
+    setQuery({ data: undefined, isLoading: false, failureCount: 2 });
+    const { result, rerender } = renderHook(() => useSystemHealth());
+    expect(result.current.isOffline).toBe(true);
+
+    // Backend comes back: a successful fetch resets failureCount to 0 and
+    // delivers a fresh snapshot. The hook must leave the offline state.
+    setQuery({ data: HEALTHY, isLoading: false, failureCount: 0 });
+    rerender();
+    expect(result.current.isOffline).toBe(false);
+    expect(result.current.snapshot.status).toBe("Reasoning");
+    expect(result.current.snapshot.heartbeatBPM).toBe(84);
+  });
 });
 
 describe("SystemHealthWidget — never falsely healthy", () => {
@@ -116,5 +131,28 @@ describe("SystemHealthWidget — never falsely healthy", () => {
     setQuery({ data: undefined, isLoading: false, failureCount: 1 });
     render(<SystemHealthWidget />);
     expect(screen.queryByText("Offline")).toBeNull();
+  });
+
+  it("leaves Offline and shows the live pulse once the backend recovers", () => {
+    // Start offline: repeated failures, flatline "--" BPM, Offline label.
+    setQuery({ data: undefined, isLoading: false, failureCount: 2 });
+    const { rerender } = render(<SystemHealthWidget />);
+    expect(screen.getByText("Offline")).toBeTruthy();
+    expect(screen.getByText("--")).toBeTruthy();
+
+    // Backend recovers: a successful poll resets failureCount and returns a
+    // snapshot. The widget must drop the Offline state and report the pulse.
+    setQuery({ data: HEALTHY, isLoading: false, failureCount: 0 });
+    rerender(<SystemHealthWidget />);
+
+    expect(screen.queryByText("Offline")).toBeNull();
+    expect(screen.queryByText("--")).toBeNull();
+    expect(screen.getByText("Reasoning")).toBeTruthy();
+    expect(screen.getByText("84")).toBeTruthy();
+
+    const widget = screen.getByRole("img");
+    expect(widget.getAttribute("aria-label")).toContain("Reasoning");
+    expect(widget.getAttribute("aria-label")).toContain("84 beats per minute");
+    expect(widget.getAttribute("aria-label")).not.toContain("offline");
   });
 });
