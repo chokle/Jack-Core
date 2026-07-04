@@ -25,6 +25,23 @@ export const aiPipelineLimiter = rateLimit({
 });
 
 /**
+ * Rate limiter for POST /videos/ingest — the bulk-capable upload route.
+ * Onboarding a library (20–50 clips in one session) would trip the 10/15min
+ * aiPipelineLimiter almost immediately. This route is admin-gated
+ * (requireAdminSession) and each request also passes through the server-side
+ * pipeline concurrency gate, so a higher ceiling is safe: 120 requests per 15
+ * minutes per IP supports a real bulk upload while still capping automation.
+ */
+export const ingestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many uploads — please try again later." },
+  keyGenerator,
+});
+
+/**
  * Rate limiter for chat and semantic search endpoints.
  * Each request calls OpenAI embeddings plus optionally a chat completion.
  * 30 requests per minute per IP allows normal interactive use while

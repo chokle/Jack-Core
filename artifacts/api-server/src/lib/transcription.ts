@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -18,6 +18,10 @@ export interface TranscriptSegment {
 export interface TranscriptionResult {
   text: string;
   segments: TranscriptSegment[];
+  /** Source video duration in seconds, or null if it could not be probed. */
+  durationSeconds: number | null;
+  /** A scaled JPEG poster frame, or null if extraction failed. */
+  thumbnailJpeg: Buffer | null;
 }
 
 /**
@@ -144,7 +148,55 @@ async function probeDurationSeconds(file: string): Promise<number> {
   });
 }
 
-async function transcribeFile(path: string): Promise<TranscriptionResult> {
+/**
+ * Best-effort duration probe. Returns null instead of throwing so a probe
+ * failure never fails the transcription job — duration is enrichment only.
+ */
+async function probeDurationSafe(file: string): Promise<number | null> {
+  try {
+    return await probeDurationSeconds(file);
+  } catch (err) {
+    logger.warn({ err }, "transcribe: duration probe failed — continuing");
+    return null;
+  }
+}
+
+/**
+ * Best-effort poster-frame extraction. Seeks 1s in for a representative frame
+ * (skips a black lead-in) and falls back to the very first frame for short
+ * clips. Scales to 640px wide (even height) at moderate quality. Returns null
+ * instead of throwing — a thumbnail is enrichment and must never fail the job.
+ */
+async function extractThumbnailSafe(input: string, output: string): Promise<Buffer | null> {
+  for (const seek of ["1", "0"]) {
+    try {
+      await run("ffmpeg", [
+        "-nostdin",
+        "-y",
+        "-ss",
+        seek,
+        "-i",
+        input,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=640:-2",
+        "-q:v",
+        "3",
+        output,
+      ]);
+      const buf = await readFile(output);
+      if (buf.length > 0) return buf;
+    } catch (err) {
+      logger.warn({ err, seek }, "transcribe: thumbnail extraction attempt failed");
+    }
+  }
+  return null;
+}
+
+async function transcribeFile(
+  path: string,
+): Promise<{ text: string; segments: TranscriptSegment[] }> {
   const transcription = await openai.audio.transcriptions.create({
     file: createReadStream(path),
     model: MODELS.transcription,
@@ -163,7 +215,9 @@ async function transcribeFile(path: string): Promise<TranscriptionResult> {
  * Download a video, extract speech audio, and transcribe it with Whisper,
  * chunking automatically when the audio exceeds Whisper's upload limit. Segment
  * timestamps from every chunk are offset by the chunk's start time so the final
- * transcript timeline is continuous. All temp files are removed before return.
+ * transcript timeline is continuous. Also extracts a poster-frame thumbnail and
+ * the source duration (both best-effort — never fatal). All temp files are
+ * removed before return.
  */
 export async function transcribeFromUrl(videoUrl: string): Promise<TranscriptionResult> {
   // Reject oversized sources before any download or ffmpeg work starts.
@@ -174,12 +228,18 @@ export async function transcribeFromUrl(videoUrl: string): Promise<Transcription
     const source = join(dir, "source");
     await downloadToFile(videoUrl, source);
 
+    // Enrichment (best-effort, never fatal): probe the source duration and grab
+    // a poster frame from the original video while the temp file still exists.
+    const durationSeconds = await probeDurationSafe(source);
+    const thumbnailJpeg = await extractThumbnailSafe(source, join(dir, "thumb.jpg"));
+
     const audio = join(dir, "audio.m4a");
     await extractAudio(source, audio);
     const { size } = await stat(audio);
 
     if (size <= SINGLE_PASS_MAX_BYTES) {
-      return await transcribeFile(audio);
+      const { text, segments } = await transcribeFile(audio);
+      return { text, segments, durationSeconds, thumbnailJpeg };
     }
 
     const duration = await probeDurationSeconds(audio);
@@ -210,7 +270,12 @@ export async function transcribeFromUrl(videoUrl: string): Promise<Transcription
       await rm(chunkPath, { force: true });
     }
 
-    return { text: texts.join(" ").trim(), segments: allSegments };
+    return {
+      text: texts.join(" ").trim(),
+      segments: allSegments,
+      durationSeconds,
+      thumbnailJpeg,
+    };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

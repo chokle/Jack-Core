@@ -7,7 +7,18 @@ vi.mock("../supabase.js", async () => {
 
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
-  return { createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
+  return {
+    // The distiller calls the `chatCompletion` wrapper (Vitality-tracked in
+    // prod). Delegate to the shared fake openai at call time so the test's
+    // `create` stub is used.
+    chatCompletion: (params: unknown) =>
+      (m.openai as { chat: { completions: { create: (p: unknown) => unknown } } }).chat.completions.create(
+        params,
+      ),
+    createEmbedding: m.createEmbedding,
+    MODELS: m.MODELS,
+    openai: m.openai,
+  };
 });
 
 import {

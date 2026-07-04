@@ -15,6 +15,13 @@ vi.mock("../supabase.js", async () => {
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
   return {
+    // The pipeline calls the `chatCompletion` wrapper (which in prod wraps
+    // openai.chat.completions.create with Vitality tracking). Delegate to the
+    // shared fake openai at call time so the test's `create` stub is picked up.
+    chatCompletion: (params: unknown) =>
+      (m.openai as { chat: { completions: { create: (p: unknown) => unknown } } }).chat.completions.create(
+        params,
+      ),
     createEmbedding: m.createEmbedding,
     createEmbeddings: async (texts: string[]) =>
       Promise.all(texts.map((t) => m.createEmbedding(t))),
@@ -43,6 +50,7 @@ import {
   MAX_ATTEMPTS,
   UPLOADING_TTL_MS,
   backoffDelayMs,
+  enqueuePipeline,
   recoverJobs,
   runPipeline,
 } from "../jobs.js";
@@ -431,5 +439,51 @@ describe("runPipeline — strict knowledge-write verification at indexing", () =
 
     expect(verifyAndRecordGraphWrite).not.toHaveBeenCalled();
     expect(video("v1")["status"]).toBe("completed");
+  });
+});
+
+describe("enqueuePipeline — bulk-upload concurrency gate", () => {
+  it("caps concurrent pipeline runs and drains the backlog to completion", async () => {
+    // Four videos already claimed for transcription (exactly how the ingest
+    // route leaves them) enqueued at once — the bulk-upload scenario.
+    for (const id of ["g1", "g2", "g3", "g4"]) {
+      seedVideo({
+        id,
+        status: "transcribing",
+        processing_stage: "transcribing",
+        claimed_by: INSTANCE_ID,
+        heartbeat_at: iso(0),
+      });
+    }
+
+    // Hold each transcription open until explicitly released, so the number of
+    // in-flight runs is observable.
+    const releasers: Array<() => void> = [];
+    const result = { text: "t", segments: [], durationSeconds: null, thumbnailJpeg: null };
+    transcribeFromUrl.mockImplementation(
+      () => new Promise((resolve) => releasers.push(() => resolve(result))),
+    );
+    createCompletion.mockResolvedValue(goodCompletion());
+    runDistillation.mockResolvedValue(null);
+
+    for (const id of ["g1", "g2", "g3", "g4"]) enqueuePipeline(id, "transcribing");
+
+    // Only two start; the other two wait behind the gate rather than stampeding.
+    await vi.waitFor(() => expect(transcribeFromUrl).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(transcribeFromUrl).toHaveBeenCalledTimes(2);
+
+    // Releasing in-flight runs lets the queued videos through; everything drains
+    // to completed (and the gate ends empty — no leaked slots).
+    await vi.waitFor(
+      () => {
+        releasers.splice(0).forEach((release) => release());
+        expect(transcribeFromUrl).toHaveBeenCalledTimes(4);
+        for (const id of ["g1", "g2", "g3", "g4"]) {
+          expect(video(id)["status"]).toBe("completed");
+        }
+      },
+      { timeout: 2000 },
+    );
   });
 });

@@ -79,7 +79,16 @@ export function KnowledgeGraph() {
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const nodesRef = useRef<Map<string, GraphNode>>(new Map());
   const edgesRef = useRef<GraphEdge[]>([]);
-  const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
+  // Seed with the real viewport up front: the graph-construction effect runs
+  // BEFORE the render-loop effect's resize(), so a {w:1,h:1} seed would spawn
+  // every node at (0.5, 0.5). That pile of coincident nodes produces degenerate
+  // (zero-length) draw geometry, which Chrome renders as a canvas-spanning
+  // gradient spike (the stray blue crosshair) until the sim spreads them out.
+  const sizeRef = useRef({
+    w: typeof window !== "undefined" ? window.innerWidth || 1 : 1,
+    h: typeof window !== "undefined" ? window.innerHeight || 1 : 1,
+    dpr: 1,
+  });
   const pointerRef = useRef({ x: 0, y: 0 });
   const reducedMotionRef = useRef(false);
 
@@ -352,6 +361,19 @@ export function KnowledgeGraph() {
       r *= 0.4 + 0.6 * grow;
 
       const glowR = r * 5;
+      // Guard the gradient axis: a non-finite node position or a non-positive
+      // radius makes createRadialGradient degenerate, which Chrome/Skia renders
+      // as a canvas-spanning spike (the stray blue crosshair). A node in that
+      // state has nothing meaningful to draw, so skip it entirely — same
+      // philosophy as pulseSegment() guarding the neural-flow linear gradient.
+      if (
+        !Number.isFinite(n.x) ||
+        !Number.isFinite(n.y) ||
+        !Number.isFinite(glowR) ||
+        glowR <= 0
+      ) {
+        return;
+      }
       const g = c.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowR);
       g.addColorStop(0, rgba(col, 0.5 * intensity));
       g.addColorStop(0.4, rgba(col, 0.12 * intensity));

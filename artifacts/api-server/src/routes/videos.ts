@@ -12,7 +12,7 @@ import {
   removeGraphSafe,
   CLAIMABLE_STATUSES,
 } from "../lib/jobs.js";
-import { aiPipelineLimiter } from "../lib/rate-limit.js";
+import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
 import { requireAdminSession } from "../lib/admin-auth.js";
 import {
   ListVideosQueryParams,
@@ -34,6 +34,31 @@ const router = Router();
 // routes module. The implementations now live in the durable job system.
 export { runAnalysis } from "../lib/jobs.js";
 
+/**
+ * Map a raw snake_case `videos` row to the camelCase `Video` shape the OpenAPI
+ * contract (and the React client) expect. The list and recent endpoints both
+ * `select("*")`, so without this the client reads `undefined` for thumbnailUrl,
+ * videoUrl, duration, competencyCodes, etc. (the detail endpoint already maps).
+ */
+function toVideoResponse(v: Record<string, unknown>) {
+  return {
+    id: v["id"],
+    title: v["title"],
+    description: v["description"] ?? null,
+    trade: v["trade"] ?? null,
+    thumbnailUrl: v["thumbnail_url"] ?? null,
+    videoUrl: v["video_url"] ?? null,
+    duration: v["duration"] ?? null,
+    status: v["status"],
+    competencyCodes: v["competency_codes"] ?? [],
+    tags: v["tags"] ?? [],
+    attempts: v["attempts"] ?? null,
+    lastError: v["last_error"] ?? null,
+    createdAt: v["created_at"],
+    updatedAt: v["updated_at"] ?? null,
+  };
+}
+
 router.get("/videos", async (req, res) => {
   try {
     const query = ListVideosQueryParams.safeParse(req.query);
@@ -54,7 +79,7 @@ router.get("/videos", async (req, res) => {
     const { data, error, count } = await dbQuery;
     if (error) throw error;
 
-    return res.json({ videos: data ?? [], total: count ?? 0 });
+    return res.json({ videos: (data ?? []).map(toVideoResponse), total: count ?? 0 });
   } catch (err) {
     req.log.error({ err }, "listVideos error");
     return res.status(500).json({ error: "Failed to list videos" });
@@ -130,7 +155,7 @@ const upload = multer({
 router.post(
   "/videos/ingest",
   requireAdminSession,
-  aiPipelineLimiter,
+  ingestLimiter,
   upload.single("file"),
   async (req, res) => {
     const tempPath = req.file?.path;
@@ -296,7 +321,7 @@ router.get("/videos/recent", async (req, res) => {
       .order("created_at", { ascending: false })
       .limit(6);
     if (error) throw error;
-    return res.json(data ?? []);
+    return res.json((data ?? []).map(toVideoResponse));
   } catch (err) {
     req.log.error({ err }, "getRecentVideos error");
     return res.status(500).json({ error: "Failed to get recent videos" });

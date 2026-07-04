@@ -228,9 +228,12 @@ async function stageTranscribe(videoId: string): Promise<void> {
     throw new UnretryableError("Video has no media URL to transcribe");
   }
 
-  const { text: fullTranscript, segments: rawSegments } = await transcribeFromUrl(
-    video.video_url as string,
-  );
+  const {
+    text: fullTranscript,
+    segments: rawSegments,
+    durationSeconds,
+    thumbnailJpeg,
+  } = await transcribeFromUrl(video.video_url as string);
 
   const segments = rawSegments.map((s) => ({
     video_id: videoId,
@@ -257,9 +260,31 @@ async function stageTranscribe(videoId: string): Promise<void> {
     if (insertErr) throw insertErr;
   }
 
+  // Best-effort enrichment: upload the poster frame to the existing public
+  // bucket at a deterministic path (upsert => idempotent re-runs) and record
+  // duration + thumbnail_url in the SAME update as the transcript. A thumbnail
+  // or duration failure must NEVER fail transcription — a usable transcript is
+  // the point of this stage (mirrors the analysis-exhaustion philosophy).
+  let thumbnailUrl: string | null = null;
+  if (thumbnailJpeg && thumbnailJpeg.length > 0) {
+    const thumbPath = `thumbnails/${videoId}.jpg`;
+    const { error: thumbErr } = await supabase.storage
+      .from("jack-videos")
+      .upload(thumbPath, thumbnailJpeg, { contentType: "image/jpeg", upsert: true });
+    if (thumbErr) {
+      logger.warn({ err: thumbErr, videoId }, "thumbnail upload failed — continuing");
+    } else {
+      thumbnailUrl = `${process.env["SUPABASE_URL"]}/storage/v1/object/public/jack-videos/${thumbPath}`;
+    }
+  }
+
+  const videoUpdate: Record<string, unknown> = { transcript: fullTranscript };
+  if (durationSeconds != null) videoUpdate["duration"] = durationSeconds;
+  if (thumbnailUrl) videoUpdate["thumbnail_url"] = thumbnailUrl;
+
   const { error: updateErr } = await supabase
     .from("videos")
-    .update({ transcript: fullTranscript })
+    .update(videoUpdate)
     .eq("id", videoId);
   if (updateErr) throw updateErr;
 }
@@ -541,12 +566,60 @@ export async function runPipeline(
   });
 }
 
-/** Fire-and-forget enqueue of a pipeline run on the next tick. */
+// ---------------------------------------------------------------------------
+// Pipeline concurrency gate. A bulk upload can enqueue dozens of videos at once;
+// ungated, each would spawn its own download + ffmpeg + Whisper + embedding work
+// simultaneously, exhausting disk/CPU and tripping OpenAI rate limits. Bound the
+// number of enqueued pipelines running at once (FIFO). Rows are durable, so
+// anything still waiting when the process restarts is picked up by the recovery
+// sweep. (Recovery itself resumes through a separate chain already serialized to
+// one at a time.)
+// ---------------------------------------------------------------------------
+const MAX_CONCURRENT_PIPELINES = 2;
+let activePipelines = 0;
+const pipelineWaiters: Array<() => void> = [];
+
+function acquirePipelineSlot(): Promise<void> {
+  if (activePipelines < MAX_CONCURRENT_PIPELINES) {
+    activePipelines++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    pipelineWaiters.push(resolve);
+  });
+}
+
+function releasePipelineSlot(): void {
+  // Hand the slot directly to the next waiter (keeps the active count steady) or
+  // free it when nobody is queued.
+  const next = pipelineWaiters.shift();
+  if (next) next();
+  else activePipelines--;
+}
+
+/** Fire-and-forget enqueue of a pipeline run, bounded by the concurrency gate. */
 export function enqueuePipeline(videoId: string, fromStage: Stage = "transcribing"): void {
-  setImmediate(() => {
-    runPipeline(videoId, fromStage).catch((err: unknown) => {
+  setImmediate(async () => {
+    // The caller already claimed the row (status flipped to a stage, claimed_by
+    // = us). While it waits behind the gate it isn't yet running, so nothing
+    // would refresh its heartbeat — keep one alive so the watchdog doesn't
+    // classify a healthy, queued video as stale and start a duplicate run. The
+    // heartbeat write is scoped to `claimed_by = INSTANCE_ID`, so a run whose
+    // claim we lost is a harmless no-op. runPipeline starts its own per-stage
+    // heartbeat once we hand off.
+    const stopWaitHeartbeat = startHeartbeat(videoId);
+    try {
+      await acquirePipelineSlot();
+    } finally {
+      stopWaitHeartbeat();
+    }
+    try {
+      await runPipeline(videoId, fromStage);
+    } catch (err: unknown) {
       logger.error({ err, videoId }, "pipeline run crashed outside stage handling");
-    });
+    } finally {
+      releasePipelineSlot();
+    }
   });
 }
 

@@ -93,6 +93,14 @@ CREATE INDEX IF NOT EXISTS idx_videos_trade ON videos(trade);
 CREATE INDEX IF NOT EXISTS idx_segments_video_id ON transcript_segments(video_id);
 CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
 
+-- ANN index for fast semantic retrieval at scale (thousands of videos /
+-- 100k+ transcript segments). HNSW builds fine on an empty or growing table
+-- (unlike IVFFlat, which needs representative data and list tuning at build
+-- time). match_transcript_segments' `ORDER BY ts.embedding <=> query_embedding`
+-- uses this cosine index automatically.
+CREATE INDEX IF NOT EXISTS idx_segments_embedding_hnsw
+  ON transcript_segments USING hnsw (embedding vector_cosine_ops);
+
 -- match_transcript_segments function (for semantic search + Ask Jack)
 CREATE OR REPLACE FUNCTION match_transcript_segments(
   query_embedding vector(1536),
@@ -106,6 +114,10 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql AS $$
 BEGIN
+  -- Raise the HNSW candidate list so a match_count up to the search route's
+  -- maximum (50) stays accurate (default hnsw.ef_search is 40). SET LOCAL keeps
+  -- it scoped to this function's transaction.
+  SET LOCAL hnsw.ef_search = 100;
   RETURN QUERY
   SELECT ts.id, ts.video_id, v.title AS video_title, v.thumbnail_url, v.trade,
     ts.start_time, ts.end_time, ts.text,
