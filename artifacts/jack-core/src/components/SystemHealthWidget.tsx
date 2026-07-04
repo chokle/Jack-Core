@@ -115,28 +115,40 @@ export function SystemHealthWidget({ className }: { className?: string }) {
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      // Dim base trace so the traveling pulse stands out against it.
-      ctx.globalAlpha = 0.45;
+      // Dim base trace so the traveling pulse clearly stands out against it.
+      ctx.globalAlpha = 0.28;
       ctx.shadowColor = colorRef.current;
-      ctx.shadowBlur = 3;
+      ctx.shadowBlur = 2;
       ctx.stroke();
 
       // A bright glowing "pulse" that flows left→right (heart → label) along the
-      // trace, brightest at its head and fading out along a short trail.
-      const sweepSpeed = 1 / 1.4; // ~1.4s to cross the bar
+      // trace: a fading trail that brightens toward a white comet head.
+      const sweepSpeed = 1 / 1.6; // ~1.6s to cross the bar
       const head = frac(tSec * sweepSpeed) * w;
-      const trail = w * 0.42;
-      ctx.shadowBlur = 6;
+      const trail = w * 0.5;
+      ctx.shadowColor = colorRef.current;
+      ctx.shadowBlur = 8;
       const startX = Math.max(1, Math.ceil(head - trail));
-      const endX = Math.floor(head);
+      const endX = Math.min(w, Math.floor(head));
       for (let x = startX; x <= endX; x++) {
         const d = (x - (head - trail)) / trail; // 0 at tail → 1 at head
-        ctx.globalAlpha = d * d;
+        ctx.globalAlpha = Math.max(0, d * d);
         ctx.beginPath();
         ctx.moveTo(x - 1, ys[x - 1]);
         ctx.lineTo(x, ys[x]);
         ctx.stroke();
       }
+
+      // Bright comet head — a white core with a colored glow — so the pulse is
+      // unmistakable even in the tiny sidebar trace.
+      const hx = Math.min(w, Math.max(0, Math.round(head)));
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(hx, ys[hx], 1.6, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
     };
@@ -214,7 +226,7 @@ export function SystemHealthWidget({ className }: { className?: string }) {
         }
         aria-hidden="true"
       />
-      <canvas ref={canvasRef} className="h-4 w-11 shrink-0" aria-hidden="true" />
+      <canvas ref={canvasRef} className="h-4 w-14 shrink-0" aria-hidden="true" />
       <span
         className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline"
         style={{ color }}
