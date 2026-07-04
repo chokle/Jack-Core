@@ -22,6 +22,11 @@ A canvas gradient whose axis is **finite but degenerate** (zero-length linear ax
 ## The one real bug that WAS fixed
 `sizeRef` was seeded `{w:1,h:1}`; the graph-construction effect runs BEFORE the render-loop effect's `resize()`, so on every mount of a non-graph page all non-core nodes spawned in a pile at the top-left corner and visibly drifted out for the first seconds. Now seeded from live `window.innerWidth/innerHeight`. Worthwhile regardless, but it is NOT confirmed to be the crosshair.
 
+## The SEPARATE "far-left thin blue vertical line" on the graph page (SOLVED — was NOT canvas)
+Different artifact from the crosshair above: a steady thin blue vertical line pinned to the FAR LEFT of the Living Memory graph stage, present in every state (idle/animating/panned/zoomed/reduced-motion/locked). Root cause was NOT the canvas at all — it was the `JackShell` sidebar's `border-r border-sidebar-border` (token `--sidebar-border: 217.2 32.6% 17.5%`, hue 217 = slate-blue) sitting exactly at the graph stage's left edge. Fix: drop the `border-r` (the sidebar's `bg-sidebar/85` panel already reads as distinct).
+**Decisive principle (use this first next time):** a line that stays IDENTICAL across pan/zoom/lock CANNOT be canvas-drawn content — canvas content transforms with the camera. So it's DOM/CSS, not the draw loop. Confirm in one shot by temporarily recoloring the suspected DOM border bright red and screenshotting.
+**Don't repeat the wasted path:** instrumenting the canvas draw loop (edge/pulse span detector) proved the max stroke was only ~300px vs an 720–870px span — i.e. no canvas primitive spans the axis. Edges/pulses are the ONLY strokes; everything else is circle/rect/full-bg fills. Skip that and check DOM borders first when the line is state-invariant.
+
 ## If it recurs — decisive next step (do this BEFORE adding more guards)
 Bisect empirically, don't pile on inert guards:
 1. Temporarily `display:none` (or unmount) the `KnowledgeGraph` wallpaper and have the user confirm the crosshair's presence/absence over time. This proves/disproves this canvas as the source in one step.

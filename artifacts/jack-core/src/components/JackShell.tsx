@@ -89,7 +89,7 @@ export function JackShell({
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] transform flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar backdrop-blur-md transition-transform duration-300 ease-out md:static md:z-auto md:w-60 md:max-w-none md:translate-x-0 md:bg-sidebar/85 md:transition-none ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[85vw] max-w-[320px] transform flex-col overflow-y-auto bg-sidebar backdrop-blur-md transition-transform duration-300 ease-out md:static md:z-auto md:w-60 md:max-w-none md:translate-x-0 md:bg-sidebar/85 md:transition-none ${
           isPanelOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
