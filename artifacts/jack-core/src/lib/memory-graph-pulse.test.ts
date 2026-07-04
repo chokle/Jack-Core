@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MemoryGraphPulseController,
+  pulseSegment,
   type PulseTopology,
 } from "./memory-graph-pulse";
 
@@ -166,5 +167,54 @@ describe("MemoryGraphPulseController", () => {
     expect(c.getColor()).toEqual([110, 231, 183]);
     c.setColor([167, 139, 250]);
     expect(c.getColor()).toEqual([167, 139, 250]);
+  });
+});
+
+describe("pulseSegment (degenerate-geometry guard)", () => {
+  it("returns a short comet trail behind the head for a normal pulse", () => {
+    // Horizontal edge (0,0) → (100,0), halfway, 0.16 trail.
+    const seg = pulseSegment(0, 0, 100, 0, 0.5, 0.16);
+    expect(seg).not.toBeNull();
+    expect(seg!.hx).toBeCloseTo(50, 5);
+    expect(seg!.hy).toBeCloseTo(0, 5);
+    // Tail sits 0.16 of the edge behind the head.
+    expect(seg!.tx).toBeCloseTo(34, 5);
+    expect(seg!.ty).toBeCloseTo(0, 5);
+    // The trail spans only a small fraction of the edge, never the whole edge.
+    expect(seg!.hx - seg!.tx).toBeCloseTo(16, 5);
+  });
+
+  it("draws nothing at t=0 where head and tail coincide", () => {
+    expect(pulseSegment(0, 0, 100, 0, 0, 0.16)).toBeNull();
+  });
+
+  it("draws nothing on a zero-length edge (overlapping nodes)", () => {
+    // Both endpoints at the same point — the whole edge is degenerate.
+    expect(pulseSegment(42, 42, 42, 42, 0.5, 0.16)).toBeNull();
+  });
+
+  it("draws nothing when any endpoint is non-finite", () => {
+    expect(pulseSegment(NaN, 0, 100, 0, 0.5, 0.16)).toBeNull();
+    expect(pulseSegment(0, 0, Infinity, 0, 0.5, 0.16)).toBeNull();
+    expect(pulseSegment(0, -Infinity, 100, 0, 0.5, 0.16)).toBeNull();
+    expect(pulseSegment(0, 0, 100, NaN, 0.5, 0.16)).toBeNull();
+  });
+
+  it("keeps the trail short and glued to a vertical (top-hub) edge", () => {
+    // Core (0,0) directly below the top hub (0,-200): the pulse must read as a
+    // short travelling comet, not a persistent full-height vertical line.
+    const seg = pulseSegment(0, 0, 0, -200, 0.5, 0.16);
+    expect(seg).not.toBeNull();
+    expect(seg!.hx).toBeCloseTo(0, 5);
+    expect(seg!.hy).toBeCloseTo(-100, 5);
+    // Trail length is 0.16 * 200 = 32 world units — a small fraction of 200.
+    expect(Math.abs(seg!.hy - seg!.ty)).toBeCloseTo(32, 5);
+    expect(seg!.tx).toBeCloseTo(0, 5);
+  });
+
+  it("clamps head progress to [0,1] so an overshot pulse never runs past the edge", () => {
+    const seg = pulseSegment(0, 0, 100, 0, 1.4, 0.16);
+    expect(seg).not.toBeNull();
+    expect(seg!.hx).toBeCloseTo(100, 5);
   });
 });

@@ -23,7 +23,10 @@ import {
   showTopicMetrics,
   useGridRepulsion,
 } from "../lib/graph-perf";
-import { MemoryGraphPulseController } from "../lib/memory-graph-pulse";
+import {
+  MemoryGraphPulseController,
+  pulseSegment,
+} from "../lib/memory-graph-pulse";
 import { useSystemHealth } from "../hooks/use-system-health";
 
 /**
@@ -907,13 +910,22 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             if (!a || !b) continue;
             if (offscreen(a) && offscreen(b)) continue;
             const isPrimary = p.kind === "primary";
-            const hx = a.x + (b.x - a.x) * p.t;
-            const hy = a.y + (b.y - a.y) * p.t;
             // A short trailing comet toward where it came from reads as a signal
             // moving through the network rather than a static blinking dot.
-            const tailT = Math.max(0, p.t - (isPrimary ? 0.16 : 0.11));
-            const tx = a.x + (b.x - a.x) * tailT;
-            const ty = a.y + (b.y - a.y) * tailT;
+            // Resolve it through the guarded geometry helper: a degenerate
+            // segment (non-finite node position, or a coincident head/tail at
+            // t=0 / on a zero-length edge) returns null and draws nothing, so
+            // createLinearGradient can never spike into a canvas-spanning line.
+            const seg = pulseSegment(
+              a.x,
+              a.y,
+              b.x,
+              b.y,
+              p.t,
+              isPrimary ? 0.16 : 0.11,
+            );
+            if (!seg) continue;
+            const { tx, ty, hx, hy } = seg;
             const trail = ctx.createLinearGradient(tx, ty, hx, hy);
             trail.addColorStop(0, rgba(pcol, 0));
             trail.addColorStop(1, rgba(pcol, isPrimary ? 0.5 : 0.32));

@@ -242,6 +242,55 @@ export class MemoryGraphPulseController {
   }
 }
 
+/** A resolved comet segment in world space: a short trail (tail → head). */
+export interface PulseSegment {
+  /** Trailing (faded) end of the comet. */
+  tx: number;
+  ty: number;
+  /** Leading (bright) head of the comet — where the pulse currently is. */
+  hx: number;
+  hy: number;
+}
+
+/**
+ * Resolve a pulse's short comet segment along an edge from LIVE endpoint
+ * positions and progress, or `null` when the geometry is degenerate.
+ *
+ * The renderer feeds the returned coords straight into `createLinearGradient`;
+ * a non-finite or zero-length gradient axis renders as a canvas-spanning spike
+ * (the stray "blue line"), so this guards both cases:
+ *   - any non-finite endpoint (a node briefly resolving to NaN/Infinity) → null
+ *   - a head and tail that coincide (t at the very start, or a zero-length edge
+ *     where the two nodes overlap) → null
+ * The trail is always at most `trailFraction` of the edge, so a valid pulse is a
+ * short comet, never the whole edge.
+ */
+export function pulseSegment(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  t: number,
+  trailFraction: number,
+): PulseSegment | null {
+  if (
+    !Number.isFinite(ax) ||
+    !Number.isFinite(ay) ||
+    !Number.isFinite(bx) ||
+    !Number.isFinite(by)
+  ) {
+    return null;
+  }
+  const head = Math.max(0, Math.min(1, t));
+  const tail = Math.max(0, head - Math.max(0, trailFraction));
+  const hx = ax + (bx - ax) * head;
+  const hy = ay + (by - ay) * head;
+  const tx = ax + (bx - ax) * tail;
+  const ty = ay + (by - ay) * tail;
+  if (hx === tx && hy === ty) return null;
+  return { tx, ty, hx, hy };
+}
+
 /** Random distinct `count` items from `items` (partial Fisher–Yates). */
 function sampleSubset<T>(items: T[], count: number, random: () => number): T[] {
   const copy = items.slice();
