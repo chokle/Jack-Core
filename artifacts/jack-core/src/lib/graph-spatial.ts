@@ -144,6 +144,112 @@ export function withSeededTrades(model: GraphModel): GraphModel {
   return finalizeModel(topics, nodes, edges);
 }
 
+/**
+ * Stamp each topic hub with how many non-video Knowledge Entries are filed under
+ * its trade (from the `/knowledge/stats` endpoint), so a trade that has only ever
+ * been taught through written field notes still reads as populated instead of a
+ * virgin ring. Pure and immutable: only topic nodes whose count actually changed
+ * are rebuilt, and the model is returned untouched when nothing moved (so the
+ * canvas doesn't re-sim on an identical poll).
+ *
+ * `contentCount` (via `buildHierarchy`) folds this in; the cluster `metrics`,
+ * `counts`, and maturity are deliberately left alone — Knowledge Entries are not
+ * graph concepts, so they must not inflate the "Concepts" counter or the
+ * inspector's per-kind breakdown.
+ */
+export function withKnowledgeCounts(
+  model: GraphModel,
+  countsByTrade: Record<string, number>,
+): GraphModel {
+  let changed = false;
+  const nodes = model.nodes.map((n) => {
+    if (n.kind !== "topic") return n;
+    const trade = n.meta.trade ?? n.label;
+    const count = countsByTrade[trade] ?? 0;
+    if ((n.meta.knowledgeObjectCount ?? 0) === count) return n;
+    changed = true;
+    return { ...n, meta: { ...n.meta, knowledgeObjectCount: count } };
+  });
+  return changed ? { ...model, nodes } : model;
+}
+
+/**
+ * Living-brain hub size by accumulated knowledge, in coarse buckets so a hub's
+ * heft reads as "how much has been taught here" at a glance and identical
+ * neighbors don't jitter by ±1 item. Returns a 0..1 radius weight:
+ *   0 items     → 0    (dormant — smallest, renders as a virgin ring)
+ *   1–5 items   → 0.25 (sprouting)
+ *   6–15 items  → 0.5  (growing)
+ *   16–40 items → 0.75 (established)
+ *   40+ items   → 1    (mature)
+ * `contentCount` is the COMBINED total from `buildHierarchy` (concepts + videos
+ * + conversations + folded Knowledge Entries), so written notes count toward heft.
+ */
+export function topicRadiusWeight(contentCount: number): number {
+  if (contentCount <= 0) return 0;
+  if (contentCount <= 5) return 0.25;
+  if (contentCount <= 15) return 0.5;
+  if (contentCount <= 40) return 0.75;
+  return 1;
+}
+
+/** Per-trade knowledge tally for the dev-only Brain Statistics report. */
+export interface BrainTradeStat {
+  id: string;
+  label: string;
+  trade: string;
+  /** Combined knowledge total (concepts + videos + conversations + entries). */
+  count: number;
+  /** Non-video Knowledge Entries (written field notes) filed under this trade. */
+  entries: number;
+  populated: boolean;
+}
+
+/** Read-only summary of the living brain's knowledge distribution. */
+export interface BrainStats {
+  totalTrades: number;
+  populatedTrades: number;
+  dormantTrades: number;
+  totalContent: number;
+  totalEntries: number;
+  largest: BrainTradeStat | null;
+  smallestPopulated: BrainTradeStat | null;
+  /** Every trade hub, sorted by combined knowledge (desc), then label. */
+  byTrade: BrainTradeStat[];
+}
+
+/**
+ * Snapshot the living brain's per-trade knowledge distribution, derived PURELY
+ * from the DISPLAYED model (so it already reflects seeded trades and folded
+ * Knowledge-Entry counts). Powers the dev-only Brain Statistics panel — it only
+ * reads the in-memory model and never writes anything.
+ */
+export function computeBrainStats(model: GraphModel): BrainStats {
+  const info = buildHierarchy(model);
+  const nodeById = new Map(model.nodes.map((n) => [n.id, n]));
+  const byTrade: BrainTradeStat[] = model.topics.map((t) => {
+    const node = nodeById.get(t.id);
+    const count = info.get(t.id)?.contentCount ?? 0;
+    const entries =
+      typeof node?.meta.knowledgeObjectCount === "number"
+        ? node.meta.knowledgeObjectCount
+        : 0;
+    return { id: t.id, label: t.label, trade: t.trade, count, entries, populated: count > 0 };
+  });
+  byTrade.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  const populated = byTrade.filter((t) => t.populated);
+  return {
+    totalTrades: byTrade.length,
+    populatedTrades: populated.length,
+    dormantTrades: byTrade.length - populated.length,
+    totalContent: byTrade.reduce((s, t) => s + t.count, 0),
+    totalEntries: byTrade.reduce((s, t) => s + t.entries, 0),
+    largest: byTrade[0] ?? null,
+    smallestPopulated: populated.length ? populated[populated.length - 1] : null,
+    byTrade,
+  };
+}
+
 /** Undirected adjacency list keyed by node id (each neighbor listed once). */
 export function buildAdjacency(model: GraphModel): Map<string, string[]> {
   const adj = new Map<string, string[]>();
@@ -263,7 +369,13 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
     let contentCount: number;
     if (n.kind === "topic") {
       const m = metricsByTrade.get(n.meta.trade ?? "") ?? emptyMetrics();
-      contentCount = m.knowledge + m.videos + m.conversations;
+      // Fold in non-video Knowledge Entries (written field notes) stamped by
+      // `withKnowledgeCounts`, so a trade taught only through them isn't virgin.
+      const entries =
+        typeof n.meta.knowledgeObjectCount === "number"
+          ? n.meta.knowledgeObjectCount
+          : 0;
+      contentCount = m.knowledge + m.videos + m.conversations + entries;
     } else {
       contentCount = childIds.length;
     }

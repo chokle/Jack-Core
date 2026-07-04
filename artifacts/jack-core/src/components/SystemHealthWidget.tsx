@@ -133,26 +133,36 @@ export function SystemHealthWidget({ className }: { className?: string }) {
         return;
       }
 
-      // The base trace stays visible; a gentle band of extra brightness flows
-      // left→right through it (the "pulse") — subtle, not flashy.
-      ctx.globalAlpha = 0.5;
+      // Keep the base trace dim so the traveling pulse clearly stands out
+      // against it — a brighter band flows left→right through the trace.
+      ctx.globalAlpha = 0.3;
       ctx.shadowBlur = 2;
       ctx.stroke();
 
       const sweepSpeed = 1 / 1.8; // ~1.8s for the pulse to cross the trace
       const head = frac(tSec * sweepSpeed) * w;
       const trail = w * 0.45;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 6;
       const startX = Math.max(1, Math.ceil(head - trail));
       const endX = Math.min(w, Math.floor(head));
       for (let x = startX; x <= endX; x++) {
         const d = (x - (head - trail)) / trail; // 0 at tail → 1 at head
-        ctx.globalAlpha = 0.5 + 0.5 * d * d; // brightens toward the head only
+        ctx.globalAlpha = 0.35 + 0.65 * d * d; // dim at the tail → bright at the head
         ctx.beginPath();
         ctx.moveTo(x - 1, ys[x - 1]);
         ctx.lineTo(x, ys[x]);
         ctx.stroke();
       }
+
+      // A soft head marker in the state color rides the leading edge so the
+      // sweep reads clearly even on the wider desktop trace (no flashy white).
+      const hx = Math.min(w, Math.max(0, Math.round(head)));
+      ctx.globalAlpha = 0.9;
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = colorRef.current;
+      ctx.beginPath();
+      ctx.arc(hx, ys[hx] ?? centerY, 1.5, 0, Math.PI * 2);
+      ctx.fill();
 
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
@@ -167,7 +177,15 @@ export function SystemHealthWidget({ className }: { className?: string }) {
         draw(0);
       };
       window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
+      // Re-measure when the canvas box itself changes (fullscreen toggles,
+      // sidebar layout settling) — window 'resize' alone can miss these.
+      const ro =
+        typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+      ro?.observe(canvas);
+      return () => {
+        window.removeEventListener("resize", onResize);
+        ro?.disconnect();
+      };
     }
 
     let raf = 0;
@@ -187,9 +205,15 @@ export function SystemHealthWidget({ className }: { className?: string }) {
     raf = requestAnimationFrame(loop);
     const onResize = () => setup();
     window.addEventListener("resize", onResize);
+    // Re-measure when the canvas box itself changes (fullscreen toggles,
+    // sidebar layout settling) — the loop redraws each frame afterward.
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+    ro?.observe(canvas);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
+      ro?.disconnect();
     };
   }, []);
 

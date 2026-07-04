@@ -6,6 +6,9 @@ import {
   PITCH_LIMIT,
   SHELL_RADIUS_1,
   withSeededTrades,
+  withKnowledgeCounts,
+  topicRadiusWeight,
+  computeBrainStats,
   buildAdjacency,
   buildHierarchy,
   buildSpatialLayout,
@@ -103,6 +106,130 @@ describe("buildHierarchy", () => {
         expect(info.get(node.parentId)?.childIds).toContain(node.id);
       }
     }
+  });
+});
+
+describe("withKnowledgeCounts", () => {
+  it("stamps each topic hub with its Knowledge-Entry count", () => {
+    const model = withKnowledgeCounts(withSeededTrades(baseModel()), {
+      Boilermaker: 3,
+      Welder: 2,
+    });
+    const boiler = model.nodes.find((n) => n.id === "topic:Boilermaker")!;
+    expect(boiler.meta.knowledgeObjectCount).toBe(3);
+    const welder = model.nodes.find((n) => n.id === "topic:Welder")!;
+    expect(welder.meta.knowledgeObjectCount).toBe(2);
+  });
+
+  it("lifts a virgin trade to populated once it has written notes", () => {
+    const seeded = withSeededTrades(baseModel());
+    // Baseline: Boilermaker has no videos/knowledge — it is virgin.
+    expect(buildHierarchy(seeded).get("topic:Boilermaker")!.populated).toBe(false);
+    // Filing a field note under it should light it up.
+    const withNotes = withKnowledgeCounts(seeded, { Boilermaker: 4 });
+    const boiler = buildHierarchy(withNotes).get("topic:Boilermaker")!;
+    expect(boiler.contentCount).toBe(4);
+    expect(boiler.populated).toBe(true);
+  });
+
+  it("adds to (never replaces) a trade's existing graph contribution", () => {
+    const seeded = withSeededTrades(baseModel());
+    const before = buildHierarchy(seeded).get("topic:Welder")!.contentCount;
+    const after = buildHierarchy(
+      withKnowledgeCounts(seeded, { Welder: 5 }),
+    ).get("topic:Welder")!.contentCount;
+    expect(after).toBe(before + 5);
+  });
+
+  it("does not inflate concept counts or cluster metrics", () => {
+    const seeded = withSeededTrades(baseModel());
+    const stamped = withKnowledgeCounts(seeded, { Boilermaker: 9, Welder: 9 });
+    // Knowledge Entries are not graph concepts — the "Concepts" counter and the
+    // per-trade metrics rollups must be untouched.
+    expect(stamped.counts.knowledge).toBe(seeded.counts.knowledge);
+    for (const t of stamped.topics) {
+      const original = seeded.topics.find((s) => s.id === t.id)!;
+      expect(t.metrics).toEqual(original.metrics);
+    }
+  });
+
+  it("is a no-op (same reference) when nothing changes", () => {
+    const seeded = withSeededTrades(baseModel());
+    // No trades supplied → every topic stays at 0 → unchanged model returned.
+    expect(withKnowledgeCounts(seeded, {})).toBe(seeded);
+    // Re-applying identical counts is also a no-op.
+    const once = withKnowledgeCounts(seeded, { Boilermaker: 2 });
+    expect(withKnowledgeCounts(once, { Boilermaker: 2 })).toBe(once);
+  });
+});
+
+describe("topicRadiusWeight", () => {
+  it("maps knowledge counts to monotonic, non-decreasing size buckets", () => {
+    expect(topicRadiusWeight(0)).toBe(0);
+    expect(topicRadiusWeight(1)).toBe(0.25);
+    expect(topicRadiusWeight(5)).toBe(0.25);
+    expect(topicRadiusWeight(6)).toBe(0.5);
+    expect(topicRadiusWeight(15)).toBe(0.5);
+    expect(topicRadiusWeight(16)).toBe(0.75);
+    expect(topicRadiusWeight(40)).toBe(0.75);
+    expect(topicRadiusWeight(41)).toBe(1);
+    expect(topicRadiusWeight(9999)).toBe(1);
+  });
+
+  it("treats a dormant (zero/negative) hub as the smallest bucket", () => {
+    expect(topicRadiusWeight(0)).toBe(0);
+    expect(topicRadiusWeight(-3)).toBe(0);
+  });
+
+  it("never decreases as the count grows", () => {
+    let prev = -1;
+    for (const c of [0, 1, 5, 6, 15, 16, 40, 41, 500]) {
+      const w = topicRadiusWeight(c);
+      expect(w).toBeGreaterThanOrEqual(prev);
+      prev = w;
+    }
+  });
+});
+
+describe("computeBrainStats", () => {
+  it("summarizes the per-trade knowledge distribution from the displayed model", () => {
+    const model = withKnowledgeCounts(withSeededTrades(baseModel()), {
+      Plumber: 3,
+    });
+    const stats = computeBrainStats(model);
+    expect(stats.totalTrades).toBe(model.topics.length);
+    expect(stats.populatedTrades + stats.dormantTrades).toBe(stats.totalTrades);
+    // Welder has an ingested video; Plumber has 3 written notes — both populated.
+    expect(stats.byTrade.find((t) => t.id === "topic:Welder")!.populated).toBe(true);
+    const plumber = stats.byTrade.find((t) => t.id === "topic:Plumber")!;
+    expect(plumber.count).toBe(3);
+    expect(plumber.entries).toBe(3);
+    expect(plumber.populated).toBe(true);
+  });
+
+  it("sorts by combined knowledge and reports the extremes", () => {
+    const model = withKnowledgeCounts(withSeededTrades(baseModel()), {
+      Plumber: 50,
+      Carpenter: 2,
+    });
+    const stats = computeBrainStats(model);
+    for (let i = 1; i < stats.byTrade.length; i++) {
+      expect(stats.byTrade[i - 1].count).toBeGreaterThanOrEqual(
+        stats.byTrade[i].count,
+      );
+    }
+    expect(stats.largest?.id).toBe("topic:Plumber");
+    // The smallest POPULATED hub is never a dormant (0-count) trade.
+    expect(stats.smallestPopulated?.count).toBeGreaterThan(0);
+  });
+
+  it("counts dormant trades and yields no smallestPopulated when all are empty", () => {
+    const empty = withSeededTrades(selectMemoryGraphModel(null, [], []));
+    const stats = computeBrainStats(empty);
+    expect(stats.populatedTrades).toBe(0);
+    expect(stats.dormantTrades).toBe(stats.totalTrades);
+    expect(stats.largest?.count ?? 0).toBe(0);
+    expect(stats.smallestPopulated).toBeNull();
   });
 });
 

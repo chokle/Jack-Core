@@ -15,6 +15,7 @@ import {
   clampPitch,
   depthCue,
   projectPoint,
+  topicRadiusWeight,
   type SpatialCamera,
   type SpatialNodeInfo,
 } from "../lib/graph-spatial";
@@ -61,6 +62,12 @@ interface Props {
   locked: boolean;
   delta?: GraphDelta | null;
   onZoomChange: (pct: number) => void;
+  /**
+   * False while the graph/video queries are still loading their FIRST payload.
+   * Gates the one-time activation burst so a hard reload (empty in-flight model
+   * → real model) never falsely fires every populated hub. Defaults to ready.
+   */
+  dataReady?: boolean;
 }
 
 /** Runtime, per-node render state: eased 3D position + per-frame projection. */
@@ -117,7 +124,7 @@ function clamp01(n: number): number {
 }
 
 /** Node radius scaled by accumulated knowledge (mirrors the flat canvas). */
-function spatialRadius(n: MemoryNode, degree: number): number {
+function spatialRadius(n: MemoryNode, degree: number, contentCount = 0): number {
   const base = BASE_RADII[n.kind] ?? 4;
   if (n.kind === "core") return base;
   let weight = 0;
@@ -126,7 +133,9 @@ function spatialRadius(n: MemoryNode, degree: number): number {
     const confidence = n.meta.confidence ?? 0.5;
     weight = clamp01(0.55 * clamp01(sources / 5) + 0.45 * clamp01(confidence));
   } else if (n.kind === "topic") {
-    weight = clamp01(degree / 40);
+    // Size a trade hub by how much has been taught there, bucketed so heft reads
+    // at a glance (0 dormant / 1–5 / 6–15 / 16–40 / 40+) — see topicRadiusWeight.
+    weight = topicRadiusWeight(contentCount);
   } else {
     weight = clamp01(degree / 10);
   }
@@ -174,6 +183,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       locked,
       delta,
       onZoomChange,
+      dataReady,
     },
     ref,
   ) {
@@ -184,6 +194,13 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const adjacencyRef = useRef<Map<string, Set<string>>>(new Map());
     const edgeBornRef = useRef<Map<string, number>>(new Map());
     const birthGlowRef = useRef<Map<string, number>>(new Map());
+    // Last-seen populated state per topic, so the model-rebuild effect can detect
+    // a dormant → firing transition and fire a one-time activation burst.
+    const prevPopulatedRef = useRef<Map<string, boolean>>(new Map());
+    // Gate activation bursts until the underlying queries have settled once, so a
+    // hard reload (empty in-flight model → real model) never bursts every hub.
+    const dataReadyRef = useRef(true);
+    const hasSettledRef = useRef(false);
     const centerRef = useRef<string>(CORE_ID);
     const camRef = useRef<SpatialCamera>({ yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 });
     const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
@@ -200,6 +217,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
     selectedRef.current = selectedId;
     lockedRef.current = locked;
+    dataReadyRef.current = dataReady ?? true;
     searchRef.current = search.trim().toLowerCase();
     activeMatchRef.current = activeMatchId ?? null;
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
@@ -237,8 +255,13 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const mn = nodeById.get(vid);
         const pos = layout.positions.get(vid);
         if (!mn || !pos) continue;
-        const target = spatialRadius(mn, m.degree[vid] ?? 0);
-        const populated = info.get(vid)?.populated ?? true;
+        const nodeInfo = info.get(vid);
+        const target = spatialRadius(
+          mn,
+          m.degree[vid] ?? 0,
+          nodeInfo?.contentCount ?? 0,
+        );
+        const populated = nodeInfo?.populated ?? true;
         const existing = map.get(vid);
         if (existing) {
           existing.tx = pos.x;
@@ -333,6 +356,35 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       modelRef.current = model;
       infoRef.current = buildHierarchy(model);
 
+      // Knowledge-aware activation: when a dormant trade gains its FIRST piece of
+      // knowledge (populated false → true across a rebuild), fire a one-time
+      // activation burst on its hub; thereafter it lives permanently in the firing
+      // topology below. Suppressed under reduced-motion / locked, like the
+      // delta-driven bursts.
+      {
+        const prev = prevPopulatedRef.current;
+        const reduced =
+          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
+          false;
+        // Only burst once the queries have settled AND we've already seeded from
+        // one settled model. A hard reload builds an empty in-flight model first,
+        // so the first settled rebuild just records the baseline — without this
+        // gate every populated trade would falsely burst the instant data lands.
+        // Genuine later transitions (a trade gains its first entry) still burst.
+        const ready = dataReadyRef.current;
+        const canBurst =
+          ready && hasSettledRef.current && !reduced && !lockedRef.current;
+        const nowMs = performance.now();
+        for (const t of model.topics) {
+          const nowPop = infoRef.current.get(t.id)?.populated ?? false;
+          if (canBurst && prev.get(t.id) === false && nowPop) {
+            birthGlowRef.current.set(t.id, nowMs);
+          }
+          prev.set(t.id, nowPop);
+        }
+        if (ready) hasSettledRef.current = true;
+      }
+
       const adj = new Map<string, Set<string>>();
       for (const e of model.edges) {
         if (!adj.has(e.a)) adj.set(e.a, new Set());
@@ -349,6 +401,10 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       const membersByHub: Record<string, string[]> = {};
       for (const t of model.topics) {
         if (!coreNeighbors?.has(t.id)) continue;
+        // Knowledge-aware firing: only hubs that actually hold knowledge fire. A
+        // dormant (virgin) trade stays dark until its first contribution — then
+        // the model rebuilds, it enters this list, and it fires from then on.
+        if (!infoRef.current.get(t.id)?.populated) continue;
         hubIds.push(t.id);
         const members: string[] = [];
         for (const nb of adj.get(t.id) ?? []) {
@@ -826,6 +882,24 @@ function drawNodeGlow(
   dim: boolean,
   emphasized = false,
 ) {
+  // Dormant hubs (a trade with no knowledge yet) don't fire — they breathe a
+  // faint, slow idle glow so they read as "asleep, waiting for the first
+  // contribution" rather than active. Selection/active still gets the full glow
+  // below so clicking a virgin hub is clearly acknowledged.
+  if (node.kind === "topic" && !node.populated && !emphasized) {
+    const breath = 0.5 + 0.5 * Math.sin(time * 0.0018 + node.sx * 0.01);
+    const idle = (0.12 + 0.06 * breath) * (dim ? 0.4 : 1) * node.palpha;
+    if (idle <= 0) return;
+    const gr = node.sr * 3.2;
+    const ig = c.createRadialGradient(node.sx, node.sy, 0, node.sx, node.sy, gr);
+    ig.addColorStop(0, rgba(node.color, idle));
+    ig.addColorStop(1, rgba(node.color, 0));
+    c.fillStyle = ig;
+    c.beginPath();
+    c.arc(node.sx, node.sy, gr, 0, Math.PI * 2);
+    c.fill();
+    return;
+  }
   let intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1) * node.palpha;
   let glowR = node.sr * 5;
   if (emphasized) {

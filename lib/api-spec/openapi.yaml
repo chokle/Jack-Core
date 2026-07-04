@@ -120,6 +120,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/VideoStats"
 
+  /knowledge/stats:
+    get:
+      operationId: getKnowledgeStats
+      tags: [knowledge]
+      summary: Get knowledge-object statistics (total and per-trade counts)
+      responses:
+        "200":
+          description: Knowledge stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeStats"
+
   /videos/recent:
     get:
       operationId: getRecentVideos
@@ -972,6 +985,17 @@ components:
             type: integer
         totalDuration:
           type: ["number", "null"]
+
+    KnowledgeStats:
+      type: object
+      required: [total, byTrade]
+      properties:
+        total:
+          type: integer
+        byTrade:
+          type: object
+          additionalProperties:
+            type: integer
 
     TranscriptSegment:
       type: object

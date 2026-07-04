@@ -29,6 +29,8 @@ import {
   useSetNodeVerification,
   useGetVideo,
   useGetMentorActiveSession,
+  useGetKnowledgeStats,
+  getGetKnowledgeStatsQueryKey,
   getGetVideoQueryKey,
   getGetGraphQueryKey,
   getGetMentorActiveSessionQueryKey,
@@ -53,7 +55,11 @@ import {
   BreadcrumbSeparator,
 } from "./ui/breadcrumb";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
-import { withSeededTrades } from "../lib/graph-spatial";
+import {
+  withSeededTrades,
+  withKnowledgeCounts,
+  computeBrainStats,
+} from "../lib/graph-spatial";
 import {
   rgbCss,
   rgba,
@@ -164,12 +170,28 @@ export function MemoryGraphView({
   onResumeChat,
   onStartInterview,
 }: MemoryGraphViewProps) {
-  const { model: rawModel, recent, competencies, delta, vitality } = data;
-  // Seed the 12 major Red Seal trades into the displayed graph exactly once.
-  // Empty ("virgin") trades render as selectable dashed hubs the user can be
-  // the first to fill. The delta stream stays derived from the RAW model, so a
-  // freshly-seeded (but empty) trade never fires a "Jack just learned…" toast.
-  const model = useMemo(() => withSeededTrades(rawModel), [rawModel]);
+  const { model: rawModel, recent, competencies, delta, vitality, isLoading } =
+    data;
+  // Per-trade count of non-video Knowledge Entries, polled so a trade that gains
+  // its first written field note lights up (dormant → firing) without a reload.
+  // React Query structural sharing keeps `byTrade` referentially stable across
+  // identical polls, so the model useMemo below only recomputes on a real change.
+  const { data: knowledgeStats } = useGetKnowledgeStats({
+    query: {
+      queryKey: getGetKnowledgeStatsQueryKey(),
+      refetchInterval: 8000,
+    },
+  });
+  const knowledgeCounts = knowledgeStats?.byTrade;
+  // Seed the 12 major Red Seal trades into the displayed graph exactly once, then
+  // fold in the Knowledge-Entry counts. Empty ("virgin") trades render as
+  // selectable dashed hubs the user can be the first to fill. The delta stream
+  // stays derived from the RAW model, so a freshly-seeded (but empty) trade — or
+  // one populated only by written notes — never fires a "Jack just learned…" toast.
+  const model = useMemo(
+    () => withKnowledgeCounts(withSeededTrades(rawModel), knowledgeCounts ?? {}),
+    [rawModel, knowledgeCounts],
+  );
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // The graph stage is the positioning context for the floating hover preview,
@@ -520,6 +542,7 @@ export function MemoryGraphView({
           locked={locked}
           delta={delta}
           onZoomChange={setZoomPct}
+          dataReady={!isLoading}
         />
 
         {/* Header overlay */}
@@ -829,7 +852,88 @@ export function MemoryGraphView({
           onResumeChat={onResumeChat}
           onResumeInterview={onResumeInterview}
         />
+        {import.meta.env.DEV && <BrainStatsPanel model={model} />}
       </aside>
+    </div>
+  );
+}
+
+/**
+ * Dev-only Brain Statistics report — a read-only breakdown of the living brain's
+ * knowledge distribution (firing vs dormant trades, largest/smallest hubs, total
+ * concepts and field notes), derived purely from the in-memory model via
+ * `computeBrainStats`. Gated behind `import.meta.env.DEV` at the call site so it
+ * never ships to production, and it NEVER writes anything.
+ */
+function BrainStatsPanel({ model }: { model: MemoryGraphData["model"] }) {
+  const stats = useMemo(() => computeBrainStats(model), [model]);
+  const cells: [string, number][] = [
+    ["Trades", stats.totalTrades],
+    ["Firing", stats.populatedTrades],
+    ["Dormant", stats.dormantTrades],
+    ["Concepts", stats.totalContent],
+    ["Notes", stats.totalEntries],
+  ];
+  return (
+    <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/90">
+          Brain Statistics
+        </span>
+        <span className="rounded bg-amber-500/15 px-1.5 font-mono text-[9px] uppercase tracking-wider text-amber-300/70">
+          dev
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {cells.map(([label, value]) => (
+          <div key={label} className="rounded bg-white/5 px-2 py-1.5">
+            <div className="font-mono text-sm tabular-nums text-foreground">
+              {value}
+            </div>
+            <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+      {stats.largest && stats.largest.count > 0 && (
+        <p className="mt-2.5 text-[11px] text-muted-foreground">
+          Largest:{" "}
+          <span className="text-foreground/90">{stats.largest.label}</span> (
+          {stats.largest.count})
+        </p>
+      )}
+      {stats.smallestPopulated && (
+        <p className="text-[11px] text-muted-foreground">
+          Smallest firing:{" "}
+          <span className="text-foreground/90">
+            {stats.smallestPopulated.label}
+          </span>{" "}
+          ({stats.smallestPopulated.count})
+        </p>
+      )}
+      <ul className="mt-2.5 space-y-1">
+        {stats.byTrade.map((t) => (
+          <li
+            key={t.id}
+            className="flex items-center justify-between gap-2 font-mono text-[10px]"
+          >
+            <span
+              className={
+                t.populated
+                  ? "truncate text-foreground/80"
+                  : "truncate text-muted-foreground/50"
+              }
+            >
+              {t.label}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {t.count}
+              {t.entries > 0 ? ` (${t.entries}✎)` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

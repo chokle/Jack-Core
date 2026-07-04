@@ -36,6 +36,7 @@ import type {
   KnowledgeCandidateList,
   KnowledgeGraph,
   KnowledgeNode,
+  KnowledgeStats,
   ListKnowledgeCandidatesParams,
   ListParkedThoughtsParams,
   ListVideosParams,
@@ -464,6 +465,83 @@ export function useGetVideoStats<TData = Awaited<ReturnType<typeof getVideoStats
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetVideoStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetKnowledgeStatsUrl = () => {
+
+
+
+
+  return `/api/knowledge/stats`
+}
+
+/**
+ * @summary Get knowledge-object statistics (total and per-trade counts)
+ */
+export const getKnowledgeStats = async ( options?: RequestInit): Promise<KnowledgeStats> => {
+
+  return customFetch<KnowledgeStats>(getGetKnowledgeStatsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKnowledgeStatsQueryKey = () => {
+    return [
+    `/api/knowledge/stats`
+    ] as const;
+    }
+
+
+export const getGetKnowledgeStatsQueryOptions = <TData = Awaited<ReturnType<typeof getKnowledgeStats>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKnowledgeStatsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKnowledgeStats>>> = ({ signal }) => getKnowledgeStats({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeStats>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKnowledgeStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getKnowledgeStats>>>
+export type GetKnowledgeStatsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get knowledge-object statistics (total and per-trade counts)
+ */
+
+export function useGetKnowledgeStats<TData = Awaited<ReturnType<typeof getKnowledgeStats>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeStats>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKnowledgeStatsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

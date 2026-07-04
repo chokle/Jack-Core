@@ -111,6 +111,15 @@ export const GetVideoStatsResponse = zod.object({
 
 
 /**
+ * @summary Get knowledge-object statistics (total and per-trade counts)
+ */
+export const GetKnowledgeStatsResponse = zod.object({
+  "total": zod.number(),
+  "byTrade": zod.record(zod.string(), zod.number())
+})
+
+
+/**
  * @summary Get recently added or analyzed videos
  */
 export const GetRecentVideosResponseItem = zod.object({

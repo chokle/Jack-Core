@@ -45,6 +45,8 @@ export * from './knowledgeGraphCounts';
 export * from './knowledgeNode';
 export * from './knowledgeNodeKind';
 export * from './knowledgeNodeMeta';
+export * from './knowledgeStats';
+export * from './knowledgeStatsByTrade';
 export * from './listKnowledgeCandidatesParams';
 export * from './listKnowledgeCandidatesStatus';
 export * from './listParkedThoughtsParams';

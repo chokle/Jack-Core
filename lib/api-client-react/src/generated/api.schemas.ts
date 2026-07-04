@@ -204,6 +204,13 @@ export interface VideoStats {
   totalDuration?: number | null;
 }
 
+export type KnowledgeStatsByTrade = {[key: string]: number};
+
+export interface KnowledgeStats {
+  total: number;
+  byTrade: KnowledgeStatsByTrade;
+}
+
 export interface JobStatus {
   jobId: string;
   status: string;

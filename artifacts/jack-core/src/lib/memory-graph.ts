@@ -106,6 +106,13 @@ export interface MemoryNode {
     sources?: NodeSource[];
     /** Alternate wordings that collapse onto this canonical node (capped 25). */
     aliases?: string[];
+    /**
+     * Non-video Knowledge Entries filed under this trade (topic hubs only).
+     * Stamped onto the DISPLAYED model by `withKnowledgeCounts` from the
+     * `/knowledge/stats` endpoint; folded into the hub's `contentCount` so a
+     * trade taught only through written field notes still reads as populated.
+     */
+    knowledgeObjectCount?: number;
   };
   /**
    * Future-proof capture blob — present (possibly empty) on EVERY node so the
