@@ -60,6 +60,7 @@ export function SystemHealthWidget({ className }: { className?: string }) {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawRef = useRef<(tSec: number) => void>(() => {});
+  const phaseRef = useRef(0); // accumulated beat-clock for continuous scrolling
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -104,50 +105,54 @@ export function SystemHealthWidget({ className }: { className?: string }) {
       }
 
       const amp = h * 0.42;
-      const cyclesShown = 1.8;
-      const beatsPerSec = bpmRef.current / 60;
+      // Keep beat spacing constant regardless of trace width, so a wider ECG
+      // shows MORE beats (patient-monitor feel) instead of stretched ones.
+      const cyclesShown = Math.max(1.4, w / 32);
+      // A slow, small timing wobble (heart-rate variability): over ~8s beats
+      // drift a touch early/late so the rhythm feels organic rather than a
+      // looping animation. Timing only — never amplitude or brightness.
+      const wobble = 0.15 * Math.sin((tSec * Math.PI * 2) / 8);
+      const beatBase = phaseRef.current + wobble;
       const ys: number[] = new Array(w + 1);
       ctx.beginPath();
       for (let x = 0; x <= w; x++) {
-        const phase = frac(tSec * beatsPerSec - ((w - x) / w) * cyclesShown);
+        const phase = frac(beatBase - ((w - x) / w) * cyclesShown);
         const y = centerY - ecg(phase) * amp;
         ys[x] = y;
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      // Dim base trace so the traveling pulse clearly stands out against it.
-      ctx.globalAlpha = 0.28;
       ctx.shadowColor = colorRef.current;
+
+      if (reduced) {
+        // Reduced motion: one steady, fully-visible trace, no sweep.
+        ctx.globalAlpha = 0.9;
+        ctx.shadowBlur = 2;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        return;
+      }
+
+      // The base trace stays visible; a gentle band of extra brightness flows
+      // left→right through it (the "pulse") — subtle, not flashy.
+      ctx.globalAlpha = 0.5;
       ctx.shadowBlur = 2;
       ctx.stroke();
 
-      // A bright glowing "pulse" that flows left→right (heart → label) along the
-      // trace: a fading trail that brightens toward a white comet head.
-      const sweepSpeed = 1 / 1.6; // ~1.6s to cross the bar
+      const sweepSpeed = 1 / 1.8; // ~1.8s for the pulse to cross the trace
       const head = frac(tSec * sweepSpeed) * w;
-      const trail = w * 0.5;
-      ctx.shadowColor = colorRef.current;
-      ctx.shadowBlur = 8;
+      const trail = w * 0.45;
+      ctx.shadowBlur = 5;
       const startX = Math.max(1, Math.ceil(head - trail));
       const endX = Math.min(w, Math.floor(head));
       for (let x = startX; x <= endX; x++) {
         const d = (x - (head - trail)) / trail; // 0 at tail → 1 at head
-        ctx.globalAlpha = Math.max(0, d * d);
+        ctx.globalAlpha = 0.5 + 0.5 * d * d; // brightens toward the head only
         ctx.beginPath();
         ctx.moveTo(x - 1, ys[x - 1]);
         ctx.lineTo(x, ys[x]);
         ctx.stroke();
       }
-
-      // Bright comet head — a white core with a colored glow — so the pulse is
-      // unmistakable even in the tiny sidebar trace.
-      const hx = Math.min(w, Math.max(0, Math.round(head)));
-      ctx.globalAlpha = 1;
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(hx, ys[hx], 1.6, 0, Math.PI * 2);
-      ctx.fill();
 
       ctx.globalAlpha = 1;
       ctx.shadowBlur = 0;
@@ -171,8 +176,11 @@ export function SystemHealthWidget({ className }: { className?: string }) {
       const dt = lastTs ? Math.max(0, (ts - lastTs) / 1000) : 0;
       lastTs = ts;
       // Ease the drawn BPM toward the latest target so poll-to-poll changes
-      // glide instead of jumping.
-      bpmRef.current += (bpmTargetRef.current - bpmRef.current) * Math.min(1, dt * 2.5);
+      // glide back to resting gradually (over a few seconds) instead of jumping.
+      bpmRef.current += (bpmTargetRef.current - bpmRef.current) * Math.min(1, dt * 0.9);
+      // Advance the beat clock by the eased rate: continuous scroll whose speed
+      // scales with BPM (and no phase jump when BPM eases).
+      phaseRef.current += dt * (bpmRef.current / 60);
       draw(ts / 1000);
       raf = requestAnimationFrame(loop);
     };
@@ -226,17 +234,27 @@ export function SystemHealthWidget({ className }: { className?: string }) {
         }
         aria-hidden="true"
       />
-      <canvas ref={canvasRef} className="h-4 w-14 shrink-0" aria-hidden="true" />
-      <span
-        className="hidden font-mono text-[10px] font-semibold uppercase tracking-[0.12em] sm:inline"
-        style={{ color }}
-      >
-        {statusLabel}
-      </span>
-      <span className="font-mono text-[10px] font-semibold tabular-nums" style={{ color }}>
-        {isOffline ? "--" : snapshot.heartbeatBPM}
-        <span className="ml-0.5 text-muted-foreground">BPM</span>
-      </span>
+      <canvas ref={canvasRef} className="h-4 w-16 shrink-0 md:w-24" aria-hidden="true" />
+      <div className="flex flex-col justify-center leading-tight">
+        <span
+          className="hidden items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] sm:flex"
+          style={{ color }}
+        >
+          <span
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+          {statusLabel}
+        </span>
+        <span
+          className="font-mono text-[10px] font-semibold tabular-nums"
+          style={{ color }}
+        >
+          {isOffline ? "--" : snapshot.heartbeatBPM}
+          <span className="ml-0.5 text-muted-foreground">BPM</span>
+        </span>
+      </div>
     </div>
   );
 }
