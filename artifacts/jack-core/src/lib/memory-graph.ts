@@ -538,7 +538,7 @@ export function nodeFreshness(node: MemoryNode): FreshnessInfo {
  * counts. Both the client-derived and server-derived builders route through here
  * so the two paths produce an identical, fully-populated shape.
  */
-function finalizeModel(
+export function finalizeModel(
   topics: Topic[],
   rawNodes: MemoryNode[],
   edges: MemoryEdge[],

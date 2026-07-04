@@ -109,6 +109,7 @@ function JackApp() {
             onJumpToTimestamp={handleCitationClick}
             onResumeInterview={handleResumeInterview}
             onResumeChat={handleResumeChat}
+            onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
           <InterviewMode />

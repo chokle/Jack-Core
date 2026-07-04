@@ -1,0 +1,150 @@
+## Task: Implement 3D Spatial Navigation for Jack’s Live Brain
+
+We need to upgrade Jack’s Live Brain from a flat node map into a true 3D spatial knowledge navigator.
+
+This is not a decorative 3D scene.
+
+This is the navigation system for Jack’s memory.
+
+The drawing represents the core interaction model:
+
+- There is always a current center point.
+- The user can orbit around that center point.
+- The user can zoom in/out with pinch or scroll.
+- The user can pan/rotate around the knowledge space.
+- Clicking/selecting any node instantly locks onto it.
+- Once locked, that node becomes the new center point.
+- Related nodes reposition around the new center point.
+
+Think of it like navigating a solar system of knowledge.
+
+Jack is the main origin point, but any node can become the local origin.
+
+### Why this matters
+
+Torch may eventually support 40+ trades.
+
+A flat map will become cluttered and weak.
+
+We need spatial depth so trades, domains, topics, videos, sketches, procedures, contributors, and field notes can branch naturally without looking like a messy 2D spiderweb.
+
+### Required Navigation Behavior
+
+1. **Orbit Around Current Center**
+   - User can rotate around the current center node.
+   - Mouse drag / touch drag should rotate the camera around the selected node.
+   - The centered node remains visually locked while surrounding nodes move around it.
+
+2. **Pinch / Scroll Zoom**
+   - Pinch on mobile and scroll on desktop should zoom toward or away from the current center.
+   - Zooming should feel smooth and controlled.
+   - Do not teleport the camera abruptly.
+
+3. **Click-to-Lock**
+   - When the user clicks/taps a node:
+     - animate camera toward that node
+     - make that node the new center point
+     - highlight it as active
+     - show its direct child nodes and strongest related nodes around it
+
+4. **Dynamic Centering**
+   - Jack starts as the default center.
+   - Selecting “Welding” makes Welding the center.
+   - Selecting “FCAW-S” makes FCAW-S the center.
+   - Selecting “Vertical-Up” makes Vertical-Up the center.
+   - Selecting a specific knowledge entry can center that entry and display its media/cards.
+
+5. **Graph Hierarchy**
+   The system must support this hierarchy:
+
+   Jack
+     → Trades
+       → Domains
+         → Categories
+           → Knowledge Entries
+
+   But the renderer should not hardcode those levels.
+
+   Treat everything as a graph node with:
+   - id
+   - label
+   - type
+   - parentId
+   - relatedNodeIds
+   - strength / relevance
+   - contentCount
+   - populated / empty state
+
+6. **Trade Coverage**
+   Seed the first orbit with major trade nodes.
+
+   Include at least:
+   - Welder
+   - Construction Electrician
+   - Plumber
+   - Carpenter
+   - Steamfitter / Pipefitter
+   - Sheet Metal Worker
+   - Heavy Duty Equipment Technician
+   - Refrigeration & AC Mechanic
+   - Mobile Crane Operator
+   - Industrial Mechanic / Millwright
+   - Bricklayer
+   - Boilermaker
+
+   The structure should support expanding to 40+ Red Seal trades without redesign.
+
+7. **Empty Node State**
+   Empty trades or categories should not look broken.
+
+   They should look intentionally untouched.
+
+   Use a “virgin cluster” / “be first to contribute” style state:
+   - dimmer glow
+   - clean empty orbit
+   - small call-to-action
+   - inviting, not sad
+
+8. **Visual Direction**
+   - Dark Torch interface
+   - Orange Torch highlights
+   - White/blue subtle depth lines if needed
+   - Avoid cartoonish spinning
+   - Avoid clutter
+   - Make the user feel like they are pivoting around Jack’s knowledge
+
+9. **Performance**
+   - Must run smoothly in browser.
+   - Prioritize simple geometry over heavy effects.
+   - Cap visible nodes if needed.
+   - Load nearby/related nodes first.
+   - Lazy-load deeper branches.
+
+10. **Fallback**
+   If full 3D is too heavy for the current sprint:
+   - build a 2.5D version first
+   - still preserve the click-to-lock center-point behavior
+   - still support orbit-like navigation
+   - still make the map feel spatial, not flat
+
+### Success Criteria
+
+This is successful when:
+
+- Jack starts as the center.
+- The user sees major trade nodes around him.
+- User can drag/pivot around the brain.
+- User can zoom with pinch/scroll.
+- Clicking a trade smoothly locks onto that trade.
+- That trade becomes the new center.
+- Its categories/knowledge branches appear around it.
+- Empty clusters look intentionally available for first contributors.
+- The system feels expandable to 40+ trades.
+
+Do not build a static 12-ring visual.
+
+Build a reusable spatial graph navigation system.
+
+Any node can become the center.
+Any cluster can branch.
+Jack’s brain should feel explorable.

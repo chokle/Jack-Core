@@ -38,9 +38,9 @@ import type {
   ParkedThought,
 } from "@workspace/api-client-react";
 import {
-  MemoryGraphCanvas,
+  SpatialBrainCanvas,
   type MemoryGraphHandle,
-} from "./MemoryGraphCanvas";
+} from "./SpatialBrainCanvas";
 import { FloatingNodeInspector } from "./FloatingNodeInspector";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
@@ -53,6 +53,7 @@ import {
   BreadcrumbSeparator,
 } from "./ui/breadcrumb";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
+import { withSeededTrades } from "../lib/graph-spatial";
 import {
   rgbCss,
   rgba,
@@ -82,6 +83,8 @@ interface MemoryGraphViewProps {
   onResumeInterview: (sessionId: string) => void;
   /** Resume a parked Ask Jack conversation, opening the drawer with context. */
   onResumeChat: (thought: ParkedThought) => void;
+  /** Start a fresh interview — offered on an empty ("virgin") trade cluster. */
+  onStartInterview: () => void;
 }
 
 /**
@@ -159,8 +162,14 @@ export function MemoryGraphView({
   onJumpToTimestamp,
   onResumeInterview,
   onResumeChat,
+  onStartInterview,
 }: MemoryGraphViewProps) {
-  const { model, recent, competencies, delta, vitality } = data;
+  const { model: rawModel, recent, competencies, delta, vitality } = data;
+  // Seed the 12 major Red Seal trades into the displayed graph exactly once.
+  // Empty ("virgin") trades render as selectable dashed hubs the user can be
+  // the first to fill. The delta stream stays derived from the RAW model, so a
+  // freshly-seeded (but empty) trade never fires a "Jack just learned…" toast.
+  const model = useMemo(() => withSeededTrades(rawModel), [rawModel]);
   const canvasRef = useRef<MemoryGraphHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // The graph stage is the positioning context for the floating hover preview,
@@ -486,6 +495,7 @@ export function MemoryGraphView({
         onSelectNode: setSelectedId,
         onResumeInterview,
         onResumeChat,
+        onStartInterview,
         isAdmin,
         isUpdatingVerification: setVerification.isPending,
         onSetVerification: (id, status) =>
@@ -497,7 +507,7 @@ export function MemoryGraphView({
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
-        <MemoryGraphCanvas
+        <SpatialBrainCanvas
           ref={canvasRef}
           model={model}
           selectedId={selectedId}
@@ -1380,6 +1390,7 @@ interface NodeDetailProps {
   onSelectNode: (id: string) => void;
   onResumeInterview: (sessionId: string) => void;
   onResumeChat: (thought: ParkedThought) => void;
+  onStartInterview: () => void;
   isAdmin: boolean;
   isUpdatingVerification: boolean;
   onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
@@ -1774,6 +1785,7 @@ function NodeDetailBody({
   onSelectNode,
   onResumeInterview,
   onResumeChat,
+  onStartInterview,
   isAdmin,
   isUpdatingVerification,
   onSetVerification,
@@ -1868,6 +1880,17 @@ function NodeDetailBody({
       {node.kind === "topic" && clusterMetrics && (
         <div className="mb-3 border-b border-border/60 pb-3">
           <ClusterMetricsRow metrics={clusterMetrics} />
+          {clusterMetrics.knowledge === 0 &&
+            clusterMetrics.videos === 0 &&
+            clusterMetrics.conversations === 0 && (
+              <button
+                onClick={onStartInterview}
+                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
+              >
+                <UserCheck className="h-3.5 w-3.5" /> Be the first — teach Jack
+                this trade
+              </button>
+            )}
         </div>
       )}
       {description && (
