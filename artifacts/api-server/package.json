@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "seed:knowledge": "tsx src/scripts/seed-knowledge-entry.ts",
+    "import:knowledge": "tsx src/scripts/import-knowledge-objects.ts",
     "test": "vitest run",
     "typecheck": "tsc --build ../../lib/api-zod ../../lib/db && tsc -p tsconfig.json --noEmit"
   },
