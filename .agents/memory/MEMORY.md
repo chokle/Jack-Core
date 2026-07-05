@@ -23,3 +23,4 @@
 - [Diff-on-rebuild load race](diff-on-rebuild-load-race.md) — transition-detect effects must gate on first settled query load (isLoading); empty in-flight→real model else false-fires every item.
 - [Citation field reuse](citation-source-reuse.md) — one flat citation shape for video + knowledge; knowledge reuses the video fields (videoId=""); new consumers must branch on sourceType.
 - [Playwright install fails on Nix](playwright-browser-install-nix.md) — ad-hoc `npx playwright install` can't fetch Chromium's apt deps here; don't retry, fall back to code-trace verification.
+- [Verification reranking](verification-reranking.md) — reviewer verify/reject only steers retrieval via concept meta.sources timestamp↔segment overlap; no-timestamp concepts can't steer; verified boosts, rejected suppresses.

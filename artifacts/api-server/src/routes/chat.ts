@@ -6,6 +6,7 @@ import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { SESSION_COOKIE, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
+import { fetchVerificationCoverage, rerankByVerification } from "../lib/verification-rerank.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -74,7 +75,30 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
     let contextText = "";
 
-    for (const seg of (segments ?? []) as Array<Record<string, unknown>>) {
+    // Steer the retrieved transcript context by reviewer decisions: verified
+    // concepts' segments are boosted, rejected concepts' segments are suppressed.
+    // This reorders the context Jack reasons over and the citations it returns.
+    const rawSegments = (segments ?? []) as Array<Record<string, unknown>>;
+    const coverage = await fetchVerificationCoverage(
+      rawSegments
+        .map((s) => s["video_id"])
+        .filter((v): v is string => typeof v === "string"),
+    );
+    const rankedSegments =
+      coverage.length === 0
+        ? rawSegments
+        : rerankByVerification(
+            rawSegments,
+            (s) => ({
+              videoId: typeof s["video_id"] === "string" ? (s["video_id"] as string) : "",
+              startTime: typeof s["start_time"] === "number" ? (s["start_time"] as number) : 0,
+              endTime: typeof s["end_time"] === "number" ? (s["end_time"] as number) : 0,
+              score: typeof s["similarity"] === "number" ? (s["similarity"] as number) : 0,
+            }),
+            coverage,
+          ).map((r) => r.item);
+
+    for (const seg of rankedSegments) {
       contextText += `[${seg["video_title"] ?? "Video"} @ ${formatTime(seg["start_time"] as number)}]\n${seg["text"]}\n\n`;
       citations.push({
         videoId: seg["video_id"] as string,

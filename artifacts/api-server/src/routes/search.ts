@@ -4,6 +4,41 @@ import { createEmbedding } from "../lib/openai.js";
 import { publish } from "../lib/vitality.js";
 import { SemanticSearchBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
+import { fetchVerificationCoverage, rerankByVerification } from "../lib/verification-rerank.js";
+
+interface SearchResult {
+  videoId: unknown;
+  videoTitle: unknown;
+  thumbnailUrl: unknown;
+  text: unknown;
+  startTime: unknown;
+  endTime: unknown;
+  score: number;
+  trade: unknown;
+}
+
+/**
+ * Re-rank raw search results by reviewer decisions: verified concepts' segments
+ * are boosted, rejected concepts' segments are suppressed. The adjusted score is
+ * written back so the client's ordering and displayed relevance both reflect it.
+ */
+async function applyVerificationRerank(results: SearchResult[]): Promise<SearchResult[]> {
+  if (results.length === 0) return results;
+  const coverage = await fetchVerificationCoverage(
+    results.map((r) => r.videoId).filter((v): v is string => typeof v === "string"),
+  );
+  if (coverage.length === 0) return results;
+  return rerankByVerification(
+    results,
+    (r) => ({
+      videoId: typeof r.videoId === "string" ? r.videoId : "",
+      startTime: typeof r.startTime === "number" ? r.startTime : 0,
+      endTime: typeof r.endTime === "number" ? r.endTime : 0,
+      score: r.score,
+    }),
+    coverage,
+  ).map((r) => ({ ...r.item, score: r.score }));
+}
 
 const router = Router();
 
@@ -54,7 +89,7 @@ router.post("/search", aiQueryLimiter, async (req, res) => {
         };
       });
 
-      return res.json({ query, results });
+      return res.json({ query, results: await applyVerificationRerank(results) });
     }
 
     const results = (segments ?? []).map((s: Record<string, unknown>) => ({
@@ -64,11 +99,11 @@ router.post("/search", aiQueryLimiter, async (req, res) => {
       text: s["text"],
       startTime: s["start_time"],
       endTime: s["end_time"],
-      score: s["similarity"] ?? 0,
+      score: (s["similarity"] as number) ?? 0,
       trade: s["trade"] ?? null,
     }));
 
-    return res.json({ query, results });
+    return res.json({ query, results: await applyVerificationRerank(results) });
   } catch (err) {
     req.log.error({ err }, "semanticSearch error");
     return res.status(500).json({ error: "Search failed" });
