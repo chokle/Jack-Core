@@ -67,7 +67,7 @@ These govern how any new knowledge enters Torch. Violating them corrupts the gra
 5. **Reviews are resilient to graph drift.** A recorded best-match id is a hint, not a guarantee — always re-validate a resolution target against the live graph before writing (follow merge ledgers; re-match by content if it vanished).
 6. **Withdrawal removes the person, not the knowledge.** Concepts with surviving evidence are retained (aggregates recomputed); mentor-only concepts are archived (restorable), never silently deleted.
 
-Deeper mechanics live in `replit.md` ("Architecture decisions") — keep that file authoritative for the how; keep this list authoritative for the why.
+Deeper mechanics live in `docs/architecture.md` and `docs/knowledge-graph.md` (indexed from `replit.md`) — keep those files authoritative for the how; keep this list authoritative for the why.
 
 ---
 

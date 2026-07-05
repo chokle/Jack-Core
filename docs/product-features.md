@@ -1,0 +1,15 @@
+# Product Features
+
+The user-facing capabilities of Jack. For the mission behind them see [`../VISION.md`](../VISION.md); for how they are built see [`./architecture.md`](./architecture.md) and [`./knowledge-graph.md`](./knowledge-graph.md).
+
+- **Video Library** — upload, browse, and filter training videos by trade and status
+- **AI Transcription** — Whisper transcribes videos with timestamps; segments are indexed for search
+- **AI Analysis** — GPT-4o generates summaries, key points, and Red Seal competency mappings
+- **Semantic Search** — RAG over transcript segments with pgvector; falls back to text search if no embeddings
+- **Ask Jack** — Conversational AI that searches the internal library first, answers with timestamp citations
+- **Knowledge Entries** — generic, NON-video knowledge assets (written field notes, sketches, photos) with a title/description/trade/category/tags/body/images/metadata (and optional related videos/timestamps). Ask Jack retrieves them semantically alongside video transcripts and cites them (image + snippet, "Field note" badge, no clip to jump to). Proves Jack can answer from knowledge that never came from a video. Created out-of-band via a seed script (no ingestion UI); retrieval is table-driven
+- **Related Videos** — Vector similarity to surface related content after watching
+- **Interview Mode** — Jack conversationally interviews experienced tradespeople one plainspoken question at a time (skippable); answers are saved verbatim, distilled with the same engine as videos, and reinforce the SAME shared knowledge graph as `mentor_supplied` corroboration. An interrupted interview can be picked up later via a **Resume Interview** action that appears on that mentor's node in the Living Memory graph whenever they have an incomplete session (progress is durable server-side, so it survives refreshes/new devices)
+- **Knowledge Review** — admin-gated curation of queued mentor-concept candidates: Accept (green, reinforce the suggested best match), Merge (amber, reinforce a reviewer-chosen concept), Reject (red, required reason); replay-safe, with pending/accepted/merged/rejected tabs
+- **Graph Health** — admin-gated dashboard on the Review screen showing knowledge-write verification: verified/partial/failed/pending counts, retry-queue depth (videos + answers), average processing time, and a log of recent writes with per-check detail; failed mentor answers get a one-click Retry distillation. A video or mentor answer never reports success if its knowledge failed to enter the graph
+- **Parking Lot** — a "Park This Thought" action in Ask Jack and Interview Mode snapshots the moment (last ≤5 messages/turns, topic, unfinished thought, timestamp, trade/category, optional reason) so a promising tangent isn't lost. Parked items appear in the Living Memory sidebar (unfiltered) and on a mentor's node detail (filtered to that mentor) with status parked/resumed/resolved; Resume restores the context and — for interview items — shows a reorientation banner when the mentor returns to Interview Mode. No dedicated page; persisted server-side and session-scoped like chat history
