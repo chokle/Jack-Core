@@ -85,7 +85,9 @@ function JackApp() {
     <>
       {/* Ambient memory wallpaper behind the library / detail surfaces. The
           Memory Graph view renders its own full-bleed interactive canvas. */}
-      {!inGraph && <KnowledgeGraph />}
+      {/* TEMP DIAGNOSTIC: ambient wallpaper disabled to isolate the left-edge
+          "blue line" report. Restore to `{!inGraph && <KnowledgeGraph />}`. */}
+      {false && !inGraph && <KnowledgeGraph />}
 
       <JackShell
         active={activeNav}
