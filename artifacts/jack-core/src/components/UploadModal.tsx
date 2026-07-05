@@ -150,7 +150,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-card w-full max-w-2xl rounded-xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-card w-full max-w-2xl rounded-xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[100dvh] sm:max-h-[90vh]">
         <div className="flex justify-between items-center p-4 border-b border-border bg-muted/30">
           <h2 className="font-semibold flex items-center gap-2">
             <UploadCloud className="h-5 w-5 text-primary" />
@@ -160,7 +160,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
             variant="ghost"
             size="icon"
             onClick={onClose}
-            className="h-8 w-8"
+            className="h-10 w-10 sm:h-8 sm:w-8"
             disabled={isUploading}
           >
             <X className="h-4 w-4" />
@@ -225,7 +225,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 shrink-0"
+                      className="h-9 w-9 sm:h-7 sm:w-7 shrink-0"
                       onClick={() => removeItem(item.id)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -250,21 +250,27 @@ export function UploadModal({ onClose }: UploadModalProps) {
           </div>
         </div>
 
-        <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between gap-2">
-          <p className="text-xs font-mono text-muted-foreground">
+        <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border bg-muted/30 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-mono text-muted-foreground text-center sm:text-left">
             {items.length} selected
             {doneCount ? ` • ${doneCount} queued` : ""}
             {errorCount ? ` • ${errorCount} failed` : ""}
           </p>
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={isUploading}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onClose}
+              disabled={isUploading}
+              className="flex-1 sm:flex-none"
+            >
               {doneCount > 0 && runnableCount === 0 ? "Done" : "Cancel"}
             </Button>
             <Button
               type="button"
               onClick={handleUpload}
               disabled={isUploading || runnableCount === 0}
-              className="bg-primary text-primary-foreground"
+              className="flex-1 sm:flex-none bg-primary text-primary-foreground"
             >
               {isUploading ? (
                 <>

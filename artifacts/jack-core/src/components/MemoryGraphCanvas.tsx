@@ -542,29 +542,108 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       };
 
       // ----- pointer interaction --------------------------------------------
+      // Supports mouse drag-to-pan/click-to-select, wheel-zoom, double-click-to-pin
+      // (desktop) AND two-finger pinch-to-zoom + long-press-to-pin (touch), all on
+      // the same pointer-event stream so a phone with a trackpad-like touchscreen
+      // gets consistent behavior.
       let dragging = false;
       let moved = 0;
       let last = { x: 0, y: 0 };
+      let dragPointerType: string = "mouse";
+      let longPressFired = false;
+      let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+      const activePointers = new Map<number, { x: number; y: number }>();
+      let pinchStartDist = 0;
+      let pinchStartScale = 1;
+      let pinchMid = { x: 0, y: 0 };
+
+      const clearLongPress = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
 
       const localXY = (e: PointerEvent) => {
         const rect = canvas.getBoundingClientRect();
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
       };
 
+      const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+
       const onPointerDown = (e: PointerEvent) => {
         if (locked) return;
         camTargetRef.current = null;
+        const pos = localXY(e);
+        activePointers.set(e.pointerId, pos);
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+
+        if (activePointers.size === 2) {
+          // Second finger down — switch into pinch-zoom, abandoning any
+          // single-finger drag/long-press that was in flight.
+          dragging = false;
+          clearLongPress();
+          const pts = [...activePointers.values()];
+          pinchStartDist = dist2(pts[0]!, pts[1]!);
+          pinchStartScale = camRef.current.scale;
+          pinchMid = { x: (pts[0]!.x + pts[1]!.x) / 2, y: (pts[0]!.y + pts[1]!.y) / 2 };
+          return;
+        }
+        if (activePointers.size > 2) return;
+
         dragging = true;
         moved = 0;
-        last = localXY(e);
-        canvas.setPointerCapture(e.pointerId);
+        last = pos;
+        dragPointerType = e.pointerType;
+
+        // Touch has no hover/double-click, so a long-press is the touch-native
+        // equivalent of desktop's double-click-to-pin.
+        if (e.pointerType === "touch") {
+          longPressFired = false;
+          clearLongPress();
+          longPressTimer = setTimeout(() => {
+            if (!dragging || moved > 10) return;
+            const hit = pick(pos.x, pos.y);
+            if (hit && hit.kind !== "core") {
+              longPressFired = true;
+              onTogglePinRef.current?.(hit.id);
+              dragging = false;
+            }
+          }, 550);
+        }
       };
       const onPointerMove = (e: PointerEvent) => {
-        const { x, y } = localXY(e);
+        const pos = localXY(e);
+        if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, pos);
+
+        if (activePointers.size === 2 && !locked) {
+          const pts = [...activePointers.values()];
+          const d = dist2(pts[0]!, pts[1]!);
+          if (pinchStartDist > 1) {
+            const factor = d / pinchStartDist;
+            const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchStartScale * factor));
+            const cam = camRef.current;
+            const wx = (pinchMid.x - cam.tx) / cam.scale;
+            const wy = (pinchMid.y - cam.ty) / cam.scale;
+            cam.scale = next;
+            cam.tx = pinchMid.x - wx * next;
+            cam.ty = pinchMid.y - wy * next;
+            onZoomChange(Math.round(next * 100));
+          }
+          return;
+        }
+
+        const { x, y } = pos;
         if (dragging && !locked) {
           const dx = x - last.x;
           const dy = y - last.y;
           moved += Math.abs(dx) + Math.abs(dy);
+          if (moved > 10) clearLongPress();
           camRef.current.tx += dx;
           camRef.current.ty += dy;
           last = { x, y };
@@ -579,9 +658,18 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         }
       };
       const onPointerUp = (e: PointerEvent) => {
+        activePointers.delete(e.pointerId);
+        clearLongPress();
         if (locked) return;
+        if (activePointers.size >= 1) {
+          // Lifting one finger out of a pinch — reset so the remaining finger
+          // resumes a fresh pan instead of jumping to the old drag delta.
+          dragging = false;
+          return;
+        }
         const { x, y } = localXY(e);
-        if (dragging && moved < 6) {
+        const clickThreshold = dragPointerType === "touch" ? 10 : 6;
+        if (dragging && moved < clickThreshold && !longPressFired) {
           const hit = pick(x, y);
           onSelect(hit ? hit.id : null);
         }
@@ -591,6 +679,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         } catch {
           /* ignore */
         }
+      };
+      const onPointerCancel = (e: PointerEvent) => {
+        activePointers.delete(e.pointerId);
+        clearLongPress();
+        dragging = false;
       };
       const onWheel = (e: WheelEvent) => {
         if (locked) return;
@@ -616,6 +709,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       canvas.addEventListener("pointerdown", onPointerDown);
       canvas.addEventListener("pointermove", onPointerMove);
       canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
       canvas.addEventListener("pointerleave", onLeave);
       canvas.addEventListener("dblclick", onDblClick);
       canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -1048,9 +1142,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       return () => {
         cancelAnimationFrame(raf);
         ro.disconnect();
+        clearLongPress();
         canvas.removeEventListener("pointerdown", onPointerDown);
         canvas.removeEventListener("pointermove", onPointerMove);
         canvas.removeEventListener("pointerup", onPointerUp);
+        canvas.removeEventListener("pointercancel", onPointerCancel);
         canvas.removeEventListener("pointerleave", onLeave);
         canvas.removeEventListener("dblclick", onDblClick);
         canvas.removeEventListener("wheel", onWheel);

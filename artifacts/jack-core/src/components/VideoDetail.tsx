@@ -138,9 +138,9 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+      <div className="flex-1 overflow-y-auto lg:overflow-hidden flex flex-col lg:flex-row">
         {/* Main Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 lg:overflow-y-auto p-6 space-y-6">
           <div className="aspect-video bg-black rounded-xl overflow-hidden relative border border-border">
             {video.videoUrl ? (
               <video ref={videoRef} src={video.videoUrl} controls className="w-full h-full object-contain" />
@@ -175,7 +175,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
         </div>
 
         {/* Sidebar Panel */}
-        <div className="w-full lg:w-[400px] border-l border-border bg-sidebar flex flex-col h-[calc(100vh-73px)]">
+        <div className="w-full lg:w-[400px] border-l border-border bg-sidebar flex flex-col lg:h-[calc(100vh-73px)]">
           <div className="flex p-2 gap-1 border-b border-border bg-card">
             <button 
               onClick={() => setActiveTab("analysis")}
@@ -191,7 +191,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
             </button>
           </div>
 
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 overflow-visible lg:overflow-hidden">
             <div className="p-4 space-y-6">
               {activeTab === "analysis" ? (
                 <div className="space-y-6">
@@ -233,7 +233,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                       <div
                         key={i}
                         onClick={() => seekVideo(segment.startTime)}
-                        className="group flex gap-3 hover:bg-muted/50 p-2 -mx-2 rounded-lg cursor-pointer transition-colors"
+                        className="group flex gap-3 hover:bg-muted/50 active:bg-muted/50 p-3 -mx-2 rounded-lg cursor-pointer transition-colors"
                       >
                         <div className="font-mono text-xs text-primary pt-0.5">
                           {Math.floor(segment.startTime / 60)}:{(segment.startTime % 60).toString().padStart(2, '0')}

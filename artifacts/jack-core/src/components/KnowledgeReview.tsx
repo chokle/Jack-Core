@@ -190,7 +190,7 @@ export function KnowledgeReview() {
             <button
               key={t.value}
               onClick={() => setStatusTab(t.value)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+              className={`rounded-lg px-3 py-2 md:py-1.5 text-xs font-semibold transition-colors ${
                 statusTab === t.value
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -510,7 +510,7 @@ function CandidateCard({
             size="sm"
             disabled={busy}
             onClick={() => onResolve("restore")}
-            className="bg-emerald-600 text-white hover:bg-emerald-500"
+            className="min-h-10 md:min-h-8 bg-emerald-600 text-white hover:bg-emerald-500"
             title="Re-mint this concept as attribution-free unverified knowledge"
           >
             <RotateCcw className="mr-1.5 h-4 w-4" />
@@ -527,6 +527,7 @@ function CandidateCard({
             variant="outline"
             disabled={busy}
             onClick={() => onResolve("rearchive")}
+            className="min-h-10 md:min-h-8"
             title="Undo this restore — move the concept back to archived knowledge"
           >
             <Archive className="mr-1.5 h-4 w-4" />
@@ -545,6 +546,7 @@ function CandidateCard({
             variant="outline"
             disabled={busy}
             onClick={() => onResolve("reopen")}
+            className="min-h-10 md:min-h-8"
             title="Undo this rejection — return the candidate to the pending queue for a fresh decision"
           >
             <RotateCcw className="mr-1.5 h-4 w-4" />
@@ -562,7 +564,7 @@ function CandidateCard({
                 size="sm"
                 disabled={busy || !topMatch || topMatchGone}
                 onClick={() => onResolve("accept")}
-                className="bg-emerald-600 text-white hover:bg-emerald-500"
+                className="min-h-10 md:min-h-8 bg-emerald-600 text-white hover:bg-emerald-500"
                 title={
                   !topMatch
                     ? "No suggested match — use merge instead"
@@ -579,7 +581,7 @@ function CandidateCard({
                 variant="outline"
                 disabled={busy}
                 onClick={() => setMode("merge")}
-                className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                className="min-h-10 md:min-h-8 border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
               >
                 <GitMerge className="mr-1.5 h-4 w-4" />
                 Merge into…
@@ -589,7 +591,7 @@ function CandidateCard({
                 variant="outline"
                 disabled={busy}
                 onClick={() => setMode("reject")}
-                className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                className="min-h-10 md:min-h-8 border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
               >
                 <XCircle className="mr-1.5 h-4 w-4" />
                 Reject
@@ -614,11 +616,11 @@ function CandidateCard({
                     setMergeTarget(null);
                   }}
                   placeholder="Search existing concepts…"
-                  className="bg-background pl-8"
+                  className="bg-background pl-8 h-11 text-base md:h-9 md:text-sm"
                   autoFocus
                 />
               </div>
-              <div className="max-h-44 space-y-1 overflow-y-auto">
+              <div className="max-h-60 md:max-h-44 space-y-1 overflow-y-auto">
                 {mergeMatches.length === 0 ? (
                   <div className="px-2 py-3 text-xs text-muted-foreground">
                     No concepts match that search.
@@ -628,7 +630,7 @@ function CandidateCard({
                     <button
                       key={n.id}
                       onClick={() => setMergeTarget(n)}
-                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                      className={`flex min-h-11 md:min-h-0 w-full items-center justify-between rounded-lg border px-3 py-2.5 md:py-2 text-left text-sm transition-colors ${
                         mergeTarget?.id === n.id
                           ? "border-amber-500/60 bg-amber-500/10 text-amber-300"
                           : "border-border bg-muted/20 text-foreground hover:bg-muted/50"
@@ -650,12 +652,18 @@ function CandidateCard({
                     mergeTarget &&
                     onResolve("merge", { targetNodeId: mergeTarget.id })
                   }
-                  className="bg-amber-600 text-white hover:bg-amber-500"
+                  className="min-h-10 md:min-h-8 bg-amber-600 text-white hover:bg-amber-500"
                 >
                   <GitMerge className="mr-1.5 h-4 w-4" />
                   Merge into {mergeTarget ? `“${mergeTarget.label}”` : "…"}
                 </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("idle")}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setMode("idle")}
+                  className="min-h-10 md:min-h-8"
+                >
                   Cancel
                 </Button>
               </div>
@@ -668,7 +676,7 @@ function CandidateCard({
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Why is this being rejected? (required)"
-                className="bg-background"
+                className="bg-background h-11 text-base md:h-9 md:text-sm"
                 autoFocus
               />
               <div className="flex gap-2">
@@ -676,12 +684,18 @@ function CandidateCard({
                   size="sm"
                   disabled={busy || !reason.trim()}
                   onClick={() => onResolve("reject", { reason: reason.trim() })}
-                  className="bg-red-600 text-white hover:bg-red-500"
+                  className="min-h-10 md:min-h-8 bg-red-600 text-white hover:bg-red-500"
                 >
                   <XCircle className="mr-1.5 h-4 w-4" />
                   Reject
                 </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setMode("idle")}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setMode("idle")}
+                  className="min-h-10 md:min-h-8"
+                >
                   Cancel
                 </Button>
               </div>

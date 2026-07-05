@@ -44,6 +44,12 @@ interface FloatingPanelProps {
    */
   bodyKey?: string;
   ariaLabel?: string;
+  /**
+   * Desktop renders a draggable floating window; mobile renders a docked
+   * bottom sheet (full-width, rounded top corners, swipe-down-to-dismiss on
+   * the header, safe-area-aware bottom padding). Defaults to desktop.
+   */
+  isDesktop?: boolean;
 }
 
 const PAD = 12;
@@ -121,7 +127,12 @@ export function FloatingPanel({
   maxHeight = "70vh",
   bodyKey,
   ariaLabel,
+  isDesktop = true,
 }: FloatingPanelProps) {
+  // All hooks below run unconditionally (desktop and mobile alike) — the
+  // mobile-sheet render swap happens at the very end, at the JSX return, so
+  // this never trips the Rules of Hooks even though `isDesktop` can flip at
+  // runtime (viewport resize / rotation).
   const panelRef = useRef<HTMLDivElement>(null);
   // The single source of truth for placement (avoids state-driven transform).
   const posRef = useRef<XY | null>(null);
@@ -244,6 +255,21 @@ export function FloatingPanel({
     visibility: ready ? "visible" : "hidden",
   };
 
+  if (!isDesktop) {
+    return (
+      <MobileSheet
+        headerContent={headerContent}
+        headerActions={headerActions}
+        onClose={onClose}
+        maxHeight={maxHeight}
+        bodyKey={bodyKey}
+        ariaLabel={ariaLabel}
+      >
+        {children}
+      </MobileSheet>
+    );
+  }
+
   return (
     <div
       ref={panelRef}
@@ -276,6 +302,115 @@ export function FloatingPanel({
       <div
         key={bodyKey}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Mobile counterpart to the desktop draggable window: a docked bottom sheet.
+ * Full-width, rounded top corners only, safe-area-aware bottom padding, and a
+ * swipe-down gesture on the header (or its drag handle) to dismiss — no
+ * free-drag positioning since there's no room to relocate it on a phone.
+ */
+function MobileSheet({
+  headerContent,
+  headerActions,
+  children,
+  onClose,
+  maxHeight,
+  bodyKey,
+  ariaLabel,
+}: {
+  headerContent: ReactNode;
+  headerActions?: ReactNode;
+  children: ReactNode;
+  onClose: () => void;
+  maxHeight?: string;
+  bodyKey?: string;
+  ariaLabel?: string;
+}) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; dy: number } | null>(null);
+
+  const setDy = (dy: number) => {
+    const el = sheetRef.current;
+    if (!el) return;
+    el.style.transform = dy > 0 ? `translateY(${dy}px)` : "translateY(0px)";
+  };
+
+  const onHeaderPointerDown = (e: ReactPointerEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    dragRef.current = { startY: e.clientY, dy: 0 };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onHeaderPointerMove = (e: ReactPointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dy = Math.max(0, e.clientY - d.startY);
+    d.dy = dy;
+    setDy(dy);
+  };
+
+  const endDrag = (e: ReactPointerEvent) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    if (!d) return;
+    // A decisive downward swipe dismisses; anything short springs back open.
+    if (d.dy > 90) {
+      onClose();
+    } else {
+      setDy(0);
+    }
+  };
+
+  return (
+    <div
+      ref={sheetRef}
+      role="dialog"
+      aria-label={ariaLabel}
+      style={{ maxHeight: maxHeight ?? "80dvh" }}
+      className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-white/10 bg-card/95 shadow-2xl shadow-black/70 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in slide-in-from-bottom-4 fade-in-0"
+    >
+      <div
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        style={{ touchAction: "none" }}
+        className="flex select-none flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-2 active:cursor-grabbing"
+      >
+        <div className="mx-auto h-1.5 w-10 shrink-0 rounded-full bg-white/20" aria-hidden />
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">{headerContent}</div>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerActions}
+            <button
+              onClick={onClose}
+              title="Close"
+              aria-label="Close"
+              className="-mr-1 -mt-1 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors active:bg-white/10 active:text-foreground"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div
+        key={bodyKey}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       >
         {children}
       </div>

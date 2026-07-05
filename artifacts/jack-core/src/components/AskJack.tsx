@@ -124,7 +124,7 @@ export function AskJack({
               ? { duration: 0 }
               : { type: "spring", damping: 30, stiffness: 320 }
           }
-          className="fixed top-0 right-0 h-screen w-full sm:w-[450px] bg-sidebar border-l border-sidebar-border shadow-2xl flex flex-col z-50"
+          className="fixed top-0 right-0 h-dvh w-full sm:w-[450px] bg-sidebar border-l border-sidebar-border shadow-2xl flex flex-col z-50"
         >
           <div className="flex items-center justify-between p-4 border-b border-sidebar-border bg-sidebar-primary/5">
             <div className="flex items-center gap-2">
@@ -212,7 +212,7 @@ export function AskJack({
             </div>
           </ScrollArea>
 
-          <div className="p-4 bg-sidebar-primary/5 border-t border-sidebar-border space-y-2">
+          <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-sidebar-primary/5 border-t border-sidebar-border space-y-2 shrink-0">
             {messages.length > 0 && (
               <div className="flex justify-end">
                 <ParkThisThoughtButton
@@ -231,14 +231,14 @@ export function AskJack({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask about red seal standards..."
-                className="pr-12 bg-card border-card-border focus-visible:ring-primary"
+                className="h-11 pr-12 bg-card border-card-border focus-visible:ring-primary text-base md:h-9 md:text-sm"
                 disabled={askJack?.isPending}
               />
               <Button 
                 type="submit" 
                 size="icon" 
                 data-testid="send-button"
-                className="absolute right-1 top-1 h-8 w-8 bg-primary hover:bg-primary/90 text-primary-foreground"
+                className="absolute right-1 top-1 h-9 w-9 bg-primary hover:bg-primary/90 text-primary-foreground md:h-8 md:w-8"
                 disabled={!input.trim() || askJack?.isPending}
               >
                 <Send className="h-4 w-4" />

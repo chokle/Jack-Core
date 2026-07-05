@@ -559,8 +559,11 @@ export function MemoryGraphView({
             <h1 className="text-2xl font-extrabold tracking-tight text-white drop-shadow">
               JACK'S LIVING MEMORY
             </h1>
-            <p className="mt-1 font-mono text-xs text-white/55">
+            <p className="mt-1 hidden font-mono text-xs text-white/55 md:block">
               Click any node for its full capture · double-click to pin
+            </p>
+            <p className="mt-1 font-mono text-xs text-white/55 md:hidden">
+              Tap a node for details · long-press to pin
             </p>
             <GrowthCounter
               knowledge={model.counts.knowledge}
@@ -569,15 +572,15 @@ export function MemoryGraphView({
               reducedMotion={reducedMotion}
             />
           </div>
-          <div className="pointer-events-auto flex items-center gap-2">
-            <div className="relative">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[160px] flex-1 lg:flex-none">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={onSearchKeyDown}
                 placeholder="Search the graph..."
-                className="h-9 w-56 rounded-lg border border-white/10 bg-black/40 pl-9 pr-16 text-sm text-white outline-none backdrop-blur placeholder:text-white/40 focus:border-primary/60"
+                className="h-10 w-full rounded-lg border border-white/10 bg-black/40 pl-9 pr-16 text-sm text-white outline-none backdrop-blur placeholder:text-white/40 focus:border-primary/60 md:h-9 lg:w-56"
               />
               {query && (
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] tabular-nums text-white/50">
@@ -586,9 +589,9 @@ export function MemoryGraphView({
                     : "0/0"}
                 </span>
               )}
-              {/* Arrow-key navigation hint — only while matches exist. */}
+              {/* Arrow-key navigation hint — keyboard-only, and only while matches exist. */}
               {matchIds.length > 0 && (
-                <div className="pointer-events-none absolute left-0 top-full mt-1.5 flex items-center gap-2 rounded-md border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] text-white/60 backdrop-blur">
+                <div className="pointer-events-none absolute left-0 top-full mt-1.5 hidden items-center gap-2 rounded-md border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] text-white/60 backdrop-blur md:flex">
                   <span className="flex items-center gap-0.5">
                     <ArrowUp className="h-3 w-3" />
                     <ArrowDown className="h-3 w-3" />
@@ -797,6 +800,7 @@ export function MemoryGraphView({
             ariaLabel={`${selected.label} details`}
             defaultPlacement={isDesktop ? "top-right" : "bottom"}
             maxHeight={isDesktop ? "70vh" : "80dvh"}
+            isDesktop={isDesktop}
             bodyKey={selected.id}
             headerContent={
               <InspectorHeaderContent
@@ -1043,10 +1047,10 @@ function IconButton({
     <button
       onClick={onClick}
       title={title}
-      className={`flex h-8 w-8 items-center justify-center rounded-md border backdrop-blur transition-colors ${
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border backdrop-blur transition-colors md:h-8 md:w-8 ${
         active
           ? "border-primary/50 bg-primary/20 text-primary"
-          : "border-white/10 bg-black/40 text-white/70 hover:bg-white/10 hover:text-white"
+          : "border-white/10 bg-black/40 text-white/70 hover:bg-white/10 hover:text-white active:bg-white/15"
       }`}
     >
       {children}

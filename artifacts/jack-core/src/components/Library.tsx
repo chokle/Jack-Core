@@ -91,7 +91,7 @@ export function Library({ onSelectVideo }: LibraryProps) {
             </h2>
             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
               {recentVideos.map((video, idx) => (
-                <div key={video.id} className="min-w-[300px] w-[300px] flex-shrink-0">
+                <div key={video.id} className="min-w-[75vw] w-[75vw] sm:min-w-[300px] sm:w-[300px] flex-shrink-0">
                   <VideoCard video={video} onClick={() => onSelectVideo(video.id)} index={idx} />
                 </div>
               ))}
