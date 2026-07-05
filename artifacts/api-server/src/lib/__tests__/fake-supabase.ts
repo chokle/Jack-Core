@@ -103,19 +103,27 @@ export class FakeSupabase {
       );
 
       const scored = (this.tables["transcript_segments"] ?? [])
-        .filter((s) => s["embedding"] != null)
+        // A seeded segment is rankable one of two ways: it carries a stored
+        // embedding (cosine-scored against the query, like the real pgvector fn),
+        // or it carries a precomputed `similarity` for tests that need to pin the
+        // exact retrieval scores they reason about (e.g. proving trust reranking
+        // flips the order). Rows with neither can't be scored and are skipped.
+        .filter((s) => s["embedding"] != null || typeof s["similarity"] === "number")
         .map((s) => {
-          const emb = JSON.parse(s["embedding"] as string) as number[];
           const video = (videoById.get(s["video_id"]) ?? {}) as Row;
+          const similarity =
+            typeof s["similarity"] === "number"
+              ? (s["similarity"] as number)
+              : cosine(query, JSON.parse(s["embedding"] as string) as number[]);
           return {
             video_id: s["video_id"],
-            video_title: video["title"] ?? null,
-            thumbnail_url: video["thumbnail_url"] ?? null,
+            video_title: s["video_title"] ?? video["title"] ?? null,
+            thumbnail_url: s["thumbnail_url"] ?? video["thumbnail_url"] ?? null,
             text: s["text"],
             start_time: s["start_time"],
             end_time: s["end_time"],
-            trade: video["trade"] ?? null,
-            similarity: cosine(query, emb),
+            trade: s["trade"] ?? video["trade"] ?? null,
+            similarity,
           };
         })
         .filter((r) => filterTrade == null || r.trade === filterTrade)
