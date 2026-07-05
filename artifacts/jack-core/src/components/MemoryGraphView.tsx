@@ -40,9 +40,9 @@ import type {
   ParkedThought,
 } from "@workspace/api-client-react";
 import {
-  SpatialBrainCanvas,
+  MemoryGraphCanvas,
   type MemoryGraphHandle,
-} from "./SpatialBrainCanvas";
+} from "./MemoryGraphCanvas";
 import { FloatingPanel } from "./FloatingPanel";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
@@ -156,8 +156,7 @@ export function MemoryGraphView({
   onResumeChat,
   onStartInterview,
 }: MemoryGraphViewProps) {
-  const { model: rawModel, recent, competencies, delta, vitality, isLoading } =
-    data;
+  const { model: rawModel, recent, competencies, delta, vitality } = data;
   // Per-trade count of non-video Knowledge Entries, polled so a trade that gains
   // its first written field note lights up (dormant → firing) without a reload.
   // React Query structural sharing keeps `byTrade` referentially stable across
@@ -191,10 +190,6 @@ export function MemoryGraphView({
   const [search, setSearch] = useState("");
   const [locked, setLocked] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
-  // Full Graph (default) keeps every trade visible and selection only changes
-  // emphasis; Focus View drills into the selection (recenters + prunes). Default
-  // must be full so the launch view never hides trades when a node is selected.
-  const [graphViewMode, setGraphViewMode] = useState<"full" | "focus">("full");
   // The legend is a large overlay that crowds the graph on phones, so start it
   // collapsed on small screens (users can still reveal it via the toggle).
   // Desktop keeps it open by default.
@@ -541,7 +536,7 @@ export function MemoryGraphView({
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
-        <SpatialBrainCanvas
+        <MemoryGraphCanvas
           ref={canvasRef}
           model={model}
           selectedId={selectedId}
@@ -554,8 +549,6 @@ export function MemoryGraphView({
           locked={locked}
           delta={delta}
           onZoomChange={setZoomPct}
-          dataReady={!isLoading}
-          viewMode={graphViewMode}
         />
 
         {/* Header overlay */}
@@ -608,34 +601,6 @@ export function MemoryGraphView({
                   </span>
                 </div>
               )}
-            </div>
-            {/* View mode: Full Graph keeps every trade visible (selection only
-                changes emphasis); Focus View drills into the selection. Default
-                is Full Graph so launch never hides trades on selection. */}
-            <div className="flex items-center gap-0.5 rounded-lg border border-white/10 bg-black/45 p-1 backdrop-blur">
-              {(["full", "focus"] as const).map((mode) => {
-                const on = graphViewMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setGraphViewMode(mode)}
-                    aria-pressed={on}
-                    title={
-                      mode === "full"
-                        ? "Show the full graph — selecting a node highlights it without hiding other trades"
-                        : "Focus on the selected node — recenters and hides distant trades"
-                    }
-                    className={`rounded px-2.5 py-1 font-mono text-[11px] transition-colors ${
-                      on
-                        ? "bg-white/15 text-white"
-                        : "text-white/55 hover:text-white/85"
-                    }`}
-                  >
-                    {mode === "full" ? "Full Graph" : "Focus View"}
-                  </button>
-                );
-              })}
             </div>
             <IconButton
               title={showLegend ? "Hide legend" : "Show legend"}

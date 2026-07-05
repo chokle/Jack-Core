@@ -44,22 +44,16 @@ transparent and the blit reads as a circle.
   on unmount.
 
 **How to apply — check which component is actually mounted first.** The sprite fix
-currently lives ONLY in `MemoryGraphCanvas.tsx`, which is now **dead code**: the
-Memory Graph view renders `SpatialBrainCanvas.tsx` instead (a "drop-in sibling",
-MemoryGraphView.tsx), and `MemoryGraphCanvas` is referenced only in comments. So
-the optimization is absent from the path users see — the "spatial brain" rewrite
-silently reintroduced the per-node `createRadialGradient` glow. Any glow-perf work
-(the sprite technique included) must land in the RENDERED canvas to matter.
-
-**Nuance — the live cost is bounded, not the pre-#84 unbounded cliff.**
-`SpatialBrainCanvas` imports nothing from `graph-perf.ts` (no screen-cull, no glow
-LOD) and its `drawn` set is filtered only by `n.vis`, BUT `graph-spatial.ts` caps
-the visible set at `DEFAULT_MAX_VISIBLE = 220`, so it draws at most ~220 per-node
-gradients/frame. Don't claim a *measured* fps regression from the code alone — the
-per-node pattern is present but capped.
+lives in `MemoryGraphCanvas.tsx`, which is once again the **LIVE** canvas: the
+Memory Graph view (`MemoryGraphView.tsx`) renders `MemoryGraphCanvas` after the 3D
+`SpatialBrainCanvas.tsx` experiment was rolled back for launch. So the sprite
+optimization IS on the path users see. `SpatialBrainCanvas` is now dead-on-disk (it
+reintroduced the per-node `createRadialGradient` glow and never carried the sprite
+LOD) pending a deliberate post-launch 3D revisit — if you resurrect it, port the
+sprite technique before shipping.
 
 Empirical FPS can't be measured in the headless preview screenshot tool (CPU-
-rasterized, underreports vs a real GPU browser). A dev-only on-screen fps meter now
-lives in `SpatialBrainCanvas` (enable with `?graphStress=N` or `?fps=1`); verify
-render correctness with `?graphStress=N` and read real fps in a desktop browser at
-full zoom (a dense cluster filling the viewport — the worst case, not default zoom).
+rasterized, underreports vs a real GPU browser). Read real fps in a desktop browser
+at full zoom (a dense cluster filling the viewport — the worst case, not default
+zoom). Note: the dev-only on-screen fps meter (`?graphStress=N` / `?fps=1`) lived in
+the now-dead `SpatialBrainCanvas`, so it is not wired into the live 2D canvas.
