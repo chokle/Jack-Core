@@ -1623,7 +1623,7 @@ function ConfidenceSparkline({
  * withdrew. All fields are optional — each block renders only when it has data,
  * so the section is honest about what Jack actually recorded.
  */
-function ProvenanceContent({
+export function ProvenanceContent({
   node,
   nodeById,
   onSelectNode,
@@ -2157,7 +2157,7 @@ function MentorResumeAction({
   );
 }
 
-function NodeDetailBody({
+export function NodeDetailBody({
   node,
   degree,
   relatedVideoCount,
