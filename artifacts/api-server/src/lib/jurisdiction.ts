@@ -78,7 +78,7 @@ CRITICAL RULE: Always search and prioritize the internal Torch Knowledge Reposit
 
 ${
     usedInternalKnowledge
-      ? `Relevant content from the internal knowledge library (training videos and written knowledge entries):\n\n${contextText}\nUse the above content to answer the question. Reference specific moments from videos where applicable, and draw on the written knowledge entries too.`
+      ? `Relevant content from the internal knowledge library (training videos and written knowledge entries):\n\n${contextText}\nUse the above content to answer the question. Reference specific moments from videos where applicable, and draw on the written knowledge entries too. Some sources carry a trust tag after the timestamp (e.g. "· mentor-verified", "· confirmed across N videos"): prefer these higher-trust sources, lean on them when sources disagree, and where it helps the reader you may note that a point is mentor-verified or confirmed across multiple videos.`
       : `No internal library content matched this query. Answer from general Canadian trades knowledge following the SOURCE PRIORITY ORDER above (Red Seal, then CSA, CWB, and Canadian provincial/government sources), and note that no specific internal content is available on this topic. If you cannot verify the applicable Canadian standard, say so rather than guessing.`
   }`;
 }

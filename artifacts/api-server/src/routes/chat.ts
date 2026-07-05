@@ -84,9 +84,17 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .map((s) => s["video_id"])
         .filter((v): v is string => typeof v === "string"),
     );
+    // Keep the full rerank result (not just the item) so we can both order the
+    // context by trust and annotate each segment with its trust signal, letting
+    // Jack cite how well-corroborated / reviewer-verified a claim is.
     const rankedSegments =
       coverage.length === 0
-        ? rawSegments
+        ? rawSegments.map((item) => ({
+            item,
+            verification: "neutral" as const,
+            confidence: 0,
+            sourceCount: 0,
+          }))
         : rerankByVerification(
             rawSegments,
             (s) => ({
@@ -96,10 +104,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
               score: typeof s["similarity"] === "number" ? (s["similarity"] as number) : 0,
             }),
             coverage,
-          ).map((r) => r.item);
+          );
 
-    for (const seg of rankedSegments) {
-      contextText += `[${seg["video_title"] ?? "Video"} @ ${formatTime(seg["start_time"] as number)}]\n${seg["text"]}\n\n`;
+    for (const { item: seg, verification, sourceCount } of rankedSegments) {
+      const trustTag = describeTrust(verification, sourceCount);
+      contextText += `[${seg["video_title"] ?? "Video"} @ ${formatTime(seg["start_time"] as number)}${trustTag}]\n${seg["text"]}\n\n`;
       citations.push({
         videoId: seg["video_id"] as string,
         videoTitle: (seg["video_title"] as string) ?? "Unknown",
@@ -205,6 +214,18 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Render a short, human-readable trust tag for a retrieved segment so the model
+ * can optionally cite how trustworthy the claim is. Returns "" when there is no
+ * signal worth surfacing (a lone, unreviewed mention), keeping the context clean.
+ */
+function describeTrust(verification: "verified" | "rejected" | "neutral", sourceCount: number): string {
+  const parts: string[] = [];
+  if (verification === "verified") parts.push("mentor-verified");
+  if (sourceCount >= 2) parts.push(`confirmed across ${sourceCount} videos`);
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
 }
 
 export default router;
