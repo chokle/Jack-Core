@@ -33,6 +33,7 @@ import type {
 } from "@workspace/api-client-react";
 import { AdminLogin } from "./AdminLogin";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
+import { MentorContributions } from "./MentorContributions";
 import { MentorWithdrawal } from "./MentorWithdrawal";
 import { GraphHealth } from "./GraphHealth";
 import { useToast } from "@/hooks/use-toast";
@@ -370,6 +371,7 @@ export function KnowledgeReview() {
           </div>
         )}
 
+        {isAdmin === true && <MentorContributions />}
         {isAdmin === true && <MentorWithdrawal />}
         {isAdmin === true && <GraphHealth />}
       </div>

@@ -19,6 +19,7 @@ import {
   getListMentorsQueryKey,
   getListKnowledgeCandidatesQueryKey,
   getGetGraphQueryKey,
+  getGetMentorContributionsQueryKey,
   getPreviewMentorWithdrawalQueryKey,
 } from "@workspace/api-client-react";
 import type { MentorSummary, MentorWithdrawalResult } from "@workspace/api-client-react";
@@ -131,6 +132,9 @@ export function MentorWithdrawal() {
         setConfirming(null);
         void queryClient.invalidateQueries({ queryKey: getListMentorsQueryKey() });
         void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: getGetMentorContributionsQueryKey(),
+        });
         void queryClient.invalidateQueries({
           queryKey: getListKnowledgeCandidatesQueryKey({ status: "pending" }),
         });
