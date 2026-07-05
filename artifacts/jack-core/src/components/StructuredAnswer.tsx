@@ -6,6 +6,8 @@ import {
   ChevronUp,
   FileText,
   ShieldAlert,
+  ShieldCheck,
+  CheckCheck,
   Wrench,
   Package,
   Lightbulb,
@@ -60,6 +62,31 @@ const TONE_CLASSES: Record<string, string> = {
   medium: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   low: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
 };
+
+// Subtle per-citation trust badges. Rendered only when a citation carries a
+// trust signal from retrieval: `verified` = a mentor reviewer confirmed a
+// covering concept; `sourceCount` >= 2 = the claim is corroborated across that
+// many videos. Neutral/untrusted citations render nothing (return null).
+function TrustBadges({ verified, sourceCount }: { verified?: boolean; sourceCount?: number | null }) {
+  const corroborated = typeof sourceCount === "number" && sourceCount >= 2;
+  if (!verified && !corroborated) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {verified && (
+        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-emerald-400">
+          <ShieldCheck className="h-3 w-3 flex-shrink-0" />
+          Mentor-verified
+        </span>
+      )}
+      {corroborated && (
+        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-sky-300">
+          <CheckCheck className="h-3 w-3 flex-shrink-0" />
+          Confirmed across {sourceCount} videos
+        </span>
+      )}
+    </div>
+  );
+}
 
 function Runs({ runs }: { runs: Run[] }) {
   return (
@@ -253,6 +280,7 @@ export function StructuredAnswer({
                     {c.text && <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{c.text}</div>}
                   </div>
                 </div>
+                <TrustBadges verified={c.verified} sourceCount={c.sourceCount} />
                 <button
                   type="button"
                   onClick={() => onCitationClick(c.videoId, c.startTime)}

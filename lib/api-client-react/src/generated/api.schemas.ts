@@ -276,6 +276,10 @@ export interface Citation {
      * @nullable
      */
   entryId?: string | null;
+  /** True when a mentor reviewer has verified a concept covering this citation. Absent/false when no reviewer has weighed in. Only ever set for "video" citations that retrieval tied to a trusted concept. */
+  verified?: boolean;
+  /** Distinct source videos that corroborate the concept covering this citation. Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when no covering concept applies (e.g. knowledge citations). */
+  sourceCount?: number;
 }
 
 export interface ChatResponse {

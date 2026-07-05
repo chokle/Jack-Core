@@ -71,6 +71,8 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       thumbnailUrl: string | null;
       sourceType: "video" | "knowledge";
       entryId?: string;
+      verified?: boolean;
+      sourceCount?: number;
     }> = [];
 
     let contextText = "";
@@ -117,6 +119,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         text: seg["text"] as string,
         thumbnailUrl: (seg["thumbnail_url"] as string | null) ?? null,
         sourceType: "video",
+        // Surface the trust signal the reranker already computed so the client
+        // can badge it. `verified` = a reviewer confirmed a covering concept;
+        // `sourceCount` = distinct corroborating videos (client badges ≥2).
+        verified: verification === "verified",
+        sourceCount,
       });
     }
 
