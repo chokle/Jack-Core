@@ -31,18 +31,20 @@ import { ambientMotionEnabled } from "../lib/motion";
  *
  * A drop-in sibling of MemoryGraphCanvas (identical handle + props) that renders
  * Jack's Living Memory as a depth-shelled constellation you can ORBIT (drag =
- * yaw/pitch), ZOOM (wheel / two-finger pinch), and RECENTER (click a node to
- * lock it at the middle; the graph re-fans around it). All geometry lives in the
+ * yaw/pitch) and ZOOM (wheel / two-finger pinch). All geometry lives in the
  * pure, unit-tested `graph-spatial` module so drawn behavior can't drift from
  * tested behavior. No three.js — a plain 2D canvas with a hand-rolled
  * perspective projection keeps the bundle lean and the render path debuggable.
  *
- * View mode governs how selection behaves. In "full" (default) the graph stays
- * centered on the JACK core and a selection only changes EMPHASIS (highlight/dim
- * via `selectedId`) — nothing is pruned, so every trade stays visible. In "focus"
- * a selection recenters the layout on the picked node and prunes to its local
- * neighborhood (the legacy drill-in). `focusNode` recenters only in focus mode;
- * `ensureVisible` is a no-op.
+ * View mode governs how selection behaves. In "full" (default) the WHOLE graph
+ * is fanned out from the JACK core (every trade plus its deeper branch) and
+ * stays put on selection: a click only EMPHASIZES the picked node and its
+ * neighbours (via `selectedId`) and swings the orbit camera so that branch comes
+ * to the front — nothing is ever pruned, so every trade stays visible in the
+ * background. In "focus" a selection recenters the layout on the picked node and
+ * prunes to its local neighbourhood (the legacy drill-in). `focusNode` swings
+ * the camera in full mode and recenters in focus mode; `ensureVisible` nudges
+ * the camera only when the node is off-screen or on the far side of the orbit.
  */
 
 export interface MemoryGraphHandle {
@@ -159,6 +161,13 @@ function spatialRadius(n: MemoryNode, degree: number, contentCount = 0): number 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3;
 const DEFAULT_PITCH = -0.3;
+/**
+ * Hops kept visible in FULL mode. The whole graph (~100 nodes) fits well under
+ * the visible cap, so we fan out deep enough to reveal every trade's branch
+ * (concepts, competencies, hazards, tools) instead of a shallow 2-hop window.
+ * Must stay finite — `buildSpatialLayout`'s deeper-shell loop runs `d <= maxHops`.
+ */
+const FULL_MAX_HOPS = 8;
 const ORBIT_SPEED = 0.006;
 const BIRTH_MS = 1600;
 
@@ -218,6 +227,9 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const hasSettledRef = useRef(false);
     const centerRef = useRef<string>(CORE_ID);
     const camRef = useRef<SpatialCamera>({ yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 });
+    // Target the orbit camera eases toward (a focusNode/ensureVisible "swing").
+    // null = no swing in flight; any manual drag/zoom clears it.
+    const camTargetRef = useRef<SpatialCamera | null>(null);
     const sizeRef = useRef({ w: 1, h: 1, dpr: 1 });
     const lockedRef = useRef(locked);
     const reducedRef = useRef(false);
@@ -279,7 +291,17 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       const m = modelRef.current;
       const info = infoRef.current;
       if (!m || m.nodes.length === 0) return;
-      const layout = buildSpatialLayout(m, id, { hierarchy: info });
+      // Full mode always fans the WHOLE graph out from the core (deep enough to
+      // include every trade's branch), so a selection never prunes other trades
+      // and the ~8s model poll can't quietly re-window it back to 2 hops. Focus
+      // mode keeps the legacy shallow drill-in around the picked node.
+      const layout =
+        viewModeRef.current === "full"
+          ? buildSpatialLayout(m, CORE_ID, {
+              maxHops: FULL_MAX_HOPS,
+              hierarchy: info,
+            })
+          : buildSpatialLayout(m, id, { hierarchy: info });
       centerRef.current = layout.centerId;
 
       const map = nodesRef.current;
@@ -353,9 +375,53 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
     // ----- imperative controls (wired to the on-screen buttons) -------------
     const applyZoom = (factor: number) => {
+      // A manual zoom cancels any in-flight camera swing so the user stays in control.
+      camTargetRef.current = null;
       const cam = camRef.current;
       cam.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, cam.zoom * factor));
       onZoomChange(Math.round(cam.zoom * 100));
+    };
+
+    // Swing the orbit camera so a node rotates to the front-and-center of the
+    // view (restores the old flat canvas's focusNode "jump"): aim yaw/pitch at
+    // the node's world position and gently zoom in, never out. The frame loop
+    // eases camRef toward this target; any manual drag/zoom cancels it.
+    const orientCameraTo = (id: string) => {
+      const n = nodesRef.current.get(id);
+      if (!n) return;
+      // Aim at the layout target (not the mid-ease position) so a freshly
+      // revealed branch still resolves to a stable orientation.
+      const horiz = Math.hypot(n.tx, n.tz);
+      const cam = camRef.current;
+      if (horiz < 1e-3 && Math.abs(n.ty) < 1e-3) {
+        // The core sits at the origin — restore the default framing.
+        const zoom = Math.max(cam.zoom, 1);
+        camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom };
+        onZoomChange(Math.round(zoom * 100));
+        return;
+      }
+      const zoom = Math.min(MAX_ZOOM, Math.max(cam.zoom, 1.15));
+      camTargetRef.current = {
+        yaw: Math.PI - Math.atan2(n.tx, n.tz),
+        pitch: clampPitch(-Math.atan2(n.ty, horiz)),
+        zoom,
+      };
+      onZoomChange(Math.round(zoom * 100));
+    };
+
+    // Whether a node needs the camera swung to it: true when it projects
+    // off-screen or onto the far hemisphere of the orbit (so an already-framed
+    // selection just emphasizes without moving the camera).
+    const needsOrient = (id: string): boolean => {
+      const n = nodesRef.current.get(id);
+      if (!n) return false;
+      const proj = projectPoint({ x: n.tx, y: n.ty, z: n.tz }, camRef.current);
+      if (proj.depth > 0) return true;
+      const { w, h } = sizeRef.current;
+      const sx = w / 2 + proj.x;
+      const sy = h / 2 + proj.y;
+      const margin = Math.min(w, h) * 0.18;
+      return sx < margin || sx > w - margin || sy < margin || sy > h - margin;
     };
 
     useImperativeHandle(ref, () => ({
@@ -363,6 +429,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       zoomOut: () => applyZoom(1 / 1.2),
       reset: () => {
         const cam = camRef.current;
+        camTargetRef.current = null;
         cam.yaw = 0;
         cam.pitch = DEFAULT_PITCH;
         cam.zoom = 1;
@@ -381,14 +448,18 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         };
       },
       focusNode: (id: string) => {
-        // Only the focus view recenters/prunes around a node. In full mode the
-        // caller also selects it, which drives emphasis without hiding the rest
-        // of the graph, so focusNode is intentionally a layout no-op there.
+        // Focus view drills in by recentering/pruning around the node. Full view
+        // keeps the whole graph and instead swings the orbit camera so the
+        // node's branch comes to the front (restores the old canvas's "jump").
         if (viewModeRef.current === "focus") recenterRef.current(id);
+        else orientCameraTo(id);
       },
-      // No-op: full mode keeps the whole graph put (selection only emphasizes),
-      // and focus mode already recenters the selection to the middle.
-      ensureVisible: () => {},
+      ensureVisible: (id: string) => {
+        // Full view: swing the camera only when the node is off-screen or on the
+        // far side of the orbit, so an already-framed selection just emphasizes.
+        // Focus view already recenters the selection to the middle.
+        if (viewModeRef.current === "full" && needsOrient(id)) orientCameraTo(id);
+      },
     }));
 
     // ----- rebuild structure whenever the model changes ---------------------
@@ -482,11 +553,14 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     }, [selectedId]);
 
     // View-mode transition: entering "full" rebuilds the whole graph around the
-    // core (a prior focus view may have pruned it away); entering "focus" drills
-    // into the current selection (or the core when nothing is selected).
+    // core (a prior focus view may have pruned it away) and swings back to the
+    // default framing so the whole graph reads at a glance; entering "focus"
+    // drills into the current selection (or the core when nothing is selected).
     useEffect(() => {
       if (viewMode === "full") {
         recenterRef.current(CORE_ID);
+        camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 };
+        onZoomChange(100);
       } else {
         recenterRef.current(selectedRef.current ?? CORE_ID);
       }
@@ -572,6 +646,8 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
       const onPointerDown = (e: PointerEvent) => {
         if (locked) return;
+        // A manual grab cancels any in-flight camera swing.
+        camTargetRef.current = null;
         const p = localXY(e);
         pointers.set(e.pointerId, p);
         if (pointers.size === 1) {
@@ -865,6 +941,30 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const dt = Math.min(2, Math.max(0, (t - lastT) / 16.67));
         lastT = t;
         if (!document.hidden) {
+          // Ease an in-flight camera swing (focusNode / ensureVisible) toward its
+          // target before stepping/drawing. Yaw takes the shortest angular path.
+          const camTarget = camTargetRef.current;
+          if (camTarget) {
+            const cam = camRef.current;
+            const k = Math.min(1, 0.14 * dt);
+            let dyaw = camTarget.yaw - cam.yaw;
+            dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+            const dpitch = camTarget.pitch - cam.pitch;
+            const dzoom = camTarget.zoom - cam.zoom;
+            cam.yaw += dyaw * k;
+            cam.pitch += dpitch * k;
+            cam.zoom += dzoom * k;
+            if (
+              Math.abs(dyaw) < 0.002 &&
+              Math.abs(dpitch) < 0.002 &&
+              Math.abs(dzoom) < 0.002
+            ) {
+              cam.yaw = camTarget.yaw;
+              cam.pitch = camTarget.pitch;
+              cam.zoom = camTarget.zoom;
+              camTargetRef.current = null;
+            }
+          }
           step(dt);
           const pulse = pulseCtrlRef.current;
           if (pulse) {
