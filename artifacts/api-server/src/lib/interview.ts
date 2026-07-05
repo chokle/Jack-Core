@@ -16,6 +16,7 @@
  */
 import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
+import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
 
 /** The trades a mentor can be interviewed for (UI selection list). */
 export const INTERVIEW_TRADES = [
@@ -205,6 +206,33 @@ function fallbackQuestion(profile: MentorProfileLite, history: AnsweredTurn[]): 
 }
 
 /**
+ * Build the interview system prompt. Extracted (and exported) as a pure function
+ * so the Canadian-jurisdiction default is unit-testable without a live model.
+ */
+export function buildInterviewSystemPrompt(args: {
+  name: string;
+  remaining: string[];
+  machineHint: string | undefined;
+}): string {
+  const { name, remaining, machineHint } = args;
+  return `You are Jack, interviewing a seasoned ${name} to capture their hard-won field knowledge for an apprentice-facing knowledge base. Interview like a sharp, curious human — not a form.
+
+${JURISDICTION_POLICY_BRIEF}
+
+Rules:
+- Ask EXACTLY ONE question. Keep it short, plainspoken, and conversational — the way a respectful colleague would ask. No preamble, no multi-part questions, no yes/no questions.
+- If the mentor's last answer was substantive and valuable, DRILL DEEPER on it with a natural follow-up (ask for the "how" or "why", a specific example, or the tell-tale signs) instead of jumping topics. If the thread is exhausted, thin, or they skipped, move on to a fresh theme. Never badger.
+- Assume a Canadian trade context: when a question touches codes, standards, certification, or safety, frame it the Canadian way (Red Seal / CSA / CWB, provincial regulators) — never assume OSHA, AWS, NEC, or other U.S. rules.
+- Over the whole interview, work through these themes (you choose the order and when to move on): ${INTERVIEW_CATEGORIES.map((c) => c.key).join(", ")}. Themes not yet covered: ${remaining.length ? remaining.join(", ") : "(all covered — you may wrap up)"}.
+${machineHint ? `- For machine/process questions, useful subtopics for this trade: ${machineHint}.` : ""}
+- Set "complete" to true ONLY when you've meaningfully covered the themes and further questions would just repeat — then leave "question" empty.
+- "category" MUST be one of the theme keys above (use the closest fit; use "wrap_up" only when complete).
+- "topic" is a short 1-3 word tag for what this specific question is about (or null).
+
+Respond with a JSON object: {"question": string, "category": string, "topic": string|null, "complete": boolean}.`;
+}
+
+/**
  * Ask the chat model for the next interview question given the mentor's profile
  * and the conversation so far. Returns a plainspoken single question tagged with
  * its theme, or `complete: true` when the interview has run its course. Falls
@@ -252,18 +280,7 @@ export async function generateNextQuestion(
           })
           .join("\n\n");
 
-  const system = `You are Jack, interviewing a seasoned ${name} to capture their hard-won field knowledge for an apprentice-facing knowledge base. Interview like a sharp, curious human — not a form.
-
-Rules:
-- Ask EXACTLY ONE question. Keep it short, plainspoken, and conversational — the way a respectful colleague would ask. No preamble, no multi-part questions, no yes/no questions.
-- If the mentor's last answer was substantive and valuable, DRILL DEEPER on it with a natural follow-up (ask for the "how" or "why", a specific example, or the tell-tale signs) instead of jumping topics. If the thread is exhausted, thin, or they skipped, move on to a fresh theme. Never badger.
-- Over the whole interview, work through these themes (you choose the order and when to move on): ${INTERVIEW_CATEGORIES.map((c) => c.key).join(", ")}. Themes not yet covered: ${remaining.length ? remaining.join(", ") : "(all covered — you may wrap up)"}.
-${machineHint ? `- For machine/process questions, useful subtopics for this trade: ${machineHint}.` : ""}
-- Set "complete" to true ONLY when you've meaningfully covered the themes and further questions would just repeat — then leave "question" empty.
-- "category" MUST be one of the theme keys above (use the closest fit; use "wrap_up" only when complete).
-- "topic" is a short 1-3 word tag for what this specific question is about (or null).
-
-Respond with a JSON object: {"question": string, "category": string, "topic": string|null, "complete": boolean}.`;
+  const system = buildInterviewSystemPrompt({ name, remaining, machineHint });
 
   const user = `Mentor profile:
 ${profileLines}

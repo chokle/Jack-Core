@@ -22,6 +22,7 @@
 import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
+import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
 import {
   knowledgeNodeId,
   syncVideoKnowledge,
@@ -177,6 +178,32 @@ export function normalizeItems(raw: unknown, validCompetencyCodes: Set<string>):
 }
 
 /**
+ * Build the distillation system prompt. Extracted (and exported) as a pure
+ * function so the Canadian-standard framing is unit-testable without a live
+ * model. Standards are recorded with their Canadian designation (CSA / CWB /
+ * Red Seal), never a U.S. equivalent.
+ */
+export function buildDistillationSystemPrompt(competencyContext: string): string {
+  return `You are Jack's Knowledge Distillation Engine for skilled trades training. Your job is to distill a training video transcript into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across many videos.
+
+${JURISDICTION_POLICY_BRIEF}
+
+Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Jet Rod, Arc Blow, Porosity, Cold Lap, WPS, Preheat, Hydrogen Cracking, Torque Spec, Bend Radius.
+
+Rules:
+- Return ONLY durable, reusable concepts — things another video on the same trade could also teach. Do NOT create one object per sentence, per segment, or per specific example in this video.
+- Return AT MOST ${MAX_KNOWLEDGE_ITEMS} objects. Fewer is better; only include what the video genuinely teaches.
+- Each object's "category" MUST be one of: ${KNOWLEDGE_CATEGORIES.join(", ")}.
+  concept = a technique/principle; tool = a hand/power tool; equipment = larger machinery/gear; material = a consumable/stock; procedure = a repeatable process; hazard = a safety risk; slang = trade terminology/jargon; certification = a credential; standard = a code/spec — use the Canadian designation (e.g. CSA, CWB, Red Seal, WPS); do NOT record U.S. equivalents like OSHA, AWS, or NEC as the standard; regional_term = a location-specific term.
+- "timestamps" is an array of transcript times in seconds (from the [seconds] markers) where the concept is discussed.
+- "confidence" is your confidence in [0,1] that this is a real, reusable concept this video teaches.
+- "competencyCode" is OPTIONAL — set it to a Red Seal code from the list below ONLY if this concept clearly maps to one, else omit or null.
+
+Available Red Seal competencies:
+${competencyContext}`;
+}
+
+/**
  * Distill a transcript into a bounded set of reusable atomic knowledge objects by
  * asking the analysis model. Returns a validated, de-duplicated, bounded list —
  * never raw model output.
@@ -202,21 +229,7 @@ export async function distillTranscript(input: {
     messages: [
       {
         role: "system",
-        content: `You are Jack's Knowledge Distillation Engine for skilled trades training. Your job is to distill a training video transcript into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across many videos.
-
-Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Jet Rod, Arc Blow, Porosity, Cold Lap, WPS, Preheat, Hydrogen Cracking, Torque Spec, Bend Radius.
-
-Rules:
-- Return ONLY durable, reusable concepts — things another video on the same trade could also teach. Do NOT create one object per sentence, per segment, or per specific example in this video.
-- Return AT MOST ${MAX_KNOWLEDGE_ITEMS} objects. Fewer is better; only include what the video genuinely teaches.
-- Each object's "category" MUST be one of: ${KNOWLEDGE_CATEGORIES.join(", ")}.
-  concept = a technique/principle; tool = a hand/power tool; equipment = larger machinery/gear; material = a consumable/stock; procedure = a repeatable process; hazard = a safety risk; slang = trade terminology/jargon; certification = a credential; standard = a code/spec (e.g. CSA, WPS); regional_term = a location-specific term.
-- "timestamps" is an array of transcript times in seconds (from the [seconds] markers) where the concept is discussed.
-- "confidence" is your confidence in [0,1] that this is a real, reusable concept this video teaches.
-- "competencyCode" is OPTIONAL — set it to a Red Seal code from the list below ONLY if this concept clearly maps to one, else omit or null.
-
-Available Red Seal competencies:
-${competencyContext}`,
+        content: buildDistillationSystemPrompt(competencyContext),
       },
       {
         role: "user",
