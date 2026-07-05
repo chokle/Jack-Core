@@ -49,6 +49,68 @@ const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
   { value: "restored", label: "Restored" },
 ];
 
+/** How the candidate list is ordered relative to each mentor's track record. */
+type MentorSort = "queue" | "trusted" | "risky";
+
+const MENTOR_SORTS: { value: MentorSort; label: string; title: string }[] = [
+  { value: "queue", label: "Queue order", title: "Newest-first, as Jack queued them" },
+  {
+    value: "trusted",
+    label: "Trusted mentors first",
+    title: "Mentors with the most accepted contributions at the top",
+  },
+  {
+    value: "risky",
+    label: "Low-trust first",
+    title: "Mentors with the most rejected contributions at the top",
+  },
+];
+
+/**
+ * Order candidates by their mentor's track record without mutating the source
+ * list. `queue` preserves the server order. `trusted` floats mentors with the
+ * most accepted contributions to the top; `risky` floats the most-rejected
+ * mentors. Candidates whose mentor is unknown (no contribution row, or no
+ * mentorProfileId) always sink to the bottom so they never crowd out a
+ * signal-carrying card, and ties fall back to the original queue position for a
+ * stable order.
+ */
+function sortCandidatesByMentor(
+  candidates: KnowledgeCandidate[],
+  contributionByMentor: Map<string, MentorContribution>,
+  sort: MentorSort,
+): KnowledgeCandidate[] {
+  if (sort === "queue") return candidates;
+  const contributionFor = (c: KnowledgeCandidate) =>
+    c.mentorProfileId ? contributionByMentor.get(c.mentorProfileId) ?? null : null;
+  // Primary signal per mode; unknown mentors score below any real mentor.
+  const score = (contribution: MentorContribution | null) => {
+    if (!contribution) return -1;
+    return sort === "trusted" ? contribution.accepted : contribution.rejected;
+  };
+  return candidates
+    .map((candidate, index) => ({ candidate, index, contribution: contributionFor(candidate) }))
+    .sort((a, b) => {
+      const diff = score(b.contribution) - score(a.contribution);
+      if (diff !== 0) return diff;
+      // Tiebreak on the opposing signal so a cleaner record wins within a bucket.
+      const aOther = a.contribution
+        ? sort === "trusted"
+          ? a.contribution.rejected
+          : a.contribution.accepted
+        : 0;
+      const bOther = b.contribution
+        ? sort === "trusted"
+          ? b.contribution.rejected
+          : b.contribution.accepted
+        : 0;
+      const otherDiff = sort === "trusted" ? aOther - bOther : bOther - aOther;
+      if (otherDiff !== 0) return otherDiff;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.candidate);
+}
+
 /** Where each resolution action lands a card, so the success toast can tell the
  *  reviewer which tab to find it under. */
 const ACTION_DESTINATION: Record<string, { label: string }> = {
@@ -80,6 +142,7 @@ export function KnowledgeReview() {
   }, []);
 
   const [statusTab, setStatusTab] = useState<ListKnowledgeCandidatesStatus>("pending");
+  const [mentorSort, setMentorSort] = useState<MentorSort>("queue");
   // Non-admins get a read-only queue; the sign-in overlay only appears on demand.
   const [showLogin, setShowLogin] = useState(false);
   const queryClient = useQueryClient();
@@ -196,6 +259,11 @@ export function KnowledgeReview() {
   }
 
   const candidates = candidatesQuery.data?.candidates ?? [];
+  const sortedCandidates = sortCandidatesByMentor(
+    candidates,
+    contributionByMentor,
+    mentorSort,
+  );
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
@@ -229,6 +297,33 @@ export function KnowledgeReview() {
           ))}
         </div>
 
+        {/* Order the queue by mentor track record so a reviewer can triage
+            trusted vs. low-trust mentors first. Only shown when there's a
+            multi-card list to reorder. */}
+        {candidates.length > 1 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Sort by mentor
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {MENTOR_SORTS.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => setMentorSort(s.value)}
+                  title={s.title}
+                  className={`rounded-lg px-2.5 py-1.5 md:py-1 text-xs font-medium transition-colors ${
+                    mentorSort === s.value
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isAdmin === null || candidatesQuery.isLoading ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground">
             <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading…
@@ -248,7 +343,7 @@ export function KnowledgeReview() {
           </div>
         ) : (
           <div className="space-y-4">
-            {candidates.map((cand, idx) => (
+            {sortedCandidates.map((cand, idx) => (
               <motion.div
                 key={cand.id}
                 initial={{ opacity: 0, y: 8 }}
