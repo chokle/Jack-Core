@@ -230,7 +230,9 @@ export function MemoryGraphView({
       } in ${g.trade}`,
       nodeId: delta.newestNodeId,
     }));
-    setToasts((prev) => [...prev, ...fresh].slice(-4));
+    // Cap at the 3 most recent; older growth stays reflected in the "Recent
+    // Knowledge Added" feed, so dropping the oldest toast loses nothing.
+    setToasts((prev) => [...prev, ...fresh].slice(-3));
   }, [delta]);
   const dismissToast = useCallback(
     (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)),
@@ -711,29 +713,6 @@ export function MemoryGraphView({
           </IconButton>
         </div>
 
-        {/* Growth toasts — non-intrusive, auto-dismissing, tap to focus newest */}
-        {toasts.length > 0 && (
-          <div className="pointer-events-none absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
-            {toasts.map((t) => (
-              <GrowthToast
-                key={t.id}
-                text={t.text}
-                reducedMotion={reducedMotion}
-                onDismiss={() => dismissToast(t.id)}
-                onClick={
-                  t.nodeId
-                    ? () => {
-                        setSelectedId(t.nodeId!);
-                        canvasRef.current?.focusNode(t.nodeId!);
-                        dismissToast(t.id);
-                      }
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        )}
-
         {/* Hover preview — a quick glance before committing to the full inspector */}
         {hovered && !selectedId && hovered.kind !== "core" && (
           <div
@@ -832,27 +811,58 @@ export function MemoryGraphView({
         )}
       </div>
 
-      {/* Right rail — ambient panels only; per-node detail lives in the inspector */}
-      <aside className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-sidebar/85 p-4 backdrop-blur-md lg:flex">
-        <VitalityPanel vitality={vitality} reducedMotion={reducedMotion} />
-        <HubMaturityPanel topics={model.topics} onSelect={setSelectedId} />
-        <LiveFeed
-          recent={recent}
-          colorByTrade={colorByTrade}
-          onSelect={(id) => {
-            // Prefer opening the node in-graph; fall back to the video page for
-            // items not yet materialized as graph nodes (e.g. still processing).
-            if (nodeById.has(`video:${id}`)) setSelectedId(`video:${id}`);
-            else onOpenVideo(id);
-          }}
-        />
-        <PendingKnowledgePanel />
-        <ParkedThoughtsList
-          limit={5}
-          onResumeChat={onResumeChat}
-          onResumeInterview={onResumeInterview}
-        />
-        {import.meta.env.DEV && <BrainStatsPanel model={model} />}
+      {/* Right rail — ambient panels only; per-node detail lives in the inspector.
+          A pinned dock at the bottom surfaces the "Jack just learned…" growth
+          toasts here, out of the graph interaction area entirely. */}
+      <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-sidebar/85 backdrop-blur-md lg:flex">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <VitalityPanel vitality={vitality} reducedMotion={reducedMotion} />
+          <HubMaturityPanel topics={model.topics} onSelect={setSelectedId} />
+          <LiveFeed
+            recent={recent}
+            colorByTrade={colorByTrade}
+            onSelect={(id) => {
+              // Prefer opening the node in-graph; fall back to the video page for
+              // items not yet materialized as graph nodes (e.g. still processing).
+              if (nodeById.has(`video:${id}`)) setSelectedId(`video:${id}`);
+              else onOpenVideo(id);
+            }}
+          />
+          <PendingKnowledgePanel />
+          <ParkedThoughtsList
+            limit={5}
+            onResumeChat={onResumeChat}
+            onResumeInterview={onResumeInterview}
+          />
+          {import.meta.env.DEV && <BrainStatsPanel model={model} />}
+        </div>
+        {/* Growth toasts — pinned to the sidebar's bottom-right, newest on top,
+            max 3, tap to focus the new node. Each toast's 20s timer only elapses
+            while this view is mounted (the user is on the Memory Graph) and the
+            tab is visible. */}
+        {toasts.length > 0 && (
+          <div className="shrink-0 border-t border-border/60 p-3">
+            <div className="flex flex-col-reverse gap-2">
+              {toasts.map((t) => (
+                <GrowthToast
+                  key={t.id}
+                  text={t.text}
+                  reducedMotion={reducedMotion}
+                  onDismiss={() => dismissToast(t.id)}
+                  onClick={
+                    t.nodeId
+                      ? () => {
+                          setSelectedId(t.nodeId!);
+                          canvasRef.current?.focusNode(t.nodeId!);
+                          dismissToast(t.id);
+                        }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -1157,19 +1167,21 @@ function GrowthCounter({
   );
 }
 
-/** How long a growth toast lingers, counting only time the page is visible. */
-const TOAST_LIFETIME_MS = 18000;
+/** How long a growth toast lingers (20s), counting only time the user is on the
+ *  Memory Graph with the tab visible. */
+const TOAST_LIFETIME_MS = 20000;
 /** Fade-out duration before the toast is removed from the list. */
 const TOAST_EXIT_MS = 240;
 
 /**
- * A single auto-dismissing "Jack just learned…" toast. Lingers ~18s but only
+ * A single auto-dismissing "Jack just learned…" toast. Lingers 20s but only
  * counts down while the user is actively on the page — the timer pauses whenever
  * the tab is hidden/backgrounded and resumes with the remaining time on return,
- * so a toast is never missed while the user is away. The countdown is decoupled
- * from parent re-renders (it runs once on mount, reading the latest onDismiss via
- * a ref), then plays a short fade-out before removing itself. Clickable when it
- * can focus a node.
+ * so a toast is never missed while the user is away. Leaving the Memory Graph
+ * unmounts this view, which likewise halts the countdown until the user returns.
+ * The countdown is decoupled from parent re-renders (it runs once on mount,
+ * reading the latest onDismiss via a ref), then plays a short fade-out before
+ * removing itself. Clickable when it can focus a node.
  */
 function GrowthToast({
   text,
@@ -1234,7 +1246,7 @@ function GrowthToast({
     <button
       type="button"
       onClick={onClick}
-      className={`pointer-events-auto flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-950/70 px-3.5 py-1.5 text-xs font-medium text-emerald-100 shadow-lg shadow-black/40 backdrop-blur transition-colors hover:border-emerald-400/60 ${
+      className={`pointer-events-auto flex w-full items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-950/60 px-3 py-1.5 text-left text-[11px] font-medium leading-snug text-emerald-100/90 shadow-sm shadow-black/20 backdrop-blur-sm transition-colors hover:border-emerald-400/50 hover:text-emerald-100 ${
         onClick ? "cursor-pointer" : "cursor-default"
       } ${
         reducedMotion
@@ -1244,7 +1256,7 @@ function GrowthToast({
             : "animate-in fade-in slide-in-from-bottom-2"
       }`}
     >
-      <Activity className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+      <Activity className="h-3 w-3 shrink-0 text-emerald-400" />
       {text}
     </button>
   );
