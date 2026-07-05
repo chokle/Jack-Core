@@ -340,6 +340,94 @@ describe("Knowledge Review — reject", () => {
 });
 
 /**
+ * Reopen — a reviewer's undo for a REJECTED candidate. Reject writes no graph
+ * edge, so returning the row to pending is side-effect-free; only rejected rows
+ * qualify, and a scrubbed (withdrawn-mentor) row is refused so it can't strand.
+ */
+describe("Knowledge Review — reopen", () => {
+  it("returns a rejected candidate to pending, clearing every resolution field", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "premature reject" });
+    const snap = graphSnapshot();
+
+    const result = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.replayed).toBe(false);
+    expect(result.candidate.status).toBe("pending");
+    expect(result.candidate.resolutionReason).toBeNull();
+    expect(result.candidate.resolvedTargetId).toBeNull();
+    expect(result.candidate.requestedTargetId).toBeNull();
+    expect(result.candidate.redirectReason).toBeNull();
+    expect(result.candidate.resolvedAt).toBeNull();
+
+    // Reopen is side-effect-free — the live graph is byte-for-byte unchanged.
+    expect(graphSnapshot()).toBe(snap);
+
+    // Back in the pending queue and gone from rejected.
+    expect((await listKnowledgeCandidates("pending"))[0]!.id).toBe(candidateId);
+    expect(await listKnowledgeCandidates("rejected")).toHaveLength(0);
+  });
+
+  it("replaying reopen on an already-pending candidate is a no-op success", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "oops" });
+    await resolveKnowledgeCandidate(candidateId, "reopen");
+    const candSnap = snapshot(candidates());
+
+    const replay = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(replay.ok).toBe(true);
+    if (replay.ok) expect(replay.replayed).toBe(true);
+    expect(snapshot(candidates())).toBe(candSnap);
+  });
+
+  it("refuses to reopen a non-rejected candidate", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+
+    const conflict = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(conflict.ok).toBe(false);
+    if (!conflict.ok) expect(conflict.code).toBe("conflict");
+    // The accepted resolution is untouched.
+    expect(candidates()[0]!["status"]).toBe("accepted");
+  });
+
+  it("refuses to reopen a rejected candidate whose mentor was withdrawn (scrubbed)", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "will revisit" });
+    // Simulate mentor withdrawal scrubbing the resolved candidate's provenance.
+    candidates()[0]!["mentor_profile_id"] = null;
+
+    const refused = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.code).toBe("invalid");
+    // Still rejected — nothing changed.
+    expect(candidates()[0]!["status"]).toBe("rejected");
+  });
+
+  it("a reject → reopen → accept cycle reinforces the concept like a direct accept", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "reconsidering" });
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+
+    const accept = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(accept.ok).toBe(true);
+    if (!accept.ok) return;
+    expect(accept.candidate.status).toBe("accepted");
+    expect(accept.candidate.resolvedTargetId).toBe(canonicalId);
+
+    // The mentor provenance edge exists, deduped by the original answer id.
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    expect(edge).toBeDefined();
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+
+    expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
+    expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(candidateId);
+  });
+});
+
+/**
  * Resilient Knowledge Review — the graph legitimately moves while a candidate
  * sits in review (merges, deletions, withdrawals). A recorded best-match id is
  * a hint, not a guarantee: resolution must re-validate the target against the

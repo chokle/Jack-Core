@@ -2,7 +2,7 @@
 - [Untrusted content rendering](untrusted-content-rendering.md) — video analysis + chat content come from public uploads; render as text, never via dangerouslySetInnerHTML.
 - [Atomic knowledge graph provenance](knowledge-graph-provenance.md) — distilled concepts share one canonical node; provenance is edge-owned (kind='knowledge'); invariants that keep re-processing idempotent.
 - [Stored node ids are hints](stored-node-id-revalidation.md) — any deferred workflow holding a graph node id must re-validate it at action time (live → merge ledger → content re-match → structured refusal).
-- [Restore/re-archive toggle](candidate-restore-toggle.md) — restore⇄rearchive are inverse candidate actions; each is a no-op on its own terminal state (re-archiving an archived row is success, not conflict).
+- [Restore/re-archive/reopen toggles](candidate-restore-toggle.md) — restore⇄rearchive and reject→reopen are inverse candidate actions; each no-ops on its own terminal state; reopen is rejected-only + refuses scrubbed (null-mentor) rows.
 - [express-rate-limit IPv6](express-rate-limit-ipv6.md) — custom keyGenerator must wrap req.ip with ipKeyGenerator or v8 throws ERR_ERL_KEY_GEN_IPV6 and IPv6 clients evade limits.
 - [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.
 - [Orval useQuery queryKey](orval-usequery-querykey.md) — generated hooks require an explicit `queryKey` in the `query` options object (TS2741); use `getGet<Op>QueryKey(id)`.

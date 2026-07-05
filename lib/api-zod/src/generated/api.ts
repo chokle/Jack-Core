@@ -519,7 +519,7 @@ export const ResolveKnowledgeCandidateParams = zod.object({
 })
 
 export const ResolveKnowledgeCandidateBody = zod.object({
-  "action": zod.enum(['accept', 'merge', 'reject', 'restore', 'rearchive']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer\'s curated vouch if a video\/mentor re-taught it meanwhile).'),
+  "action": zod.enum(['accept', 'merge', 'reject', 'restore', 'rearchive', 'reopen']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer\'s curated vouch if a video\/mentor re-taught it meanwhile); reopen — undo a reject, returning the candidate to the pending queue for a fresh decision (rejected candidates only; reject wrote no graph edge so this is side-effect-free).'),
   "targetNodeId": zod.string().optional().describe('The existing concept to merge into (required for merge).'),
   "reason": zod.string().optional().describe('Why the candidate was rejected (required for reject).')
 })

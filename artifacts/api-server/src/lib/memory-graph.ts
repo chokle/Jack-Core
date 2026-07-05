@@ -2114,7 +2114,8 @@ export type CandidateResolutionAction =
   | "merge"
   | "reject"
   | "restore"
-  | "rearchive";
+  | "rearchive"
+  | "reopen";
 
 export type CandidateResolutionResult =
   | { ok: true; candidate: KnowledgeCandidateRecord; replayed: boolean }
@@ -2129,6 +2130,7 @@ const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   reject: "rejected",
   restore: "restored",
   rearchive: "archived",
+  reopen: "pending",
 };
 
 /**
@@ -2208,6 +2210,13 @@ async function resolveKnowledgeCandidateInner(
   // its own lifecycle (a 'restored' row) and never touches the pending path.
   if (action === "rearchive") {
     return rearchiveRestoredCandidateInner(record);
+  }
+
+  // Reopen is a reviewer's undo for a REJECTED candidate: reject writes no graph
+  // edge, so returning the row to 'pending' is side-effect-free and safe. It has
+  // its own lifecycle (a 'rejected' row) and never touches the accept/merge path.
+  if (action === "reopen") {
+    return reopenRejectedCandidateInner(record);
   }
 
   const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
@@ -2733,6 +2742,110 @@ async function rearchiveRestoredCandidateInner(
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
     if (winner.status === "archived") return { ok: true, candidate: winner, replayed: true };
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Candidate was already resolved as '${winner.status}'.`,
+    };
+  }
+
+  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+}
+
+/**
+ * Reopen a REJECTED candidate — a reviewer's undo that returns it to the pending
+ * queue for a fresh accept/merge/reject decision. This is deliberately scoped to
+ * rejected rows only:
+ *
+ *  - Reject writes NO graph edge (it is a pure status+reason change), so clearing
+ *    the resolution fields and flipping back to 'pending' is completely side-
+ *    effect-free — there is nothing in the live graph to reverse.
+ *  - Accept/merge, by contrast, wrote an additive mentor→concept edge; undoing
+ *    those safely needs per-answer edge withdrawal that does not exist yet, so
+ *    reopen refuses any non-rejected lifecycle state with a conflict.
+ *  - A withdrawn mentor's resolved candidates are SCRUBBED (mentor_profile_id
+ *    nulled). Reopening such a row would strand it: accept/merge later refuse a
+ *    candidate with no mentor provenance, and a future withdrawal would DELETE a
+ *    pending row rather than scrub it. So reopen refuses a scrubbed row up front.
+ *  - Replay-safe and toggle-shaped like restore/rearchive: the flip is compare-
+ *    and-set on `status='rejected'`, so an already-'pending' row is a no-op
+ *    success and a row resolved out from under us reports replay/conflict.
+ */
+async function reopenRejectedCandidateInner(
+  record: KnowledgeCandidateRecord,
+): Promise<CandidateResolutionResult> {
+  // Replay: an already-pending candidate is a no-op success.
+  if (record.status === "pending") {
+    return { ok: true, candidate: record, replayed: true };
+  }
+  // Only rejected knowledge can be reopened — refuse any other lifecycle state.
+  // Reversing an accept/merge edge is out of scope (needs per-answer withdrawal).
+  if (record.status !== "rejected") {
+    return {
+      ok: false,
+      code: "conflict",
+      message: `Only rejected candidates can be reopened (this candidate is '${record.status}').`,
+    };
+  }
+  // A withdrawn mentor's candidate was scrubbed of its provenance — reopening it
+  // would strand it (accept/merge would forever refuse it), so refuse up front.
+  if (!record.mentorProfileId) {
+    return {
+      ok: false,
+      code: "invalid",
+      message:
+        "This candidate's mentor was withdrawn, so it can no longer be reopened for reinforcement.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  // Compare-and-set: only reopen if the row is still rejected. Clear every
+  // resolution field so the row is indistinguishable from a fresh pending
+  // candidate for the accept/merge/reject path.
+  const { data: updated, error: updErr } = await supabase
+    .from("knowledge_candidates")
+    .update({
+      status: "pending",
+      resolution_reason: null,
+      resolved_target_id: null,
+      requested_target_id: null,
+      redirect_reason: null,
+      resolved_at: null,
+      updated_at: now,
+    })
+    .eq("id", record.id)
+    .eq("status", "rejected")
+    // Guard the scrub race too: if a mentor withdrawal nulls this row's
+    // provenance between the pre-read check above and here, the CAS misses and
+    // we never strand it as pending. (fake-supabase models only this .not form.)
+    .not("mentor_profile_id", "is", null)
+    .select("*")
+    .maybeSingle();
+  if (updErr) throw updErr;
+
+  if (!updated) {
+    // Lost the compare-and-set race — re-read and report replay/conflict/invalid.
+    const { data: current, error: curErr } = await supabase
+      .from("knowledge_candidates")
+      .select("*")
+      .eq("id", record.id)
+      .maybeSingle();
+    if (curErr) throw curErr;
+    if (!current) {
+      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+    }
+    const winner = mapCandidateRow(current as Record<string, unknown>);
+    if (winner.status === "pending") return { ok: true, candidate: winner, replayed: true };
+    // Scrubbed out from under us (still 'rejected' but mentor now null) — report
+    // the same strand refusal the pre-read guard would give on retry.
+    if (winner.status === "rejected" && !winner.mentorProfileId) {
+      return {
+        ok: false,
+        code: "invalid",
+        message:
+          "This candidate's mentor was withdrawn, so it can no longer be reopened for reinforcement.",
+      };
+    }
     return {
       ok: false,
       code: "conflict",

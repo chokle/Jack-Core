@@ -33,6 +33,7 @@ import type {
 import { AdminLogin } from "./AdminLogin";
 import { MentorWithdrawal } from "./MentorWithdrawal";
 import { GraphHealth } from "./GraphHealth";
+import { useToast } from "@/hooks/use-toast";
 
 /** Scaffold kinds that can never be a merge target. */
 const SCAFFOLD_KINDS = new Set(["core", "topic", "competency", "video", "mentor"]);
@@ -45,6 +46,17 @@ const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
   { value: "archived", label: "Archived" },
   { value: "restored", label: "Restored" },
 ];
+
+/** Where each resolution action lands a card, so the success toast can tell the
+ *  reviewer which tab to find it under. */
+const ACTION_DESTINATION: Record<string, { label: string }> = {
+  accept: { label: "Accepted" },
+  merge: { label: "Merged" },
+  reject: { label: "Rejected" },
+  reopen: { label: "Pending" },
+  restore: { label: "Restored" },
+  rearchive: { label: "Archived" },
+};
 
 export function KnowledgeReview() {
   // The resolve route is admin-only on the server; this check just decides
@@ -67,6 +79,7 @@ export function KnowledgeReview() {
 
   const [statusTab, setStatusTab] = useState<ListKnowledgeCandidatesStatus>("pending");
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const candidatesQuery = useListKnowledgeCandidates(
     { status: statusTab },
@@ -116,19 +129,32 @@ export function KnowledgeReview() {
   const resolve = useResolveKnowledgeCandidate({
     request: { credentials: "include" },
     mutation: {
-      onSuccess: () => {
+      onSuccess: (_data, variables) => {
         setGoneCandidateId(null);
-        void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: statusTab }) });
-        void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: "pending" }) });
+        // Invalidate the whole candidates key (prefix-matches every status tab)
+        // plus the mentor track record and graph, so the resolved card leaves
+        // this tab AND is fresh under its destination tab without a manual reload.
+        void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetMentorContributionsQueryKey() });
         void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
+        const dest = ACTION_DESTINATION[variables.data.action];
+        if (dest) {
+          toast({ title: dest.label, description: `Moved to the ${dest.label} tab.` });
+        }
       },
       onError: (error, variables) => {
-        const body = (error as { data?: { code?: string } | null }).data;
+        const body = (error as { data?: { code?: string; error?: string } | null }).data;
         if (body?.code === "target_gone") {
           setGoneCandidateId(variables.id);
           // Refresh the listing so match chips show current validity.
-          void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey({ status: statusTab }) });
+          void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey() });
+          return;
         }
+        toast({
+          variant: "destructive",
+          title: "Couldn't complete that action",
+          description: body?.error ?? "The candidate may have already been resolved elsewhere.",
+        });
       },
     },
   });
@@ -290,7 +316,7 @@ function CandidateCard({
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
   onResolve: (
-    action: "accept" | "merge" | "reject" | "restore" | "rearchive",
+    action: "accept" | "merge" | "reject" | "restore" | "rearchive" | "reopen",
     extra?: { targetNodeId?: string; reason?: string },
   ) => void;
 }) {
@@ -308,6 +334,7 @@ function CandidateCard({
   const isPending = candidate.status === "pending";
   const isArchived = candidate.status === "archived";
   const isRestored = candidate.status === "restored";
+  const isRejected = candidate.status === "rejected";
 
   const mergeMatches = useMemo(() => {
     const q = mergeSearch.trim().toLowerCase();
@@ -504,6 +531,24 @@ function CandidateCard({
           >
             <Archive className="mr-1.5 h-4 w-4" />
             Re-archive
+          </Button>
+        </div>
+      )}
+
+      {/* Reopen a rejected candidate: return it to the pending queue for a fresh
+          decision. Hidden when the mentor was withdrawn (provenance scrubbed),
+          since reopen would strand a candidate accept/merge can no longer use. */}
+      {isRejected && candidate.mentorProfileId && (
+        <div className="mt-4 border-t border-border/70 pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onResolve("reopen")}
+            title="Undo this rejection — return the candidate to the pending queue for a fresh decision"
+          >
+            <RotateCcw className="mr-1.5 h-4 w-4" />
+            Reopen for review
           </Button>
         </div>
       )}
