@@ -5,6 +5,7 @@
 - [Restore/re-archive/reopen toggles](candidate-restore-toggle.md) — restore⇄rearchive and reject→reopen are inverse candidate actions; each no-ops on its own terminal state; reopen is rejected-only + refuses scrubbed (null-mentor) rows.
 - [Shared env vars land in tracked .replit](replit-env-vs-secrets.md) — setEnvVars shared writes plaintext into committed .replit; sensitive keys (admin/tokens/DB URLs) must be secrets via requestEnvVar, never shared.
 - [Processable test video for Jack](jack-test-video-ingest.md) — seed videos can't process (missing media); synth a spoken clip via OpenAI TTS+ffmpeg and POST /videos/ingest to get real segments/analysis/concepts.
+- [Radix ScrollArea overflow](radix-scrollarea-overflow.md) — long text clips on the right inside ScrollArea because Radix's inner wrapper is display:table; force [&>div]:!block so it wraps.
 - [express-rate-limit IPv6](express-rate-limit-ipv6.md) — custom keyGenerator must wrap req.ip with ipKeyGenerator or v8 throws ERR_ERL_KEY_GEN_IPV6 and IPv6 clients evade limits.
 - [OpenAPI body schema naming](openapi-body-schema-naming.md) — never name a request-body component schema `<OperationId>Body`; it collides with Orval's generated body type.
 - [Orval useQuery queryKey](orval-usequery-querykey.md) — generated hooks require an explicit `queryKey` in the `query` options object (TS2741); use `getGet<Op>QueryKey(id)`.
