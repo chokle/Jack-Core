@@ -577,7 +577,11 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         if (wasDragging && moved < 6) {
           const p = localXY(e);
           const hit = pick(p.x, p.y);
-          onSelect(hit ? hit.id : null);
+          // Only (re)select on a real node hit. An empty-space click no longer
+          // clears the selection — the floating inspector is a window, not a
+          // modal, so it stays open (and the node stays highlighted) until the
+          // user closes it via X or Escape.
+          if (hit) onSelect(hit.id);
         }
         dragging = false;
       };

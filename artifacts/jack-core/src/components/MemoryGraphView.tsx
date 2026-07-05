@@ -22,7 +22,6 @@ import {
   ArrowUp,
   ArrowDown,
   CornerDownLeft,
-  X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -43,7 +42,7 @@ import {
   SpatialBrainCanvas,
   type MemoryGraphHandle,
 } from "./SpatialBrainCanvas";
-import { FloatingNodeInspector } from "./FloatingNodeInspector";
+import { FloatingPanel } from "./FloatingPanel";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
 import {
@@ -768,36 +767,58 @@ export function MemoryGraphView({
           </div>
         )}
 
-        {/* Mobile-only scrim behind the bottom sheet. On desktop the graph stays
-            FULLY visible — the floating inspector never dims or covers it. */}
-        {selected && (
-          <div className="pointer-events-none absolute inset-0 z-10 bg-black/40 md:hidden" />
-        )}
-
-        {/* Inspector — a standalone floating contextual card beside the node on
-            desktop, a bottom sheet on mobile — so clicking any node ALWAYS shows
-            its captured data without ever covering the graph edge-to-edge. */}
-        {selected && detailProps && isDesktop && (
-          <FloatingNodeInspector
-            node={selected}
-            degree={detailProps.degree}
-            videoCount={detailProps.videoCount}
-            pinned={pinnedIds.has(selected.id)}
-            onTogglePin={() => togglePin(selected.id)}
-            onClose={() => setSelectedId(null)}
+        {/* Node inspector — a draggable floating window (never a blocking modal):
+            drag it by the header, it stays where you leave it (remembered for the
+            session), and the graph stays fully pannable/zoomable while it's open.
+            A single component serves desktop and mobile; only the first-open
+            placement differs. */}
+        {selected && detailProps && (
+          <FloatingPanel
+            positionKey="node-inspector"
             stageRef={stageRef}
-            getScreenPos={(id) => canvasRef.current?.getScreenPos(id) ?? null}
+            onClose={() => setSelectedId(null)}
+            ariaLabel={`${selected.label} details`}
+            defaultPlacement={isDesktop ? "top-right" : "bottom"}
+            maxHeight={isDesktop ? "70vh" : "80dvh"}
+            bodyKey={selected.id}
+            headerContent={
+              <InspectorHeaderContent
+                node={selected}
+                degree={detailProps.degree}
+                videoCount={detailProps.videoCount}
+              />
+            }
+            headerActions={
+              selected.kind !== "core" ? (
+                <button
+                  onClick={() => togglePin(selected.id)}
+                  title={
+                    pinnedIds.has(selected.id)
+                      ? "Unpin node from graph"
+                      : "Pin node in place in graph"
+                  }
+                  aria-label={
+                    pinnedIds.has(selected.id)
+                      ? "Unpin node from graph"
+                      : "Pin node in place in graph"
+                  }
+                  className={`-mt-1 flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                    pinnedIds.has(selected.id)
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
+                  }`}
+                >
+                  {pinnedIds.has(selected.id) ? (
+                    <PinOff className="h-4 w-4" />
+                  ) : (
+                    <Pin className="h-4 w-4" />
+                  )}
+                </button>
+              ) : null
+            }
           >
             <NodeDetailBody {...detailProps} />
-          </FloatingNodeInspector>
-        )}
-        {selected && detailProps && !isDesktop && (
-          <NodeInspectorPanel
-            {...detailProps}
-            onClose={() => setSelectedId(null)}
-            pinned={pinnedIds.has(selected.id)}
-            onTogglePin={() => togglePin(selected.id)}
-          />
+          </FloatingPanel>
         )}
       </div>
 
@@ -1503,22 +1524,19 @@ interface NodeDetailProps {
 }
 
 /**
- * Mobile / narrow-viewport node inspector — a bottom sheet. On desktop the
- * inspector is the standalone `FloatingNodeInspector` contextual card instead;
- * this component is only rendered below the desktop breakpoint, where a
- * full-width sheet anchored to the bottom is the appropriate pattern.
+ * The left side of the node inspector's header — color dot, label, subtitle,
+ * freshness, and high-level stats. Extracted so the draggable `FloatingPanel`
+ * (used for both desktop and mobile) can host it as its header content.
  */
-function NodeInspectorPanel({
-  onClose,
-  pinned,
-  onTogglePin,
-  ...props
-}: NodeDetailProps & {
-  onClose: () => void;
-  pinned: boolean;
-  onTogglePin: () => void;
+function InspectorHeaderContent({
+  node,
+  degree,
+  videoCount,
+}: {
+  node: MemoryNode;
+  degree: number;
+  videoCount: number;
 }) {
-  const { node, degree, videoCount } = props;
   const knowledge = isKnowledgeKind(node.kind);
   const kLabel = kindLabelFor(node.kind);
   const freshness = node.kind === "core" ? null : nodeFreshness(node);
@@ -1531,91 +1549,44 @@ function NodeInspectorPanel({
           : kLabel
         : node.meta.trade ?? kLabel;
 
-  const content = (
-    <>
-      <div className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span
-            className="mt-1 h-3 w-3 shrink-0 rounded-full"
-            style={{
-              background: rgbCss(node.color),
-              boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
-            }}
-          />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold leading-snug text-foreground">
-              {node.label}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
-                {subtitle}
-              </span>
-              {freshness && <FreshnessBadge info={freshness} />}
-            </div>
-            {/* High-level stats first — details live in collapsible sections. */}
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <span>
-                <b className="font-semibold tabular-nums text-foreground">
-                  {degree}
-                </b>{" "}
-                Connection{degree === 1 ? "" : "s"}
-              </span>
-              <span aria-hidden className="text-white/20">
-                ·
-              </span>
-              <span>
-                <b className="font-semibold tabular-nums text-foreground">
-                  {videoCount}
-                </b>{" "}
-                Video{videoCount === 1 ? "" : "s"}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {node.kind !== "core" && (
-            <button
-              onClick={onTogglePin}
-              title={pinned ? "Unpin node" : "Pin node in place"}
-              aria-label={pinned ? "Unpin node" : "Pin node in place"}
-              className={`-mt-1 flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                pinned
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
-              }`}
-            >
-              {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            title="Close"
-            aria-label="Close"
-            className="-mr-1 -mt-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-      {/* Keyed by node id: switching nodes resets scroll + collapsibles to the
-          high-level view WITHOUT remounting (and re-animating) the panel shell. */}
-      <div
-        key={node.id}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
-      >
-        <NodeDetailBody {...props} />
-      </div>
-    </>
-  );
-
-  // A bottom sheet — full width is acceptable on narrow / mobile screens.
   return (
-    <div
-      role="dialog"
-      aria-label={`${node.label} details`}
-      className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 flex max-h-[80dvh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-card/95 shadow-2xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in fade-in-0 slide-in-from-bottom-4"
-    >
-      {content}
+    <div className="flex min-w-0 items-start gap-2.5">
+      <span
+        className="mt-1 h-3 w-3 shrink-0 rounded-full"
+        style={{
+          background: rgbCss(node.color),
+          boxShadow: `0 0 8px ${rgba(node.color, 0.9)}`,
+        }}
+      />
+      <div className="min-w-0">
+        <div className="text-sm font-semibold leading-snug text-foreground">
+          {node.label}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-xs" style={{ color: rgba(node.color, 0.95) }}>
+            {subtitle}
+          </span>
+          {freshness && <FreshnessBadge info={freshness} />}
+        </div>
+        {/* High-level stats first — details live in collapsible sections. */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span>
+            <b className="font-semibold tabular-nums text-foreground">
+              {degree}
+            </b>{" "}
+            Connection{degree === 1 ? "" : "s"}
+          </span>
+          <span aria-hidden className="text-white/20">
+            ·
+          </span>
+          <span>
+            <b className="font-semibold tabular-nums text-foreground">
+              {videoCount}
+            </b>{" "}
+            Video{videoCount === 1 ? "" : "s"}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
