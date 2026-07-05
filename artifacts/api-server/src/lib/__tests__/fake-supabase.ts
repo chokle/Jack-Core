@@ -1,8 +1,10 @@
 /**
  * In-memory fake of the tiny slice of the Supabase JS client that memory-graph.ts
  * and distillation.ts use. It supports the chainable query-builder surface the
- * graph code touches (select/eq/neq/in/order/maybeSingle, upsert with onConflict
- * + ignoreDuplicates, delete with filters) plus the `match_knowledge_nodes` RPC.
+ * graph code touches (select/eq/neq/in/order/limit/maybeSingle, upsert with
+ * onConflict + ignoreDuplicates, delete with filters) plus the
+ * `match_knowledge_nodes`, `match_transcript_segments`, and
+ * `match_knowledge_entries` RPCs (the last two back the retrieval routes).
  *
  * It deliberately models the two DB behaviours the idempotency logic relies on:
  *   - partial upsert on conflict updates ONLY the provided columns (so a scaffold
@@ -89,6 +91,48 @@ export class FakeSupabase {
 
       return { data: scored, error: null };
     }
+
+    if (name === "match_transcript_segments") {
+      const query = (params["query_embedding"] as number[]) ?? [];
+      const threshold = params["match_threshold"] as number;
+      const count = params["match_count"] as number;
+      const filterTrade = (params["filter_trade"] as string | null) ?? null;
+
+      const videoById = new Map(
+        (this.tables["videos"] ?? []).map((v) => [v["id"], v] as const),
+      );
+
+      const scored = (this.tables["transcript_segments"] ?? [])
+        .filter((s) => s["embedding"] != null)
+        .map((s) => {
+          const emb = JSON.parse(s["embedding"] as string) as number[];
+          const video = (videoById.get(s["video_id"]) ?? {}) as Row;
+          return {
+            video_id: s["video_id"],
+            video_title: video["title"] ?? null,
+            thumbnail_url: video["thumbnail_url"] ?? null,
+            text: s["text"],
+            start_time: s["start_time"],
+            end_time: s["end_time"],
+            trade: video["trade"] ?? null,
+            similarity: cosine(query, emb),
+          };
+        })
+        .filter((r) => filterTrade == null || r.trade === filterTrade)
+        .filter((r) => r.similarity > threshold)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, count);
+
+      return { data: scored, error: null };
+    }
+
+    // Non-video Knowledge Entries carry no trust signal and are out of scope for
+    // the reranker; the chat route calls this alongside the transcript search, so
+    // model it as "no entry matches" rather than an unknown-rpc error.
+    if (name === "match_knowledge_entries") {
+      return { data: [], error: null };
+    }
+
     return { data: null, error: { message: `unknown rpc ${name}` } };
   }
 }
@@ -101,6 +145,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private updateValues: Row = {};
   private singleMode: "none" | "maybe" | "single" = "none";
   private orderBy: { col: string; ascending: boolean } | null = null;
+  private limitCount: number | null = null;
 
   constructor(
     private db: FakeSupabase,
@@ -180,6 +225,13 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this;
   }
 
+  // `.limit(n)` — cap the returned rows (applied after ordering), matching the
+  // history/search read paths in chat.ts and search.ts.
+  limit(n: number): this {
+    this.limitCount = n;
+    return this;
+  }
+
   maybeSingle(): this {
     this.singleMode = "maybe";
     return this;
@@ -244,6 +296,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
         return ascending ? av - bv : bv - av;
       });
     }
+    if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
     if (this.singleMode !== "none") {
       return { data: matched[0] ?? null, error: null };
     }
