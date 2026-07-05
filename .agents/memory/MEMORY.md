@@ -13,7 +13,7 @@
 - [Leaf typecheck vs composite libs](leaf-typecheck-composite-libs.md) — leaf `tsc --noEmit` doesn't build lib refs; stale/missing dist yields misleading "no exported member"/TS6305; build refs first.
 - [Canvas rAF negative dt](canvas-raf-negative-dt.md) — first rAF timestamp can precede a performance.now() baseline → negative dt eases node radius below 0 → arc() crash; floor dt at 0.
 - [PostgREST schema-cache transience](postgrest-schema-cache-transience.md) — PGRST205/"schema cache" after DDL is transient; retry through it, don't flip a landed write to failed; real missing node/edge is a returned verdict, never retried.
-- [Blue crosshair canvas artifact](canvas-blue-crosshair.md) — intermittent full-viewport blue line = degenerate gradient axis spike; if it recurs, bisect by unmounting KnowledgeGraph.
+- [Blue crosshair canvas artifact](canvas-blue-crosshair.md) — three "blue line" cases: (1) canvas degenerate-gradient spike, (2) sidebar DOM border, (3) cursor-from-left "line" is the Replit preview-pane focus outline, NOT app code — ask for a screen recording early.
 - [Deploy healthcheck base path](deploy-healthcheck-base-path.md) — platform/uptime check pings bare /api (not /api/healthz); base path must return a shallow (no-DB) 200 or it reads as an outage; redeploy to take effect.
 - [PostgREST .or() filter injection](postgrest-or-filter-injection.md) — never inline a client-controlled value (e.g. a session cookie) into `.or()`; validate as UUID first or use `.eq()`.
 - [Queued-job heartbeat](job-heartbeat-while-queued.md) — a claimed row deferred behind an async gate must keep heartbeating while queued, or the watchdog reclaims it as stale → double-run + false-fail.

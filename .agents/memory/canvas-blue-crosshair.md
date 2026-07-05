@@ -27,6 +27,15 @@ Different artifact from the crosshair above: a steady thin blue vertical line pi
 **Decisive principle (use this first next time):** a line that stays IDENTICAL across pan/zoom/lock CANNOT be canvas-drawn content — canvas content transforms with the camera. So it's DOM/CSS, not the draw loop. Confirm in one shot by temporarily recoloring the suspected DOM border bright red and screenshotting.
 **Don't repeat the wasted path:** instrumenting the canvas draw loop (edge/pulse span detector) proved the max stroke was only ~300px vs an 720–870px span — i.e. no canvas primitive spans the axis. Edges/pulses are the ONLY strokes; everything else is circle/rect/full-bg fills. Skip that and check DOM borders first when the line is state-invariant.
 
+## The THIRD "blue line" — Replit preview-pane focus outline (NOT the app at all)
+A user reported a blue line that "pops up when moving the cursor from the far-left edge toward the window, never from the right," the same on every page, only in Jack (not on a blank browser tab). This turned out to be the **Replit workspace's preview-pane focus/active highlight**, not Jack code. A screen recording (extract frames with `ffmpeg -vf fps=3`) showed a bright blue L-shaped ring flashing along the **left+top edges of the preview iframe** the instant the cursor crossed into the preview from the chat side, then fading.
+**Decisive tells (use these to short-circuit next time):**
+- The ring outlines the **iframe's outer boundary** (a full top+left corner at the exact pane edge). Content *inside* an iframe cannot paint its own outer border — so a boundary ring is parent-drawn = Replit chrome, never app code.
+- "Left only, never right": the preview pane is on the right; you can only enter it by crossing its left edge (its right side is the window edge).
+- "Not on a blank tab": a plain tab isn't inside the preview pane. It flashes for ANY app in the preview, not just this one.
+- Color is Replit's bright accent blue (~#0079F2), distinct from Jack's orange primary and muted slate-blue COL_COMPETENCY.
+It will NOT appear in the deployed app or when opening the app URL directly in a browser tab. Nothing to fix in code. Ask for a screen recording early when a "cursor-triggered" line is reported — it settles app-vs-workspace in one look.
+
 ## If it recurs — decisive next step (do this BEFORE adding more guards)
 Bisect empirically, don't pile on inert guards:
 1. Temporarily `display:none` (or unmount) the `KnowledgeGraph` wallpaper and have the user confirm the crosshair's presence/absence over time. This proves/disproves this canvas as the source in one step.
