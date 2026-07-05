@@ -4,17 +4,16 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-// Absolute origin of the deployed site, used to make canonical/OG/structured-data
-// URLs and the sitemap/robots entries absolute. Derived from the actual serving
-// domain per environment so it stays correct in dev and after publishing.
+// Absolute canonical origin of the deployed app, used to make canonical/OG/
+// structured-data URLs and the sitemap/robots entries absolute.
 function resolveSiteUrl(): string {
-  const host =
-    process.env.REPLIT_DOMAINS?.split(",")[0]?.trim() ||
-    process.env.REPLIT_DEV_DOMAIN?.trim() ||
-    "";
-  return host
-    ? `https://${host.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`
-    : "";
+  // Jack ships as the Torch product app at app.torchlabs.ca, so canonical/OG/
+  // sitemap URLs must point there regardless of which environment renders the
+  // page (preview, .replit.app, or the live custom domain). Override with
+  // PUBLIC_SITE_URL if the app ever moves.
+  const raw = process.env.PUBLIC_SITE_URL?.trim() || "https://app.torchlabs.ca";
+  const host = raw.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return host ? `https://${host}` : "";
 }
 
 // Injects the absolute site URL into index.html (via the `__SITE_URL__` token)
