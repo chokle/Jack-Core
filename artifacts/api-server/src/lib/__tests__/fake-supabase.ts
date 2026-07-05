@@ -135,10 +135,12 @@ export class FakeSupabase {
     }
 
     // Non-video Knowledge Entries carry no trust signal and are out of scope for
-    // the reranker; the chat route calls this alongside the transcript search, so
-    // model it as "no entry matches" rather than an unknown-rpc error.
+    // the reranker; the chat route calls this alongside the transcript search.
+    // Tests that need the knowledge-citation branch can seed the
+    // `knowledge_entries` table (rows are returned as-is, no cosine scoring); by
+    // default it is empty so most tests still see "no entry matches".
     if (name === "match_knowledge_entries") {
-      return { data: [], error: null };
+      return { data: (this.tables["knowledge_entries"] ?? []).map((r) => ({ ...r })), error: null };
     }
 
     return { data: null, error: { message: `unknown rpc ${name}` } };

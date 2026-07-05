@@ -228,7 +228,7 @@ function formatTime(seconds: number): string {
  * can optionally cite how trustworthy the claim is. Returns "" when there is no
  * signal worth surfacing (a lone, unreviewed mention), keeping the context clean.
  */
-function describeTrust(verification: "verified" | "rejected" | "neutral", sourceCount: number): string {
+export function describeTrust(verification: "verified" | "rejected" | "neutral", sourceCount: number): string {
   const parts: string[] = [];
   if (verification === "verified") parts.push("mentor-verified");
   if (sourceCount >= 2) parts.push(`confirmed across ${sourceCount} videos`);
