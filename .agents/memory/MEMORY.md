@@ -34,3 +34,4 @@
 - [Withdrawn-evidence restore = dismiss](withdrawn-evidence-restore.md) — acting on a concept's rejectedEvidence clears the note (can't safely re-corroborate; source row is gone); concept always has ≥1 live source; recompute only filters.
 - [flex-wrap icon-row overlap](flex-wrap-icon-row-overlap.md) — a `flex-1 min-w-0` item next to `shrink-0` icon buttons squeezes instead of wrapping at 320px; give it a real min-width to force the wrap.
 - [Nested scroll auto-height fix](nested-scroll-auto-height.md) — kill a mobile double-scroll trap by making the two-pane sidebar's fixed height + inner ScrollArea `lg:`-only so it collapses to auto and the page becomes the single scroll owner.
+- [Core node visual primacy](core-node-visual-primacy.md) — growth-sized trade hubs can outgrow the fixed Jack core; keep core radius above max hub (topic*2.1) or Jack stops reading as the center.

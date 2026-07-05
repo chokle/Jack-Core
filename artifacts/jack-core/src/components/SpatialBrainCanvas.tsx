@@ -103,7 +103,9 @@ interface SN {
 }
 
 const BASE_RADII: Record<NodeKind, number> = {
-  core: 24,
+  // Jack is the gateway: the core must stay visually larger than any hub, which
+  // grows up to topic * (1 + 1.1) = 25.2 once a trade is fully taught.
+  core: 36,
   topic: 12,
   video: 6,
   mentor: 6.5,
