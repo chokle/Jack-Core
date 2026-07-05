@@ -54,6 +54,8 @@ export * from './listParkedThoughtsStatus';
 export * from './listVideosParams';
 export * from './listVideosStatus';
 export * from './mentorActiveSession';
+export * from './mentorContribution';
+export * from './mentorContributionList';
 export * from './mentorList';
 export * from './mentorProfile';
 export * from './mentorSummary';

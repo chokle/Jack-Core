@@ -19,13 +19,16 @@ import {
   useListKnowledgeCandidates,
   useResolveKnowledgeCandidate,
   useGetGraph,
+  useGetMentorContributions,
   getListKnowledgeCandidatesQueryKey,
   getGetGraphQueryKey,
+  getGetMentorContributionsQueryKey,
 } from "@workspace/api-client-react";
 import type {
   KnowledgeCandidate,
   KnowledgeNode,
   ListKnowledgeCandidatesStatus,
+  MentorContribution,
 } from "@workspace/api-client-react";
 import { AdminLogin } from "./AdminLogin";
 import { MentorWithdrawal } from "./MentorWithdrawal";
@@ -77,6 +80,20 @@ export function KnowledgeReview() {
   const graphQuery = useGetGraph({
     query: { enabled: isAdmin === true, queryKey: getGetGraphQueryKey() },
   });
+  const contributionsQuery = useGetMentorContributions({
+    request: { credentials: "include" },
+    query: { enabled: isAdmin === true, queryKey: getGetMentorContributionsQueryKey() },
+  });
+
+  // mentorProfileId → contribution track record, so each card can show the
+  // mentor's overall footprint without an extra per-card request.
+  const contributionByMentor = useMemo(() => {
+    const map = new Map<string, MentorContribution>();
+    for (const c of contributionsQuery.data?.contributions ?? []) {
+      map.set(c.mentorProfileId, c);
+    }
+    return map;
+  }, [contributionsQuery.data]);
 
   const conceptNodes = useMemo(
     () => (graphQuery.data?.nodes ?? []).filter((n) => !SCAFFOLD_KINDS.has(n.kind)),
@@ -188,6 +205,11 @@ export function KnowledgeReview() {
                   candidate={cand}
                   conceptNodes={conceptNodes}
                   nodeLabelById={nodeLabelById}
+                  mentorContribution={
+                    cand.mentorProfileId
+                      ? contributionByMentor.get(cand.mentorProfileId) ?? null
+                      : null
+                  }
                   busy={resolve.isPending}
                   targetGone={goneCandidateId === cand.id}
                   onResolve={(action, extra) =>
@@ -206,10 +228,54 @@ export function KnowledgeReview() {
   );
 }
 
+/**
+ * A mentor's overall footprint, shown under their name on a candidate card so a
+ * reviewer can weigh a borderline candidate against the mentor's track record:
+ * how many live concepts they created or reinforced, and how their prior
+ * candidates were resolved. All counts are read-only aggregations from the
+ * server — nothing here mutates the graph.
+ */
+function MentorTrackRecord({ contribution }: { contribution: MentorContribution }) {
+  const { conceptsCreated, conceptsReinforced, accepted, rejected, pending } = contribution;
+  const conceptTotal = conceptsCreated + conceptsReinforced;
+  return (
+    <div
+      className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/90"
+      title="This mentor's overall contribution across the Living Memory"
+    >
+      <span className="font-mono uppercase tracking-[0.14em] text-muted-foreground/70">
+        Track record
+      </span>
+      <span title="Live concepts this mentor sources">
+        <span className="font-semibold text-foreground">{conceptTotal}</span> concept
+        {conceptTotal === 1 ? "" : "s"}
+        {conceptTotal > 0 && (
+          <span className="text-muted-foreground/70">
+            {" "}
+            ({conceptsCreated} created · {conceptsReinforced} reinforced)
+          </span>
+        )}
+      </span>
+      <span className="text-emerald-400/90" title="Prior candidates accepted or merged">
+        {accepted} accepted
+      </span>
+      <span className="text-red-400/90" title="Prior candidates rejected">
+        {rejected} rejected
+      </span>
+      {pending > 0 && (
+        <span className="text-amber-400/90" title="Candidates still awaiting review">
+          {pending} pending
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CandidateCard({
   candidate,
   conceptNodes,
   nodeLabelById,
+  mentorContribution,
   busy,
   targetGone,
   onResolve,
@@ -218,6 +284,8 @@ function CandidateCard({
   conceptNodes: KnowledgeNode[];
   /** Node id → human label, for rendering resolution targets by name. */
   nodeLabelById: Map<string, string>;
+  /** This candidate's mentor's overall track record, or null if unknown. */
+  mentorContribution: MentorContribution | null;
   busy: boolean;
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
@@ -307,6 +375,9 @@ function CandidateCard({
               </span>
             )}
           </div>
+          {mentorContribution && candidate.mentorName && (
+            <MentorTrackRecord contribution={mentorContribution} />
+          )}
         </div>
       </div>
 

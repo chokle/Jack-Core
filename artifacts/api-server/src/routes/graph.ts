@@ -4,6 +4,7 @@ import {
   GetGraphHealthResponse,
   ListKnowledgeCandidatesQueryParams,
   ListKnowledgeCandidatesResponse,
+  GetMentorContributionsResponse,
   ResolveKnowledgeCandidateParams,
   ResolveKnowledgeCandidateBody,
   ResolveKnowledgeCandidateResponse,
@@ -15,6 +16,7 @@ import {
   rebuildGraph,
   setNodeVerification,
   listKnowledgeCandidates,
+  getMentorContributionStats,
   resolveKnowledgeCandidate,
   getGraphHealth,
 } from "../lib/memory-graph.js";
@@ -73,6 +75,23 @@ router.get("/graph/candidates", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "listKnowledgeCandidates error");
     return res.status(500).json({ error: "Failed to load knowledge candidates" });
+  }
+});
+
+// Per-mentor contribution counts — a read-only track record (concepts created /
+// reinforced in the live graph, plus accepted / rejected / pending candidates)
+// that reviewers use to calibrate trust in a borderline candidate. Admin-gated
+// like the resolved-candidate surface: it correlates mentor identities with
+// their whole contribution history, which the public product never exposes.
+router.get("/graph/mentor-contributions", requireAdminSession, async (req, res) => {
+  try {
+    const contributions = await getMentorContributionStats();
+    return res.json(
+      GetMentorContributionsResponse.parse({ contributions, total: contributions.length }),
+    );
+  } catch (err) {
+    req.log.error({ err }, "getMentorContributions error");
+    return res.status(500).json({ error: "Failed to load mentor contributions" });
   }
 });
 

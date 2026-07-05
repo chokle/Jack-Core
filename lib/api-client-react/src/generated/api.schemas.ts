@@ -678,6 +678,25 @@ export interface KnowledgeCandidateList {
   total: number;
 }
 
+export interface MentorContribution {
+  mentorProfileId: string;
+  /** Live concepts this mentor is the sole provenance source for (no other video or mentor corroborates them). */
+  conceptsCreated: number;
+  /** Live concepts this mentor co-sources alongside other videos or mentors (strengthening a shared canonical concept). */
+  conceptsReinforced: number;
+  /** Review candidates from this mentor accepted or merged into the graph. */
+  accepted: number;
+  /** Review candidates from this mentor rejected. */
+  rejected: number;
+  /** Review candidates from this mentor still awaiting a decision. */
+  pending: number;
+}
+
+export interface MentorContributionList {
+  contributions: MentorContribution[];
+  total: number;
+}
+
 export interface MentorSummary {
   id: string;
   name: string;

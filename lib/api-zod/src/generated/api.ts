@@ -495,6 +495,23 @@ export const ListKnowledgeCandidatesResponse = zod.object({
 
 
 /**
+ * Read-only aggregation over mentor→concept provenance edges and the knowledge-candidate history. Reviewers use it to gauge a mentor's overall track record when weighing a borderline candidate. Admin-gated like the rest of the resolved-candidate surface.
+ * @summary Per-mentor contribution counts for reviewer trust calibration (admin only)
+ */
+export const GetMentorContributionsResponse = zod.object({
+  "contributions": zod.array(zod.object({
+  "mentorProfileId": zod.string(),
+  "conceptsCreated": zod.number().describe('Live concepts this mentor is the sole provenance source for (no other video or mentor corroborates them).'),
+  "conceptsReinforced": zod.number().describe('Live concepts this mentor co-sources alongside other videos or mentors (strengthening a shared canonical concept).'),
+  "accepted": zod.number().describe('Review candidates from this mentor accepted or merged into the graph.'),
+  "rejected": zod.number().describe('Review candidates from this mentor rejected.'),
+  "pending": zod.number().describe('Review candidates from this mentor still awaiting a decision.')
+})),
+  "total": zod.number()
+})
+
+
+/**
  * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
  */
 export const ResolveKnowledgeCandidateParams = zod.object({

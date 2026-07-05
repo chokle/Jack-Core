@@ -24,6 +24,7 @@ import {
   rebuildGraph,
   knowledgeNodeId,
   setNodeVerification,
+  getMentorContributionStats,
   GRAPH_CORE_ID,
 } from "../memory-graph.js";
 
@@ -1858,5 +1859,116 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     expect(candidates()).toHaveLength(1);
     expect(candidates()[0]!["id"]).toBe(`arch:${conceptId}`);
     expect(candidates()[0]!["status"]).toBe("archived");
+  });
+});
+
+describe("getMentorContributionStats — read-only per-mentor track record", () => {
+  const MENTOR_A = "prof-a";
+  const MENTOR_B = "prof-b";
+
+  /** Seed a mentor→concept provenance edge (kind='knowledge'). */
+  function mentorEdge(mentorProfileId: string, conceptId: string): void {
+    fake.tables["knowledge_edges"] ??= [];
+    fake.tables["knowledge_edges"]!.push({
+      source_id: `mentor:${mentorProfileId}`,
+      target_id: conceptId,
+      kind: "knowledge",
+      weight: 1,
+      meta: { mentorProfileId },
+    });
+  }
+
+  /** Seed a video→concept provenance edge (a second, non-mentor source). */
+  function videoEdge(videoId: string, conceptId: string): void {
+    fake.tables["knowledge_edges"] ??= [];
+    fake.tables["knowledge_edges"]!.push({
+      source_id: `video:${videoId}`,
+      target_id: conceptId,
+      kind: "knowledge",
+      weight: 1,
+      meta: {},
+    });
+  }
+
+  function candidate(mentorProfileId: string, status: string, id: string): void {
+    fake.tables["knowledge_candidates"] ??= [];
+    fake.tables["knowledge_candidates"]!.push({ id, status, mentor_profile_id: mentorProfileId });
+  }
+
+  it("splits created (sole source) from reinforced (co-sourced) concepts", async () => {
+    // Mentor A is the only source of "solo", and co-sources "shared" with a video.
+    mentorEdge(MENTOR_A, "k:concept:solo");
+    mentorEdge(MENTOR_A, "k:concept:shared");
+    videoEdge("v1", "k:concept:shared");
+
+    const stats = await getMentorContributionStats();
+    const a = stats.find((s) => s.mentorProfileId === MENTOR_A)!;
+    expect(a.conceptsCreated).toBe(1);
+    expect(a.conceptsReinforced).toBe(1);
+  });
+
+  it("two mentors co-sourcing one concept each count it as reinforced", async () => {
+    mentorEdge(MENTOR_A, "k:concept:coauthored");
+    mentorEdge(MENTOR_B, "k:concept:coauthored");
+
+    const stats = await getMentorContributionStats();
+    const a = stats.find((s) => s.mentorProfileId === MENTOR_A)!;
+    const b = stats.find((s) => s.mentorProfileId === MENTOR_B)!;
+    expect(a.conceptsCreated).toBe(0);
+    expect(a.conceptsReinforced).toBe(1);
+    expect(b.conceptsReinforced).toBe(1);
+  });
+
+  it("counts candidate outcomes (accepted+merged) / rejected / pending per mentor", async () => {
+    candidate(MENTOR_A, "accepted", "c1");
+    candidate(MENTOR_A, "merged", "c2");
+    candidate(MENTOR_A, "rejected", "c3");
+    candidate(MENTOR_A, "pending", "c4");
+    candidate(MENTOR_A, "archived", "c5"); // ignored: not a review outcome
+    candidate(MENTOR_B, "pending", "c6");
+
+    const stats = await getMentorContributionStats();
+    const a = stats.find((s) => s.mentorProfileId === MENTOR_A)!;
+    expect(a.accepted).toBe(2);
+    expect(a.rejected).toBe(1);
+    expect(a.pending).toBe(1);
+    const b = stats.find((s) => s.mentorProfileId === MENTOR_B)!;
+    expect(b.pending).toBe(1);
+    expect(b.accepted).toBe(0);
+  });
+
+  it("derives a mentor's profile id from the source id when meta lacks one", async () => {
+    fake.tables["knowledge_edges"] ??= [];
+    fake.tables["knowledge_edges"]!.push({
+      source_id: `mentor:${MENTOR_A}`,
+      target_id: "k:concept:no-meta",
+      kind: "knowledge",
+      weight: 1,
+      meta: {},
+    });
+
+    const stats = await getMentorContributionStats();
+    const a = stats.find((s) => s.mentorProfileId === MENTOR_A)!;
+    expect(a.conceptsCreated).toBe(1);
+  });
+
+  it("ignores non-knowledge edges and rows with no mentor profile id", async () => {
+    // A structural (non-'knowledge') edge must never be scanned as provenance.
+    fake.tables["knowledge_edges"] ??= [];
+    fake.tables["knowledge_edges"]!.push({
+      source_id: `mentor:${MENTOR_A}`,
+      target_id: "k:concept:hub",
+      kind: "hub",
+      weight: 1,
+      meta: { mentorProfileId: MENTOR_A },
+    });
+    candidate("", "pending", "c-noprofile");
+
+    const stats = await getMentorContributionStats();
+    expect(stats).toHaveLength(0);
+  });
+
+  it("returns an empty list when there is nothing to aggregate", async () => {
+    expect(await getMentorContributionStats()).toEqual([]);
   });
 });

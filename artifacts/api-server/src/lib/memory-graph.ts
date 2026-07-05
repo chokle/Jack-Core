@@ -1987,6 +1987,124 @@ export async function listKnowledgeCandidates(
 }
 
 /**
+ * Per-mentor contribution track record — a read-only aggregation reviewers use
+ * to gauge how much a mentor has shaped the Living Memory before acting on a
+ * borderline candidate. All counts are derived (never persisted), so this is
+ * always consistent with the live graph and the candidate history.
+ */
+export interface MentorContributionStat {
+  mentorProfileId: string;
+  /** Live concepts this mentor is the ONLY provenance source for. */
+  conceptsCreated: number;
+  /** Live concepts this mentor co-sources with other videos/mentors. */
+  conceptsReinforced: number;
+  /** Candidates from this mentor accepted or merged into the graph. */
+  accepted: number;
+  /** Candidates from this mentor rejected. */
+  rejected: number;
+  /** Candidates from this mentor still awaiting a decision. */
+  pending: number;
+}
+
+/**
+ * Aggregate each mentor's contribution counts from two read-only sources:
+ *
+ * 1. **mentor→concept provenance edges** (`knowledge_edges`, kind='knowledge',
+ *    source `mentor:<id>`) tell us which live concepts a mentor sources. To split
+ *    "created" from "reinforced" we also look at how many DISTINCT provenance
+ *    sources each concept has: a concept sourced only by this mentor is counted
+ *    as created; a concept it shares with any other video/mentor is reinforced.
+ *    This is a proxy — the ingestion-time create/reinforce decision isn't stored
+ *    on the edge — but it is well-defined and stable: a concept "created" by a
+ *    mentor becomes "reinforced" for everyone once a second source corroborates it.
+ * 2. **candidate history** (`knowledge_candidates`) gives each mentor's review
+ *    outcomes (accepted/merged → accepted, rejected, pending).
+ *
+ * A single edge scan and a single candidate scan keep this O(edges + candidates),
+ * which is fine at library scale (mirrors the existing listMentors aggregation).
+ */
+export async function getMentorContributionStats(): Promise<MentorContributionStat[]> {
+  const [edgesRes, candsRes] = await Promise.all([
+    supabase.from("knowledge_edges").select("source_id, target_id, meta").eq("kind", "knowledge"),
+    supabase.from("knowledge_candidates").select("mentor_profile_id, status"),
+  ]);
+  if (edgesRes.error) throw edgesRes.error;
+  if (candsRes.error) throw candsRes.error;
+
+  // concept target id -> set of distinct provenance source node ids
+  const conceptSources = new Map<string, Set<string>>();
+  // mentor profile id -> set of concept target ids it sources
+  const mentorConcepts = new Map<string, Set<string>>();
+
+  for (const row of edgesRes.data ?? []) {
+    const e = row as Record<string, unknown>;
+    const source = e["source_id"];
+    const target = e["target_id"];
+    if (typeof source !== "string" || typeof target !== "string") continue;
+
+    let sources = conceptSources.get(target);
+    if (!sources) {
+      sources = new Set<string>();
+      conceptSources.set(target, sources);
+    }
+    sources.add(source);
+
+    if (source.startsWith("mentor:")) {
+      const meta = (e["meta"] as Record<string, unknown> | null) ?? {};
+      const pid =
+        typeof meta["mentorProfileId"] === "string"
+          ? (meta["mentorProfileId"] as string)
+          : source.slice("mentor:".length);
+      let concepts = mentorConcepts.get(pid);
+      if (!concepts) {
+        concepts = new Set<string>();
+        mentorConcepts.set(pid, concepts);
+      }
+      concepts.add(target);
+    }
+  }
+
+  const stats = new Map<string, MentorContributionStat>();
+  const ensure = (pid: string): MentorContributionStat => {
+    let s = stats.get(pid);
+    if (!s) {
+      s = {
+        mentorProfileId: pid,
+        conceptsCreated: 0,
+        conceptsReinforced: 0,
+        accepted: 0,
+        rejected: 0,
+        pending: 0,
+      };
+      stats.set(pid, s);
+    }
+    return s;
+  };
+
+  for (const [pid, concepts] of mentorConcepts) {
+    const s = ensure(pid);
+    for (const conceptId of concepts) {
+      const sources = conceptSources.get(conceptId);
+      if (sources && sources.size > 1) s.conceptsReinforced += 1;
+      else s.conceptsCreated += 1;
+    }
+  }
+
+  for (const row of candsRes.data ?? []) {
+    const r = row as Record<string, unknown>;
+    const pid = r["mentor_profile_id"];
+    if (typeof pid !== "string" || !pid) continue;
+    const status = r["status"];
+    const s = ensure(pid);
+    if (status === "accepted" || status === "merged") s.accepted += 1;
+    else if (status === "rejected") s.rejected += 1;
+    else if (status === "pending") s.pending += 1;
+  }
+
+  return [...stats.values()];
+}
+
+/**
  * Knowledge Review outcomes. accept/merge/reject resolve a PENDING mentor
  * candidate; restore re-mints an ARCHIVED (mentor-withdrawn) concept back into
  * the live graph.

@@ -41,6 +41,7 @@ import type {
   ListParkedThoughtsParams,
   ListVideosParams,
   MentorActiveSession,
+  MentorContributionList,
   MentorList,
   MentorWithdrawalPreview,
   MentorWithdrawalResult,
@@ -1657,6 +1658,84 @@ export function useListKnowledgeCandidates<TData = Awaited<ReturnType<typeof lis
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListKnowledgeCandidatesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMentorContributionsUrl = () => {
+
+
+
+
+  return `/api/graph/mentor-contributions`
+}
+
+/**
+ * Read-only aggregation over mentor→concept provenance edges and the knowledge-candidate history. Reviewers use it to gauge a mentor's overall track record when weighing a borderline candidate. Admin-gated like the rest of the resolved-candidate surface.
+ * @summary Per-mentor contribution counts for reviewer trust calibration (admin only)
+ */
+export const getMentorContributions = async ( options?: RequestInit): Promise<MentorContributionList> => {
+
+  return customFetch<MentorContributionList>(getGetMentorContributionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMentorContributionsQueryKey = () => {
+    return [
+    `/api/graph/mentor-contributions`
+    ] as const;
+    }
+
+
+export const getGetMentorContributionsQueryOptions = <TData = Awaited<ReturnType<typeof getMentorContributions>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMentorContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMentorContributionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMentorContributions>>> = ({ signal }) => getMentorContributions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMentorContributions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMentorContributionsQueryResult = NonNullable<Awaited<ReturnType<typeof getMentorContributions>>>
+export type GetMentorContributionsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Per-mentor contribution counts for reviewer trust calibration (admin only)
+ */
+
+export function useGetMentorContributions<TData = Awaited<ReturnType<typeof getMentorContributions>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMentorContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMentorContributionsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
