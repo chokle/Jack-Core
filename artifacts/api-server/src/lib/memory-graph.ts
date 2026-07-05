@@ -2212,11 +2212,12 @@ async function resolveKnowledgeCandidateInner(
     return rearchiveRestoredCandidateInner(record);
   }
 
-  // Reopen is a reviewer's undo for a REJECTED candidate: reject writes no graph
-  // edge, so returning the row to 'pending' is side-effect-free and safe. It has
-  // its own lifecycle (a 'rejected' row) and never touches the accept/merge path.
+  // Reopen is a reviewer's undo for a RESOLVED candidate: a rejected row flips
+  // back to 'pending' side-effect-free (reject wrote no graph edge), while an
+  // accepted/merged row also has its reinforcement reversed per-answer before the
+  // flip. It has its own lifecycle and never touches the accept/merge write path.
   if (action === "reopen") {
-    return reopenRejectedCandidateInner(record);
+    return reopenResolvedCandidateInner(record);
   }
 
   const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
@@ -2753,38 +2754,123 @@ async function rearchiveRestoredCandidateInner(
 }
 
 /**
- * Reopen a REJECTED candidate — a reviewer's undo that returns it to the pending
- * queue for a fresh accept/merge/reject decision. This is deliberately scoped to
- * rejected rows only:
+ * Per-answer inverse of persistMentorResolvedConcepts' provenance write: drop a
+ * single answer's contribution to a mentor→concept edge, then re-evaluate the
+ * concept. This is what lets `reopen` undo an accepted/merged lesson.
  *
- *  - Reject writes NO graph edge (it is a pure status+reason change), so clearing
- *    the resolution fields and flipping back to 'pending' is completely side-
- *    effect-free — there is nothing in the live graph to reverse.
- *  - Accept/merge, by contrast, wrote an additive mentor→concept edge; undoing
- *    those safely needs per-answer edge withdrawal that does not exist yet, so
- *    reopen refuses any non-rejected lifecycle state with a conflict.
- *  - A withdrawn mentor's resolved candidates are SCRUBBED (mentor_profile_id
+ *  - Remove `answerId` from the mentor→concept edge's `meta.answerIds`
+ *    (weight = distinct answers), deleting the edge only when its LAST answer
+ *    leaves — so a concept the mentor corroborated across several answers keeps the
+ *    edge minus this one. Removing an already-absent answer, or acting on an
+ *    edge/target that has since vanished, is a no-op — the reversal is idempotent
+ *    and safe to run before the reopen status flip (a mid-flight failure heals on
+ *    a reopen retry).
+ *  - Then prune (a now-sourceless, non-curated concept is deleted, edges cascade),
+ *    recompute the survivor's aggregates so confidence (noisy-OR over the
+ *    REMAINING sources) and hub-edge weights drop honestly, and demote a
+ *    solely-mentor-supplied verification status back to 'unverified' — the SAME
+ *    re-evaluation a mentor withdrawal runs on a corroborated concept.
+ *  - Aliases and `meta.mergedFrom` are deliberately LEFT intact (they are
+ *    unattributed alternate wordings, not mentor data — dropping them would break
+ *    duplicate-matching for every other source; the retained alias means a
+ *    re-taught wording exact-alias-matches back into the reinforce band).
+ *  - The edge's scalar `meta.confidence` (a max over the mentor's answers, with no
+ *    per-answer ledger) is NOT lowered: exact reversal is impossible, so a kept
+ *    edge's node confidence may stay marginally overstated ONLY when the removed
+ *    answer held the max and other answers remain. Documented tradeoff.
+ */
+async function reverseMentorReinforcement(
+  mentorProfileId: string,
+  targetNodeId: string | null,
+  answerId: string,
+): Promise<void> {
+  // A resolved accept/merge always recorded its target; without one there is
+  // nothing to reverse.
+  if (!targetNodeId) return;
+
+  const edgeId = edgeKey(mentorNodeId(mentorProfileId), targetNodeId);
+  const { data: edgeRow, error } = await supabase
+    .from("knowledge_edges")
+    .select("id, meta")
+    .eq("id", edgeId)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (edgeRow) {
+    const meta = ((edgeRow as Record<string, unknown>)["meta"] as Record<string, unknown>) ?? {};
+    const prevAnswerIds = Array.isArray(meta["answerIds"])
+      ? (meta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      : [];
+    // Only touch the edge when this answer actually contributed to it — otherwise
+    // the reversal already happened (idempotent retry) and we must not disturb
+    // another answer's corroboration.
+    if (prevAnswerIds.includes(answerId)) {
+      const answerIds = prevAnswerIds.filter((a) => a !== answerId);
+      if (answerIds.length === 0) {
+        // This answer was the mentor's only corroboration — drop the edge entirely.
+        const { error: delErr } = await supabase
+          .from("knowledge_edges")
+          .delete()
+          .eq("id", edgeId);
+        if (delErr) throw delErr;
+      } else {
+        // Other answers still corroborate — keep the edge, minus this answer.
+        // (knowledge_edges has no updated_at column; only weight + meta change.)
+        const { error: updErr } = await supabase
+          .from("knowledge_edges")
+          .update({ weight: answerIds.length, meta: { ...meta, answerIds } })
+          .eq("id", edgeId);
+        if (updErr) throw updErr;
+      }
+    }
+  }
+
+  // Re-evaluate the concept from its REMAINING provenance: drop it if now
+  // sourceless (curated nodes exempt), else reconverge its aggregates and demote a
+  // stale mentor_supplied status. Prune before recompute — recompute skips ids that
+  // no longer exist — mirroring removeVideoGraph / removeMentorGraph.
+  await pruneOrphanKnowledge();
+  await recomputeKnowledgeAggregates([targetNodeId]);
+  await demoteStaleMentorSupplied([targetNodeId]);
+}
+
+/**
+ * Reopen a RESOLVED candidate — a reviewer's undo that returns it to the pending
+ * queue for a fresh accept/merge/reject decision:
+ *
+ *  - REJECTED rows: reject wrote NO graph edge, so clearing the resolution fields
+ *    and flipping back to 'pending' is completely side-effect-free.
+ *  - ACCEPTED / MERGED rows: accept/merge wrote an additive mentor→concept
+ *    provenance edge. Reopen reverses it PER-ANSWER (reverseMentorReinforcement)
+ *    before the flip, so confidence, hub-edge weights and a solely-mentor-supplied
+ *    verification status all drop honestly — undoing the lesson, not just the row.
+ *  - A withdrawn mentor's resolved candidate is SCRUBBED (mentor_profile_id
  *    nulled). Reopening such a row would strand it: accept/merge later refuse a
  *    candidate with no mentor provenance, and a future withdrawal would DELETE a
  *    pending row rather than scrub it. So reopen refuses a scrubbed row up front.
- *  - Replay-safe and toggle-shaped like restore/rearchive: the flip is compare-
- *    and-set on `status='rejected'`, so an already-'pending' row is a no-op
- *    success and a row resolved out from under us reports replay/conflict.
+ *  - Replay-safe and toggle-shaped like restore/rearchive: the graph reversal
+ *    runs BEFORE the compare-and-set flip and every step is idempotent, so an
+ *    already-'pending' row is a no-op success, a mid-flight failure heals on a
+ *    reopen retry, and a row resolved out from under us reports replay/conflict.
  */
-async function reopenRejectedCandidateInner(
+async function reopenResolvedCandidateInner(
   record: KnowledgeCandidateRecord,
 ): Promise<CandidateResolutionResult> {
   // Replay: an already-pending candidate is a no-op success.
   if (record.status === "pending") {
     return { ok: true, candidate: record, replayed: true };
   }
-  // Only rejected knowledge can be reopened — refuse any other lifecycle state.
-  // Reversing an accept/merge edge is out of scope (needs per-answer withdrawal).
-  if (record.status !== "rejected") {
+  // Only a resolved candidate can be reopened — refuse any other lifecycle state
+  // (archived/restored have their own restore/rearchive inverse).
+  if (
+    record.status !== "rejected" &&
+    record.status !== "accepted" &&
+    record.status !== "merged"
+  ) {
     return {
       ok: false,
       code: "conflict",
-      message: `Only rejected candidates can be reopened (this candidate is '${record.status}').`,
+      message: `Only rejected, accepted, or merged candidates can be reopened (this candidate is '${record.status}').`,
     };
   }
   // A withdrawn mentor's candidate was scrubbed of its provenance — reopening it
@@ -2798,10 +2884,23 @@ async function reopenRejectedCandidateInner(
     };
   }
 
+  // Accept/merge wrote a mentor→concept provenance edge; undo this answer's
+  // contribution BEFORE the status flip so a mid-flight failure heals on retry.
+  // (A rejected row wrote no edge and skips this entirely.)
+  if (record.status === "accepted" || record.status === "merged") {
+    await reverseMentorReinforcement(
+      record.mentorProfileId,
+      record.resolvedTargetId,
+      // Same dedup key persistMentorResolvedConcepts used: the original answer
+      // when known, otherwise the candidate id.
+      record.answerId ?? record.id,
+    );
+  }
+
   const now = new Date().toISOString();
-  // Compare-and-set: only reopen if the row is still rejected. Clear every
-  // resolution field so the row is indistinguishable from a fresh pending
-  // candidate for the accept/merge/reject path.
+  // Compare-and-set: only reopen if the row is still in the state we reversed.
+  // Clear every resolution field so the row is indistinguishable from a fresh
+  // pending candidate for the accept/merge/reject path.
   const { data: updated, error: updErr } = await supabase
     .from("knowledge_candidates")
     .update({
@@ -2814,7 +2913,7 @@ async function reopenRejectedCandidateInner(
       updated_at: now,
     })
     .eq("id", record.id)
-    .eq("status", "rejected")
+    .eq("status", record.status)
     // Guard the scrub race too: if a mentor withdrawal nulls this row's
     // provenance between the pre-read check above and here, the CAS misses and
     // we never strand it as pending. (fake-supabase models only this .not form.)
@@ -2836,9 +2935,9 @@ async function reopenRejectedCandidateInner(
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
     if (winner.status === "pending") return { ok: true, candidate: winner, replayed: true };
-    // Scrubbed out from under us (still 'rejected' but mentor now null) — report
-    // the same strand refusal the pre-read guard would give on retry.
-    if (winner.status === "rejected" && !winner.mentorProfileId) {
+    // Scrubbed out from under us (still resolved but mentor now null) — report the
+    // same strand refusal the pre-read guard would give on retry.
+    if (winner.status === record.status && !winner.mentorProfileId) {
       return {
         ok: false,
         code: "invalid",

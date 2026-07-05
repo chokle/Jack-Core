@@ -460,6 +460,8 @@ function CandidateCard({
   const isArchived = candidate.status === "archived";
   const isRestored = candidate.status === "restored";
   const isRejected = candidate.status === "rejected";
+  const isAccepted = candidate.status === "accepted";
+  const isMerged = candidate.status === "merged";
 
   const mergeMatches = useMemo(() => {
     const q = mergeSearch.trim().toLowerCase();
@@ -661,10 +663,13 @@ function CandidateCard({
         </div>
       )}
 
-      {/* Reopen a rejected candidate: return it to the pending queue for a fresh
-          decision. Hidden when the mentor was withdrawn (provenance scrubbed),
-          since reopen would strand a candidate accept/merge can no longer use. */}
-      {isRejected && candidate.mentorProfileId && (
+      {/* Reopen a resolved candidate: return it to the pending queue for a fresh
+          decision. For accepted/merged this also UNDOES the reinforcement —
+          the server drops this answer's mentor→concept provenance edge and
+          reconverges the concept's confidence. Hidden when the mentor was
+          withdrawn (provenance scrubbed), since reopen would strand a candidate
+          accept/merge can no longer use. */}
+      {(isRejected || isAccepted || isMerged) && candidate.mentorProfileId && (
         <div className="mt-4 border-t border-border/70 pt-3">
           <Button
             size="sm"
@@ -672,10 +677,14 @@ function CandidateCard({
             disabled={busy}
             onClick={() => onResolve("reopen")}
             className="min-h-10 md:min-h-8"
-            title="Undo this rejection — return the candidate to the pending queue for a fresh decision"
+            title={
+              isRejected
+                ? "Undo this rejection — return the candidate to the pending queue for a fresh decision"
+                : "Undo this reinforcement — remove the lesson from the knowledge graph and return the candidate to pending"
+            }
           >
             <RotateCcw className="mr-1.5 h-4 w-4" />
-            Reopen for review
+            {isRejected ? "Reopen for review" : "Undo & reopen"}
           </Button>
         </div>
       )}

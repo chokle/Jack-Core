@@ -381,15 +381,16 @@ describe("Knowledge Review — reopen", () => {
     expect(snapshot(candidates())).toBe(candSnap);
   });
 
-  it("refuses to reopen a non-rejected candidate", async () => {
+  it("refuses to reopen a candidate in a non-reopenable state (e.g. archived)", async () => {
     await seedPendingCandidate();
-    await resolveKnowledgeCandidate(candidateId, "accept");
+    // Archived/restored rows have their own restore/rearchive inverse — reopen
+    // only undoes rejected/accepted/merged resolutions.
+    candidates()[0]!["status"] = "archived";
 
     const conflict = await resolveKnowledgeCandidate(candidateId, "reopen");
     expect(conflict.ok).toBe(false);
     if (!conflict.ok) expect(conflict.code).toBe("conflict");
-    // The accepted resolution is untouched.
-    expect(candidates()[0]!["status"]).toBe("accepted");
+    expect(candidates()[0]!["status"]).toBe("archived");
   });
 
   it("refuses to reopen a rejected candidate whose mentor was withdrawn (scrubbed)", async () => {
@@ -424,6 +425,143 @@ describe("Knowledge Review — reopen", () => {
 
     expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
     expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(candidateId);
+  });
+});
+
+/**
+ * Reopen (undo accept/merge) — the per-answer INVERSE of a reinforcement. Accept/
+ * merge wrote a mentor→concept provenance edge; reopening must drop THIS answer's
+ * contribution, reconverge the concept's confidence, and demote a solely-mentor-
+ * supplied status back to unverified — undoing the lesson, not just the row.
+ */
+describe("Knowledge Review — reopen (undo accept/merge)", () => {
+  it("undoes an accepted reinforcement: drops the mentor edge, reconverges confidence, demotes to unverified", async () => {
+    await seedPendingCandidate();
+    const preNode = nodeById(canonicalId)!;
+    const preConfidence = preNode["confidence"] as number;
+    // The video-taught concept starts unverified before any mentor corroboration.
+    expect(preNode["verification_status"]).toBe("unverified");
+
+    await resolveKnowledgeCandidate(candidateId, "accept");
+    // Accept added mentor corroboration: edge present, confidence up, mentor_supplied.
+    expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeDefined();
+    const acceptedNode = nodeById(canonicalId)!;
+    expect(acceptedNode["verification_status"]).toBe("mentor_supplied");
+    expect(acceptedNode["confidence"] as number).toBeGreaterThan(preConfidence);
+
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+    if (!reopened.ok) return;
+    expect(reopened.replayed).toBe(false);
+    expect(reopened.candidate.status).toBe("pending");
+    expect(reopened.candidate.resolvedTargetId).toBeNull();
+    expect(reopened.candidate.resolvedAt).toBeNull();
+
+    // The mentor→concept provenance edge is gone (its only answer was withdrawn)...
+    expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeUndefined();
+    // ...the concept survives on its remaining video source, with confidence and
+    // verification reconverged to their pre-accept values.
+    const undoneNode = nodeById(canonicalId)!;
+    expect(undoneNode).toBeDefined();
+    expect(undoneNode["verification_status"]).toBe("unverified");
+    expect(undoneNode["confidence"] as number).toBeCloseTo(preConfidence, 10);
+
+    // Back in the pending queue for a fresh decision, gone from accepted.
+    expect((await listKnowledgeCandidates("pending"))[0]!.id).toBe(candidateId);
+    expect(await listKnowledgeCandidates("accepted")).toHaveLength(0);
+  });
+
+  it("undoes a merged reinforcement onto the reviewer-chosen node", async () => {
+    await seedPendingCandidate();
+    const other = makeItem("concept", "Shielding Gas Discipline");
+    await syncVideoKnowledge("vid-1", [makeItem("concept", CANONICAL_TITLE), other]);
+
+    await resolveKnowledgeCandidate(candidateId, "merge", { targetNodeId: other.id });
+    expect(edgeBetween(`mentor:${MENTOR_A}`, other.id)).toBeDefined();
+    expect(nodeById(other.id)!["verification_status"]).toBe("mentor_supplied");
+
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+    if (reopened.ok) expect(reopened.candidate.status).toBe("pending");
+
+    // The reinforcement onto the chosen node is undone; the node keeps its own
+    // video provenance and demotes back to unverified.
+    expect(edgeBetween(`mentor:${MENTOR_A}`, other.id)).toBeUndefined();
+    expect(nodeById(other.id)).toBeDefined();
+    expect(nodeById(other.id)!["verification_status"]).toBe("unverified");
+
+    expect((await listKnowledgeCandidates("pending"))[0]!.id).toBe(candidateId);
+    expect(await listKnowledgeCandidates("merged")).toHaveLength(0);
+  });
+
+  it("per-answer withdrawal: a shared mentor edge survives, minus this answer, with weight decremented", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+
+    // Simulate a SECOND answer from the same mentor corroborating the same concept
+    // (accept dedups by answerId; a real multi-answer mentor edge carries both).
+    const ANSWER_2 = "22222222-0000-0000-0000-000000000002";
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    (edge["meta"] as Record<string, unknown>)["answerIds"] = [ANSWER_1, ANSWER_2];
+    edge["weight"] = 2;
+
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+
+    // The edge lives on for the other answer; only THIS answer's contribution left.
+    const after = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    expect(after).toBeDefined();
+    expect((after["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_2]);
+    expect(after["weight"]).toBe(1);
+    // Still mentor-corroborated, so the status stays mentor_supplied.
+    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
+  });
+
+  it("replaying reopen after undoing an accept is a no-op success", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+    await resolveKnowledgeCandidate(candidateId, "reopen");
+    const snap = graphSnapshot();
+    const candSnap = snapshot(candidates());
+
+    const replay = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(replay.ok).toBe(true);
+    if (replay.ok) expect(replay.replayed).toBe(true);
+    expect(graphSnapshot()).toBe(snap);
+    expect(snapshot(candidates())).toBe(candSnap);
+  });
+
+  it("refuses to reopen an accepted candidate whose mentor was withdrawn (scrubbed)", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+    // Simulate mentor withdrawal scrubbing the resolved candidate's provenance.
+    candidates()[0]!["mentor_profile_id"] = null;
+    const snap = graphSnapshot();
+
+    const refused = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.code).toBe("invalid");
+    // Still accepted, live graph untouched.
+    expect(candidates()[0]!["status"]).toBe("accepted");
+    expect(graphSnapshot()).toBe(snap);
+  });
+
+  it("an accept → reopen → accept cycle reconverges to the same reinforcement", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+    await resolveKnowledgeCandidate(candidateId, "reopen");
+
+    const reaccept = await resolveKnowledgeCandidate(candidateId, "accept");
+    expect(reaccept.ok).toBe(true);
+    if (!reaccept.ok) return;
+    expect(reaccept.candidate.status).toBe("accepted");
+    expect(reaccept.candidate.resolvedTargetId).toBe(canonicalId);
+
+    // The mentor provenance edge is back, deduped by the original answer id.
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    expect(edge).toBeDefined();
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
   });
 });
 
