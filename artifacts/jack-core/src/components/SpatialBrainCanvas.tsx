@@ -37,9 +37,12 @@ import { ambientMotionEnabled } from "../lib/motion";
  * tested behavior. No three.js — a plain 2D canvas with a hand-rolled
  * perspective projection keeps the bundle lean and the render path debuggable.
  *
- * Selection drives the center: the view sets `selectedId`, this canvas recenters
- * on it (null → the JACK core). `focusNode` recenters directly; `ensureVisible`
- * is a no-op because the selected node is always brought to the middle.
+ * View mode governs how selection behaves. In "full" (default) the graph stays
+ * centered on the JACK core and a selection only changes EMPHASIS (highlight/dim
+ * via `selectedId`) — nothing is pruned, so every trade stays visible. In "focus"
+ * a selection recenters the layout on the picked node and prunes to its local
+ * neighborhood (the legacy drill-in). `focusNode` recenters only in focus mode;
+ * `ensureVisible` is a no-op.
  */
 
 export interface MemoryGraphHandle {
@@ -69,6 +72,14 @@ interface Props {
    * → real model) never falsely fires every populated hub. Defaults to ready.
    */
   dataReady?: boolean;
+  /**
+   * "full" (default): the whole graph stays centered on the JACK core and a
+   * selection only changes emphasis (highlight/dim) — nothing is pruned, so
+   * every trade stays visible. "focus": a selection recenters the layout on the
+   * picked node and prunes to its local neighborhood (the legacy drill-in view).
+   * User-toggled; defaults to full so launch never hides trades on selection.
+   */
+  viewMode?: "full" | "focus";
 }
 
 /** Runtime, per-node render state: eased 3D position + per-frame projection. */
@@ -187,6 +198,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       delta,
       onZoomChange,
       dataReady,
+      viewMode = "full",
     },
     ref,
   ) {
@@ -210,6 +222,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const lockedRef = useRef(locked);
     const reducedRef = useRef(false);
     const selectedRef = useRef<string | null>(selectedId);
+    const viewModeRef = useRef(viewMode);
     const searchRef = useRef("");
     const activeMatchRef = useRef<string | null>(null);
     const hoverRef = useRef<string | null>(null);
@@ -225,6 +238,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const fpsLastRef = useRef(0);
 
     selectedRef.current = selectedId;
+    viewModeRef.current = viewMode;
     lockedRef.current = locked;
     dataReadyRef.current = dataReady ?? true;
     searchRef.current = search.trim().toLowerCase();
@@ -367,9 +381,13 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         };
       },
       focusNode: (id: string) => {
-        recenterRef.current(id);
+        // Only the focus view recenters/prunes around a node. In full mode the
+        // caller also selects it, which drives emphasis without hiding the rest
+        // of the graph, so focusNode is intentionally a layout no-op there.
+        if (viewModeRef.current === "focus") recenterRef.current(id);
       },
-      // The selected node is always recentered, so it can never be off-screen.
+      // No-op: full mode keeps the whole graph put (selection only emphasizes),
+      // and focus mode already recenters the selection to the middle.
       ensureVisible: () => {},
     }));
 
@@ -451,10 +469,28 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       for (const key of [...born.keys()]) if (!live.has(key)) born.delete(key);
     }, [model]);
 
-    // Recenter on the selected node (null → the JACK core).
+    // Selection behavior depends on the view mode. In "focus" mode a selection
+    // recenters the layout on the picked node (legacy drill-in: prunes to its
+    // neighborhood). In "full" mode selection is emphasis-only — selectedRef
+    // already drives the per-frame highlight/dim, so the global graph stays put
+    // and no trades are hidden. Reads viewModeRef (not viewMode) so toggling the
+    // mode doesn't re-run this effect; the transition below owns that.
     useEffect(() => {
-      recenterRef.current(selectedId ?? CORE_ID);
+      if (viewModeRef.current === "focus") {
+        recenterRef.current(selectedId ?? CORE_ID);
+      }
     }, [selectedId]);
+
+    // View-mode transition: entering "full" rebuilds the whole graph around the
+    // core (a prior focus view may have pruned it away); entering "focus" drills
+    // into the current selection (or the core when nothing is selected).
+    useEffect(() => {
+      if (viewMode === "full") {
+        recenterRef.current(CORE_ID);
+      } else {
+        recenterRef.current(selectedRef.current ?? CORE_ID);
+      }
+    }, [viewMode]);
 
     // Birth bursts from the shared snapshot diff (suppressed when locked/reduced).
     useEffect(() => {

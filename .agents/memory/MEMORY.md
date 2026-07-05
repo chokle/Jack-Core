@@ -16,6 +16,7 @@
 - [Leaf typecheck vs composite libs](leaf-typecheck-composite-libs.md) — leaf `tsc --noEmit` doesn't build lib refs; stale/missing dist yields misleading "no exported member"/TS6305; build refs first.
 - [Canvas rAF negative dt](canvas-raf-negative-dt.md) — first rAF timestamp can precede a performance.now() baseline → negative dt eases node radius below 0 → arc() crash; floor dt at 0.
 - [Canvas per-node glow sprite perf](canvas-glow-sprite-perf.md) — cached glow-sprite blit beats per-node createRadialGradient; but it's in DEAD MemoryGraphCanvas — live view renders SpatialBrainCanvas (per-node glow, capped ≤220 nodes). Check which canvas is mounted.
+- [Graph selection emphasis vs prune](graph-selection-emphasis-vs-prune.md) — in SpatialBrainCanvas only recenterTo prunes; dimmed()/emphasized is non-destructive. Full Graph (default) never recenters on select; Focus View drills in.
 - [PostgREST schema-cache transience](postgrest-schema-cache-transience.md) — PGRST205/"schema cache" after DDL is transient; retry through it, don't flip a landed write to failed; real missing node/edge is a returned verdict, never retried.
 - [Blue crosshair canvas artifact](canvas-blue-crosshair.md) — three distinct "blue line" cases (canvas gradient spike / sidebar DOM border / Replit preview focus outline); diagnosis tree in the topic file.
 - [Deploy healthcheck base path](deploy-healthcheck-base-path.md) — platform/uptime check pings bare /api (not /api/healthz); base path must return a shallow (no-DB) 200 or it reads as an outage; redeploy to take effect.
