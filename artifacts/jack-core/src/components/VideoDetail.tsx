@@ -33,8 +33,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
     },
   });
 
-  // @ts-ignore
-  const { data: relatedVideos } = useFetchRelatedVideos?.(videoId, { query: { enabled: !!videoId, queryKey: ['related', videoId] } }) ?? { data: null };
+  const { data: relatedVideos } = useFetchRelatedVideos(videoId, { query: { enabled: !!videoId, queryKey: ['related', videoId] } });
 
   const transcribeMutation = useTranscribeVideo();
   const analyzeMutation = useAnalyzeVideo();
