@@ -13,6 +13,7 @@
  * service-role key, so they never accept caller-supplied privileged identifiers.
  */
 import { Router } from "express";
+import multer from "multer";
 import { supabase } from "../lib/supabase.js";
 import {
   ListMentorsResponse,
@@ -38,11 +39,71 @@ import {
   type MentorProfileLite,
 } from "../lib/interview.js";
 import { runMentorAnswerDistillation, type MentorDistilledItem } from "../lib/distillation.js";
+import { transcribeAudioBuffer } from "../lib/transcription.js";
 
 const router = Router();
 
 const MAX_ANSWER_LENGTH = 8000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whisper's hard upload limit is 25 MB. A mono voice recording is tiny (~1 MB /
+ * minute), so this cap comfortably covers even a very long spoken answer while
+ * bounding the RAM a single request can buffer (memoryStorage) and the OpenAI
+ * spend it can trigger. Paired with aiInterviewLimiter + an active-session gate.
+ */
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/**
+ * MIME types a browser MediaRecorder realistically emits for audio. Chrome/
+ * Firefox produce webm/opus (sometimes mislabeled `video/webm` for an
+ * audio-only stream), iOS Safari produces mp4/aac; ogg/wav/mpeg are included
+ * for completeness. Anything else is rejected before it reaches Whisper.
+ */
+const AUDIO_MIME_ALLOWLIST = new Set([
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "video/webm",
+  "video/mp4",
+]);
+
+/** Map a recorded MIME type to the file extension Whisper uses to detect format. */
+function audioExtension(mimetype: string): string {
+  const mime = mimetype.split(";")[0]?.trim().toLowerCase() ?? "";
+  switch (mime) {
+    case "audio/ogg":
+      return "ogg";
+    case "audio/mp4":
+    case "video/mp4":
+      return "mp4";
+    case "audio/mpeg":
+      return "mp3";
+    case "audio/wav":
+    case "audio/x-wav":
+      return "wav";
+    case "audio/webm":
+    case "video/webm":
+    default:
+      return "webm";
+  }
+}
+
+/**
+ * multipart parser for the single "audio" field of a voice answer. In-memory
+ * (clips are small and never persisted), size-capped, and MIME-allowlisted.
+ */
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AUDIO_BYTES, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const mime = file.mimetype.split(";")[0]?.trim().toLowerCase() ?? "";
+    cb(null, AUDIO_MIME_ALLOWLIST.has(mime));
+  },
+}).single("audio");
 
 type Row = Record<string, unknown>;
 
@@ -371,6 +432,78 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
     return res.status(500).json({ error: "Failed to submit answer" });
   }
 });
+
+/**
+ * POST /interview/sessions/:id/transcribe — voice-answer transcription.
+ *
+ * Accepts one short audio clip (multipart field "audio") recorded in the browser
+ * and returns its Whisper transcript so the mentor can review/edit it before
+ * submitting the text via POST .../answers. The audio is NEVER persisted — only
+ * the final text answer is stored (privacy: see threat_model.md).
+ *
+ * DELIBERATE CONTRACT EXCEPTION: like POST /videos/ingest, this multipart route
+ * is intentionally NOT in the OpenAPI spec (Orval multipart is awkward for a
+ * single tiny endpoint); the client calls it with a manual fetch(FormData).
+ *
+ * The upload is gated on an existing, ACTIVE session (unguessable UUID) BEFORE
+ * the body is buffered, so an anonymous caller cannot push 25 MB through the
+ * server or trigger paid Whisper work at will (threat model: paid-compute DoS).
+ */
+router.post(
+  "/interview/sessions/:id/transcribe",
+  aiInterviewLimiter,
+  async (req, res, next) => {
+    try {
+      const loaded = await loadSession(req.params.id);
+      if (!loaded) return res.status(404).json({ error: "Interview session not found" });
+      if ((loaded.session["status"] as string) === "completed") {
+        return res.status(409).json({ error: "This interview is already complete." });
+      }
+      return next();
+    } catch (err) {
+      req.log.error({ err }, "transcribeInterviewAnswer gate error");
+      return res.status(500).json({ error: "Failed to transcribe audio" });
+    }
+  },
+  (req, res) => {
+    audioUpload(req, res, async (uploadErr: unknown) => {
+      try {
+        if (uploadErr) {
+          if (uploadErr instanceof multer.MulterError) {
+            if (uploadErr.code === "LIMIT_FILE_SIZE") {
+              return res
+                .status(413)
+                .json({ error: "That recording is too long. Please record a shorter answer." });
+            }
+            return res.status(400).json({ error: "Could not read the audio upload." });
+          }
+          throw uploadErr;
+        }
+
+        const file = req.file;
+        if (!file || file.buffer.length === 0) {
+          return res
+            .status(400)
+            .json({ error: "No audio was received. Please record your answer again." });
+        }
+
+        const transcript = await transcribeAudioBuffer(
+          file.buffer,
+          `answer.${audioExtension(file.mimetype)}`,
+        );
+        if (!transcript) {
+          return res.status(422).json({
+            error: "We couldn't make out any words — please try recording again.",
+          });
+        }
+        return res.json({ transcript });
+      } catch (err) {
+        req.log.error({ err }, "transcribeInterviewAnswer error");
+        return res.status(500).json({ error: "Failed to transcribe audio" });
+      }
+    });
+  },
+);
 
 router.post("/interview/sessions/:id/skip", aiInterviewLimiter, async (req, res) => {
   try {

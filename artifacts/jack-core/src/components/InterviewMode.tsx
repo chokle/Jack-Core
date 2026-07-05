@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Mic,
-  SkipForward,
-  Send,
   Loader2,
   Sparkles,
   CheckCircle2,
@@ -15,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { VoiceAnswerInput } from "@/components/VoiceAnswerInput";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useStartInterview,
@@ -519,65 +518,26 @@ export function InterviewMode() {
                 </p>
               </div>
 
-              {/* Answer box */}
-              <form onSubmit={handleSubmitAnswer} className="space-y-3">
-                <Textarea
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="Answer in your own words — Jack captures it verbatim…"
-                  className="min-h-32 resize-none bg-background text-base leading-relaxed"
-                  disabled={busy}
-                  autoFocus
-                />
-                {error && (
-                  <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-sm text-destructive">
-                    {error}
-                  </p>
-                )}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={handleSkip}
-                      disabled={busy}
-                      className="text-muted-foreground"
-                    >
-                      <SkipForward className="mr-2 h-4 w-4" /> Skip
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={handleFinish}
-                      disabled={busy}
-                      className="text-muted-foreground"
-                    >
-                      Wrap up
-                    </Button>
-                    <ParkThisThoughtButton
-                      source="interview"
-                      interviewSessionId={session.id}
-                      context={buildInterviewParkContext(transcript, session.currentQuestion)}
-                      disabled={busy}
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={busy || !answer.trim()}
-                    className="bg-primary text-primary-foreground"
-                  >
-                    {submitAnswer.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
-                      </>
-                    ) : (
-                      <>
-                        <Send className="mr-2 h-4 w-4" /> Submit answer
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
+              {/* Answer box — voice-first capture with typing fallback */}
+              <VoiceAnswerInput
+                sessionId={session.id}
+                answer={answer}
+                onAnswerChange={setAnswer}
+                onSubmit={handleSubmitAnswer}
+                onSkip={handleSkip}
+                onFinish={handleFinish}
+                busy={busy}
+                submitting={submitAnswer.isPending}
+                formError={error}
+                parkButton={
+                  <ParkThisThoughtButton
+                    source="interview"
+                    interviewSessionId={session.id}
+                    context={buildInterviewParkContext(transcript, session.currentQuestion)}
+                    disabled={busy}
+                  />
+                }
+              />
 
               {/* Live distillation feedback */}
               {totalDistilled > 0 && (

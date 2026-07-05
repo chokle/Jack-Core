@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
+import { toFile } from "openai";
 import { openai, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 
@@ -279,4 +280,29 @@ export async function transcribeFromUrl(videoUrl: string): Promise<Transcription
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Transcribe a single short in-memory audio clip (e.g. a spoken Interview Mode
+ * answer captured in the browser) with Whisper and return plain text.
+ *
+ * Unlike {@link transcribeFromUrl}, this does NO download, ffmpeg re-encode, or
+ * chunking: interview answers are short and comfortably under Whisper's 25 MB
+ * upload limit, and whisper-1 natively accepts the browser's recorded container
+ * (webm/opus from Chrome/Firefox, mp4/aac from iOS Safari, ogg, etc.).
+ *
+ * Whisper infers the container/codec from the file extension, so `filename`
+ * MUST carry the real extension (e.g. `answer.webm`, `answer.mp4`).
+ */
+export async function transcribeAudioBuffer(buffer: Buffer, filename: string): Promise<string> {
+  if (buffer.length === 0) {
+    throw new Error("Audio clip is empty");
+  }
+  const result = await openai.audio.transcriptions.create({
+    file: await toFile(buffer, filename),
+    model: MODELS.transcription,
+    response_format: "text",
+  });
+  // With response_format: "text" the SDK resolves to a plain string.
+  return (typeof result === "string" ? result : String(result)).trim();
 }
