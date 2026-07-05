@@ -190,7 +190,12 @@ export function MemoryGraphView({
   const [search, setSearch] = useState("");
   const [locked, setLocked] = useState(false);
   const [zoomPct, setZoomPct] = useState(100);
-  const [showLegend, setShowLegend] = useState(true);
+  // The legend is a large overlay that crowds the graph on phones, so start it
+  // collapsed on small screens (users can still reveal it via the toggle).
+  // Desktop keeps it open by default.
+  const [showLegend, setShowLegend] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 768,
+  );
   const isDesktop = useIsDesktop();
   const reducedMotion = usePrefersReducedMotion();
 

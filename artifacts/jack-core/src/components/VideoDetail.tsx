@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks } from "lucide-react";
+import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -83,7 +83,33 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
     );
   }
 
-  if (!video) return null;
+  if (!video) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex-1 flex flex-col h-full bg-background"
+      >
+        <div className="flex-none p-4 border-b border-border flex items-center bg-card/50 backdrop-blur">
+          <Button variant="ghost" size="sm" onClick={onBack} className="font-mono text-xs">
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Library
+          </Button>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-6 gap-4">
+          <FileQuestion className="h-12 w-12 text-muted-foreground opacity-40" />
+          <div>
+            <h2 className="text-lg font-semibold">This video couldn't be opened</h2>
+            <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
+              It may have been removed, or it's still finishing setup. Go back and try selecting it again.
+            </p>
+          </div>
+          <Button size="sm" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Library
+          </Button>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div 
