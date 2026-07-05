@@ -502,6 +502,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/KnowledgeNode"
 
+  /graph/nodes/{id}/restore-evidence:
+    post:
+      operationId: restoreWithdrawnEvidence
+      tags: [graph]
+      summary: >-
+        Clear a reviewed withdrawn-evidence entry from a concept's provenance
+        (admin only). Idempotent — a missing entry is a no-op success.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreEvidenceInput"
+      responses:
+        "200":
+          description: Updated knowledge node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeNode"
+        "400":
+          description: Invalid node id or body
+        "404":
+          description: No distilled knowledge node with that id
+
   /interview/sessions:
     post:
       operationId: startInterview
@@ -1214,6 +1245,16 @@ components:
         status:
           type: string
           enum: [verified, rejected, unverified]
+
+    RestoreEvidenceInput:
+      type: object
+      required: [videoId]
+      properties:
+        videoId:
+          type: string
+          description: >-
+            The source video whose withdrawn-evidence entry a reviewer has
+            reviewed and wants cleared from this concept's provenance history.
 
     KnowledgeNode:
       type: object

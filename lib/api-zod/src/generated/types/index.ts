@@ -71,6 +71,7 @@ export * from './parkedThoughtStatus';
 export * from './parkThoughtInput';
 export * from './parkThoughtInputSource';
 export * from './redistillAnswerResult';
+export * from './restoreEvidenceInput';
 export * from './searchInput';
 export * from './searchResult';
 export * from './searchResults';

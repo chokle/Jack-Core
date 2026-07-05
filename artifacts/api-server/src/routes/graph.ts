@@ -10,11 +10,14 @@ import {
   ResolveKnowledgeCandidateResponse,
   SetNodeVerificationParams,
   SetNodeVerificationBody,
+  RestoreWithdrawnEvidenceParams,
+  RestoreWithdrawnEvidenceBody,
 } from "@workspace/api-zod";
 import {
   getGraph,
   rebuildGraph,
   setNodeVerification,
+  restoreWithdrawnEvidence,
   listKnowledgeCandidates,
   getMentorContributionStats,
   resolveKnowledgeCandidate,
@@ -166,6 +169,29 @@ router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, r
   } catch (err) {
     req.log.error({ err }, "setNodeVerification error");
     return res.status(500).json({ error: "Failed to update verification status" });
+  }
+});
+
+// Admin-only: clear a reviewed withdrawn-evidence entry from a concept's
+// provenance. Gated identically to node verification — this mutates the shared
+// Living Memory graph and the API holds the Supabase service-role key with no
+// other auth boundary. Idempotent: a missing entry returns the node unchanged.
+router.post("/graph/nodes/:id/restore-evidence", requireAdminSession, async (req, res) => {
+  const paramsParsed = RestoreWithdrawnEvidenceParams.safeParse(req.params);
+  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
+
+  const bodyParsed = RestoreWithdrawnEvidenceBody.safeParse(req.body);
+  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+
+  try {
+    const node = await restoreWithdrawnEvidence(paramsParsed.data.id, bodyParsed.data.videoId);
+    if (!node) {
+      return res.status(404).json({ error: "No distilled knowledge node with that id." });
+    }
+    return res.json(node);
+  } catch (err) {
+    req.log.error({ err }, "restoreWithdrawnEvidence error");
+    return res.status(500).json({ error: "Failed to restore withdrawn evidence" });
   }
 });
 

@@ -26,6 +26,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useSetNodeVerification,
+  useRestoreWithdrawnEvidence,
   useGetVideo,
   useGetMentorActiveSession,
   useGetKnowledgeStats,
@@ -255,6 +256,18 @@ export function MemoryGraphView({
 
   const queryClient = useQueryClient();
   const setVerification = useSetNodeVerification({
+    request: { credentials: "include" },
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
+      },
+    },
+  });
+
+  // Admins can clear a reviewed withdrawn-evidence entry off a concept's
+  // provenance. Gated identically to verification — the POST route is admin-only
+  // on the server; hiding the control just keeps the UI honest for everyone else.
+  const restoreEvidence = useRestoreWithdrawnEvidence({
     request: { credentials: "include" },
     mutation: {
       onSuccess: () => {
@@ -514,6 +527,9 @@ export function MemoryGraphView({
         isUpdatingVerification: setVerification.isPending,
         onSetVerification: (id, status) =>
           setVerification.mutate({ id, data: { status } }),
+        isRestoringEvidence: restoreEvidence.isPending,
+        onRestoreEvidence: (id, videoId) =>
+          restoreEvidence.mutate({ id, data: { videoId } }),
       }
     : null;
 
@@ -1612,11 +1628,17 @@ function ProvenanceContent({
   nodeById,
   onSelectNode,
   onOpenVideo,
+  isAdmin,
+  isRestoringEvidence,
+  onRestoreEvidence,
 }: {
   node: MemoryNode;
   nodeById: Map<string, MemoryNode>;
   onSelectNode: (id: string) => void;
   onOpenVideo: (id: string) => void;
+  isAdmin: boolean;
+  isRestoringEvidence: boolean;
+  onRestoreEvidence: (id: string, videoId: string) => void;
 }) {
   const models = node.meta.models ?? [];
   const first = node.meta.firstExtractedAt;
@@ -1702,20 +1724,38 @@ function ProvenanceContent({
           <ul className="space-y-1.5">
             {rejected.map((r, i) => {
               const vNode = nodeById.get(`video:${r.videoId}`);
-              const title = vNode?.label ?? "Removed source";
               return (
                 <li
                   key={`${r.videoId}-${i}`}
                   className="rounded-md border border-red-400/20 bg-red-400/[0.06] px-2 py-1.5 text-[11px]"
                 >
-                  <button
-                    disabled={!vNode}
-                    onClick={() => vNode && onOpenVideo(r.videoId)}
-                    className="block max-w-full truncate text-left font-medium text-foreground/90 enabled:hover:text-primary disabled:opacity-70"
-                    title={title}
-                  >
-                    {title}
-                  </button>
+                  <div className="flex items-start gap-2">
+                    {vNode ? (
+                      // Resolvable source → open the video to review why it dropped.
+                      <button
+                        onClick={() => onOpenVideo(r.videoId)}
+                        className="block min-w-0 flex-1 truncate text-left font-medium text-foreground/90 hover:text-primary"
+                        title={vNode.label}
+                      >
+                        {vNode.label}
+                      </button>
+                    ) : (
+                      // No resolvable video (deleted source) → degrade to plain text.
+                      <span className="block min-w-0 flex-1 truncate font-medium text-foreground/70">
+                        Removed source
+                      </span>
+                    )}
+                    {isAdmin && (
+                      <button
+                        disabled={isRestoringEvidence}
+                        onClick={() => onRestoreEvidence(node.id, r.videoId)}
+                        className="shrink-0 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Clear this withdrawal from the concept's history"
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </div>
                   <div className="mt-0.5 text-muted-foreground">
                     {r.reason ? r.reason : "No longer corroborates this concept"}
                     {r.at ? ` · ${timeAgo(r.at)}` : ""}
@@ -1789,6 +1829,8 @@ interface NodeDetailProps {
   isAdmin: boolean;
   isUpdatingVerification: boolean;
   onSetVerification: (id: string, status: VerificationUpdateStatus) => void;
+  isRestoringEvidence: boolean;
+  onRestoreEvidence: (id: string, videoId: string) => void;
 }
 
 /**
@@ -2134,6 +2176,8 @@ function NodeDetailBody({
   isAdmin,
   isUpdatingVerification,
   onSetVerification,
+  isRestoringEvidence,
+  onRestoreEvidence,
 }: NodeDetailProps) {
   const knowledge = isKnowledgeKind(node.kind);
 
@@ -2460,6 +2504,9 @@ function NodeDetailBody({
               nodeById={nodeById}
               onSelectNode={onSelectNode}
               onOpenVideo={onOpenVideo}
+              isAdmin={isAdmin}
+              isRestoringEvidence={isRestoringEvidence}
+              onRestoreEvidence={onRestoreEvidence}
             />
           </Section>
         )}

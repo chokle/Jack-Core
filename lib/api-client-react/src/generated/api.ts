@@ -49,6 +49,7 @@ import type {
   ParkedThought,
   ParkedThoughtList,
   RedistillAnswerResult,
+  RestoreEvidenceInput,
   SearchInput,
   SearchResults,
   StartInterviewInput,
@@ -1888,6 +1889,77 @@ export const useSetNodeVerification = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSetNodeVerificationMutationOptions(options));
+    }
+
+export const getRestoreWithdrawnEvidenceUrl = (id: string,) => {
+
+
+
+
+  return `/api/graph/nodes/${id}/restore-evidence`
+}
+
+/**
+ * @summary Clear a reviewed withdrawn-evidence entry from a concept's provenance (admin only). Idempotent — a missing entry is a no-op success.
+ */
+export const restoreWithdrawnEvidence = async (id: string,
+    restoreEvidenceInput: RestoreEvidenceInput, options?: RequestInit): Promise<KnowledgeNode> => {
+
+  return customFetch<KnowledgeNode>(getRestoreWithdrawnEvidenceUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(restoreEvidenceInput)
+  }
+);}
+
+
+
+
+export const getRestoreWithdrawnEvidenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreWithdrawnEvidence>>, TError,{id: string;data: BodyType<RestoreEvidenceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreWithdrawnEvidence>>, TError,{id: string;data: BodyType<RestoreEvidenceInput>}, TContext> => {
+
+const mutationKey = ['restoreWithdrawnEvidence'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreWithdrawnEvidence>>, {id: string;data: BodyType<RestoreEvidenceInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  restoreWithdrawnEvidence(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreWithdrawnEvidenceMutationResult = NonNullable<Awaited<ReturnType<typeof restoreWithdrawnEvidence>>>
+    export type RestoreWithdrawnEvidenceMutationBody = BodyType<RestoreEvidenceInput>
+    export type RestoreWithdrawnEvidenceMutationError = ErrorType<void>
+
+    /**
+ * @summary Clear a reviewed withdrawn-evidence entry from a concept's provenance (admin only). Idempotent — a missing entry is a no-op success.
+ */
+export const useRestoreWithdrawnEvidence = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreWithdrawnEvidence>>, TError,{id: string;data: BodyType<RestoreEvidenceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreWithdrawnEvidence>>,
+        TError,
+        {id: string;data: BodyType<RestoreEvidenceInput>},
+        TContext
+      > => {
+      return useMutation(getRestoreWithdrawnEvidenceMutationOptions(options));
     }
 
 export const getStartInterviewUrl = () => {

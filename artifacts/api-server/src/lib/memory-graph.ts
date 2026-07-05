@@ -3385,6 +3385,81 @@ export async function setNodeVerification(
   };
 }
 
+/**
+ * Clear a single reviewed withdrawn-evidence entry from a concept's provenance.
+ *
+ * A `rejectedEvidence` entry is recorded automatically when a video is
+ * re-processed and no longer extracts a concept it once corroborated. It is a
+ * trust signal, not a live link — a concept only KEEPS such an entry if it
+ * survived pruning, i.e. it still has at least one other corroborating source,
+ * so the concept is always alive. Once a reviewer has opened the source video
+ * and decided the drop is acceptable (or spurious), this clears that one entry.
+ *
+ * We deliberately do NOT re-add the dropped video as a source: the distilled
+ * knowledge row for that concept-video pair was removed when the extraction
+ * stopped producing it, so re-linking would either fabricate extraction data or
+ * be silently re-withdrawn on the next re-process. `recomputeKnowledgeAggregates`
+ * only ever FILTERS `rejectedEvidence` (it never re-adds), so this removal is
+ * durable across future re-processing and self-heal rebuilds.
+ *
+ * Idempotent: a node with no matching entry is a no-op success (returns the node
+ * unchanged). Returns null when the node is absent or is not a knowledge node.
+ */
+export async function restoreWithdrawnEvidence(
+  nodeId: string,
+  videoId: string,
+): Promise<GraphNode | null> {
+  const { data: existing, error: readErr } = await supabase
+    .from("knowledge_nodes")
+    .select("kind, meta")
+    .eq("id", nodeId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!existing) return null;
+
+  const ex = existing as Record<string, unknown>;
+  const kind = ex["kind"] as string;
+  if (!KNOWLEDGE_NODE_KINDS.includes(kind as KnowledgeNodeKind)) return null;
+
+  const prevMeta = (ex["meta"] as Record<string, unknown>) ?? {};
+  const prevRejected = Array.isArray(prevMeta["rejectedEvidence"])
+    ? (prevMeta["rejectedEvidence"] as Array<Record<string, unknown>>)
+    : [];
+  const rejectedEvidence = prevRejected.filter((r) => r["videoId"] !== videoId);
+
+  // No matching entry (or none at all): idempotent no-op — re-read the current
+  // row so the caller always gets the persisted node back, unchanged.
+  const readCurrent = rejectedEvidence.length === prevRejected.length;
+
+  const { data: updated, error: updErr } = readCurrent
+    ? await supabase.from("knowledge_nodes").select("*").eq("id", nodeId).single()
+    : await supabase
+        .from("knowledge_nodes")
+        .update({
+          meta: { ...prevMeta, rejectedEvidence },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", nodeId)
+        .select("*")
+        .single();
+  if (updErr) throw updErr;
+
+  const r = updated as Record<string, unknown>;
+  return {
+    id: r["id"] as string,
+    kind: r["kind"] as GraphNode["kind"],
+    label: r["label"] as string,
+    trade: (r["trade"] as string | null) ?? null,
+    refId: (r["ref_id"] as string | null) ?? null,
+    description: (r["description"] as string | null) ?? null,
+    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
+    verificationStatus: (r["verification_status"] as string) ?? "unverified",
+    meta: (r["meta"] as Record<string, unknown>) ?? {},
+    createdAt: r["created_at"] as string,
+    updatedAt: (r["updated_at"] as string) ?? (r["created_at"] as string),
+  };
+}
+
 /** Read the full persisted graph. */
 export async function getGraph(): Promise<KnowledgeGraph> {
   const [{ data: nodeRows, error: nErr }, { data: edgeRows, error: eErr }] = await Promise.all([

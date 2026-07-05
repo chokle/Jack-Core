@@ -31,3 +31,4 @@
 - [Verification reranking](verification-reranking.md) — reviewer verify/reject only steers retrieval via concept meta.sources timestamp↔segment overlap; no-timestamp concepts can't steer; verified boosts, rejected suppresses.
 - [Admin-gated route request tests](admin-route-request-tests.md) — supertest pattern: vi.hoisted JACK_ADMIN_KEY before import, mint cookie via createAdminSession+fakeRes, mock memory-graph, stub req.log.
 - [Reviewer identity in the admin session](reviewer-identity-session.md) — reviewer name rides in the signed session cookie (base64url JSON), read via getAdminReviewer; never from the body; verificationHistory entries carry it.
+- [Withdrawn-evidence restore = dismiss](withdrawn-evidence-restore.md) — acting on a concept's rejectedEvidence clears the note (can't safely re-corroborate; source row is gone); concept always has ≥1 live source; recompute only filters.

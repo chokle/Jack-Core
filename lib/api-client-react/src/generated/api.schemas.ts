@@ -338,6 +338,11 @@ export interface VerificationUpdate {
   status: VerificationUpdateStatus;
 }
 
+export interface RestoreEvidenceInput {
+  /** The source video whose withdrawn-evidence entry a reviewer has reviewed and wants cleared from this concept's provenance history. */
+  videoId: string;
+}
+
 export type KnowledgeNodeKind = typeof KnowledgeNodeKind[keyof typeof KnowledgeNodeKind];
 
 

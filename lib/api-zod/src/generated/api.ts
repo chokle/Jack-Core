@@ -581,6 +581,32 @@ export const SetNodeVerificationResponse = zod.object({
 
 
 /**
+ * @summary Clear a reviewed withdrawn-evidence entry from a concept's provenance (admin only). Idempotent — a missing entry is a no-op success.
+ */
+export const RestoreWithdrawnEvidenceParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const RestoreWithdrawnEvidenceBody = zod.object({
+  "videoId": zod.string().describe('The source video whose withdrawn-evidence entry a reviewer has reviewed and wants cleared from this concept\'s provenance history.')
+})
+
+export const RestoreWithdrawnEvidenceResponse = zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
+  "label": zod.string(),
+  "trade": zod.string().nullish(),
+  "refId": zod.string().nullish(),
+  "description": zod.string().nullable(),
+  "confidence": zod.number().nullable(),
+  "verificationStatus": zod.string(),
+  "meta": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
  * @summary Create a mentor profile and start an interview session
  */
 export const StartInterviewBody = zod.object({
