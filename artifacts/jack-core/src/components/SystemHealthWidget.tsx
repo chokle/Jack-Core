@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { Heart } from "lucide-react";
 import { useSystemHealth } from "../hooks/use-system-health";
+import { ambientMotionEnabled } from "../lib/motion";
 import type { SystemHealthSnapshotPulseColor } from "@workspace/api-client-react";
 
 /** The heart icon is ALWAYS this red, independent of operating state. */
@@ -14,8 +15,9 @@ const HEART_RED = "#ef4444";
  * reasoning, orange = writing/ingesting, red = warning). The status label and
  * BPM read out alongside it, and the full vitality read-out is in the tooltip.
  *
- * Motion is real (rAF-driven) but honors `prefers-reduced-motion`: a static
- * trace is drawn instead of an animated one.
+ * Motion is real (rAF-driven). The ECG is a signature *ambient* effect, so it
+ * runs regardless of the OS reduce-motion setting (see `lib/motion`); a static
+ * fallback trace remains available if that shared policy is ever flipped off.
  */
 
 const PULSE_HEX: Record<SystemHealthSnapshotPulseColor, string> = {
@@ -68,8 +70,10 @@ export function SystemHealthWidget({ className }: { className?: string }) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const reduced =
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    // ECG is a signature ambient effect — it runs regardless of the OS
+    // reduce-motion setting (see lib/motion). Kept as a variable so flipping the
+    // shared policy restores the static-trace fallback branches below.
+    const reduced = !ambientMotionEnabled();
 
     let w = 0;
     let h = 0;
@@ -220,8 +224,10 @@ export function SystemHealthWidget({ className }: { className?: string }) {
   // When reduced motion is on, the loop above draws only once — refresh the
   // static trace when the reported color/BPM (or offline state) changes.
   useEffect(() => {
-    const reduced =
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    // ECG is a signature ambient effect — it runs regardless of the OS
+    // reduce-motion setting (see lib/motion). Kept as a variable so flipping the
+    // shared policy restores the static-trace fallback branches below.
+    const reduced = !ambientMotionEnabled();
     if (reduced) {
       bpmRef.current = snapshot.heartbeatBPM;
       drawRef.current(0);

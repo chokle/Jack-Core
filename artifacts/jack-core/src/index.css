@@ -326,8 +326,3 @@
   transform-origin: center;
   will-change: transform;
 }
-@media (prefers-reduced-motion: reduce) {
-  .jack-heart-beat {
-    animation: none;
-  }
-}

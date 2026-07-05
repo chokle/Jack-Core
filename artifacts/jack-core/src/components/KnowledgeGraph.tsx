@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useListVideos, getListVideosQueryKey } from "@workspace/api-client-react";
 import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
+import { ambientMotionEnabled } from "@/lib/motion";
 
 /**
  * KnowledgeGraph — a living, ambient wallpaper that renders Jack's memory as a
@@ -226,8 +227,7 @@ export function KnowledgeGraph() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctxRef.current = ctx;
-    reducedMotionRef.current =
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    reducedMotionRef.current = !ambientMotionEnabled();
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);

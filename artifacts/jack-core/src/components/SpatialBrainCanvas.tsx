@@ -24,6 +24,7 @@ import {
   pulseSegment,
 } from "../lib/memory-graph-pulse";
 import { useSystemHealth } from "../hooks/use-system-health";
+import { ambientMotionEnabled } from "../lib/motion";
 
 /**
  * SpatialBrainCanvas — the 2.5D "Live Brain" spatial navigator.
@@ -363,9 +364,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       // delta-driven bursts.
       {
         const prev = prevPopulatedRef.current;
-        const reduced =
-          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
-          false;
+        const reduced = !ambientMotionEnabled();
         // Only burst once the queries have settled AND we've already seeded from
         // one settled model. A hard reload builds an empty in-flight model first,
         // so the first settled rebuild just records the baseline — without this
@@ -439,8 +438,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     // Birth bursts from the shared snapshot diff (suppressed when locked/reduced).
     useEffect(() => {
       if (!delta) return;
-      const reduced =
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      const reduced = !ambientMotionEnabled();
       if (reduced || lockedRef.current) return;
       if (!delta.addedNodeIds.length) return;
       const now = performance.now();
@@ -453,8 +451,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      reducedRef.current =
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      reducedRef.current = !ambientMotionEnabled();
       pulseCtrlRef.current?.setEnabled(!reducedRef.current && !locked);
 
       const seedStars = (w: number, h: number) => {

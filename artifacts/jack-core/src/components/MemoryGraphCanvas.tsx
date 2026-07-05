@@ -28,6 +28,7 @@ import {
   pulseSegment,
 } from "../lib/memory-graph-pulse";
 import { useSystemHealth } from "../hooks/use-system-health";
+import { ambientMotionEnabled } from "../lib/motion";
 
 /**
  * MemoryGraphCanvas — the interactive centerpiece of the Memory Graph view.
@@ -441,8 +442,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     // motion, so opting out of motion truly means no new motion.
     useEffect(() => {
       if (!delta) return;
-      const reduced =
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      const reduced = !ambientMotionEnabled();
       if (reduced || lockedRef.current) return;
       if (!delta.addedNodeIds.length && !delta.strengthenedEdgeKeys.length) return;
       const now = performance.now();
@@ -457,8 +457,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      reducedRef.current =
-        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      reducedRef.current = !ambientMotionEnabled();
       // Neural flow is ambient motion: suppress it under reduced-motion or a
       // locked view, mirroring how birth / edge-strengthen bursts are gated.
       pulseCtrlRef.current?.setEnabled(!reducedRef.current && !locked);
