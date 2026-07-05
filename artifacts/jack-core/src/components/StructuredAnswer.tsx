@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import type { Citation } from "@workspace/api-client-react";
 import { parseAnswer, type AnswerSection, type Block, type Run } from "@/lib/parse-answer";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface StructuredAnswerProps {
   content: string;
@@ -63,6 +64,49 @@ const TONE_CLASSES: Record<string, string> = {
   low: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
 };
 
+// A single trust badge that reveals a plain-language explanation of what it
+// means. Reachable on touch (tap toggles) and desktop (hover opens); the
+// Popover renders in a portal so it never clips inside the ~450px Ask Jack
+// drawer.
+function TrustBadge({
+  icon: Icon,
+  label,
+  explanation,
+  className,
+}: {
+  icon: LucideIcon;
+  label: string;
+  explanation: string;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          aria-label={`${label}. What does this mean?`}
+          className={`inline-flex cursor-help items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-current ${className}`}
+        >
+          <Icon className="h-3 w-3 flex-shrink-0" />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="w-64 max-w-[calc(100vw-2rem)] p-3 text-xs leading-relaxed text-popover-foreground"
+      >
+        {explanation}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // Subtle per-citation trust badges. Rendered only when a citation carries a
 // trust signal from retrieval: `verified` = a mentor reviewer confirmed a
 // covering concept; `sourceCount` >= 2 = the claim is corroborated across that
@@ -73,16 +117,20 @@ function TrustBadges({ verified, sourceCount }: { verified?: boolean; sourceCoun
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {verified && (
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-emerald-400">
-          <ShieldCheck className="h-3 w-3 flex-shrink-0" />
-          Mentor-verified
-        </span>
+        <TrustBadge
+          icon={ShieldCheck}
+          label="Mentor-verified"
+          explanation="A human mentor reviewed and confirmed the concept behind this clip — not just AI."
+          className="border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+        />
       )}
       {corroborated && (
-        <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-sky-300">
-          <CheckCheck className="h-3 w-3 flex-shrink-0" />
-          Confirmed across {sourceCount} videos
-        </span>
+        <TrustBadge
+          icon={CheckCheck}
+          label={`Confirmed across ${sourceCount} videos`}
+          explanation={`The same claim shows up in ${sourceCount} separate videos, so it's backed by more than one source.`}
+          className="border-sky-500/30 bg-sky-500/15 text-sky-300"
+        />
       )}
     </div>
   );
