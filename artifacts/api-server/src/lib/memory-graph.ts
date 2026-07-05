@@ -3325,6 +3325,7 @@ export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 export async function setNodeVerification(
   nodeId: string,
   status: VerificationStatus,
+  reviewer: string | null = null,
 ): Promise<GraphNode | null> {
   const { data: existing, error: readErr } = await supabase
     .from("knowledge_nodes")
@@ -3339,9 +3340,10 @@ export async function setNodeVerification(
   if (!KNOWLEDGE_NODE_KINDS.includes(kind as KnowledgeNodeKind)) return null;
 
   // Verification history: append a transition only when the decision actually
-  // changes, so re-affirming the same status never grows the log. Reviewer
-  // identity is intentionally omitted — that belongs to a separate signed-in
-  // reviewer feature; here we record only what changed and when.
+  // changes, so re-affirming the same status never grows the log. Each entry now
+  // records the accountable reviewer (the signed-in human behind the decision),
+  // so a "verified" concept carries a name — not just what changed and when.
+  // `reviewer` is null for anonymous/legacy sessions that carry no identity.
   const prevStatus = ((ex["verification_status"] as string | null) ?? "unverified") as VerificationStatus;
   const prevMeta = (ex["meta"] as Record<string, unknown>) ?? {};
   const prevHistory = Array.isArray(prevMeta["verificationHistory"])
@@ -3352,7 +3354,7 @@ export async function setNodeVerification(
       ? prevHistory
       : capHistory([
           ...prevHistory,
-          { from: prevStatus, to: status, at: new Date().toISOString() },
+          { from: prevStatus, to: status, at: new Date().toISOString(), reviewer },
         ]);
 
   const { data: updated, error: updErr } = await supabase

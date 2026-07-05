@@ -23,29 +23,80 @@ function sign(value: string): string {
   return `${value}.${sig}`;
 }
 
-function verify(signed: string): boolean {
+/**
+ * Verify a signed token and return its (still-encoded) value, or null if the
+ * signature does not match — so callers can both authenticate the session and
+ * read the reviewer identity carried inside it.
+ */
+function verifiedValue(signed: string): string | null {
   const dot = signed.lastIndexOf(".");
-  if (dot === -1) return false;
+  if (dot === -1) return null;
   const value = signed.slice(0, dot);
   const expected = sign(value);
   try {
-    return timingSafeEqual(Buffer.from(signed), Buffer.from(expected));
+    return timingSafeEqual(Buffer.from(signed), Buffer.from(expected)) ? value : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-const SESSION_VALUE = "authenticated";
-const SIGNED_SESSION = () => sign(SESSION_VALUE);
+/**
+ * The signed session no longer carries a bare "authenticated" marker: it now
+ * encodes the accountable reviewer behind the session, so every gated write can
+ * attribute a decision to a named human. The payload is base64url JSON (no dots,
+ * so the `value.signature` split stays unambiguous) and is HMAC-signed — the
+ * client cannot forge or alter the reviewer name without JACK_ADMIN_KEY.
+ */
+interface SessionPayload {
+  v: "authenticated";
+  reviewer: string | null;
+}
+
+const REVIEWER_MAX_LEN = 80;
+
+/** Trim, collapse whitespace, and cap a submitted reviewer name; empty → null. */
+export function normalizeReviewer(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const cleaned = raw.replace(/\s+/g, " ").trim().slice(0, REVIEWER_MAX_LEN);
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function encodeSessionValue(reviewer: string | null): string {
+  const payload: SessionPayload = { v: "authenticated", reviewer };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function decodeSessionValue(value: string): SessionPayload | null {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const obj = parsed as Record<string, unknown>;
+    if (obj["v"] !== "authenticated") return null;
+    return { v: "authenticated", reviewer: normalizeReviewer(obj["reviewer"]) };
+  } catch {
+    return null;
+  }
+}
+
+/** Read + authenticate the session payload from the request cookie, or null. */
+function readSession(req: Request): SessionPayload | null {
+  if (!JACK_ADMIN_KEY) return null;
+  const cookie = req.cookies?.[COOKIE_NAME];
+  if (typeof cookie !== "string") return null;
+  const value = verifiedValue(cookie);
+  if (value === null) return null;
+  return decodeSessionValue(value);
+}
 
 /**
  * Validate the submitted password against JACK_ADMIN_KEY and, on success,
- * set an HttpOnly signed session cookie.  The raw password is compared
- * only server-side and is never echoed back.
+ * set an HttpOnly signed session cookie carrying the reviewer's name.  The raw
+ * password is compared only server-side and is never echoed back.
  */
 export function createAdminSession(
   password: string,
   res: Response,
+  reviewer?: string | null,
 ): "ok" | "wrong" | "unconfigured" {
   if (!JACK_ADMIN_KEY) return "unconfigured";
   let equal = false;
@@ -56,7 +107,8 @@ export function createAdminSession(
   }
   if (!equal) return "wrong";
 
-  res.cookie(COOKIE_NAME, SIGNED_SESSION(), {
+  const signed = sign(encodeSessionValue(normalizeReviewer(reviewer)));
+  res.cookie(COOKIE_NAME, signed, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env["NODE_ENV"] === "production",
@@ -70,10 +122,12 @@ export function clearAdminSession(res: Response): void {
 }
 
 export function isAdminSessionValid(req: Request): boolean {
-  if (!JACK_ADMIN_KEY) return false;
-  const cookie = req.cookies?.[COOKIE_NAME];
-  if (typeof cookie !== "string") return false;
-  return verify(cookie);
+  return readSession(req) !== null;
+}
+
+/** The accountable reviewer behind the current session, if one is signed in. */
+export function getAdminReviewer(req: Request): string | null {
+  return readSession(req)?.reviewer ?? null;
 }
 
 /**

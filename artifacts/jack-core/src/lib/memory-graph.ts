@@ -105,11 +105,13 @@ export interface RejectedEvidence {
   reason?: string;
 }
 
-/** A human verify/reject/reset transition (no reviewer identity). */
+/** A human verify/reject/reset transition, attributed to the signed-in reviewer. */
 export interface VerificationTransition {
   from: string;
   to: string;
   at: string;
+  /** Name of the reviewer who made the decision; null for legacy/anon entries. */
+  reviewer?: string | null;
 }
 
 export interface MemoryNode {
@@ -916,6 +918,7 @@ function readVerificationHistory(
       from: typeof e["from"] === "string" ? e["from"] : "",
       to: typeof e["to"] === "string" ? e["to"] : "",
       at: typeof e["at"] === "string" ? e["at"] : "",
+      reviewer: typeof e["reviewer"] === "string" ? e["reviewer"] : null,
     });
   }
   return out;

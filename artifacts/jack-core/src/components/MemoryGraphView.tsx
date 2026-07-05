@@ -1749,8 +1749,13 @@ function ProvenanceContent({
                   >
                     {to?.label ?? v.to ?? "—"}
                   </span>
+                  {v.reviewer && (
+                    <span className="truncate text-[10px] text-muted-foreground/80">
+                      by {v.reviewer}
+                    </span>
+                  )}
                   {v.at && (
-                    <span className="ml-auto font-mono text-[10px] text-muted-foreground/70">
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
                       {timeAgo(v.at)}
                     </span>
                   )}

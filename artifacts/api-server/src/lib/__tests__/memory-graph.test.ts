@@ -1322,23 +1322,42 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
   });
 
   describe("verification history", () => {
-    it("appends a transition only when the decision changes (no reviewer identity)", async () => {
+    it("appends a transition only when the decision changes, attributing each to its reviewer", async () => {
       const v = "vid-vh";
       await seedVideo(v);
       const id = knowledgeNodeId("concept", "Fusion");
       await syncVideoKnowledge(v, [makeItem("concept", "Fusion")]);
 
-      await setNodeVerification(id, "verified");
-      await setNodeVerification(id, "verified"); // re-affirm — no new entry
-      await setNodeVerification(id, "rejected");
+      await setNodeVerification(id, "verified", "Dana the Welder");
+      await setNodeVerification(id, "verified", "Dana the Welder"); // re-affirm — no new entry
+      await setNodeVerification(id, "rejected", "Sam the Inspector");
 
       const history = meta(id)["verificationHistory"] as Array<Record<string, unknown>>;
       expect(history).toHaveLength(2);
-      expect(history[0]).toMatchObject({ from: "unverified", to: "verified" });
-      expect(history[1]).toMatchObject({ from: "verified", to: "rejected" });
-      // Reviewer identity is intentionally never recorded here.
-      expect(history[0]!["reviewer"]).toBeUndefined();
+      expect(history[0]).toMatchObject({
+        from: "unverified",
+        to: "verified",
+        reviewer: "Dana the Welder",
+      });
+      expect(history[1]).toMatchObject({
+        from: "verified",
+        to: "rejected",
+        reviewer: "Sam the Inspector",
+      });
       expect(history[0]!["at"]).toEqual(expect.any(String));
+    });
+
+    it("records a null reviewer when the decision carries no signed-in identity", async () => {
+      const v = "vid-vh-anon";
+      await seedVideo(v);
+      const id = knowledgeNodeId("concept", "Undercut");
+      await syncVideoKnowledge(v, [makeItem("concept", "Undercut")]);
+
+      await setNodeVerification(id, "verified");
+
+      const history = meta(id)["verificationHistory"] as Array<Record<string, unknown>>;
+      expect(history).toHaveLength(1);
+      expect(history[0]!["reviewer"]).toBeNull();
     });
 
     it("preserves verification history across re-processing of the source video", async () => {

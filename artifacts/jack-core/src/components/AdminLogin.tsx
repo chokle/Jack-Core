@@ -8,13 +8,16 @@ interface AdminLoginProps {
 }
 
 export function AdminLogin({ onSuccess }: AdminLoginProps) {
+  const [reviewer, setReviewer] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const canSubmit = password.trim().length > 0 && reviewer.trim().length > 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || loading) return;
+    if (!canSubmit || loading) return;
     setError(null);
     setLoading(true);
     try {
@@ -22,7 +25,7 @@ export function AdminLogin({ onSuccess }: AdminLoginProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password, reviewer: reviewer.trim() }),
       });
       if (res.ok) {
         onSuccess();
@@ -46,14 +49,23 @@ export function AdminLogin({ onSuccess }: AdminLoginProps) {
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Enter the admin password to manage the video library.
+            Sign in to manage the library and review knowledge. Your name is
+            recorded behind every verify / reject decision you make.
           </p>
+          <Input
+            type="text"
+            value={reviewer}
+            onChange={(e) => setReviewer(e.target.value)}
+            placeholder="Your name"
+            autoFocus
+            maxLength={80}
+            className="bg-background"
+          />
           <Input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Admin password"
-            autoFocus
             className="bg-background"
           />
           {error && (
@@ -62,7 +74,7 @@ export function AdminLogin({ onSuccess }: AdminLoginProps) {
             </p>
           )}
           <div className="flex justify-end">
-            <Button type="submit" disabled={loading || !password}>
+            <Button type="submit" disabled={loading || !canSubmit}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Sign in
             </Button>

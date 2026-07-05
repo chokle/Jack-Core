@@ -20,7 +20,11 @@ import {
   resolveKnowledgeCandidate,
   getGraphHealth,
 } from "../lib/memory-graph.js";
-import { requireAdminSession, isAdminSessionValid } from "../lib/admin-auth.js";
+import {
+  requireAdminSession,
+  isAdminSessionValid,
+  getAdminReviewer,
+} from "../lib/admin-auth.js";
 
 const router = Router();
 
@@ -147,7 +151,14 @@ router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, r
   if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
 
   try {
-    const node = await setNodeVerification(paramsParsed.data.id, bodyParsed.data.status);
+    // Attribute the decision to the signed-in reviewer carried in the session
+    // cookie — never a client-supplied field — so the recorded identity cannot
+    // be spoofed by the request body.
+    const node = await setNodeVerification(
+      paramsParsed.data.id,
+      bodyParsed.data.status,
+      getAdminReviewer(req),
+    );
     if (!node) {
       return res.status(404).json({ error: "No distilled knowledge node with that id." });
     }

@@ -143,7 +143,12 @@ describe("buildGraphModelFromServer — provenance passthrough", () => {
         { videoId: "v9", at: "2026-03-01T00:00:00.000Z", reason: "off-topic" },
       ],
       verificationHistory: [
-        { from: "unverified", to: "verified", at: "2026-02-11T00:00:00.000Z" },
+        {
+          from: "unverified",
+          to: "verified",
+          at: "2026-02-11T00:00:00.000Z",
+          reviewer: "Dana the Welder",
+        },
       ],
     },
   };
@@ -205,6 +210,7 @@ describe("buildGraphModelFromServer — provenance passthrough", () => {
       from: "unverified",
       to: "verified",
       at: "2026-02-11T00:00:00.000Z",
+      reviewer: "Dana the Welder",
     });
   });
 

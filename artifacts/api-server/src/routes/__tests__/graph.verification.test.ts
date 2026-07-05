@@ -44,7 +44,7 @@ import { createAdminSession } from "../../lib/admin-auth.js";
 const NODE_ID = "k:concept:porosity-prevention";
 
 /** Build a valid signed session cookie by driving the real login machinery. */
-function adminCookie(): string {
+function adminCookie(reviewer?: string): string {
   let cookie = "";
   const fakeRes = {
     cookie(name: string, value: string) {
@@ -52,7 +52,7 @@ function adminCookie(): string {
       return this;
     },
   } as unknown as Response;
-  const result = createAdminSession(ADMIN_KEY, fakeRes);
+  const result = createAdminSession(ADMIN_KEY, fakeRes, reviewer);
   expect(result).toBe("ok");
   return cookie;
 }
@@ -124,7 +124,31 @@ describe("PATCH /graph/nodes/:id/verification — authorization", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: NODE_ID, verificationStatus: "verified" });
-    expect(setNodeVerification).toHaveBeenCalledWith(NODE_ID, "verified");
+    // No reviewer name on the session → attributed to null, not a spoofable value.
+    expect(setNodeVerification).toHaveBeenCalledWith(NODE_ID, "verified", null);
+  });
+
+  it("attributes the decision to the signed-in reviewer, ignoring any body-supplied identity", async () => {
+    setNodeVerification.mockResolvedValue({
+      id: NODE_ID,
+      kind: "concept",
+      label: "Porosity Prevention",
+      trade: "Welder",
+      refId: null,
+      description: null,
+      confidence: 0.9,
+      verificationStatus: "verified",
+      meta: {},
+    });
+
+    const res = await request(app)
+      .patch(`/api/graph/nodes/${NODE_ID}/verification`)
+      .set("Cookie", adminCookie("Dana the Welder"))
+      // A malicious body claims a different reviewer — it must be ignored.
+      .send({ status: "verified", reviewer: "Someone Else" });
+
+    expect(res.status).toBe(200);
+    expect(setNodeVerification).toHaveBeenCalledWith(NODE_ID, "verified", "Dana the Welder");
   });
 });
 
@@ -148,6 +172,6 @@ describe("PATCH /graph/nodes/:id/verification — validation & 404", () => {
       .send({ status: "verified" });
 
     expect(res.status).toBe(404);
-    expect(setNodeVerification).toHaveBeenCalledWith("video:not-a-concept", "verified");
+    expect(setNodeVerification).toHaveBeenCalledWith("video:not-a-concept", "verified", null);
   });
 });
