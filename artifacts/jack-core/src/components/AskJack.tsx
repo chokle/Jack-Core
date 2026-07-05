@@ -44,8 +44,7 @@ export function AskJack({
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
-  // @ts-ignore
-  const askJack = useAskJack?.();
+  const askJack = useAskJack();
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
 
@@ -81,7 +80,7 @@ export function AskJack({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || askJack?.isPending) return;
+    if (!input.trim() || askJack.isPending) return;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -93,27 +92,24 @@ export function AskJack({
     setMessages(prev => [...prev, userMessage]);
     setInput("");
 
-    if (askJack) {
-      askJack.mutate(
-        // sessionId is omitted — the server binds the request to the caller's
-        // HttpOnly cookie session and ignores any id in the body.
-        // @ts-ignore
-        { data: { message: userMessage.content } },
-        {
-          onSuccess: (data: any) => {
-            const assistantMessage: DisplayMessage = {
-              id: Date.now().toString(),
-              role: "assistant",
-              content: data.answer,
-              citations: data.citations,
-              usedInternalKnowledge: data.usedInternalKnowledge,
-              createdAt: new Date().toISOString()
-            };
-            setMessages(prev => [...prev, assistantMessage]);
-          }
+    // sessionId is omitted — the server binds the request to the caller's
+    // HttpOnly cookie session and ignores any id in the body.
+    askJack.mutate(
+      { data: { message: userMessage.content } },
+      {
+        onSuccess: (data) => {
+          const assistantMessage: DisplayMessage = {
+            id: Date.now().toString(),
+            role: "assistant",
+            content: data.answer,
+            citations: data.citations,
+            usedInternalKnowledge: data.usedInternalKnowledge,
+            createdAt: new Date().toISOString()
+          };
+          setMessages(prev => [...prev, assistantMessage]);
         }
-      );
-    }
+      }
+    );
   };
 
   return (
