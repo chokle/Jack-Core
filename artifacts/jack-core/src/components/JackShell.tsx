@@ -129,6 +129,7 @@ export function JackShell({
             icon={<Bot className="h-4 w-4" />}
             label="Ask Jack"
             onClick={openChat}
+            testId="open-chat"
           />
           <NavItem
             icon={<Network className="h-4 w-4" />}
@@ -214,12 +215,14 @@ function NavItem({
   active,
   soon,
   onClick,
+  testId,
 }: {
   icon: ReactNode;
   label: string;
   active?: boolean;
   soon?: boolean;
   onClick?: () => void;
+  testId?: string;
 }) {
   if (soon) {
     return (
@@ -240,6 +243,7 @@ function NavItem({
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
         active
           ? "bg-primary/15 font-semibold text-primary"

@@ -9,7 +9,7 @@ import {
   ChatMessage,
   type ParkedThought,
 } from "@workspace/api-client-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { StructuredAnswer } from "@/components/StructuredAnswer";
 import { ParkThisThoughtButton } from "@/components/ParkedThoughts";
 import { timeAgo } from "@/lib/memory-graph";
@@ -38,7 +38,9 @@ export function AskJack({
 }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
@@ -62,6 +64,14 @@ export function AskJack({
       setInput(initialContext);
     }
   }, [initialContext]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    // Focus as soon as the drawer opens so automation (and keyboard users)
+    // don't have to wait for/race the entrance animation.
+    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [isOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -113,7 +123,11 @@ export function AskJack({
           initial={{ x: "100%", opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: "100%", opacity: 0 }}
-          transition={{ type: "spring", damping: 25, stiffness: 200 }}
+          transition={
+            prefersReducedMotion
+              ? { duration: 0 }
+              : { type: "spring", damping: 30, stiffness: 320 }
+          }
           className="fixed top-0 right-0 h-screen w-full sm:w-[450px] bg-sidebar border-l border-sidebar-border shadow-2xl flex flex-col z-50"
         >
           <div className="flex items-center justify-between p-4 border-b border-sidebar-border bg-sidebar-primary/5">
@@ -216,6 +230,8 @@ export function AskJack({
             )}
             <form onSubmit={handleSubmit} className="relative">
               <Input
+                ref={inputRef}
+                data-testid="chat-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask about red seal standards..."
@@ -225,6 +241,7 @@ export function AskJack({
               <Button 
                 type="submit" 
                 size="icon" 
+                data-testid="send-button"
                 className="absolute right-1 top-1 h-8 w-8 bg-primary hover:bg-primary/90 text-primary-foreground"
                 disabled={!input.trim() || askJack?.isPending}
               >
