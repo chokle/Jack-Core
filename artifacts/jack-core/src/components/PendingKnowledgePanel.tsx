@@ -10,8 +10,11 @@ import type { KnowledgeCandidate } from "@workspace/api-client-react";
  * Living Memory can see which mentor-taught concepts are awaiting Knowledge
  * Review — no resolution controls here (Accept/Merge/Reject stay admin-gated
  * in the Knowledge Review surface).
+ *
+ * `limit` caps how many rows render (the sidebar shows a compact 6); pass
+ * `Infinity` from the full-page Review view so non-admins see the whole queue.
  */
-export function PendingKnowledgePanel() {
+export function PendingKnowledgePanel({ limit = 6 }: { limit?: number } = {}) {
   const candidatesQuery = useListKnowledgeCandidates(
     { status: "pending" },
     {
@@ -58,13 +61,13 @@ export function PendingKnowledgePanel() {
             — they join the graph once reviewed.
           </p>
           <ul className="space-y-3">
-            {candidates.slice(0, 6).map((cand: KnowledgeCandidate) => (
+            {candidates.slice(0, limit).map((cand: KnowledgeCandidate) => (
               <PendingCandidateRow key={cand.id} candidate={cand} />
             ))}
           </ul>
-          {candidates.length > 6 && (
+          {candidates.length > limit && (
             <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              +{candidates.length - 6} more in the queue
+              +{candidates.length - limit} more in the queue
             </p>
           )}
         </>

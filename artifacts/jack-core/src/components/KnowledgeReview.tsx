@@ -10,6 +10,7 @@ import {
   User,
   Archive,
   RotateCcw,
+  Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,6 +32,7 @@ import type {
   MentorContribution,
 } from "@workspace/api-client-react";
 import { AdminLogin } from "./AdminLogin";
+import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { MentorWithdrawal } from "./MentorWithdrawal";
 import { GraphHealth } from "./GraphHealth";
 import { useToast } from "@/hooks/use-toast";
@@ -78,6 +80,8 @@ export function KnowledgeReview() {
   }, []);
 
   const [statusTab, setStatusTab] = useState<ListKnowledgeCandidatesStatus>("pending");
+  // Non-admins get a read-only queue; the sign-in overlay only appears on demand.
+  const [showLogin, setShowLogin] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -161,8 +165,32 @@ export function KnowledgeReview() {
 
   if (isAdmin === false) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <AdminLogin onSuccess={() => setIsAdmin(true)} />
+      <div className="flex flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl px-4 py-8 md:px-8">
+          <div className="mb-1 flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-primary" />
+            <h1 className="text-xl font-bold tracking-tight">Knowledge Review</h1>
+          </div>
+          <p className="mb-6 text-sm text-muted-foreground">
+            These mentor-taught concepts are waiting for a reviewer to place them
+            in the Living Memory. Anyone can follow the queue — reviewers sign in
+            to accept, merge, or reject.
+          </p>
+
+          <div className="mb-6">
+            <Button
+              onClick={() => setShowLogin(true)}
+              className="min-h-10 md:min-h-9"
+            >
+              <Lock className="mr-1.5 h-4 w-4" />
+              Sign in to review
+            </Button>
+          </div>
+
+          <PendingKnowledgePanel limit={Infinity} />
+        </div>
+
+        {showLogin && <AdminLogin onSuccess={() => setIsAdmin(true)} />}
       </div>
     );
   }
