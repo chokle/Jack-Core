@@ -43,9 +43,23 @@ transparent and the blit reads as a circle.
   overrides) → a few dozen small sprites; scope it to the component so it releases
   on unmount.
 
-**How to apply:** the sibling ambient canvases (`SpatialBrainCanvas.tsx`,
-`KnowledgeGraph.tsx`) use the same per-node `createRadialGradient` pattern; if
-either ever needs to scale to large node counts, apply the same sprite technique.
-Empirical FPS can't be measured in the headless preview screenshot tool — verify
-render correctness with `?graphStress=N` (dev-only) and measure fps in a real
-browser.
+**How to apply — check which component is actually mounted first.** The sprite fix
+currently lives ONLY in `MemoryGraphCanvas.tsx`, which is now **dead code**: the
+Memory Graph view renders `SpatialBrainCanvas.tsx` instead (a "drop-in sibling",
+MemoryGraphView.tsx), and `MemoryGraphCanvas` is referenced only in comments. So
+the optimization is absent from the path users see — the "spatial brain" rewrite
+silently reintroduced the per-node `createRadialGradient` glow. Any glow-perf work
+(the sprite technique included) must land in the RENDERED canvas to matter.
+
+**Nuance — the live cost is bounded, not the pre-#84 unbounded cliff.**
+`SpatialBrainCanvas` imports nothing from `graph-perf.ts` (no screen-cull, no glow
+LOD) and its `drawn` set is filtered only by `n.vis`, BUT `graph-spatial.ts` caps
+the visible set at `DEFAULT_MAX_VISIBLE = 220`, so it draws at most ~220 per-node
+gradients/frame. Don't claim a *measured* fps regression from the code alone — the
+per-node pattern is present but capped.
+
+Empirical FPS can't be measured in the headless preview screenshot tool (CPU-
+rasterized, underreports vs a real GPU browser). A dev-only on-screen fps meter now
+lives in `SpatialBrainCanvas` (enable with `?graphStress=N` or `?fps=1`); verify
+render correctness with `?graphStress=N` and read real fps in a desktop browser at
+full zoom (a dense cluster filling the viewport — the worst case, not default zoom).

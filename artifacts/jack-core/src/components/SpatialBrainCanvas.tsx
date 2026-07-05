@@ -215,6 +215,12 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const onHoverRef = useRef(onHover);
     const onTogglePinRef = useRef(onTogglePin);
     const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
+    // Dev-only FPS meter refs (see `showFps`). The rolling frame count is written
+    // straight to the DOM from the rAF loop, so measuring the frame rate never
+    // itself triggers a React re-render (which would perturb the measurement).
+    const fpsElRef = useRef<HTMLDivElement>(null);
+    const fpsFramesRef = useRef(0);
+    const fpsLastRef = useRef(0);
 
     selectedRef.current = selectedId;
     lockedRef.current = locked;
@@ -224,6 +230,19 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
     onHoverRef.current = onHover;
     onTogglePinRef.current = onTogglePin;
+
+    // Dev-only: reveal an on-screen FPS meter when the perf stress harness is
+    // active (`?graphStress=N`) or explicitly requested (`?fps=1`). This is the
+    // instrument the "confirm 45–60fps" check reads; it is never shown in normal
+    // use. Note a headless/preview browser (CPU-rasterized canvas) reports a
+    // lower rate than a real GPU-accelerated desktop browser.
+    const params =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : null;
+    const showFps =
+      !!params &&
+      (params.get("fps") === "1" || Number(params.get("graphStress")) > 0);
 
     // ----- neural flow ("thinking") ----------------------------------------
     const { snapshot, isOffline } = useSystemHealth();
@@ -803,6 +822,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
       let raf = 0;
       let lastT = performance.now();
+      fpsLastRef.current = lastT;
       const frame = (t: number) => {
         const dt = Math.min(2, Math.max(0, (t - lastT) / 16.67));
         lastT = t;
@@ -814,6 +834,17 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
             pulse.update(t);
           }
           draw(t);
+          // Rolling FPS over ~500ms windows, written to the meter DOM node when
+          // it is mounted (dev-only). Otherwise just two integer ops per frame.
+          fpsFramesRef.current += 1;
+          if (t - fpsLastRef.current >= 500) {
+            const fps = Math.round(
+              (fpsFramesRef.current * 1000) / (t - fpsLastRef.current),
+            );
+            if (fpsElRef.current) fpsElRef.current.textContent = `${fps} fps`;
+            fpsFramesRef.current = 0;
+            fpsLastRef.current = t;
+          }
         }
         raf = requestAnimationFrame(frame);
       };
@@ -833,11 +864,21 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     }, [locked]);
 
     return (
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 h-full w-full touch-none"
-        style={{ cursor: locked ? "default" : "grab" }}
-      />
+      <>
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 h-full w-full touch-none"
+          style={{ cursor: locked ? "default" : "grab" }}
+        />
+        {showFps && (
+          <div
+            ref={fpsElRef}
+            className="pointer-events-none absolute left-2 top-2 z-20 rounded bg-black/70 px-2 py-1 font-mono text-xs tabular-nums text-emerald-400"
+          >
+            … fps
+          </div>
+        )}
+      </>
     );
   },
 );
