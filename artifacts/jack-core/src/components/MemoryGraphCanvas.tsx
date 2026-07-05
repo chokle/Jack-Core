@@ -223,6 +223,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const activeMatchRef = useRef<string | null>(null);
     const hoverRef = useRef<string | null>(null);
     const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
+    // Per-color pre-rasterized radial-glow sprites, blitted with drawImage in the
+    // node-glow pass instead of building a gradient + filling a large arc per node
+    // per frame — the dominant cost that stalls a dense graph at full zoom. Scoped
+    // to the instance so it is released on unmount; bounded by the color palette.
+    const glowSpritesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
     // Pinned ids + latest callbacks kept in refs so the (locked-only) sim effect
     // always sees current values without re-subscribing its listeners each render.
     const pinnedRef = useRef<Set<string>>(EMPTY_PINNED);
@@ -865,6 +870,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             time,
             dimmed(node.id, node.topicId),
             emphasized,
+            glowSpritesRef.current,
           );
           // Organic birth burst for a genuinely-new node: an expanding halo +
           // brief flare that decays out over BIRTH_MS.
@@ -1149,36 +1155,94 @@ function drawBirthBurst(c: CanvasRenderingContext2D, node: P, p: number) {
   }
 }
 
+/**
+ * Side length (px) of a cached glow sprite. Large enough that scaling it down to
+ * a typical node glow stays soft, small enough to build and blit cheaply.
+ */
+const GLOW_SPRITE_PX = 128;
+
+/**
+ * Rasterize one soft radial-glow sprite for `col`. The gradient stops mirror the
+ * per-node glow at full intensity (0 → 0.5, 0.4 → 0.12, 1 → 0); the gradient
+ * reaches full transparency at the inscribed circle so the square's corners are
+ * clear and the blit reads as a circular glow.
+ */
+function makeGlowSprite(col: RGB): HTMLCanvasElement {
+  const size = GLOW_SPRITE_PX;
+  const cv = document.createElement("canvas");
+  cv.width = size;
+  cv.height = size;
+  const c = cv.getContext("2d")!;
+  const mid = size / 2;
+  const g = c.createRadialGradient(mid, mid, 0, mid, mid, mid);
+  g.addColorStop(0, rgba(col, 0.5));
+  g.addColorStop(0.4, rgba(col, 0.12));
+  g.addColorStop(1, rgba(col, 0));
+  c.fillStyle = g;
+  c.fillRect(0, 0, size, size);
+  return cv;
+}
+
+/** Get (memoizing) the glow sprite for `col`, keyed by its RGB triple. */
+function getGlowSprite(
+  cache: Map<string, HTMLCanvasElement>,
+  col: RGB,
+): HTMLCanvasElement {
+  const key = `${col[0]},${col[1]},${col[2]}`;
+  let sprite = cache.get(key);
+  if (!sprite) {
+    sprite = makeGlowSprite(col);
+    cache.set(key, sprite);
+  }
+  return sprite;
+}
+
 function drawNodeGlow(
   c: CanvasRenderingContext2D,
   node: P,
   time: number,
   dim: boolean,
-  emphasized = false,
+  emphasized: boolean,
+  sprites: Map<string, HTMLCanvasElement>,
 ) {
   const age = time - node.bornAt;
   const grow = Math.min(1, age / 600);
   const r = node.radius * (0.4 + 0.6 * grow);
   let intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1);
   let glowR = r * 5;
-  // A slow pulse on the focused node so it reads as "alive" without distracting.
-  if (emphasized) {
-    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
-    intensity *= 1.35 + 0.55 * pulse;
-    glowR *= 1.15 + 0.15 * pulse;
-  }
   const col =
     node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
       : node.color;
-  const g = c.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
-  g.addColorStop(0, rgba(col, 0.5 * intensity));
-  g.addColorStop(0.4, rgba(col, 0.12 * intensity));
-  g.addColorStop(1, rgba(col, 0));
-  c.fillStyle = g;
-  c.beginPath();
-  c.arc(node.x, node.y, glowR, 0, Math.PI * 2);
-  c.fill();
+
+  // Emphasized (selected / active search match) nodes number at most one or two
+  // on screen and pulse with an intensity that can exceed 1, so they keep the
+  // exact per-frame gradient — pixel-perfect and cheap at that count.
+  if (emphasized) {
+    // A slow pulse so the focused node reads as "alive" without distracting.
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+    intensity *= 1.35 + 0.55 * pulse;
+    glowR *= 1.15 + 0.15 * pulse;
+    const g = c.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowR);
+    g.addColorStop(0, rgba(col, 0.5 * intensity));
+    g.addColorStop(0.4, rgba(col, 0.12 * intensity));
+    g.addColorStop(1, rgba(col, 0));
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(node.x, node.y, glowR, 0, Math.PI * 2);
+    c.fill();
+    return;
+  }
+
+  // Fast path (the crowd): blit the cached glow sprite for this color, scaled to
+  // the node's glow diameter, with intensity reapplied via globalAlpha. Under the
+  // additive `lighter` composite this matches the gradient it replaces.
+  if (glowR <= 0) return;
+  const sprite = getGlowSprite(sprites, col);
+  const prevAlpha = c.globalAlpha;
+  c.globalAlpha = clamp01(intensity);
+  c.drawImage(sprite, node.x - glowR, node.y - glowR, glowR * 2, glowR * 2);
+  c.globalAlpha = prevAlpha;
 }
 
 function drawNodeBody(
