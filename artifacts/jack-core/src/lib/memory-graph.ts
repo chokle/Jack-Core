@@ -77,6 +77,39 @@ export interface NodeSource {
   videoId: string;
   timestamps: number[];
   confidence: number;
+  /** The model + date that distilled this contribution; null on pre-provenance
+   *  edges (kept null rather than fabricated so the derived aggregates stay honest). */
+  model?: string | null;
+  extractedAt?: string | null;
+}
+
+/** One point in a concept's confidence-over-time log (append-on-change). */
+export interface ConfidencePoint {
+  confidence: number;
+  sourceCount: number;
+  at: string;
+}
+
+/** Another concept identity that collapsed onto this canonical node. */
+export interface MergedConcept {
+  id: string;
+  label: string;
+  category?: string;
+  at?: string;
+}
+
+/** A video that USED to corroborate this concept but no longer does. */
+export interface RejectedEvidence {
+  videoId: string;
+  at?: string;
+  reason?: string;
+}
+
+/** A human verify/reject/reset transition (no reviewer identity). */
+export interface VerificationTransition {
+  from: string;
+  to: string;
+  at: string;
 }
 
 export interface MemoryNode {
@@ -106,6 +139,20 @@ export interface MemoryNode {
     sources?: NodeSource[];
     /** Alternate wordings that collapse onto this canonical node (capped 25). */
     aliases?: string[];
+    /**
+     * Knowledge Provenance ledger fields (present only for KnowledgeKind nodes).
+     * All are DERIVED from the node's provenance edges except verificationHistory
+     * (the human decision log). They power the inspector's "why do we know this?"
+     * view: which models extracted it, when, how confidence moved, what merged
+     * in, and which evidence was later withdrawn.
+     */
+    models?: string[];
+    firstExtractedAt?: string;
+    lastExtractedAt?: string;
+    confidenceHistory?: ConfidencePoint[];
+    mergedFrom?: MergedConcept[];
+    rejectedEvidence?: RejectedEvidence[];
+    verificationHistory?: VerificationTransition[];
     /**
      * Non-video Knowledge Entries filed under this trade (topic hubs only).
      * Stamped onto the DISPLAYED model by `withKnowledgeCounts` from the
@@ -785,6 +832,90 @@ function readSources(meta: Record<string, unknown> | null | undefined): NodeSour
         ? (e["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
         : [],
       confidence: typeof e["confidence"] === "number" ? e["confidence"] : 0.5,
+      model: typeof e["model"] === "string" ? e["model"] : null,
+      extractedAt: typeof e["extractedAt"] === "string" ? e["extractedAt"] : null,
+    });
+  }
+  return out;
+}
+
+/** Parse the confidence-over-time log stored on a knowledge node's meta. */
+function readConfidenceHistory(
+  meta: Record<string, unknown> | null | undefined,
+): ConfidencePoint[] {
+  const raw = meta?.["confidenceHistory"];
+  if (!Array.isArray(raw)) return [];
+  const out: ConfidencePoint[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e["confidence"] !== "number") continue;
+    out.push({
+      confidence: e["confidence"],
+      sourceCount: typeof e["sourceCount"] === "number" ? e["sourceCount"] : 0,
+      at: typeof e["at"] === "string" ? e["at"] : "",
+    });
+  }
+  return out;
+}
+
+/** Parse the merged-in concept ledger stored on a knowledge node's meta. */
+function readMergedFrom(
+  meta: Record<string, unknown> | null | undefined,
+): MergedConcept[] {
+  const raw = meta?.["mergedFrom"];
+  if (!Array.isArray(raw)) return [];
+  const out: MergedConcept[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const id = typeof e["id"] === "string" ? e["id"] : null;
+    if (!id) continue;
+    out.push({
+      id,
+      label: typeof e["label"] === "string" ? e["label"] : id,
+      category: typeof e["category"] === "string" ? e["category"] : undefined,
+      at: typeof e["at"] === "string" ? e["at"] : undefined,
+    });
+  }
+  return out;
+}
+
+/** Parse the withdrawn-evidence ledger stored on a knowledge node's meta. */
+function readRejectedEvidence(
+  meta: Record<string, unknown> | null | undefined,
+): RejectedEvidence[] {
+  const raw = meta?.["rejectedEvidence"];
+  if (!Array.isArray(raw)) return [];
+  const out: RejectedEvidence[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const videoId = typeof e["videoId"] === "string" ? e["videoId"] : null;
+    if (!videoId) continue;
+    out.push({
+      videoId,
+      at: typeof e["at"] === "string" ? e["at"] : undefined,
+      reason: typeof e["reason"] === "string" ? e["reason"] : undefined,
+    });
+  }
+  return out;
+}
+
+/** Parse the human verification-decision log stored on a knowledge node's meta. */
+function readVerificationHistory(
+  meta: Record<string, unknown> | null | undefined,
+): VerificationTransition[] {
+  const raw = meta?.["verificationHistory"];
+  if (!Array.isArray(raw)) return [];
+  const out: VerificationTransition[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    out.push({
+      from: typeof e["from"] === "string" ? e["from"] : "",
+      to: typeof e["to"] === "string" ? e["to"] : "",
+      at: typeof e["at"] === "string" ? e["at"] : "",
     });
   }
   return out;
@@ -913,6 +1044,13 @@ export function buildGraphModelFromServer(graph: {
           timestamps: metaNumArray(n.meta, "timestamps"),
           sources,
           aliases: metaStrArray(n.meta, "aliases"),
+          models: metaStrArray(n.meta, "models"),
+          firstExtractedAt: metaStr(n.meta, "firstExtractedAt"),
+          lastExtractedAt: metaStr(n.meta, "lastExtractedAt"),
+          confidenceHistory: readConfidenceHistory(n.meta),
+          mergedFrom: readMergedFrom(n.meta),
+          rejectedEvidence: readRejectedEvidence(n.meta),
+          verificationHistory: readVerificationHistory(n.meta),
           createdAt: n.createdAt,
           updatedAt: n.updatedAt,
         },

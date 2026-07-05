@@ -72,6 +72,7 @@ import {
   CORE_ID,
   type MemoryNode,
   type NodeSource,
+  type ConfidencePoint,
   type RGB,
   type FreshnessInfo,
   type ClusterMetrics,
@@ -1501,6 +1502,268 @@ function ClusterMetricsRow({
   );
 }
 
+/** Absolute calendar date (e.g. "Jul 5, 2026") for provenance timestamps, where
+ *  the exact day matters more than a relative "3d ago". Falls back to em-dash. */
+function formatDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/**
+ * A tiny confidence-over-time sparkline drawn from a concept's provenance
+ * `confidenceHistory` (append-on-change). Each point is 0..1; the line is drawn
+ * in the node's own color so the trend reads at a glance. Renders nothing for
+ * fewer than two points (a flat line tells no story).
+ */
+function ConfidenceSparkline({
+  history,
+  color,
+}: {
+  history: ConfidencePoint[];
+  color: RGB;
+}) {
+  if (history.length < 2) return null;
+  const W = 220;
+  const H = 40;
+  const PAD = 3;
+  const n = history.length;
+  const x = (i: number) => PAD + (i * (W - 2 * PAD)) / (n - 1);
+  // Confidence is a 0..1 domain; invert Y so higher confidence sits higher.
+  const y = (c: number) =>
+    PAD + (1 - Math.max(0, Math.min(1, c))) * (H - 2 * PAD);
+  const line = history
+    .map((p, i) => `${x(i).toFixed(1)},${y(p.confidence).toFixed(1)}`)
+    .join(" ");
+  const area = `${PAD},${H - PAD} ${line} ${(W - PAD).toFixed(1)},${H - PAD}`;
+  const last = history[n - 1]!;
+  const first = history[0]!;
+  const trend = last.confidence - first.confidence;
+  const stroke = rgbCss(color);
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px]">
+        <span className="text-muted-foreground">Confidence over time</span>
+        <span
+          className="font-mono font-semibold tabular-nums"
+          style={{
+            color:
+              trend > 0.001
+                ? "rgb(99,214,142)"
+                : trend < -0.001
+                  ? "rgb(239,90,90)"
+                  : undefined,
+          }}
+        >
+          {trend > 0.001 ? "▲" : trend < -0.001 ? "▼" : "—"}{" "}
+          {Math.round(last.confidence * 100)}%
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="h-10 w-full"
+        role="img"
+        aria-label={`Confidence moved from ${Math.round(
+          first.confidence * 100,
+        )}% to ${Math.round(last.confidence * 100)}% over ${n} updates`}
+      >
+        <polyline points={area} fill={rgba(color, 0.12)} stroke="none" />
+        <polyline
+          points={line}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {history.map((p, i) => (
+          <circle
+            key={i}
+            cx={x(i)}
+            cy={y(p.confidence)}
+            r={i === n - 1 ? 2.5 : 1.5}
+            fill={stroke}
+          />
+        ))}
+      </svg>
+      <div className="mt-0.5 flex items-center justify-between font-mono text-[10px] text-muted-foreground/70">
+        <span>{formatDate(first.at)}</span>
+        <span>{formatDate(last.at)}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The "why do we know this?" provenance ledger for a distilled concept: which
+ * model(s) extracted it and when, how its confidence moved over time, which
+ * differently-worded concepts merged into it, and any evidence a reviewer later
+ * withdrew. All fields are optional — each block renders only when it has data,
+ * so the section is honest about what Jack actually recorded.
+ */
+function ProvenanceContent({
+  node,
+  nodeById,
+  onSelectNode,
+  onOpenVideo,
+}: {
+  node: MemoryNode;
+  nodeById: Map<string, MemoryNode>;
+  onSelectNode: (id: string) => void;
+  onOpenVideo: (id: string) => void;
+}) {
+  const models = node.meta.models ?? [];
+  const first = node.meta.firstExtractedAt;
+  const last = node.meta.lastExtractedAt;
+  const history = node.meta.confidenceHistory ?? [];
+  const merged = node.meta.mergedFrom ?? [];
+  const rejected = node.meta.rejectedEvidence ?? [];
+  const verifications = node.meta.verificationHistory ?? [];
+
+  const hasExtraction = models.length > 0 || Boolean(first) || Boolean(last);
+
+  return (
+    <div className="space-y-3">
+      {hasExtraction && (
+        <div>
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Extracted by
+          </div>
+          {models.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {models.map((m) => (
+                <span
+                  key={m}
+                  className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                >
+                  {m}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            <span>
+              First:{" "}
+              <b className="font-semibold text-foreground">{formatDate(first)}</b>
+            </span>
+            {last && last !== first && (
+              <span>
+                Latest:{" "}
+                <b className="font-semibold text-foreground">
+                  {formatDate(last)}
+                </b>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <ConfidenceSparkline history={history} color={node.color} />
+
+      {merged.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Merged in {merged.length} concept{merged.length === 1 ? "" : "s"}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {merged.map((m) => {
+              const live = nodeById.has(m.id);
+              return (
+                <button
+                  key={m.id}
+                  disabled={!live}
+                  onClick={() => live && onSelectNode(m.id)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[11px] font-medium text-white/80 transition-colors enabled:hover:border-primary/50 enabled:hover:text-primary disabled:opacity-60"
+                  title={
+                    live
+                      ? `Merged${m.at ? ` ${timeAgo(m.at)}` : ""}`
+                      : `Absorbed identity${m.at ? ` ${timeAgo(m.at)}` : ""}`
+                  }
+                >
+                  <span className="max-w-[9rem] truncate">{m.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {rejected.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-red-300/80">
+            Withdrawn evidence
+          </div>
+          <ul className="space-y-1.5">
+            {rejected.map((r, i) => {
+              const vNode = nodeById.get(`video:${r.videoId}`);
+              const title = vNode?.label ?? "Removed source";
+              return (
+                <li
+                  key={`${r.videoId}-${i}`}
+                  className="rounded-md border border-red-400/20 bg-red-400/[0.06] px-2 py-1.5 text-[11px]"
+                >
+                  <button
+                    disabled={!vNode}
+                    onClick={() => vNode && onOpenVideo(r.videoId)}
+                    className="block max-w-full truncate text-left font-medium text-foreground/90 enabled:hover:text-primary disabled:opacity-70"
+                    title={title}
+                  >
+                    {title}
+                  </button>
+                  <div className="mt-0.5 text-muted-foreground">
+                    {r.reason ? r.reason : "No longer corroborates this concept"}
+                    {r.at ? ` · ${timeAgo(r.at)}` : ""}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {verifications.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Review history
+          </div>
+          <ul className="space-y-1 text-[11px]">
+            {[...verifications].reverse().map((v, i) => {
+              const to = VERIFICATION_META[(v.to ?? "").toLowerCase()];
+              const from = VERIFICATION_META[(v.from ?? "").toLowerCase()];
+              return (
+                <li
+                  key={`${v.at}-${i}`}
+                  className="flex items-center gap-1.5 text-muted-foreground"
+                >
+                  <span>{from?.label ?? v.from ?? "—"}</span>
+                  <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
+                  <span
+                    className="font-semibold"
+                    style={{ color: to ? rgbCss(to.color) : undefined }}
+                  >
+                    {to?.label ?? v.to ?? "—"}
+                  </span>
+                  {v.at && (
+                    <span className="ml-auto font-mono text-[10px] text-muted-foreground/70">
+                      {timeAgo(v.at)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface NodeDetailProps {
   node: MemoryNode;
   degree: number;
@@ -1941,6 +2204,17 @@ function NodeDetailBody({
   const hasCaptured =
     isVideo || (knowledge && (confidence !== undefined || aliases.length > 0));
   const hasTranscript = isVideo || (knowledge && sources.length > 0);
+  // The provenance ledger is worth a section only when at least one of its
+  // blocks has something to show — otherwise we'd render an empty box.
+  const hasProvenance =
+    knowledge &&
+    ((node.meta.models?.length ?? 0) > 0 ||
+      Boolean(node.meta.firstExtractedAt) ||
+      Boolean(node.meta.lastExtractedAt) ||
+      (node.meta.confidenceHistory?.length ?? 0) >= 2 ||
+      (node.meta.mergedFrom?.length ?? 0) > 0 ||
+      (node.meta.rejectedEvidence?.length ?? 0) > 0 ||
+      (node.meta.verificationHistory?.length ?? 0) > 0);
   // Union of the individual Metadata row conditions — avoids an empty box on
   // scaffold nodes (topic/core) that have none of the detail rows.
   const hasMetadata =
@@ -2171,6 +2445,17 @@ function NodeDetailBody({
                 );
               })}
             </ul>
+          </Section>
+        )}
+
+        {knowledge && hasProvenance && (
+          <Section title="Provenance">
+            <ProvenanceContent
+              node={node}
+              nodeById={nodeById}
+              onSelectNode={onSelectNode}
+              onOpenVideo={onOpenVideo}
+            />
           </Section>
         )}
 
