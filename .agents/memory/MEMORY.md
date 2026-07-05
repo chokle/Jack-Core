@@ -27,3 +27,4 @@
 - [Client graph meta whitelist](client-graph-meta-whitelist.md) — node.meta is additionalProperties:true so it needs no codegen, but the client mapper whitelists each field; new meta fields silently drop unless types + parser are extended.
 - [Playwright install fails on Nix](playwright-browser-install-nix.md) — ad-hoc `npx playwright install` can't fetch Chromium's apt deps here; don't retry, fall back to code-trace verification.
 - [Verification reranking](verification-reranking.md) — reviewer verify/reject only steers retrieval via concept meta.sources timestamp↔segment overlap; no-timestamp concepts can't steer; verified boosts, rejected suppresses.
+- [Admin-gated route request tests](admin-route-request-tests.md) — supertest pattern: vi.hoisted JACK_ADMIN_KEY before import, mint cookie via createAdminSession+fakeRes, mock memory-graph, stub req.log.
