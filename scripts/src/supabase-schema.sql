@@ -646,6 +646,40 @@ CREATE INDEX IF NOT EXISTS idx_parked_thoughts_mentor ON parked_thoughts(mentor_
 -- mentor_name was denormalized onto the row (mirrors knowledge_candidates).
 ALTER TABLE parked_thoughts ADD COLUMN IF NOT EXISTS mentor_name TEXT;
 
+-- ============================================================================
+-- Beta user-testing mode — consent-recorded tester sessions (screen + optional
+-- mic). This is OPERATIONAL/testing data, deliberately NOT part of the public
+-- Living Memory knowledge graph. Recordings live in a PRIVATE storage bucket
+-- (never public like jack-videos) because they can capture arbitrary on-screen
+-- activity; only storage_path is stored, never a public URL. tester_user_id /
+-- tester_email are resolved server-side from the Clerk session, never from the
+-- request body.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS test_recordings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tester_user_id TEXT,
+  tester_email TEXT,
+  session_id TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  mime_type TEXT,
+  duration_ms INTEGER,
+  size_bytes BIGINT,
+  user_agent TEXT,
+  screen_resolution TEXT,
+  app_version TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_test_recordings_created_at ON test_recordings(created_at);
+CREATE INDEX IF NOT EXISTS idx_test_recordings_tester_user_id ON test_recordings(tester_user_id);
+
+-- Create the PRIVATE storage bucket for beta user-testing recordings. Unlike
+-- jack-videos (public), these can contain arbitrary captured screen content
+-- and must never be publicly listable/downloadable — only signed URLs (admin,
+-- if ever added) or the service-role key can read them.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('jack-test-recordings', 'jack-test-recordings', false)
+ON CONFLICT (id) DO NOTHING;
+
 -- Force PostgREST to reload its schema cache now that the DDL above has run.
 -- Right after a (re)apply, PostgREST serves against a stale cache until it
 -- reloads on its own, so a knowledge write in that window can be mislabelled

@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   X,
   LogOut,
+  Radio,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
@@ -28,6 +29,8 @@ interface JackShellProps {
   userLabel?: string;
   userSubLabel?: string;
   onSignOut?: () => void;
+  /** Opens the beta user-testing consent modal. Omit to hide the control entirely. */
+  onStartUserTest?: () => void;
   children: ReactNode;
 }
 
@@ -45,6 +48,7 @@ export function JackShell({
   userLabel,
   userSubLabel,
   onSignOut,
+  onStartUserTest,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -213,6 +217,17 @@ export function JackShell({
               </div>
             </div>
           </div>
+          {onStartUserTest && (
+            <button
+              type="button"
+              onClick={onStartUserTest}
+              data-testid="start-user-test"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/50 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <Radio className="h-4 w-4" />
+              Start User Test
+            </button>
+          )}
           {onSignOut && (
             <button
               type="button"

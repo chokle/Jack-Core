@@ -42,3 +42,4 @@
 - [Testing admin-gated browser flows](testing-admin-gated-browser-flows.md) — Playwright subagent can't get the JACK_ADMIN_KEY secret; verify anon gating in-browser + signed-in mutation loop via curl/live Supabase.
 - [Clerk CSP allowlist](clerk-csp.md) — strict index.html meta CSP silently blocks Clerk JS; whitelist *.clerk.accounts.dev + turnstile + blob workers; "failed to load Clerk JS" is CSP, not network.
 - [Fake supabase enforces edge FK](fake-supabase-edge-fk.md) — the test double rejects a knowledge_edges upsert whose source_id/target_id has no knowledge_nodes row; seed nodes before edges in tests.
+- [Beta user-testing mode](beta-user-testing-mode.md) — screen+mic recording: private bucket + no public URL, server-resolved identity, ref-imperative-handle modal trigger, useToast TOAST_LIMIT=1 means reminders need their own timer.

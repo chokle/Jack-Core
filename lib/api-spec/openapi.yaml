@@ -358,6 +358,13 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ChatMessage"
+    delete:
+      operationId: clearChatHistory
+      tags: [chat]
+      summary: Delete all saved Ask Jack messages for the signed-in caller, starting a fresh conversation
+      responses:
+        "204":
+          description: Cleared
 
   /competencies:
     get:

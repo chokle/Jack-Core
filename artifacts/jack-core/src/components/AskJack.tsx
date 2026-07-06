@@ -1,11 +1,24 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, X, Loader2, Sparkles, Bookmark } from "lucide-react";
+import { Send, Bot, User, X, Loader2, Sparkles, Bookmark, RotateCcw } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useAskJack,
   useGetChatHistory,
+  useClearChatHistory,
+  getGetChatHistoryQueryKey,
   ChatMessage,
   type ParkedThought,
 } from "@workspace/api-client-react";
@@ -47,8 +60,23 @@ export function AskJack({
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
   const askJack = useAskJack();
+  const queryClient = useQueryClient();
+  const clearHistory = useClearChatHistory();
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+
+  const handleClearConversation = () => {
+    clearHistory.mutate(undefined, {
+      onSuccess: () => {
+        setMessages([]);
+        // Prevent the just-cleared history refetch from repopulating messages
+        // via the restore effect above.
+        queryClient.setQueryData(getGetChatHistoryQueryKey(), []);
+        setConfirmingClear(false);
+      },
+    });
+  };
 
   useEffect(() => {
     setBannerDismissed(false);
@@ -138,9 +166,22 @@ export function AskJack({
                 <p className="text-[10px] font-mono text-sidebar-foreground/60 uppercase">Intelligence Engine</p>
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setConfirmingClear(true)}
+                  title="Start a new conversation"
+                  aria-label="Start a new conversation"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" onClick={onClose}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {resumedThought && !bannerDismissed && (
@@ -249,6 +290,41 @@ export function AskJack({
           </div>
         </motion.div>
       )}
+
+      <AlertDialog
+        open={confirmingClear}
+        onOpenChange={(open) => {
+          if (!open && !clearHistory.isPending) setConfirmingClear(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start a new conversation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This clears your saved Ask Jack chat history. It can't be undone, but the knowledge
+              library itself is untouched — you can always ask again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearHistory.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearHistory.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                handleClearConversation();
+              }}
+              className="bg-red-600 text-white hover:bg-red-500"
+            >
+              {clearHistory.isPending ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="mr-1.5 h-4 w-4" />
+              )}
+              Start fresh
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AnimatePresence>
   );
 }

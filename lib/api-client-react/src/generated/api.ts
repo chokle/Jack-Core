@@ -1436,6 +1436,76 @@ export function useGetChatHistory<TData = Awaited<ReturnType<typeof getChatHisto
 
 
 
+export const getClearChatHistoryUrl = () => {
+
+
+
+
+  return `/api/chat/history`
+}
+
+/**
+ * @summary Delete all saved Ask Jack messages for the signed-in caller, starting a fresh conversation
+ */
+export const clearChatHistory = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getClearChatHistoryUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getClearChatHistoryMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearChatHistory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearChatHistory>>, TError,void, TContext> => {
+
+const mutationKey = ['clearChatHistory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearChatHistory>>, void> = () => {
+
+
+          return  clearChatHistory(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearChatHistoryMutationResult = NonNullable<Awaited<ReturnType<typeof clearChatHistory>>>
+
+    export type ClearChatHistoryMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete all saved Ask Jack messages for the signed-in caller, starting a fresh conversation
+ */
+export const useClearChatHistory = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearChatHistory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearChatHistory>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getClearChatHistoryMutationOptions(options));
+    }
+
 export const getListCompetenciesUrl = () => {
 
 

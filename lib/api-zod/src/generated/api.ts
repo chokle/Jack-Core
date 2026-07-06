@@ -389,6 +389,12 @@ export const GetChatHistoryResponse = zod.array(GetChatHistoryResponseItem)
 
 
 /**
+ * @summary Delete all saved Ask Jack messages for the signed-in caller, starting a fresh conversation
+ */
+export const ClearChatHistoryResponse = zod.void()
+
+
+/**
  * @summary List all Red Seal competency categories
  */
 export const ListCompetenciesResponseItem = zod.object({

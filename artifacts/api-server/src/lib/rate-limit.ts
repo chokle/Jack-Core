@@ -87,3 +87,20 @@ export const parkingLotLimiter = rateLimit({
   message: { error: "Too many requests — please try again later." },
   keyGenerator,
 });
+
+/**
+ * Rate limiter for POST /testing/recordings — beta user-testing screen/mic
+ * recording uploads. No AI model is called, but each upload streams a
+ * potentially large media blob to storage, so this is a storage-cost/DoS
+ * concern (see threat_model.md), not an AI-cost one. A tester records at most
+ * a handful of sessions, so 20 uploads per 15 minutes per IP comfortably
+ * covers legitimate retries while capping automated abuse.
+ */
+export const userTestingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many upload attempts — please try again later." },
+  keyGenerator,
+});

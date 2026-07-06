@@ -269,6 +269,24 @@ router.get("/chat/history", async (req, res) => {
   }
 });
 
+router.delete("/chat/history", async (req, res) => {
+  try {
+    // Same ownership rule as history reads/writes: only the server-derived
+    // Clerk user id, never a client-supplied field. Fail closed rather than
+    // deleting/matching on anything broader than "this account's own rows".
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+
+    const { error } = await supabase.from("chat_messages").delete().eq("user_id", userId);
+    if (error) throw error;
+
+    return res.status(204).end();
+  } catch (err) {
+    req.log.error({ err }, "clearChatHistory error");
+    return res.status(500).json({ error: "Failed to clear chat history" });
+  }
+});
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);

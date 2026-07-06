@@ -36,6 +36,7 @@ Protect the **core pipeline** above all new work: upload → transcribe → embe
 
 ## Current Sprint
 
+- **Shipped:** Beta user-testing mode — a "Start User Test" sidebar button (and `?test=true`) opens a no-permissions-first consent modal, then records screen+mic via `MediaRecorder` behind a draggable floating indicator (elapsed timer, pause/resume, stop) and an auto-dismissing think-aloud reminder. On stop, the clip auto-uploads with session/device metadata to a private Supabase bucket via `POST /api/testing/recordings`; on upload failure it falls back to a local download so a recording is never lost. Fully modular under `artifacts/jack-core/src/{lib,components}/user-testing*` — never auto-records, never blocks the app.
 - **Shipped:** Living Memory "brain" upgrades — knowledge-aware neuron firing (only populated trades fire; dormant/virgin trades idle-glow), hub sizing by knowledge buckets, a dev-only Brain Statistics panel, and an ECG heartbeat desktop fix. Backed by a new read-only `GET /knowledge/stats` endpoint (per-trade `knowledge_entries` counts).
 - **Deferred (not started):** relocate the "Jack just learned…" toasts out of the graph into the sidebar. Pick up on user direction.
 

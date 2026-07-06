@@ -19,6 +19,7 @@ import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Landing } from "./components/Landing";
+import { TestingOverlay, type TestingOverlayHandle } from "./components/testing/TestingOverlay";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
 import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
@@ -116,6 +117,11 @@ function JackApp() {
 
   const graph = useMemoryGraphData();
 
+  // Beta user-testing mode: the "Start User Test" button in JackShell opens
+  // the consent modal via this imperative handle; TestingOverlay also opens
+  // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
+  const testingOverlayRef = useRef<TestingOverlayHandle>(null);
+
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
@@ -189,6 +195,7 @@ function JackApp() {
         userLabel={userLabel}
         userSubLabel={userSubLabel}
         onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
+        onStartUserTest={() => testingOverlayRef.current?.open()}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -226,6 +233,8 @@ function JackApp() {
         initialContext={chatContext}
         onCitationClick={handleCitationClick}
       />
+
+      <TestingOverlay ref={testingOverlayRef} />
     </>
   );
 }

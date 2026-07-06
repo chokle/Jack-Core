@@ -10,6 +10,7 @@ import graphRouter from "./graph.js";
 import interviewRouter from "./interview.js";
 import parkingLotRouter from "./parking-lot.js";
 import systemHealthRouter from "./system-health.js";
+import testingRouter from "./testing.js";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(graphRouter);
 router.use(interviewRouter);
 router.use(parkingLotRouter);
 router.use(systemHealthRouter);
+router.use(testingRouter);
 
 export default router;
