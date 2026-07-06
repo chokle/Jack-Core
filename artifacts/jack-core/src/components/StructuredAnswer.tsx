@@ -50,7 +50,7 @@ function fmtTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function deriveConfidence(citations: Citation[], used?: boolean): { label: string; tone: string } {
+export function deriveConfidence(citations: Citation[], used?: boolean): { label: string; tone: string } {
   const n = citations.length;
   if (n >= 2) return { label: "High confidence", tone: "high" };
   if (n === 1) return { label: "Medium confidence", tone: "medium" };
@@ -58,7 +58,7 @@ function deriveConfidence(citations: Citation[], used?: boolean): { label: strin
   return { label: "General knowledge", tone: "low" };
 }
 
-const TONE_CLASSES: Record<string, string> = {
+export const TONE_CLASSES: Record<string, string> = {
   high: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   medium: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   low: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
