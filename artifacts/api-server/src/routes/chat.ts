@@ -7,6 +7,7 @@ import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import { fetchVerificationCoverage, rerankByVerification } from "../lib/verification-rerank.js";
+import { readKnowledgeMeta, type KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -137,14 +138,50 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
-    for (const e of (entries ?? []) as Array<Record<string, unknown>>) {
+    const rawEntries = (entries ?? []) as Array<Record<string, unknown>>;
+    // The retrieval RPC (match_knowledge_entries) intentionally returns only the
+    // fields needed to render a citation — it does NOT return the `metadata` bag
+    // that carries a Knowledge Object's trust signal. Fetch that separately for
+    // just the matched entries so field-note citations can be badged the same way
+    // video citations are. Bounded by the handful of retrieved entries, and a
+    // failure here degrades to un-badged (still-answered) rather than failing the
+    // request — trust is an enhancement, never a hard dependency of answering.
+    const entryIds = rawEntries
+      .map((e) => e["id"])
+      .filter((id): id is string => typeof id === "string" && !!id);
+    const metaByEntryId = new Map<string, KnowledgeObjectMeta>();
+    if (entryIds.length > 0) {
+      const { data: metaRows, error: metaError } = await supabase
+        .from("knowledge_entries")
+        .select("id, metadata")
+        .in("id", entryIds);
+      if (metaError) {
+        req.log.error({ err: metaError }, "knowledge_entries metadata fetch failed; skipping field-note trust");
+      } else {
+        for (const row of (metaRows ?? []) as Array<Record<string, unknown>>) {
+          const id = row["id"];
+          if (typeof id === "string") metaByEntryId.set(id, readKnowledgeMeta(row["metadata"]));
+        }
+      }
+    }
+
+    for (const e of rawEntries) {
       const title = (e["title"] as string) ?? "Knowledge Entry";
       const description = (e["description"] as string) ?? "";
       const body = (e["body"] as string) ?? "";
       const images = Array.isArray(e["images"]) ? (e["images"] as Array<Record<string, unknown>>) : [];
       const imageUrl = (images[0]?.["url"] as string | undefined) ?? null;
       const snippet = (description || body).replace(/\s+/g, " ").trim().slice(0, 240);
-      contextText += `[Knowledge Entry: ${title}]\n${description ? description + "\n" : ""}${body}\n\n`;
+      const entryId = e["id"] as string;
+      // Surface the field note's OWN trust signal (verifiedBy / evidenceCount from
+      // its Knowledge Object metadata), mirroring how video citations carry the
+      // reranker's verified/sourceCount. A genuinely neutral note (no verifier, no
+      // corroboration) sends neither field, so the client leaves it un-badged.
+      const trust = knowledgeEntryTrust(metaByEntryId.get(entryId));
+      contextText += `[Knowledge Entry: ${title}${describeTrust(
+        trust.verified ? "verified" : "neutral",
+        trust.sourceCount ?? 0,
+      )}]\n${description ? description + "\n" : ""}${body}\n\n`;
       citations.push({
         // No video to jump to — videoId is empty; entryId identifies the source.
         videoId: "",
@@ -154,7 +191,10 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         text: snippet,
         thumbnailUrl: imageUrl,
         sourceType: "knowledge",
-        entryId: e["id"] as string,
+        entryId,
+        // Only set when meaningful — knowledgeEntryTrust omits neutral signals.
+        ...(trust.verified ? { verified: true } : {}),
+        ...(trust.sourceCount !== undefined ? { sourceCount: trust.sourceCount } : {}),
       });
     }
 
@@ -245,6 +285,40 @@ export function describeTrust(verification: "verified" | "rejected" | "neutral",
   if (verification === "verified") parts.push("mentor-verified");
   if (sourceCount >= 2) parts.push(`confirmed across ${sourceCount} videos`);
   return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+}
+
+/**
+ * Derive a field note's (Knowledge Entry's) trust signal for a chat citation.
+ *
+ * Unlike video citations — whose trust comes from the graph reranker — a
+ * Knowledge Object carries its OWN trust in its `metadata` bag:
+ *   - `verifiedBy` (who/what confirmed it) → `verified: true` (the mentor-verified
+ *     badge), and
+ *   - `evidenceCount` (independent pieces of evidence backing it) → `sourceCount`,
+ *     which the client badges only at >= 2 ("confirmed across N …").
+ *
+ * A genuinely neutral note — no verifier, no corroboration — returns an empty
+ * object so the route omits both fields and the client leaves it un-badged.
+ * Missing/malformed metadata is treated as neutral (never fabricated trust).
+ */
+export function knowledgeEntryTrust(
+  meta: KnowledgeObjectMeta | undefined,
+): { verified?: boolean; sourceCount?: number } {
+  if (!meta) return {};
+  const result: { verified?: boolean; sourceCount?: number } = {};
+
+  const verifiedBy = meta.verifiedBy;
+  const hasVerifier = Array.isArray(verifiedBy)
+    ? verifiedBy.some((v) => typeof v === "string" && v.trim().length > 0)
+    : typeof verifiedBy === "string" && verifiedBy.trim().length > 0;
+  if (hasVerifier) result.verified = true;
+
+  const evidenceCount = meta.evidenceCount;
+  if (typeof evidenceCount === "number" && Number.isFinite(evidenceCount) && evidenceCount >= 2) {
+    result.sourceCount = Math.floor(evidenceCount);
+  }
+
+  return result;
 }
 
 export default router;

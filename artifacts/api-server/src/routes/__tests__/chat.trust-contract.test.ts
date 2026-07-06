@@ -13,7 +13,10 @@
  *   1. Route: for a reranked VIDEO segment, the built citation carries
  *      `verified === (verification === "verified")` and the SAME `sourceCount`
  *      the reranker produced (computed independently here, then compared).
- *   2. Route: a KNOWLEDGE citation never carries `verified`/`sourceCount`.
+ *   2. Route: a KNOWLEDGE citation carries `verified`/`sourceCount` derived from
+ *      the field note's OWN metadata (verifiedBy / evidenceCount) — a verifier
+ *      badges it verified, evidenceCount >= 2 badges corroboration, and a
+ *      genuinely neutral note carries neither field.
  *   3. Contract: the citation's `verified`/`sourceCount` gating matches
  *      `describeTrust()`'s thresholds across the full (verification × sourceCount)
  *      matrix (verified → "mentor-verified"; sourceCount >= 2 → "confirmed across
@@ -45,7 +48,7 @@ vi.mock("../../lib/openai.js", async () => {
   };
 });
 
-import chatRouter, { describeTrust } from "../chat.js";
+import chatRouter, { describeTrust, knowledgeEntryTrust } from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
 import { buildCoverageFromNodes, rerankByVerification } from "../../lib/verification-rerank.js";
 
@@ -207,10 +210,10 @@ describe("chat citations — badge trust matches the reranker", () => {
     expect(verifiedCitation).toMatchObject({ verified: true, sourceCount: 3 });
   });
 
-  it("never puts verified/sourceCount on a KNOWLEDGE citation", async () => {
+  it("omits verified/sourceCount on a genuinely NEUTRAL knowledge citation", async () => {
     seedGraph();
-    // A non-video Knowledge Entry: it has no trust signal and must never be
-    // badged, so the route must omit verified/sourceCount entirely.
+    // A non-video Knowledge Entry with no trust metadata: it has no signal and
+    // must never be badged, so the route must omit verified/sourceCount entirely.
     fake.tables["knowledge_entries"] = [
       {
         id: "entry-1",
@@ -218,6 +221,7 @@ describe("chat citations — badge trust matches the reranker", () => {
         description: "Keep the torch at a consistent angle.",
         body: "",
         images: [],
+        metadata: { origin: "seed" },
       },
     ];
 
@@ -233,6 +237,88 @@ describe("chat citations — badge trust matches the reranker", () => {
       expect("sourceCount" in c).toBe(false);
       expect(c.entryId).toBe("entry-1");
     }
+  });
+
+  it("badges a KNOWLEDGE citation from the field note's own metadata (verifiedBy / evidenceCount)", async () => {
+    seedGraph();
+    // Three field notes exercising each state: mentor-verified, corroborated
+    // across >= 2 sources, and genuinely neutral. Trust lives in each note's OWN
+    // metadata bag (verifiedBy / evidenceCount), NOT the graph reranker.
+    fake.tables["knowledge_entries"] = [
+      {
+        id: "entry-verified",
+        title: "Verified field note",
+        description: "A mentor confirmed this.",
+        body: "",
+        images: [],
+        metadata: { verifiedBy: "Jane the Journeyperson", evidenceCount: 1 },
+      },
+      {
+        id: "entry-corroborated",
+        title: "Corroborated field note",
+        description: "Seen in several places.",
+        body: "",
+        images: [],
+        metadata: { evidenceCount: 4 },
+      },
+      {
+        id: "entry-neutral",
+        title: "Neutral field note",
+        description: "Just a note.",
+        body: "",
+        images: [],
+        metadata: { evidenceCount: 1 },
+      },
+    ];
+
+    const res = await request(app).post("/api/chat").send({ message: "field note" });
+    expect(res.status).toBe(200);
+
+    const byId = new Map(
+      (res.body.citations as Citation[])
+        .filter((c) => c.sourceType === "knowledge")
+        .map((c) => [c.entryId, c] as const),
+    );
+
+    // verifiedBy present → verified: true, and (evidenceCount < 2) → no sourceCount.
+    const verified = byId.get("entry-verified")!;
+    expect(verified.verified).toBe(true);
+    expect("sourceCount" in verified).toBe(false);
+
+    // evidenceCount >= 2 → sourceCount echoes it, with no verifier → no verified.
+    const corroborated = byId.get("entry-corroborated")!;
+    expect(corroborated.sourceCount).toBe(4);
+    expect("verified" in corroborated).toBe(false);
+
+    // Neutral (single-source, unverified) → neither field, so the client hides badges.
+    const neutral = byId.get("entry-neutral")!;
+    expect("verified" in neutral).toBe(false);
+    expect("sourceCount" in neutral).toBe(false);
+  });
+});
+
+describe("knowledgeEntryTrust — field-note metadata maps to badge gating", () => {
+  it("treats missing/malformed metadata as neutral (never fabricates trust)", () => {
+    expect(knowledgeEntryTrust(undefined)).toEqual({});
+    expect(knowledgeEntryTrust({})).toEqual({});
+    expect(knowledgeEntryTrust({ evidenceCount: 1 })).toEqual({});
+    expect(knowledgeEntryTrust({ verifiedBy: "   " })).toEqual({});
+    expect(knowledgeEntryTrust({ evidenceCount: Number.NaN })).toEqual({});
+  });
+
+  it("sets verified from any non-empty verifiedBy (string or list)", () => {
+    expect(knowledgeEntryTrust({ verifiedBy: "A Mentor" })).toEqual({ verified: true });
+    expect(knowledgeEntryTrust({ verifiedBy: ["", "A Mentor"] })).toEqual({ verified: true });
+    expect(knowledgeEntryTrust({ verifiedBy: [] })).toEqual({});
+  });
+
+  it("sets sourceCount only when evidenceCount >= 2 (floored)", () => {
+    expect(knowledgeEntryTrust({ evidenceCount: 2 })).toEqual({ sourceCount: 2 });
+    expect(knowledgeEntryTrust({ evidenceCount: 3.9 })).toEqual({ sourceCount: 3 });
+    expect(knowledgeEntryTrust({ verifiedBy: "M", evidenceCount: 5 })).toEqual({
+      verified: true,
+      sourceCount: 5,
+    });
   });
 });
 

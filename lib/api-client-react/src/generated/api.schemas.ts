@@ -285,9 +285,9 @@ export interface Citation {
      * @nullable
      */
   entryId?: string | null;
-  /** True when a mentor reviewer has verified a concept covering this citation. Absent/false when no reviewer has weighed in. Only ever set for "video" citations that retrieval tied to a trusted concept. */
+  /** True when this citation is mentor-verified. For "video" citations that means retrieval tied the segment to a reviewer-verified concept; for "knowledge" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent/false when nothing has confirmed it. */
   verified?: boolean;
-  /** Distinct source videos that corroborate the concept covering this citation. Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when no covering concept applies (e.g. knowledge citations). */
+  /** How many independent sources corroborate this citation. For "video" citations it is the distinct source videos of the covering concept; for "knowledge" citations it is the field note's own evidence count (metadata `evidenceCount`). Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal. */
   sourceCount?: number;
 }
 

@@ -357,8 +357,8 @@ export const AskJackResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
   "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
-  "verified": zod.boolean().optional().describe('True when a mentor reviewer has verified a concept covering this citation. Absent\/false when no reviewer has weighed in. Only ever set for \"video\" citations that retrieval tied to a trusted concept.'),
-  "sourceCount": zod.number().optional().describe('Distinct source videos that corroborate the concept covering this citation. Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when no covering concept applies (e.g. knowledge citations).')
+  "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
+  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
 })),
   "usedInternalKnowledge": zod.boolean().optional()
 })
@@ -380,8 +380,8 @@ export const GetChatHistoryResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
   "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
-  "verified": zod.boolean().optional().describe('True when a mentor reviewer has verified a concept covering this citation. Absent\/false when no reviewer has weighed in. Only ever set for \"video\" citations that retrieval tied to a trusted concept.'),
-  "sourceCount": zod.number().optional().describe('Distinct source videos that corroborate the concept covering this citation. Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when no covering concept applies (e.g. knowledge citations).')
+  "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
+  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
 })).optional(),
   "createdAt": zod.string()
 })
