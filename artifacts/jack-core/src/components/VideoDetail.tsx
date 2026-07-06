@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2 } from "lucide-react";
+import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2, AlertTriangle, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +53,17 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
       },
     },
   });
+
+  // Jack can successfully transcribe/analyze a video file whose container or
+  // codec the browser's <video> element can't decode (e.g. some .mov/.mkv/.avi
+  // sources). That's a client-side preview limitation, not a processing
+  // failure — never let it affect video.status. We just swap the player area
+  // for a friendly explanation instead of surfacing the browser's native
+  // "No video with supported format and MIME type found" error.
+  const [playbackUnsupported, setPlaybackUnsupported] = useState(false);
+  useEffect(() => {
+    setPlaybackUnsupported(false);
+  }, [videoId, video?.videoUrl]);
 
   const { data: relatedVideos } = useFetchRelatedVideos(videoId, { query: { enabled: !!videoId, queryKey: ['related', videoId] } });
 
@@ -195,8 +206,32 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
         {/* Main Content */}
         <div className="flex-1 lg:overflow-y-auto p-6 space-y-6">
           <div className="aspect-video bg-black rounded-xl overflow-hidden relative border border-border">
-            {video.videoUrl ? (
-              <video ref={videoRef} src={video.videoUrl} controls className="w-full h-full object-contain" />
+            {video.videoUrl && !playbackUnsupported ? (
+              <video
+                ref={videoRef}
+                src={video.videoUrl}
+                controls
+                className="w-full h-full object-contain"
+                onError={() => setPlaybackUnsupported(true)}
+              />
+            ) : video.videoUrl && playbackUnsupported ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-muted-foreground p-6 gap-3">
+                <AlertTriangle className="h-10 w-10 text-amber-500" />
+                <div>
+                  <p className="font-semibold text-foreground">
+                    Jack analyzed this video, but this file format can't be previewed in your browser.
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
+                    The transcript and analysis below are unaffected. For in-browser playback, convert the
+                    source to MP4 (H.264 video / AAC audio) and re-upload.
+                  </p>
+                </div>
+                <Button size="sm" variant="secondary" asChild>
+                  <a href={video.videoUrl} download target="_blank" rel="noopener noreferrer">
+                    <Download className="h-4 w-4 mr-2" /> Download original
+                  </a>
+                </Button>
+              </div>
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
                 <Play className="h-16 w-16 mb-4 opacity-20" />

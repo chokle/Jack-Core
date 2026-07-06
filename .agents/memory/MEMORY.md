@@ -43,3 +43,4 @@
 - [Clerk CSP allowlist](clerk-csp.md) — strict index.html meta CSP silently blocks Clerk JS; whitelist *.clerk.accounts.dev + turnstile + blob workers; "failed to load Clerk JS" is CSP, not network.
 - [Fake supabase enforces edge FK](fake-supabase-edge-fk.md) — the test double rejects a knowledge_edges upsert whose source_id/target_id has no knowledge_nodes row; seed nodes before edges in tests.
 - [Beta user-testing mode](beta-user-testing-mode.md) — screen+mic recording: private bucket + no public URL, server-resolved identity, ref-imperative-handle modal trigger, useToast TOAST_LIMIT=1 means reminders need their own timer.
+- [Video preview vs processing success](video-preview-vs-processing.md) — Jack accepts/processes containers (.mov/.avi/.mkv/3gp) browsers can't natively decode; a `<video>` onError is a preview limitation, never a processing failure — degrade gracefully, don't touch status.

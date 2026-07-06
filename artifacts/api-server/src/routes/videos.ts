@@ -116,6 +116,40 @@ const ALLOWED_VIDEO_TYPES = new Set([
   "video/3gpp2",
 ]);
 
+// Some browsers/OS combinations report a generic or slightly different
+// Content-Type for a video part in a multipart upload (e.g. "application/
+// octet-stream", or omit it entirely) even though the file extension makes
+// the format unambiguous. If we stored that generic type in Supabase
+// Storage, it would be served back as the object's Content-Type header and
+// break `<video>` playback even for otherwise-supported MP4 files — some
+// browsers (notably Safari) refuse to play a video whose Content-Type
+// header doesn't match a supported video type. Falling back to an
+// extension-based lookup keeps the stored/served type accurate.
+const VIDEO_EXTENSION_CONTENT_TYPES: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".ogg": "video/ogg",
+  ".ogv": "video/ogg",
+  ".mov": "video/quicktime",
+  ".avi": "video/x-msvideo",
+  ".mkv": "video/x-matroska",
+  ".3gp": "video/3gpp",
+  ".3g2": "video/3gpp2",
+};
+
+/**
+ * Resolve the content type to trust for a browser-supplied file. Prefers the
+ * browser-reported mimetype when it's already one of our known video types,
+ * and otherwise falls back to an extension-based guess. Returns null when
+ * neither source identifies a supported video format.
+ */
+function resolveVideoContentType(file: { originalname: string; mimetype: string }): string | null {
+  if (ALLOWED_VIDEO_TYPES.has(file.mimetype)) return file.mimetype;
+  const ext = path.extname(file.originalname).toLowerCase();
+  return VIDEO_EXTENSION_CONTENT_TYPES[ext] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Multer — DISK storage for proxied video ingest. The file spools to a tmp
 // dir instead of the Node heap (memoryStorage buffered up to 2 GB in RAM per
@@ -136,7 +170,7 @@ const upload = multer({
   }),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    cb(null, ALLOWED_VIDEO_TYPES.has(file.mimetype));
+    cb(null, resolveVideoContentType(file) !== null);
   },
 });
 
@@ -200,7 +234,9 @@ router.post(
       const { error: uploadErr } = await supabase.storage
         .from("jack-videos")
         .upload(storagePath, fs.createReadStream(tempPath), {
-          contentType: req.file.mimetype,
+          // fileFilter already guarantees a resolvable type; the mimetype
+          // fallback here is just defensive.
+          contentType: resolveVideoContentType(req.file) ?? req.file.mimetype,
           upsert: false,
         });
 
