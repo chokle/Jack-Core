@@ -28,6 +28,18 @@ const videoState = vi.hoisted(() => ({
   isLoading: false,
 }));
 
+// VideoDetail also pulls `useQueryClient` straight from react-query (for the
+// admin delete flow's cache invalidation). Without a QueryClientProvider that
+// throws on render, so stub it to an inert client — the seek path never uses it.
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@tanstack/react-query")>();
+  return {
+    ...actual,
+    useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  };
+});
+
 vi.mock("@workspace/api-client-react", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@workspace/api-client-react")>();
@@ -39,6 +51,10 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
     useFetchRelatedVideos: () => ({ data: [] }),
     useTranscribeVideo: () => ({ mutate: vi.fn(), isPending: false }),
     useAnalyzeVideo: () => ({ mutate: vi.fn(), isPending: false }),
+    // Admin video-delete hooks are also inert here — they render unconditionally
+    // in VideoDetail but the seek path never uses them.
+    useGetMe: () => ({ data: { isAdmin: false } }),
+    useDeleteVideo: () => ({ mutate: vi.fn(), isPending: false }),
   };
 });
 
