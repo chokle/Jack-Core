@@ -19,7 +19,7 @@ Production security review should focus on `artifacts/api-server/` and the SPA i
 - **Express API to Supabase** — the API talks to Supabase using a service-role key that bypasses row-level restrictions. Bugs in route-layer authorization therefore become full read/write data exposure.
 - **Express API to Supabase Storage** — the API issues signed upload URLs and writes public object URLs back into the database. Upload path ownership and file acceptance rules must be enforced here.
 - **Express API to OpenAI** — chat, embeddings, transcription, and analysis calls consume paid third-party APIs. Public triggering without quotas or authorization creates direct cost and denial-of-service risk.
-- **Public versus restricted functionality** — the current code exposes library browsing, chat, video ingestion, mutation, deletion, upload URL issuance, transcription, and analysis from the same public API surface; there is no authenticated or admin-only boundary in code.
+- **Public versus restricted functionality** — auth is now enforced in code via Clerk. Three tiers: PUBLIC (landing + Clerk sign-in/up + health), AUTHENTICATED (the whole app — library browsing, chat, Teach Jack, video submission — behind an app-level `requireAuth` on `/api`), and ADMIN (`ADMIN_EMAILS` allowlist — Knowledge Review, mutation/deletion, mentor/telemetry reads, exports, moderation — behind `requireAdmin`). Admin status is resolved server-side from the Clerk user's email, never a client-supplied field.
 - **Internal/dev-only versus production** — `artifacts/mockup-sandbox/` and `scripts/` should normally be ignored for production findings unless separately deployed or invoked by production code.
 
 ## Scan Anchors
@@ -27,7 +27,7 @@ Production security review should focus on `artifacts/api-server/` and the SPA i
 - Production API entry points: `artifacts/api-server/src/app.ts`, `artifacts/api-server/src/routes/*.ts`
 - Highest-risk server code: `artifacts/api-server/src/routes/videos.ts`, `artifacts/api-server/src/routes/chat.ts`, `artifacts/api-server/src/routes/search.ts`, `artifacts/api-server/src/lib/supabase.ts`, `artifacts/api-server/src/lib/transcription.ts`
 - Highest-risk client code: `artifacts/jack-core/src/components/AskJack.tsx`, `artifacts/jack-core/src/components/VideoDetail.tsx`, upload/chat flows in `artifacts/jack-core/src/components/UploadModal.tsx`, and any `dangerouslySetInnerHTML` sink that renders server- or model-derived content
-- Public surfaces: all `/api/*` routes are currently public; there is no server-enforced authenticated/admin surface
+- Auth boundary: `/api` is gated app-wide by Clerk `requireAuth`; admin-only routes add `requireAdmin` (email allowlist). Server-enforced and fail-closed (401 unauthenticated / 403 non-admin). The only public routes are the health/readiness probes (`/api/`, `/api/healthz`, `/api/system-health`) and the Clerk proxy.
 - Dev-only areas to usually skip: `artifacts/mockup-sandbox/`, `scripts/`
 
 ## Threat Categories
@@ -46,7 +46,7 @@ Video ingestion downloads large media files, runs ffmpeg/ffprobe, and calls Open
 
 ### Elevation of Privilege
 
-Because there is no separate authenticated or admin surface in code, any public caller currently reaches routes that exercise the Supabase service role and signed upload URL issuance. Required guarantee: a low-privilege or anonymous caller must never be able to obtain service-role-equivalent effects such as broad database mutation, storage write access, or access to other users' conversations by supplying identifiers or crafted content.
+Admin authorization is enforced server-side: `requireAdmin` resolves the caller's admin status from their Clerk-verified email against the `ADMIN_EMAILS` allowlist (fail-closed — an unset allowlist means no admins), and attribution (the reviewer name recorded on verified knowledge) comes from that resolved identity, never a request-body field. Required guarantee: a low-privilege or anonymous caller must never obtain service-role-equivalent effects such as broad database mutation, storage write access, or admin surfaces — and admin status must never be assertable from client-supplied input.
 
 ### Spoofing
 

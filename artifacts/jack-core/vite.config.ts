@@ -129,7 +129,9 @@ export default defineConfig({
   base: basePath,
   plugins: [
     react(),
-    tailwindcss(),
+    // optimize:false keeps lightningcss from reordering the @layer imports that
+    // Clerk's themes rely on — without it the Clerk UI renders broken in prod.
+    tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     seoAssetsPlugin(),
     ...(process.env.NODE_ENV !== "production" &&

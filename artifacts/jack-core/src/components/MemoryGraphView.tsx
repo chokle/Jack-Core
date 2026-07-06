@@ -29,6 +29,7 @@ import {
   useRestoreWithdrawnEvidence,
   useGetVideo,
   useGetMentorActiveSession,
+  useGetMe,
   useGetKnowledgeStats,
   getGetKnowledgeStatsQueryKey,
   getGetVideoQueryKey,
@@ -234,24 +235,10 @@ export function MemoryGraphView({
   const [activeMatch, setActiveMatch] = useState(0);
   const query = search.trim().toLowerCase();
 
-  // Reviewers with a valid admin session can verify/reject distilled concepts.
-  // We reuse the same signed session that gates library ingestion; the PATCH
-  // route is admin-only on the server, this just hides the controls otherwise.
-  const [isAdmin, setIsAdmin] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((res) => res.json() as Promise<{ authenticated?: boolean }>)
-      .then((body) => {
-        if (alive) setIsAdmin(Boolean(body.authenticated));
-      })
-      .catch(() => {
-        if (alive) setIsAdmin(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Reviewers (admins, by email allowlist) can verify/reject distilled concepts.
+  // The PATCH route is admin-only on the server; this only hides the controls
+  // for non-admins as defense-in-depth. Admin status is resolved via GET /me.
+  const isAdmin = useGetMe().data?.isAdmin ?? false;
 
   const queryClient = useQueryClient();
   const setVerification = useSetNodeVerification({

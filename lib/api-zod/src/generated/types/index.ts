@@ -17,6 +17,7 @@ export * from './chatResponse';
 export * from './citation';
 export * from './citationSourceType';
 export * from './competency';
+export * from './currentUser';
 export * from './extractedKnowledgeItem';
 export * from './extractedKnowledgeItemOutcome';
 export * from './graphHealthReport';

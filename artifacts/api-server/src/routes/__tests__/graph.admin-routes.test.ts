@@ -4,34 +4,39 @@
  * PATCH /graph/nodes/:id/verification (covered separately) but not yet
  * proven at the HTTP layer:
  *
- *   - POST /graph/candidates/:id/resolve        (requireAdminSession)
- *   - GET  /graph/mentor-contributions           (requireAdminSession)
- *   - GET  /graph/health                         (requireAdminSession)
- *   - GET  /graph/candidates?status=<non-pending> (inline isAdminSessionValid check)
+ *   - POST /graph/candidates/:id/resolve         (requireAdmin)
+ *   - GET  /graph/mentor-contributions            (requireAdmin)
+ *   - GET  /graph/health                          (requireAdmin)
+ *   - GET  /graph/candidates?status=<non-pending> (inline resolveAdminIdentity)
  *
  * The API holds the Supabase service-role key with no other auth boundary, so
  * a regression on any of these would silently expose privileged actions
- * (mutating the shared graph, or reading mentor/telemetry data) to anonymous
- * callers. These tests exercise the real HTTP wiring (cookie-parser +
- * requireAdminSession / isAdminSessionValid + the handler): anonymous callers
- * must be rejected with 401 and never reach the graph lib, while a valid
- * signed admin session must be accepted (2xx).
+ * (mutating the shared graph, or reading mentor/telemetry data) to non-admins.
+ * These tests exercise the real HTTP wiring (requireAdmin / resolveAdminIdentity
+ * + the handler) against a mocked Clerk: anonymous callers are rejected with
+ * 401, signed-in non-admins with 403, and a signed-in admin is accepted (2xx).
  *
- * The Supabase-backed lib (`memory-graph.ts`) is mocked — the point here is
- * the request-layer authorization boundary, not the graph writes themselves.
+ * The Supabase-backed lib (`memory-graph.ts`) is mocked — the point here is the
+ * request-layer authorization boundary, not the graph writes themselves.
  */
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import express, { type Express, type Response } from "express";
-import cookieParser from "cookie-parser";
+import express, { type Express } from "express";
 import request from "supertest";
 
-// admin-auth reads JACK_ADMIN_KEY at module-load time, so set it before any
+// admin-auth reads ADMIN_EMAILS once at module-load time, so set it before any
 // import resolves. vi.hoisted runs before the static imports below.
-const ADMIN_KEY = vi.hoisted(() => {
-  const key = "test-admin-key-1234567890";
-  process.env["JACK_ADMIN_KEY"] = key;
-  return key;
+vi.hoisted(() => {
+  process.env["ADMIN_EMAILS"] = "admin@torchlabs.ca";
 });
+
+// Mock Clerk so server-side identity resolution is deterministic and never
+// touches a real Clerk backend.
+const getAuth = vi.hoisted(() => vi.fn());
+const getUser = vi.hoisted(() => vi.fn());
+vi.mock("@clerk/express", () => ({
+  getAuth,
+  clerkClient: { users: { getUser } },
+}));
 
 const resolveKnowledgeCandidate = vi.hoisted(() => vi.fn());
 const listKnowledgeCandidates = vi.hoisted(() => vi.fn());
@@ -50,27 +55,27 @@ vi.mock("../../lib/memory-graph.js", () => ({
 }));
 
 import graphRouter from "../graph.js";
-import { createAdminSession } from "../../lib/admin-auth.js";
 
 const CANDIDATE_ID = "cand:porosity-mystery";
 
-/** Build a valid signed session cookie by driving the real login machinery. */
-function adminCookie(reviewer?: string): string {
-  let cookie = "";
-  const fakeRes = {
-    cookie(name: string, value: string) {
-      cookie = `${name}=${value}`;
-      return this;
-    },
-  } as unknown as Response;
-  const result = createAdminSession(ADMIN_KEY, fakeRes, reviewer);
-  expect(result).toBe("ok");
-  return cookie;
+/**
+ * Put a signed-in user behind the request. Default is the admin allowlist email;
+ * pass role "user" for a signed-in non-admin. Not calling this (the default in
+ * beforeEach) simulates an anonymous caller — getAuth returns undefined.
+ */
+function signInAs(role: "admin" | "user"): void {
+  getAuth.mockReturnValue({ userId: role === "admin" ? "u_admin" : "u_reg" });
+  const email = role === "admin" ? "admin@torchlabs.ca" : "regular@example.com";
+  getUser.mockResolvedValue({
+    firstName: null,
+    lastName: null,
+    primaryEmailAddress: { emailAddress: email },
+    emailAddresses: [{ emailAddress: email }],
+  });
 }
 
 function makeApp(): Express {
   const app = express();
-  app.use(cookieParser());
   app.use(express.json());
   // The real app wires req.log via pino-http; the route handlers call
   // req.log.{warn,error}, so provide a no-op logger for the test app.
@@ -91,6 +96,8 @@ function makeApp(): Express {
 const app = makeApp();
 
 beforeEach(() => {
+  getAuth.mockReset();
+  getUser.mockReset();
   resolveKnowledgeCandidate.mockReset();
   listKnowledgeCandidates.mockReset();
   getMentorContributionStats.mockReset();
@@ -107,17 +114,19 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
     expect(resolveKnowledgeCandidate).not.toHaveBeenCalled();
   });
 
-  it("rejects a caller presenting a forged/invalid session cookie with 401", async () => {
+  it("rejects a signed-in non-admin with 403 and never touches the graph", async () => {
+    signInAs("user");
+
     const res = await request(app)
       .post(`/api/graph/candidates/${CANDIDATE_ID}/resolve`)
-      .set("Cookie", "jack_admin_session=authenticated.deadbeefsignature")
       .send({ action: "accept" });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     expect(resolveKnowledgeCandidate).not.toHaveBeenCalled();
   });
 
-  it("accepts a valid admin session and resolves the candidate", async () => {
+  it("accepts an admin and resolves the candidate", async () => {
+    signInAs("admin");
     resolveKnowledgeCandidate.mockResolvedValue({
       ok: true,
       replayed: false,
@@ -146,7 +155,6 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
 
     const res = await request(app)
       .post(`/api/graph/candidates/${CANDIDATE_ID}/resolve`)
-      .set("Cookie", adminCookie())
       .send({ action: "accept" });
 
     expect(res.status).toBe(200);
@@ -166,16 +174,17 @@ describe("GET /graph/mentor-contributions — authorization", () => {
     expect(getMentorContributionStats).not.toHaveBeenCalled();
   });
 
-  it("rejects a caller presenting a forged/invalid session cookie with 401", async () => {
-    const res = await request(app)
-      .get("/api/graph/mentor-contributions")
-      .set("Cookie", "jack_admin_session=authenticated.deadbeefsignature");
+  it("rejects a signed-in non-admin with 403 and never touches the graph", async () => {
+    signInAs("user");
 
-    expect(res.status).toBe(401);
+    const res = await request(app).get("/api/graph/mentor-contributions");
+
+    expect(res.status).toBe(403);
     expect(getMentorContributionStats).not.toHaveBeenCalled();
   });
 
-  it("accepts a valid admin session and returns contribution stats", async () => {
+  it("accepts an admin and returns contribution stats", async () => {
+    signInAs("admin");
     getMentorContributionStats.mockResolvedValue([
       {
         mentorProfileId: "mentor-1",
@@ -187,9 +196,7 @@ describe("GET /graph/mentor-contributions — authorization", () => {
       },
     ]);
 
-    const res = await request(app)
-      .get("/api/graph/mentor-contributions")
-      .set("Cookie", adminCookie());
+    const res = await request(app).get("/api/graph/mentor-contributions");
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ total: 1 });
@@ -205,16 +212,17 @@ describe("GET /graph/health — authorization", () => {
     expect(getGraphHealth).not.toHaveBeenCalled();
   });
 
-  it("rejects a caller presenting a forged/invalid session cookie with 401", async () => {
-    const res = await request(app)
-      .get("/api/graph/health")
-      .set("Cookie", "jack_admin_session=authenticated.deadbeefsignature");
+  it("rejects a signed-in non-admin with 403 and never touches the graph", async () => {
+    signInAs("user");
 
-    expect(res.status).toBe(401);
+    const res = await request(app).get("/api/graph/health");
+
+    expect(res.status).toBe(403);
     expect(getGraphHealth).not.toHaveBeenCalled();
   });
 
-  it("accepts a valid admin session and returns the health report", async () => {
+  it("accepts an admin and returns the health report", async () => {
+    signInAs("admin");
     getGraphHealth.mockResolvedValue({
       counts: { verified: 1, partial: 0, failed: 0, pending: 0, total: 1 },
       retryQueue: { videos: 0, answers: 0, total: 0 },
@@ -222,7 +230,7 @@ describe("GET /graph/health — authorization", () => {
       recentWrites: [],
     });
 
-    const res = await request(app).get("/api/graph/health").set("Cookie", adminCookie());
+    const res = await request(app).get("/api/graph/health");
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ counts: { total: 1 } });
@@ -249,30 +257,27 @@ describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
     expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending");
   });
 
-  it("rejects an anonymous caller requesting a non-pending status with 401", async () => {
+  it("rejects an anonymous caller requesting a non-pending status with 403", async () => {
     const res = await request(app).get("/api/graph/candidates").query({ status: "accepted" });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     expect(listKnowledgeCandidates).not.toHaveBeenCalled();
   });
 
-  it("rejects a forged/invalid session cookie requesting a non-pending status with 401", async () => {
-    const res = await request(app)
-      .get("/api/graph/candidates")
-      .query({ status: "rejected" })
-      .set("Cookie", "jack_admin_session=authenticated.deadbeefsignature");
+  it("rejects a signed-in non-admin requesting a non-pending status with 403", async () => {
+    signInAs("user");
 
-    expect(res.status).toBe(401);
+    const res = await request(app).get("/api/graph/candidates").query({ status: "rejected" });
+
+    expect(res.status).toBe(403);
     expect(listKnowledgeCandidates).not.toHaveBeenCalled();
   });
 
-  it("allows a valid admin session to read a non-pending status", async () => {
+  it("allows an admin to read a non-pending status", async () => {
+    signInAs("admin");
     listKnowledgeCandidates.mockResolvedValue([]);
 
-    const res = await request(app)
-      .get("/api/graph/candidates")
-      .query({ status: "archived" })
-      .set("Cookie", adminCookie());
+    const res = await request(app).get("/api/graph/candidates").query({ status: "archived" });
 
     expect(res.status).toBe(200);
     expect(listKnowledgeCandidates).toHaveBeenCalledWith("archived");

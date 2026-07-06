@@ -10,7 +10,6 @@ import {
   User,
   Archive,
   RotateCcw,
-  Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,6 +20,7 @@ import {
   useResolveKnowledgeCandidate,
   useGetGraph,
   useGetMentorContributions,
+  useGetMe,
   getListKnowledgeCandidatesQueryKey,
   getGetGraphQueryKey,
   getGetMentorContributionsQueryKey,
@@ -31,7 +31,6 @@ import type {
   ListKnowledgeCandidatesStatus,
   MentorContribution,
 } from "@workspace/api-client-react";
-import { AdminLogin } from "./AdminLogin";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { MentorContributions } from "./MentorContributions";
 import { MentorWithdrawal } from "./MentorWithdrawal";
@@ -124,28 +123,18 @@ const ACTION_DESTINATION: Record<string, { label: string }> = {
 };
 
 export function KnowledgeReview() {
-  // The resolve route is admin-only on the server; this check just decides
-  // whether to show the login gate before the reviewer wastes effort.
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((res) => res.json() as Promise<{ authenticated?: boolean }>)
-      .then((body) => {
-        if (alive) setIsAdmin(Boolean(body.authenticated));
-      })
-      .catch(() => {
-        if (alive) setIsAdmin(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Admin status comes from the signed-in user's email allowlist (resolved
+  // server-side via GET /me). Every mutating review route is independently
+  // enforced with requireAdmin on the server; hiding the controls here is
+  // defense-in-depth, not the security boundary. Keep `null` while loading so
+  // we don't flash the non-admin view to a real admin.
+  const meQuery = useGetMe();
+  const isAdmin: boolean | null = meQuery.isLoading
+    ? null
+    : (meQuery.data?.isAdmin ?? false);
 
   const [statusTab, setStatusTab] = useState<ListKnowledgeCandidatesStatus>("pending");
   const [mentorSort, setMentorSort] = useState<MentorSort>("queue");
-  // Non-admins get a read-only queue; the sign-in overlay only appears on demand.
-  const [showLogin, setShowLogin] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -237,24 +226,12 @@ export function KnowledgeReview() {
           </div>
           <p className="mb-6 text-sm text-muted-foreground">
             These mentor-taught concepts are waiting for a reviewer to place them
-            in the Living Memory. Anyone can follow the queue — reviewers sign in
-            to accept, merge, or reject.
+            in the Living Memory. You can follow the queue below — accepting,
+            merging, or rejecting entries is limited to administrators.
           </p>
-
-          <div className="mb-6">
-            <Button
-              onClick={() => setShowLogin(true)}
-              className="min-h-10 md:min-h-9"
-            >
-              <Lock className="mr-1.5 h-4 w-4" />
-              Sign in to review
-            </Button>
-          </div>
 
           <PendingKnowledgePanel limit={Infinity} />
         </div>
-
-        {showLogin && <AdminLogin onSuccess={() => setIsAdmin(true)} />}
       </div>
     );
   }

@@ -1,150 +1,143 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
+import { getAuth, clerkClient } from "@clerk/express";
 import { logger } from "./logger.js";
 
-const JACK_ADMIN_KEY = process.env["JACK_ADMIN_KEY"];
-const COOKIE_NAME = "jack_admin_session";
+/**
+ * Admin access is ROLE-BASED BY EMAIL: `ADMIN_EMAILS` is a comma/whitespace
+ * separated allowlist. Anyone who signs in (via Clerk) with one of these emails
+ * is an admin; everyone else is a regular authenticated user. Enforcement is
+ * server-side and fail-closed — if `ADMIN_EMAILS` is unset, NO ONE is an admin,
+ * so admin-only routes (Knowledge Review, analytics, exports, moderation,
+ * system tools) stay locked even to signed-in users.
+ */
+const ADMIN_EMAILS: ReadonlySet<string> = new Set(
+  (process.env["ADMIN_EMAILS"] ?? "")
+    .split(/[,\s]+/)
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0),
+);
 
-if (!JACK_ADMIN_KEY) {
+if (ADMIN_EMAILS.size === 0) {
   logger.warn(
-    "JACK_ADMIN_KEY is not set — all admin write operations will be rejected. " +
-      "Set the JACK_ADMIN_KEY secret to enable library management.",
+    "ADMIN_EMAILS is not set — no user will have admin access (Knowledge Review, " +
+      "analytics, exports, moderation, system tools). Set the ADMIN_EMAILS secret " +
+      "(comma-separated) to grant admin access.",
   );
 }
 
-/**
- * Sign a value with HMAC-SHA256 so the session cookie cannot be forged
- * without knowledge of JACK_ADMIN_KEY.  The cookie carries only this signed
- * token — no raw credential is ever set on the client.
- */
-function sign(value: string): string {
-  const key = JACK_ADMIN_KEY!;
-  const sig = createHmac("sha256", key).update(value).digest("hex");
-  return `${value}.${sig}`;
+export interface AdminIdentity {
+  userId: string;
+  email: string;
+  name: string | null;
+}
+
+export interface CallerIdentity {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  isAdmin: boolean;
+}
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Clerk user id, set by the app-level `requireAuth` gate. */
+      userId?: string;
+      /** Resolved admin identity, set by `requireAdmin`/`resolveAdminIdentity`. */
+      admin?: AdminIdentity;
+    }
+  }
+}
+
+/** Whether an email address is in the admin allowlist (case-insensitive). */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
+
+function displayName(user: { firstName: string | null; lastName: string | null }): string | null {
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return name.length > 0 ? name : null;
 }
 
 /**
- * Verify a signed token and return its (still-encoded) value, or null if the
- * signature does not match — so callers can both authenticate the session and
- * read the reviewer identity carried inside it.
+ * Resolve the Clerk-authenticated caller's identity and admin status, or null
+ * when there is no signed-in user. Looks the user up server-side (email is not
+ * carried in the default session claims) and checks the email allowlist.
  */
-function verifiedValue(signed: string): string | null {
-  const dot = signed.lastIndexOf(".");
-  if (dot === -1) return null;
-  const value = signed.slice(0, dot);
-  const expected = sign(value);
+export async function resolveIdentity(req: Request): Promise<CallerIdentity | null> {
+  let userId: string | null | undefined;
   try {
-    return timingSafeEqual(Buffer.from(signed), Buffer.from(expected)) ? value : null;
+    userId = getAuth(req)?.userId;
   } catch {
-    return null;
+    userId = null;
+  }
+  if (!userId) return null;
+
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    const email =
+      user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress ?? null;
+    return { userId, email, name: displayName(user), isAdmin: isAdminEmail(email) };
+  } catch (err) {
+    // Fail closed: if we cannot confirm the email, the caller is not an admin.
+    req.log?.error({ err, userId }, "failed to resolve Clerk user");
+    return { userId, email: null, name: null, isAdmin: false };
   }
 }
 
 /**
- * The signed session no longer carries a bare "authenticated" marker: it now
- * encodes the accountable reviewer behind the session, so every gated write can
- * attribute a decision to a named human. The payload is base64url JSON (no dots,
- * so the `value.signature` split stays unambiguous) and is HMAC-signed — the
- * client cannot forge or alter the reviewer name without JACK_ADMIN_KEY.
+ * Resolve the caller ONLY if they are an admin, else null. Caches the result on
+ * `req.admin` so both the `requireAdmin` middleware and routes that branch on
+ * admin status inline (e.g. non-pending candidate listing) share one lookup.
  */
-interface SessionPayload {
-  v: "authenticated";
-  reviewer: string | null;
-}
-
-const REVIEWER_MAX_LEN = 80;
-
-/** Trim, collapse whitespace, and cap a submitted reviewer name; empty → null. */
-export function normalizeReviewer(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const cleaned = raw.replace(/\s+/g, " ").trim().slice(0, REVIEWER_MAX_LEN);
-  return cleaned.length > 0 ? cleaned : null;
-}
-
-function encodeSessionValue(reviewer: string | null): string {
-  const payload: SessionPayload = { v: "authenticated", reviewer };
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-}
-
-function decodeSessionValue(value: string): SessionPayload | null {
-  try {
-    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const obj = parsed as Record<string, unknown>;
-    if (obj["v"] !== "authenticated") return null;
-    return { v: "authenticated", reviewer: normalizeReviewer(obj["reviewer"]) };
-  } catch {
-    return null;
-  }
-}
-
-/** Read + authenticate the session payload from the request cookie, or null. */
-function readSession(req: Request): SessionPayload | null {
-  if (!JACK_ADMIN_KEY) return null;
-  const cookie = req.cookies?.[COOKIE_NAME];
-  if (typeof cookie !== "string") return null;
-  const value = verifiedValue(cookie);
-  if (value === null) return null;
-  return decodeSessionValue(value);
+export async function resolveAdminIdentity(req: Request): Promise<AdminIdentity | null> {
+  if (req.admin) return req.admin;
+  const identity = await resolveIdentity(req);
+  if (!identity || !identity.isAdmin || !identity.email) return null;
+  const admin: AdminIdentity = {
+    userId: identity.userId,
+    email: identity.email,
+    name: identity.name,
+  };
+  req.admin = admin;
+  return admin;
 }
 
 /**
- * Validate the submitted password against JACK_ADMIN_KEY and, on success,
- * set an HttpOnly signed session cookie carrying the reviewer's name.  The raw
- * password is compared only server-side and is never echoed back.
+ * Express middleware admitting only admin users. Fail-closed:
+ *   - not signed in           → 401
+ *   - signed in, not an admin → 403
+ * On success stashes `req.admin` so handlers can attribute the decision to a
+ * real, non-spoofable identity (never a client-supplied field).
  */
-export function createAdminSession(
-  password: string,
-  res: Response,
-  reviewer?: string | null,
-): "ok" | "wrong" | "unconfigured" {
-  if (!JACK_ADMIN_KEY) return "unconfigured";
-  let equal = false;
-  try {
-    equal = timingSafeEqual(Buffer.from(password), Buffer.from(JACK_ADMIN_KEY));
-  } catch {
-    return "wrong";
-  }
-  if (!equal) return "wrong";
-
-  const signed = sign(encodeSessionValue(normalizeReviewer(reviewer)));
-  res.cookie(COOKIE_NAME, signed, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env["NODE_ENV"] === "production",
-    maxAge: 8 * 60 * 60 * 1000,
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  void (async () => {
+    let userId: string | null | undefined;
+    try {
+      userId = getAuth(req)?.userId;
+    } catch {
+      userId = null;
+    }
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized — sign in required." });
+      return;
+    }
+    const admin = await resolveAdminIdentity(req);
+    if (!admin) {
+      req.log.warn({ url: req.url, method: req.method, userId }, "admin access denied");
+      res.status(403).json({ error: "Forbidden — admin access required." });
+      return;
+    }
+    next();
+  })().catch((err) => {
+    req.log.error({ err }, "requireAdmin error");
+    res.status(500).json({ error: "Failed to verify admin access." });
   });
-  return "ok";
 }
 
-export function clearAdminSession(res: Response): void {
-  res.clearCookie(COOKIE_NAME);
-}
-
-export function isAdminSessionValid(req: Request): boolean {
-  return readSession(req) !== null;
-}
-
-/** The accountable reviewer behind the current session, if one is signed in. */
+/** The accountable reviewer behind the current admin request, for attribution. */
 export function getAdminReviewer(req: Request): string | null {
-  return readSession(req)?.reviewer ?? null;
-}
-
-/**
- * Express middleware that rejects requests without a valid admin session
- * cookie.  Fail-closed: if JACK_ADMIN_KEY is not configured, returns 503.
- */
-export function requireAdminSession(req: Request, res: Response, next: NextFunction): void {
-  if (!JACK_ADMIN_KEY) {
-    res.status(503).json({
-      error: "Library management is not available — the application is not fully configured.",
-    });
-    return;
-  }
-  if (!isAdminSessionValid(req)) {
-    req.log.warn({ url: req.url, method: req.method }, "admin session missing or invalid");
-    res.status(401).json({ error: "Unauthorized — admin session required." });
-    return;
-  }
-  next();
+  return req.admin?.name ?? req.admin?.email ?? null;
 }

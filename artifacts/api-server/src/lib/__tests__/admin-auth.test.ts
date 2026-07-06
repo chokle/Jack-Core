@@ -1,81 +1,159 @@
 /**
- * Unit tests for the signed admin session — specifically the reviewer identity
- * it now carries. A "verified" concept must be attributable to an accountable
- * human, and that name must be tamper-proof: it rides inside the HMAC-signed
- * cookie, so a client cannot forge or alter it without JACK_ADMIN_KEY.
+ * Unit tests for the Clerk email-role admin boundary. Admin status is derived
+ * server-side from the signed-in Clerk user's email against the ADMIN_EMAILS
+ * allowlist — never from a client-supplied field — and the reviewer identity
+ * used for attribution comes from that same resolved profile. The boundary is
+ * fail-closed: no session, an unknown email, or a Clerk lookup failure all
+ * resolve to "not an admin".
  */
-import { vi, describe, it, expect } from "vitest";
-import type { Request, Response } from "express";
+import { vi, describe, it, expect, beforeEach } from "vitest";
+import type { Request } from "express";
 
-// admin-auth reads JACK_ADMIN_KEY at module-load time; set it before import.
-const ADMIN_KEY = vi.hoisted(() => {
-  const key = "test-admin-key-1234567890";
-  process.env["JACK_ADMIN_KEY"] = key;
-  return key;
+// admin-auth reads ADMIN_EMAILS once at module-load time; set it before import.
+// vi.hoisted runs before the static imports below. Deliberately mixed-case and
+// space-padded to prove the allowlist is normalized.
+vi.hoisted(() => {
+  process.env["ADMIN_EMAILS"] = "admin@torchlabs.ca, Boss@Torchlabs.ca";
 });
 
+const getAuth = vi.hoisted(() => vi.fn());
+const getUser = vi.hoisted(() => vi.fn());
+vi.mock("@clerk/express", () => ({
+  getAuth,
+  clerkClient: { users: { getUser } },
+}));
+
 import {
-  createAdminSession,
-  isAdminSessionValid,
+  isAdminEmail,
+  resolveIdentity,
+  resolveAdminIdentity,
   getAdminReviewer,
-  normalizeReviewer,
 } from "../admin-auth.js";
 
-/** Capture the cookie value createAdminSession writes onto the response. */
-function login(reviewer?: string | null): string {
-  let cookie = "";
-  const res = {
-    cookie(name: string, value: string) {
-      cookie = value;
-      return this;
-    },
-  } as unknown as Response;
-  const result = createAdminSession(ADMIN_KEY, res, reviewer);
-  expect(result).toBe("ok");
-  return cookie;
+beforeEach(() => {
+  getAuth.mockReset();
+  getUser.mockReset();
+});
+
+/** Shape a minimal Clerk user record the way clerkClient.users.getUser returns it. */
+function clerkUser(
+  opts: { email?: string | null; firstName?: string | null; lastName?: string | null } = {},
+) {
+  const email = opts.email === undefined ? "admin@torchlabs.ca" : opts.email;
+  return {
+    firstName: opts.firstName ?? null,
+    lastName: opts.lastName ?? null,
+    primaryEmailAddress: email ? { emailAddress: email } : null,
+    emailAddresses: email ? [{ emailAddress: email }] : [],
+  };
 }
 
-function reqWith(cookieValue: string | undefined): Request {
-  return { cookies: { jack_admin_session: cookieValue } } as unknown as Request;
-}
-
-describe("admin session reviewer identity", () => {
-  it("round-trips the reviewer name through the signed cookie", () => {
-    const req = reqWith(login("Dana the Welder"));
-    expect(isAdminSessionValid(req)).toBe(true);
-    expect(getAdminReviewer(req)).toBe("Dana the Welder");
+describe("isAdminEmail", () => {
+  it("matches allowlisted emails case-insensitively and trims whitespace", () => {
+    expect(isAdminEmail("ADMIN@torchlabs.ca")).toBe(true);
+    expect(isAdminEmail("  boss@torchlabs.ca  ")).toBe(true);
   });
 
-  it("keeps a valid session with a null reviewer when no name is supplied", () => {
-    const req = reqWith(login());
-    expect(isAdminSessionValid(req)).toBe(true);
-    expect(getAdminReviewer(req)).toBeNull();
+  it("rejects non-allowlisted and empty emails", () => {
+    expect(isAdminEmail("nobody@example.com")).toBe(false);
+    expect(isAdminEmail("")).toBe(false);
+    expect(isAdminEmail(null)).toBe(false);
+    expect(isAdminEmail(undefined)).toBe(false);
+  });
+});
+
+describe("resolveIdentity", () => {
+  it("returns null when there is no signed-in user", async () => {
+    getAuth.mockReturnValue(undefined);
+    expect(await resolveIdentity({} as Request)).toBeNull();
+    expect(getUser).not.toHaveBeenCalled();
   });
 
-  it("rejects a forged cookie and exposes no reviewer", () => {
-    const req = reqWith("authenticated.deadbeefsignature");
-    expect(isAdminSessionValid(req)).toBe(false);
-    expect(getAdminReviewer(req)).toBeNull();
+  it("returns null when getAuth throws (no Clerk middleware on the request)", async () => {
+    getAuth.mockImplementation(() => {
+      throw new Error("clerkMiddleware not mounted");
+    });
+    expect(await resolveIdentity({} as Request)).toBeNull();
   });
 
-  it("rejects a tampered reviewer payload (signature no longer matches)", () => {
-    const signed = login("Dana the Welder");
-    const dot = signed.lastIndexOf(".");
-    // Swap the payload for a different reviewer while keeping the old signature.
-    const forgedPayload = Buffer.from(
-      JSON.stringify({ v: "authenticated", reviewer: "Impostor" }),
-      "utf8",
-    ).toString("base64url");
-    const tampered = `${forgedPayload}${signed.slice(dot)}`;
-    const req = reqWith(tampered);
-    expect(isAdminSessionValid(req)).toBe(false);
-    expect(getAdminReviewer(req)).toBeNull();
+  it("marks an allowlisted user as admin with a resolved display name", async () => {
+    getAuth.mockReturnValue({ userId: "u_admin" });
+    getUser.mockResolvedValue(
+      clerkUser({ email: "admin@torchlabs.ca", firstName: "Dana", lastName: "Welder" }),
+    );
+
+    expect(await resolveIdentity({} as Request)).toEqual({
+      userId: "u_admin",
+      email: "admin@torchlabs.ca",
+      name: "Dana Welder",
+      isAdmin: true,
+    });
   });
 
-  it("normalizes reviewer names: trims, collapses whitespace, caps length", () => {
-    expect(normalizeReviewer("  Dana   the   Welder  ")).toBe("Dana the Welder");
-    expect(normalizeReviewer("   ")).toBeNull();
-    expect(normalizeReviewer(42)).toBeNull();
-    expect(normalizeReviewer("x".repeat(200))).toHaveLength(80);
+  it("marks a signed-in non-allowlisted user as a regular (non-admin) user", async () => {
+    getAuth.mockReturnValue({ userId: "u_reg" });
+    getUser.mockResolvedValue(clerkUser({ email: "regular@example.com" }));
+
+    expect(await resolveIdentity({} as Request)).toEqual({
+      userId: "u_reg",
+      email: "regular@example.com",
+      name: null,
+      isAdmin: false,
+    });
+  });
+
+  it("fails closed to non-admin when the Clerk user lookup throws", async () => {
+    getAuth.mockReturnValue({ userId: "u_admin" });
+    getUser.mockRejectedValue(new Error("clerk unavailable"));
+    const req = { log: { error: vi.fn() } } as unknown as Request;
+
+    expect(await resolveIdentity(req)).toEqual({
+      userId: "u_admin",
+      email: null,
+      name: null,
+      isAdmin: false,
+    });
+  });
+});
+
+describe("resolveAdminIdentity", () => {
+  it("returns null for a signed-in non-admin", async () => {
+    getAuth.mockReturnValue({ userId: "u_reg" });
+    getUser.mockResolvedValue(clerkUser({ email: "regular@example.com" }));
+    expect(await resolveAdminIdentity({} as Request)).toBeNull();
+  });
+
+  it("resolves + caches the admin identity on req.admin and reuses it", async () => {
+    getAuth.mockReturnValue({ userId: "u_admin" });
+    getUser.mockResolvedValue(
+      clerkUser({ email: "admin@torchlabs.ca", firstName: "Dana", lastName: "Welder" }),
+    );
+    const req = {} as Request;
+
+    const admin = await resolveAdminIdentity(req);
+    expect(admin).toEqual({ userId: "u_admin", email: "admin@torchlabs.ca", name: "Dana Welder" });
+    expect(req.admin).toBe(admin);
+    expect(getAdminReviewer(req)).toBe("Dana Welder");
+
+    // Second call must hit the cache and not re-query Clerk.
+    getUser.mockClear();
+    expect(await resolveAdminIdentity(req)).toBe(admin);
+    expect(getUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAdminReviewer", () => {
+  it("falls back to the email when the admin has no display name", async () => {
+    getAuth.mockReturnValue({ userId: "u_boss" });
+    getUser.mockResolvedValue(
+      clerkUser({ email: "boss@torchlabs.ca", firstName: null, lastName: null }),
+    );
+    const req = {} as Request;
+    await resolveAdminIdentity(req);
+    expect(getAdminReviewer(req)).toBe("boss@torchlabs.ca");
+  });
+
+  it("returns null when no admin has been resolved onto the request", () => {
+    expect(getAdminReviewer({} as Request)).toBeNull();
   });
 });

@@ -35,6 +35,18 @@ export const GetSystemHealthResponse = zod.object({
 
 
 /**
+ * Returns the authenticated user's id, email, display name, and whether their email is in the server-side admin allowlist. Requires a signed-in user; the app-level auth gate 401s anonymous callers before this route.
+ * @summary The signed-in caller's identity and admin status
+ */
+export const GetMeResponse = zod.object({
+  "userId": zod.string(),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "isAdmin": zod.boolean()
+})
+
+
+/**
  * @summary List all videos in the knowledge library
  */
 export const listVideosQueryLimitDefault = 20;

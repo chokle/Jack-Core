@@ -55,6 +55,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemHealthSnapshot"
 
+  /me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: The signed-in caller's identity and admin status
+      description: >-
+        Returns the authenticated user's id, email, display name, and whether
+        their email is in the server-side admin allowlist. Requires a signed-in
+        user; the app-level auth gate 401s anonymous callers before this route.
+      responses:
+        "200":
+          description: Current user identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+
   /videos:
     get:
       operationId: listVideos
@@ -857,6 +874,18 @@ paths:
 
 components:
   schemas:
+    CurrentUser:
+      type: object
+      required: [userId, email, name, isAdmin]
+      properties:
+        userId:
+          type: string
+        email:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        isAdmin:
+          type: boolean
     HealthStatus:
       type: object
       properties:

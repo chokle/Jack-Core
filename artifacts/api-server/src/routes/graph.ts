@@ -24,8 +24,8 @@ import {
   getGraphHealth,
 } from "../lib/memory-graph.js";
 import {
-  requireAdminSession,
-  isAdminSessionValid,
+  requireAdmin,
+  resolveAdminIdentity,
   getAdminReviewer,
 } from "../lib/admin-auth.js";
 
@@ -66,12 +66,12 @@ router.get("/graph/candidates", async (req, res) => {
   const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
 
-  if (parsed.data.status !== "pending" && !isAdminSessionValid(req)) {
+  if (parsed.data.status !== "pending" && !(await resolveAdminIdentity(req))) {
     req.log.warn(
       { url: req.url, status: parsed.data.status },
-      "non-pending candidate list requires admin session",
+      "non-pending candidate list requires admin access",
     );
-    return res.status(401).json({ error: "Unauthorized — admin session required." });
+    return res.status(403).json({ error: "Forbidden — admin access required." });
   }
 
   try {
@@ -90,7 +90,7 @@ router.get("/graph/candidates", async (req, res) => {
 // that reviewers use to calibrate trust in a borderline candidate. Admin-gated
 // like the resolved-candidate surface: it correlates mentor identities with
 // their whole contribution history, which the public product never exposes.
-router.get("/graph/mentor-contributions", requireAdminSession, async (req, res) => {
+router.get("/graph/mentor-contributions", requireAdmin, async (req, res) => {
   try {
     const contributions = await getMentorContributionStats();
     return res.json(
@@ -106,7 +106,7 @@ router.get("/graph/mentor-contributions", requireAdminSession, async (req, res) 
 // its top best match), Merge (reinforce a reviewer-chosen concept), or Reject
 // (record a required reason; graph untouched). Admin-gated like node
 // verification — this mutates the shared Living Memory graph.
-router.post("/graph/candidates/:id/resolve", requireAdminSession, async (req, res) => {
+router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
   const paramsParsed = ResolveKnowledgeCandidateParams.safeParse(req.params);
   if (!paramsParsed.success) return res.status(400).json({ error: "Invalid candidate id" });
 
@@ -146,7 +146,7 @@ router.post("/graph/candidates/:id/resolve", requireAdminSession, async (req, re
 // distilled concept node. This is the only route that mutates the graph, so it
 // is gated behind the same signed admin session used for library management —
 // the API uses the Supabase service-role key and has no other auth boundary.
-router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, res) => {
+router.patch("/graph/nodes/:id/verification", requireAdmin, async (req, res) => {
   const paramsParsed = SetNodeVerificationParams.safeParse(req.params);
   if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
 
@@ -176,7 +176,7 @@ router.patch("/graph/nodes/:id/verification", requireAdminSession, async (req, r
 // provenance. Gated identically to node verification — this mutates the shared
 // Living Memory graph and the API holds the Supabase service-role key with no
 // other auth boundary. Idempotent: a missing entry returns the node unchanged.
-router.post("/graph/nodes/:id/restore-evidence", requireAdminSession, async (req, res) => {
+router.post("/graph/nodes/:id/restore-evidence", requireAdmin, async (req, res) => {
   const paramsParsed = RestoreWithdrawnEvidenceParams.safeParse(req.params);
   if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
 
@@ -200,7 +200,7 @@ router.post("/graph/nodes/:id/restore-evidence", requireAdminSession, async (req
 // retry), average processing time, and the most recent writes with per-check
 // detail. Gated behind the signed admin session — it exposes internal write
 // telemetry and the API holds the Supabase service-role key.
-router.get("/graph/health", requireAdminSession, async (req, res) => {
+router.get("/graph/health", requireAdmin, async (req, res) => {
   try {
     const report = await getGraphHealth();
     return res.json(GetGraphHealthResponse.parse(report));

@@ -5,6 +5,15 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface CurrentUser {
+  userId: string;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  name: string | null;
+  isAdmin: boolean;
+}
+
 export interface HealthStatus {
   status: string;
 }

@@ -24,7 +24,7 @@ import {
   WithdrawMentorParams,
   WithdrawMentorResponse,
 } from "@workspace/api-zod";
-import { requireAdminSession } from "../lib/admin-auth.js";
+import { requireAdmin } from "../lib/admin-auth.js";
 import { publish } from "../lib/vitality.js";
 import {
   previewMentorWithdrawal,
@@ -549,7 +549,7 @@ router.post("/interview/sessions/:id/skip", aiInterviewLimiter, async (req, res)
 // Admin-gated: re-run distillation + verification for a single answer whose
 // knowledge write previously failed (surfaced on the Graph Health dashboard).
 // Idempotent — the graph write path reconciles onto the same canonical nodes.
-router.post("/interview/answers/:id/redistill", requireAdminSession, async (req, res) => {
+router.post("/interview/answers/:id/redistill", requireAdmin, async (req, res) => {
   try {
     const { data: answer, error: aErr } = await supabase
       .from("interview_answers")
@@ -673,7 +673,7 @@ router.post("/interview/sessions/:id/finish", async (req, res) => {
  * never exposes (mentors appear only as provenance on concepts). Counts are
  * computed in-memory from id-only projections, which is fine at library scale.
  */
-router.get("/interview/mentors", requireAdminSession, async (req, res) => {
+router.get("/interview/mentors", requireAdmin, async (req, res) => {
   try {
     const { data: mentors, error } = await supabase
       .from("mentor_profiles")
@@ -729,7 +729,7 @@ router.get("/interview/mentors", requireAdminSession, async (req, res) => {
  * withdrawMentor (graph work first, profile row last), so a replay after
  * success is a clean 404 and a mid-flight retry converges.
  */
-router.post("/interview/mentors/:id/withdraw", requireAdminSession, async (req, res) => {
+router.post("/interview/mentors/:id/withdraw", requireAdmin, async (req, res) => {
   try {
     const parsed = WithdrawMentorParams.safeParse(req.params);
     // A malformed id can never name a mentor — same not-found semantics as a
@@ -756,7 +756,7 @@ router.post("/interview/mentors/:id/withdraw", requireAdminSession, async (req, 
  * admin can make a fully informed decision before this irreversible action.
  * Shares the same concept-evaluation logic as the withdrawal itself.
  */
-router.get("/interview/mentors/:id/withdrawal-preview", requireAdminSession, async (req, res) => {
+router.get("/interview/mentors/:id/withdrawal-preview", requireAdmin, async (req, res) => {
   try {
     const parsed = PreviewMentorWithdrawalParams.safeParse(req.params);
     if (!parsed.success || !UUID_RE.test(parsed.data.id)) {

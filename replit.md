@@ -14,8 +14,9 @@ Jack is the AI Trade Intelligence Engine inside **Torch**: a single-page, search
 ## Current Architecture
 
 - **Monorepo:** pnpm workspaces, Node.js 24, TypeScript 5.9. Contract-first: OpenAPI → Orval (React Query hooks + Zod).
-- **Frontend:** React + Vite single-page app (`artifacts/jack-core/`) — conditional rendering, no routing.
+- **Frontend:** React + Vite app (`artifacts/jack-core/`) — the signed-in engine is a single conditional-render surface; wouter routing exists only for the public landing + Clerk sign-in/up pages.
 - **API:** Express 5 (`artifacts/api-server/`, port 8080).
+- **Auth:** Clerk (email/password + OAuth) gates the whole app; the entire `/api` surface sits behind a server-side `requireAuth`. RBAC is email-based — the `ADMIN_EMAILS` allowlist (a secret) decides who is an admin, enforced fail-closed (401/403) on the backend via `requireAdmin`. Three tiers: PUBLIC (landing + sign-in/up + health), AUTHENTICATED (whole app incl. Teach Jack + video submission), ADMIN (Knowledge Review, analytics, exports, moderation, mentor mgmt).
 - **Data:** Supabase (PostgreSQL + pgvector, 1536-dim `text-embedding-3-small`) is the single source of truth; Supabase Storage (`jack-videos` bucket).
 - **AI:** OpenAI Whisper (transcription) + GPT-4o (analysis + Ask Jack) + embeddings (RAG).
 - **Ingestion:** a resilient, idempotent in-process job pipeline (queued → uploading → uploaded → transcribing → analyzing → indexing → completed, with `failed`/`retrying`). Knowledge writes are **strictly verified** before a video/answer is marked done.
@@ -27,7 +28,7 @@ Deep detail: [`docs/architecture.md`](docs/architecture.md) · [`docs/knowledge-
 - **Contract-first:** edit `lib/api-spec/openapi.yaml`, then run `pnpm --filter @workspace/api-spec run codegen`. Never hand-edit generated code (`lib/api-client-react/src/generated/`, `lib/api-zod/src/generated/`).
 - **Validate all I/O with Zod** (`zod/v4`). Keep `pnpm run typecheck` green across all packages.
 - **Server logging:** use `req.log` / `logger` — never `console.log`. See the `pnpm-workspace` skill for workspace & TS conventions.
-- **Project constraints (user preferences):** no auth, billing, or multi-page navigation in jack-core (single-page AI engine only); Supabase is the single source of truth for all persistence; Next.js was requested but this monorepo uses React+Vite (architecture is equivalent). Optimize for shipping — do only what the task needs, favor completing fewer tasks completely, and minimize reviewer workload.
+- **Project constraints (user preferences):** Clerk auth + email-role RBAC now gates the app (added as a launch requirement) — the signed-in engine stays a single conditional-render surface, with routing limited to the public landing + Clerk sign-in/up pages; no billing. Supabase is the single source of truth for all persistence; Next.js was requested but this monorepo uses React+Vite (architecture is equivalent). Optimize for shipping — do only what the task needs, favor completing fewer tasks completely, and minimize reviewer workload.
 
 ## Active Priorities
 
@@ -40,6 +41,7 @@ Protect the **core pipeline** above all new work: upload → transcribe → embe
 
 ## Known Issues / Constraints
 
+- Admin access is empty until the `ADMIN_EMAILS` secret is set (comma/space-separated allowlist). Fail-closed: with it unset, signed-in users can use the app but NO ONE can reach admin surfaces. Clerk keys (`CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`) are auto-provisioned.
 - The Supabase schema must be applied before the app works (`setup:supabase` with `SUPABASE_DB_URL`); tables don't exist until you do.
 - Use the Supabase **Session pooler** URL — not the direct host (Replit is IPv4-only, direct host is IPv6-only) and not the transaction pooler (DDL needs a session connection).
 - After any OpenAPI change, run codegen before starting the server.

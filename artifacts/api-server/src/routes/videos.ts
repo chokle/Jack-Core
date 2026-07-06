@@ -13,7 +13,7 @@ import {
   CLAIMABLE_STATUSES,
 } from "../lib/jobs.js";
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
-import { requireAdminSession } from "../lib/admin-auth.js";
+import { requireAdmin } from "../lib/admin-auth.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -152,9 +152,11 @@ const upload = multer({
  * service-role key (never exposed to the browser), writes the public URL
  * back, and kicks off transcription.  No signed URL ever leaves the server.
  */
+// Video submission is available to any signed-in user (Tier 2), not just
+// admins — the app-level requireAuth gate already blocks anonymous callers,
+// and ingestLimiter + the multer size cap bound the abuse/cost surface.
 router.post(
   "/videos/ingest",
-  requireAdminSession,
   ingestLimiter,
   upload.single("file"),
   async (req, res) => {
@@ -259,7 +261,7 @@ router.post(
   },
 );
 
-router.post("/videos", requireAdminSession, aiPipelineLimiter, async (req, res) => {
+router.post("/videos", requireAdmin, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = CreateVideoBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -375,7 +377,7 @@ router.get("/videos/:id", async (req, res) => {
   }
 });
 
-router.patch("/videos/:id", requireAdminSession, async (req, res) => {
+router.patch("/videos/:id", requireAdmin, async (req, res) => {
   try {
     const paramsParsed = UpdateVideoParams.safeParse(req.params);
     if (!paramsParsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -409,7 +411,7 @@ router.patch("/videos/:id", requireAdminSession, async (req, res) => {
   }
 });
 
-router.delete("/videos/:id", requireAdminSession, aiPipelineLimiter, async (req, res) => {
+router.delete("/videos/:id", requireAdmin, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = DeleteVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -426,7 +428,7 @@ router.delete("/videos/:id", requireAdminSession, aiPipelineLimiter, async (req,
   }
 });
 
-router.post("/videos/:id/transcribe", requireAdminSession, aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/transcribe", requireAdmin, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = TranscribeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -478,7 +480,7 @@ router.post("/videos/:id/transcribe", requireAdminSession, aiPipelineLimiter, as
   }
 });
 
-router.post("/videos/:id/analyze", requireAdminSession, aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/analyze", requireAdmin, aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = AnalyzeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
@@ -580,7 +582,7 @@ router.get("/videos/:id/related", async (req, res) => {
   }
 });
 
-router.post("/videos/:id/upload-url", requireAdminSession, aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/upload-url", requireAdmin, aiPipelineLimiter, async (req, res) => {
   try {
     const paramsParsed = GetUploadUrlParams.safeParse(req.params);
     if (!paramsParsed.success) return res.status(400).json({ error: "Invalid id" });

@@ -11,6 +11,7 @@ import {
   Menu,
   ShieldCheck,
   X,
+  LogOut,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
@@ -24,6 +25,9 @@ interface JackShellProps {
   model: GraphModel;
   readyCount: number;
   lastUpdatedLabel: string;
+  userLabel?: string;
+  userSubLabel?: string;
+  onSignOut?: () => void;
   children: ReactNode;
 }
 
@@ -38,9 +42,13 @@ export function JackShell({
   model,
   readyCount,
   lastUpdatedLabel,
+  userLabel,
+  userSubLabel,
+  onSignOut,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const avatarInitial = (userLabel?.trim()?.charAt(0) || "J").toUpperCase();
 
   const go = (v: JackView) => {
     onNavigate(v);
@@ -191,16 +199,31 @@ export function JackShell({
         <div className="flex-1" />
 
         {/* Identity */}
-        <div className="flex items-center gap-3 border-t border-sidebar-border px-4 py-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_15px_rgba(255,100,0,0.35)]">
-            <span className="text-sm font-black">J</span>
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">Jack</div>
-            <div className="truncate text-xs text-muted-foreground">
-              Trade Intelligence
+        <div className="border-t border-sidebar-border px-4 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_15px_rgba(255,100,0,0.35)]">
+              <span className="text-sm font-black">{avatarInitial}</span>
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">
+                {userLabel ?? "Jack"}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {userSubLabel ?? "Trade Intelligence"}
+              </div>
             </div>
           </div>
+          {onSignOut && (
+            <button
+              type="button"
+              onClick={onSignOut}
+              data-testid="sign-out"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/50 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </button>
+          )}
         </div>
       </aside>
 
