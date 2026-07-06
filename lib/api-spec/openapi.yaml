@@ -550,6 +550,35 @@ paths:
         "404":
           description: No distilled knowledge node with that id
 
+  /graph/nodes/{id}/answer-contributions:
+    get:
+      operationId: getConceptAnswerContributions
+      tags: [graph]
+      summary: Per-answer confidence a concept drew from each mentor answer (admin only)
+      description: >-
+        Read-only. For a mentor-supported concept node, lists each mentor answer
+        that corroborated it and the per-answer confidence recorded on the
+        mentor→concept edge (meta.answerConfidences). Reviewers use it to see
+        which mentor answers are propping up a concept's confidence, and by how
+        much. Admin-gated like the rest of the mentor surface — it joins verbatim
+        interview content (mentor names, questions, answer excerpts). An unknown
+        or non-mentor-supported node returns an empty list.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Per-answer contributions for the concept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnswerContributionList"
+        "401":
+          description: Admin session required
+
   /interview/sessions:
     post:
       operationId: startInterview
@@ -1720,6 +1749,42 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MentorContribution"
+        total:
+          type: integer
+
+    AnswerContribution:
+      type: object
+      required: [answerId, confidence, mentorProfileId, mentorName, question, answerExcerpt]
+      properties:
+        answerId:
+          type: string
+        confidence:
+          type: ["number", "null"]
+          description: >-
+            The per-answer extraction confidence (0..1) recorded on the
+            mentor→concept edge (meta.answerConfidences). Null for answers
+            recorded before per-answer tracking existed (legacy edges) — never
+            backfilled from the edge max, so the ledger stays honest.
+        mentorProfileId:
+          type: string
+        mentorName:
+          type: ["string", "null"]
+          description: The contributing mentor's name, or null if the profile is gone.
+        question:
+          type: ["string", "null"]
+          description: The interview question this answer responded to, if still on record.
+        answerExcerpt:
+          type: ["string", "null"]
+          description: A short excerpt of the mentor's verbatim answer, if still on record.
+
+    AnswerContributionList:
+      type: object
+      required: [contributions, total]
+      properties:
+        contributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnswerContribution"
         total:
           type: integer
 

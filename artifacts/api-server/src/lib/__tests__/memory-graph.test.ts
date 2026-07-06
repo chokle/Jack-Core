@@ -25,6 +25,7 @@ import {
   knowledgeNodeId,
   setNodeVerification,
   getMentorContributionStats,
+  getConceptAnswerContributions,
   GRAPH_CORE_ID,
 } from "../memory-graph.js";
 
@@ -1989,5 +1990,91 @@ describe("getMentorContributionStats — read-only per-mentor track record", () 
 
   it("returns an empty list when there is nothing to aggregate", async () => {
     expect(await getMentorContributionStats()).toEqual([]);
+  });
+});
+
+describe("getConceptAnswerContributions — per-answer confidence ledger", () => {
+  const CONCEPT = "k:concept:porosity-control";
+  const MENTOR = "mentor-1";
+
+  it("reports each mentor answer's recorded confidence, null for legacy entries, sorted", async () => {
+    // Mentor→concept provenance edge with a per-answer confidence ledger.
+    //   ans-hi / ans-lo : scored on the ledger
+    //   ans-legacy      : in answerIds but NOT in the ledger (legacy edge) → null
+    //   ans-gone        : only in the ledger, and its answer row is missing → null
+    //                     joins, mentorName falls back to the edge's mentor id
+    fake.tables["knowledge_edges"].push({
+      source_id: `mentor:${MENTOR}`,
+      target_id: CONCEPT,
+      kind: "knowledge",
+      weight: 0.9,
+      meta: {
+        sourceType: "mentor",
+        mentorProfileId: MENTOR,
+        answerIds: ["ans-hi", "ans-lo", "ans-legacy"],
+        answerConfidences: { "ans-hi": 0.9, "ans-lo": 0.4, "ans-gone": 0.7 },
+      },
+    });
+    // A video source on the SAME concept must be ignored — mentor-only surface.
+    fake.tables["knowledge_edges"].push({
+      source_id: "video:v1",
+      target_id: CONCEPT,
+      kind: "knowledge",
+      weight: 0.5,
+      meta: { sourceType: "video" },
+    });
+
+    const longAnswer = "A".repeat(250);
+    fake.tables["interview_answers"] = [
+      { id: "ans-hi", question: "How do you prevent porosity?", answer_text: longAnswer, mentor_profile_id: MENTOR },
+      { id: "ans-lo", question: "What causes porosity?", answer_text: "Moisture or contamination.", mentor_profile_id: MENTOR },
+      { id: "ans-legacy", question: "Old question", answer_text: "Old answer text", mentor_profile_id: MENTOR },
+    ];
+    fake.tables["mentor_profiles"] = [{ id: MENTOR, name: "Dana Smith" }];
+
+    const out = await getConceptAnswerContributions(CONCEPT);
+
+    // Union of answerIds + ledger keys; highest confidence first, nulls last.
+    expect(out.map((c) => c.answerId)).toEqual([
+      "ans-hi",
+      "ans-gone",
+      "ans-lo",
+      "ans-legacy",
+    ]);
+
+    const hi = out[0]!;
+    expect(hi.confidence).toBe(0.9);
+    expect(hi.mentorName).toBe("Dana Smith");
+    expect(hi.question).toBe("How do you prevent porosity?");
+    // Verbatim answer trimmed to a short excerpt with an ellipsis.
+    expect(hi.answerExcerpt?.endsWith("…")).toBe(true);
+    expect((hi.answerExcerpt ?? "").length).toBeLessThanOrEqual(201);
+
+    // Legacy answer: on record but never scored → null, reported honestly.
+    const legacy = out.find((c) => c.answerId === "ans-legacy")!;
+    expect(legacy.confidence).toBeNull();
+    expect(legacy.question).toBe("Old question");
+    expect(legacy.answerExcerpt).toBe("Old answer text");
+
+    // Ledger-only answer whose row is gone: scored, but joins tolerate the
+    // missing row (null question/excerpt) and fall back to the edge's mentor.
+    const gone = out.find((c) => c.answerId === "ans-gone")!;
+    expect(gone.confidence).toBe(0.7);
+    expect(gone.question).toBeNull();
+    expect(gone.answerExcerpt).toBeNull();
+    expect(gone.mentorName).toBe("Dana Smith");
+  });
+
+  it("returns an empty list for a concept with no mentor provenance", async () => {
+    fake.tables["knowledge_edges"].push({
+      source_id: "video:v1",
+      target_id: CONCEPT,
+      kind: "knowledge",
+      weight: 0.5,
+      meta: { sourceType: "video" },
+    });
+
+    expect(await getConceptAnswerContributions(CONCEPT)).toEqual([]);
+    expect(await getConceptAnswerContributions("k:concept:does-not-exist")).toEqual([]);
   });
 });

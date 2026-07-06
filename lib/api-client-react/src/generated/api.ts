@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AnswerContributionList,
   CandidateResolutionConflict,
   CandidateResolutionInput,
   ChatInput,
@@ -2040,6 +2041,84 @@ export const useRestoreWithdrawnEvidence = <TError = ErrorType<void>,
       > => {
       return useMutation(getRestoreWithdrawnEvidenceMutationOptions(options));
     }
+
+export const getGetConceptAnswerContributionsUrl = (id: string,) => {
+
+
+
+
+  return `/api/graph/nodes/${id}/answer-contributions`
+}
+
+/**
+ * Read-only. For a mentor-supported concept node, lists each mentor answer that corroborated it and the per-answer confidence recorded on the mentor→concept edge (meta.answerConfidences). Reviewers use it to see which mentor answers are propping up a concept's confidence, and by how much. Admin-gated like the rest of the mentor surface — it joins verbatim interview content (mentor names, questions, answer excerpts). An unknown or non-mentor-supported node returns an empty list.
+ * @summary Per-answer confidence a concept drew from each mentor answer (admin only)
+ */
+export const getConceptAnswerContributions = async (id: string, options?: RequestInit): Promise<AnswerContributionList> => {
+
+  return customFetch<AnswerContributionList>(getGetConceptAnswerContributionsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConceptAnswerContributionsQueryKey = (id: string,) => {
+    return [
+    `/api/graph/nodes/${id}/answer-contributions`
+    ] as const;
+    }
+
+
+export const getGetConceptAnswerContributionsQueryOptions = <TData = Awaited<ReturnType<typeof getConceptAnswerContributions>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConceptAnswerContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConceptAnswerContributionsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConceptAnswerContributions>>> = ({ signal }) => getConceptAnswerContributions(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConceptAnswerContributions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConceptAnswerContributionsQueryResult = NonNullable<Awaited<ReturnType<typeof getConceptAnswerContributions>>>
+export type GetConceptAnswerContributionsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Per-answer confidence a concept drew from each mentor answer (admin only)
+ */
+
+export function useGetConceptAnswerContributions<TData = Awaited<ReturnType<typeof getConceptAnswerContributions>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConceptAnswerContributions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConceptAnswerContributionsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getStartInterviewUrl = () => {
 

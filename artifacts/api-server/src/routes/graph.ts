@@ -5,6 +5,8 @@ import {
   ListKnowledgeCandidatesQueryParams,
   ListKnowledgeCandidatesResponse,
   GetMentorContributionsResponse,
+  GetConceptAnswerContributionsParams,
+  GetConceptAnswerContributionsResponse,
   ResolveKnowledgeCandidateParams,
   ResolveKnowledgeCandidateBody,
   ResolveKnowledgeCandidateResponse,
@@ -20,6 +22,7 @@ import {
   restoreWithdrawnEvidence,
   listKnowledgeCandidates,
   getMentorContributionStats,
+  getConceptAnswerContributions,
   resolveKnowledgeCandidate,
   getGraphHealth,
 } from "../lib/memory-graph.js";
@@ -192,6 +195,30 @@ router.post("/graph/nodes/:id/restore-evidence", requireAdmin, async (req, res) 
   } catch (err) {
     req.log.error({ err }, "restoreWithdrawnEvidence error");
     return res.status(500).json({ error: "Failed to restore withdrawn evidence" });
+  }
+});
+
+// Admin-only, read-only: for a mentor-supported concept, the per-answer
+// confidence each contributing mentor answer recorded on the mentor→concept
+// edge (meta.answerConfidences), joined to the answer's question + a verbatim
+// excerpt and the mentor's name. Admin-gated like the rest of the mentor
+// surface because it exposes verbatim interview content (personal data); the
+// public product only ever shows aggregate confidence. Mutates nothing.
+router.get("/graph/nodes/:id/answer-contributions", requireAdmin, async (req, res) => {
+  const paramsParsed = GetConceptAnswerContributionsParams.safeParse(req.params);
+  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
+
+  try {
+    const contributions = await getConceptAnswerContributions(paramsParsed.data.id);
+    return res.json(
+      GetConceptAnswerContributionsResponse.parse({
+        contributions,
+        total: contributions.length,
+      }),
+    );
+  } catch (err) {
+    req.log.error({ err }, "getConceptAnswerContributions error");
+    return res.status(500).json({ error: "Failed to load answer contributions" });
   }
 });
 

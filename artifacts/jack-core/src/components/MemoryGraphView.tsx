@@ -32,6 +32,8 @@ import {
   useGetMe,
   useGetKnowledgeStats,
   getGetKnowledgeStatsQueryKey,
+  useGetConceptAnswerContributions,
+  getGetConceptAnswerContributionsQueryKey,
   getGetVideoQueryKey,
   getGetGraphQueryKey,
   getGetMentorActiveSessionQueryKey,
@@ -2146,6 +2148,98 @@ function MentorResumeAction({
   );
 }
 
+/**
+ * Admin-only: how much each mentor answer contributed to this concept's
+ * confidence — the per-answer confidence recorded on the mentor→concept edge,
+ * paired with the answer's question and a verbatim excerpt. Fetched lazily: it
+ * only mounts (and fetches) when the "Answer contributions" section is expanded.
+ * Admin-gated on the server too, because it surfaces verbatim interview content.
+ * An answer recorded before per-answer tracking existed reports no score rather
+ * than a fabricated one.
+ */
+function AnswerContributionsContent({ nodeId }: { nodeId: string }) {
+  const { data, isLoading } = useGetConceptAnswerContributions(nodeId, {
+    request: { credentials: "include" },
+    query: {
+      enabled: nodeId.length > 0,
+      queryKey: getGetConceptAnswerContributionsQueryKey(nodeId),
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <p className="text-xs text-muted-foreground">Reading the confidence ledger…</p>
+    );
+  }
+
+  const contributions = data?.contributions ?? [];
+  if (contributions.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No per-answer confidence recorded for this concept yet.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="space-y-3">
+      {contributions.map((c) => {
+        const pct =
+          c.confidence !== null
+            ? Math.round(Math.max(0, Math.min(1, c.confidence)) * 100)
+            : null;
+        return (
+          <li
+            key={c.answerId}
+            className="rounded-lg border border-border/60 bg-black/20 p-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground"
+                title={c.mentorName ?? undefined}
+              >
+                {c.mentorName ?? "Unknown mentor"}
+              </span>
+              {pct !== null ? (
+                <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums text-foreground">
+                  {pct}%
+                </span>
+              ) : (
+                <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                  no score
+                </span>
+              )}
+            </div>
+            {pct !== null ? (
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-amber-400/80"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            ) : (
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">
+                Recorded before per-answer confidence tracking — contribution not
+                scored.
+              </p>
+            )}
+            {c.question && (
+              <p className="mt-2 text-[11px] font-medium leading-relaxed text-muted-foreground">
+                {c.question}
+              </p>
+            )}
+            {c.answerExcerpt && (
+              <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/85">
+                “{c.answerExcerpt}”
+              </p>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function NodeDetailBody({
   node,
   degree,
@@ -2442,6 +2536,12 @@ export function NodeDetailBody({
                 </div>
               )}
             </div>
+          </Section>
+        )}
+
+        {knowledge && isAdmin && mentorSupplied && (
+          <Section title="Answer contributions">
+            <AnswerContributionsContent nodeId={node.id} />
           </Section>
         )}
 

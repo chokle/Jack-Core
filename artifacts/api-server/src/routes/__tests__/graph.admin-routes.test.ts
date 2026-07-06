@@ -41,6 +41,7 @@ vi.mock("@clerk/express", () => ({
 const resolveKnowledgeCandidate = vi.hoisted(() => vi.fn());
 const listKnowledgeCandidates = vi.hoisted(() => vi.fn());
 const getMentorContributionStats = vi.hoisted(() => vi.fn());
+const getConceptAnswerContributions = vi.hoisted(() => vi.fn());
 const getGraphHealth = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/memory-graph.js", () => ({
@@ -50,6 +51,7 @@ vi.mock("../../lib/memory-graph.js", () => ({
   restoreWithdrawnEvidence: vi.fn(),
   listKnowledgeCandidates,
   getMentorContributionStats,
+  getConceptAnswerContributions,
   resolveKnowledgeCandidate,
   getGraphHealth,
 }));
@@ -101,6 +103,7 @@ beforeEach(() => {
   resolveKnowledgeCandidate.mockReset();
   listKnowledgeCandidates.mockReset();
   getMentorContributionStats.mockReset();
+  getConceptAnswerContributions.mockReset();
   getGraphHealth.mockReset();
 });
 
@@ -201,6 +204,66 @@ describe("GET /graph/mentor-contributions — authorization", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ total: 1 });
     expect(getMentorContributionStats).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GET /graph/nodes/:id/answer-contributions — authorization", () => {
+  const NODE_ID = "concept:porosity-control";
+
+  it("rejects an anonymous caller with 401 and never touches the graph", async () => {
+    const res = await request(app).get(
+      `/api/graph/nodes/${encodeURIComponent(NODE_ID)}/answer-contributions`,
+    );
+
+    expect(res.status).toBe(401);
+    expect(getConceptAnswerContributions).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed-in non-admin with 403 and never touches the graph", async () => {
+    signInAs("user");
+
+    const res = await request(app).get(
+      `/api/graph/nodes/${encodeURIComponent(NODE_ID)}/answer-contributions`,
+    );
+
+    expect(res.status).toBe(403);
+    expect(getConceptAnswerContributions).not.toHaveBeenCalled();
+  });
+
+  it("accepts an admin and returns the per-answer contributions with a total", async () => {
+    signInAs("admin");
+    getConceptAnswerContributions.mockResolvedValue([
+      {
+        answerId: "ans-1",
+        confidence: 0.9,
+        mentorProfileId: "mentor-1",
+        mentorName: "Dana",
+        question: "How do you prevent porosity?",
+        answerExcerpt: "Keep the base metal clean and dry.",
+      },
+      {
+        answerId: "ans-legacy",
+        confidence: null,
+        mentorProfileId: "mentor-1",
+        mentorName: "Dana",
+        question: null,
+        answerExcerpt: null,
+      },
+    ]);
+
+    const res = await request(app).get(
+      `/api/graph/nodes/${encodeURIComponent(NODE_ID)}/answer-contributions`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ total: 2 });
+    expect(res.body.contributions).toHaveLength(2);
+    // The nullable confidence survives Zod response validation, unchanged.
+    expect(res.body.contributions[1]).toMatchObject({
+      answerId: "ans-legacy",
+      confidence: null,
+    });
+    expect(getConceptAnswerContributions).toHaveBeenCalledWith(NODE_ID);
   });
 });
 

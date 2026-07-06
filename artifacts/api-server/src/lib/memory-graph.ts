@@ -2114,6 +2114,156 @@ export async function getMentorContributionStats(): Promise<MentorContributionSt
   return [...stats.values()];
 }
 
+/** One mentor answer's recorded contribution to a concept's confidence. */
+export interface AnswerContributionEntry {
+  answerId: string;
+  /**
+   * Per-answer confidence from the mentor→concept edge ledger
+   * (meta.answerConfidences). Null for a legacy edge answer recorded before the
+   * ledger existed — reported as-is, never backfilled from the edge max.
+   */
+  confidence: number | null;
+  mentorProfileId: string;
+  mentorName: string | null;
+  question: string | null;
+  answerExcerpt: string | null;
+}
+
+const ANSWER_EXCERPT_MAX = 200;
+
+/** Trim a verbatim answer to a short, reviewer-facing excerpt (or null). */
+function toAnswerExcerpt(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const t = text.trim();
+  if (!t) return null;
+  return t.length > ANSWER_EXCERPT_MAX ? `${t.slice(0, ANSWER_EXCERPT_MAX).trimEnd()}…` : t;
+}
+
+/**
+ * Read-only: for a mentor-supported concept node, the per-answer confidence each
+ * contributing mentor answer recorded on the mentor→concept edge
+ * (meta.answerConfidences), joined to the interview answer (question + verbatim
+ * excerpt) and mentor profile (name) purely for reviewer-facing identity. NO
+ * graph writes. An unknown or non-mentor-supported node yields an empty list.
+ *
+ * Confidence is reported EXACTLY as the ledger recorded it: an answer present in
+ * meta.answerIds but absent from meta.answerConfidences (a legacy edge written
+ * before per-answer tracking existed) reports null rather than a backfilled edge
+ * max, so the "why is Jack this confident?" story stays honest. Joins tolerate
+ * missing rows — a deleted answer/profile yields null fields, not a dropped item.
+ */
+export async function getConceptAnswerContributions(
+  nodeId: string,
+): Promise<AnswerContributionEntry[]> {
+  const { data: edges, error: edgesErr } = await supabase
+    .from("knowledge_edges")
+    .select("source_id, meta")
+    .eq("target_id", nodeId)
+    .eq("kind", "knowledge");
+  if (edgesErr) throw edgesErr;
+
+  // answerId -> {confidence, mentorProfileId}. An answer belongs to exactly one
+  // mentor (one mentor→concept edge per concept), so a stray duplicate simply
+  // keeps the higher recorded confidence.
+  const byAnswer = new Map<string, { confidence: number | null; mentorProfileId: string }>();
+  for (const row of edges ?? []) {
+    const e = row as Record<string, unknown>;
+    const source = e["source_id"];
+    if (typeof source !== "string" || !source.startsWith("mentor:")) continue;
+    const meta = (e["meta"] as Record<string, unknown> | null) ?? {};
+    const mentorProfileId =
+      typeof meta["mentorProfileId"] === "string"
+        ? (meta["mentorProfileId"] as string)
+        : source.slice("mentor:".length);
+    const answerIds = Array.isArray(meta["answerIds"])
+      ? (meta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      : [];
+    const confidences =
+      meta["answerConfidences"] && typeof meta["answerConfidences"] === "object"
+        ? (meta["answerConfidences"] as Record<string, unknown>)
+        : {};
+    // Union of answerIds and any recorded confidence keys, so neither a legacy
+    // (ledger-less) answer nor a ledger entry that drifted out of answerIds is
+    // ever silently dropped.
+    const ids = new Set<string>(answerIds);
+    for (const k of Object.keys(confidences)) ids.add(k);
+    for (const id of ids) {
+      const raw = confidences[id];
+      const confidence = typeof raw === "number" ? raw : null;
+      const prev = byAnswer.get(id);
+      if (
+        !prev ||
+        (confidence !== null && (prev.confidence === null || confidence > prev.confidence))
+      ) {
+        byAnswer.set(id, { confidence, mentorProfileId });
+      }
+    }
+  }
+
+  if (byAnswer.size === 0) return [];
+
+  // Join verbatim question/answer and mentor names for reviewer-facing identity.
+  const { data: answers, error: ansErr } = await supabase
+    .from("interview_answers")
+    .select("id, question, answer_text, mentor_profile_id")
+    .in("id", [...byAnswer.keys()]);
+  if (ansErr) throw ansErr;
+  const answerById = new Map<string, Record<string, unknown>>();
+  for (const a of answers ?? []) {
+    const r = a as Record<string, unknown>;
+    if (typeof r["id"] === "string") answerById.set(r["id"], r);
+  }
+
+  const mentorIds = new Set<string>();
+  for (const { mentorProfileId } of byAnswer.values()) mentorIds.add(mentorProfileId);
+  for (const a of answerById.values()) {
+    const pid = a["mentor_profile_id"];
+    if (typeof pid === "string" && pid) mentorIds.add(pid);
+  }
+  const nameById = new Map<string, string>();
+  if (mentorIds.size > 0) {
+    const { data: mentors, error: mErr } = await supabase
+      .from("mentor_profiles")
+      .select("id, name")
+      .in("id", [...mentorIds]);
+    if (mErr) throw mErr;
+    for (const m of mentors ?? []) {
+      const r = m as Record<string, unknown>;
+      if (typeof r["id"] === "string" && typeof r["name"] === "string") {
+        nameById.set(r["id"], r["name"]);
+      }
+    }
+  }
+
+  const contributions: AnswerContributionEntry[] = [];
+  for (const [answerId, { confidence, mentorProfileId }] of byAnswer) {
+    const answer = answerById.get(answerId);
+    const answerMentorId =
+      answer && typeof answer["mentor_profile_id"] === "string"
+        ? (answer["mentor_profile_id"] as string)
+        : mentorProfileId;
+    contributions.push({
+      answerId,
+      confidence,
+      mentorProfileId,
+      mentorName: nameById.get(answerMentorId) ?? nameById.get(mentorProfileId) ?? null,
+      question:
+        answer && typeof answer["question"] === "string" ? (answer["question"] as string) : null,
+      answerExcerpt: toAnswerExcerpt(answer?.["answer_text"]),
+    });
+  }
+
+  // Highest-confidence answers first; unknown (legacy null) confidence last.
+  contributions.sort((a, b) => {
+    if (a.confidence === null && b.confidence === null) return 0;
+    if (a.confidence === null) return 1;
+    if (b.confidence === null) return -1;
+    return b.confidence - a.confidence;
+  });
+
+  return contributions;
+}
+
 /**
  * Knowledge Review outcomes. accept/merge/reject resolve a PENDING mentor
  * candidate; restore re-mints an ARCHIVED (mentor-withdrawn) concept back into

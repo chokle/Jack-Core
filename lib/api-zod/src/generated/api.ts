@@ -619,6 +619,27 @@ export const RestoreWithdrawnEvidenceResponse = zod.object({
 
 
 /**
+ * Read-only. For a mentor-supported concept node, lists each mentor answer that corroborated it and the per-answer confidence recorded on the mentor→concept edge (meta.answerConfidences). Reviewers use it to see which mentor answers are propping up a concept's confidence, and by how much. Admin-gated like the rest of the mentor surface — it joins verbatim interview content (mentor names, questions, answer excerpts). An unknown or non-mentor-supported node returns an empty list.
+ * @summary Per-answer confidence a concept drew from each mentor answer (admin only)
+ */
+export const GetConceptAnswerContributionsParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetConceptAnswerContributionsResponse = zod.object({
+  "contributions": zod.array(zod.object({
+  "answerId": zod.string(),
+  "confidence": zod.number().nullable().describe('The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.'),
+  "mentorProfileId": zod.string(),
+  "mentorName": zod.string().nullable().describe('The contributing mentor\'s name, or null if the profile is gone.'),
+  "question": zod.string().nullable().describe('The interview question this answer responded to, if still on record.'),
+  "answerExcerpt": zod.string().nullable().describe('A short excerpt of the mentor\'s verbatim answer, if still on record.')
+})),
+  "total": zod.number()
+})
+
+
+/**
  * @summary Create a mentor profile and start an interview session
  */
 export const StartInterviewBody = zod.object({

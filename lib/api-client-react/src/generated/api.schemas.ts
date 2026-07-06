@@ -712,6 +712,36 @@ export interface MentorContributionList {
   total: number;
 }
 
+export interface AnswerContribution {
+  answerId: string;
+  /**
+     * The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.
+     * @nullable
+     */
+  confidence: number | null;
+  mentorProfileId: string;
+  /**
+     * The contributing mentor's name, or null if the profile is gone.
+     * @nullable
+     */
+  mentorName: string | null;
+  /**
+     * The interview question this answer responded to, if still on record.
+     * @nullable
+     */
+  question: string | null;
+  /**
+     * A short excerpt of the mentor's verbatim answer, if still on record.
+     * @nullable
+     */
+  answerExcerpt: string | null;
+}
+
+export interface AnswerContributionList {
+  contributions: AnswerContribution[];
+  total: number;
+}
+
 export interface MentorSummary {
   id: string;
   name: string;

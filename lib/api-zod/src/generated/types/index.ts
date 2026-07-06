@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './answerContribution';
+export * from './answerContributionList';
 export * from './candidateResolutionConflict';
 export * from './candidateResolutionConflictCode';
 export * from './candidateResolutionInput';
