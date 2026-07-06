@@ -11,6 +11,7 @@ Read order for a new agent: **`../VISION.md` (why + priorities) → `../JACK_CON
 - [codebase-map.md](./codebase-map.md) — "where things live": file-by-file map of the API server and frontend.
 - [product-features.md](./product-features.md) — product feature reference (Video Library, Ask Jack, Interview Mode, Knowledge Review, Graph Health, Parking Lot, etc.).
 - [operations.md](./operations.md) — run/operate commands, the required Supabase schema setup, and operational gotchas.
+- [testing-admin-flows.md](./testing-admin-flows.md) — reusable recipe for driving admin-gated (Clerk email-role) surfaces like Knowledge Review in a real browser: allowlisting a test admin, programmatic Clerk sign-in, and Supabase fixture seeding.
 - [upload-scalability-design.md](./upload-scalability-design.md) — design-only notes on scaling the upload pipeline (trigger-gated; no implementation).
 
 ## Related root documents

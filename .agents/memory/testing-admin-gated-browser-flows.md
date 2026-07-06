@@ -11,14 +11,24 @@ anymore — the whole `routes/admin.ts` file and the password-session machinery 
 removed when auth migrated to Clerk. `requireAdmin` resolves the caller from
 `getAuth(req).userId` → `clerkClient.users.getUser` → `isAdminEmail`.
 
-**Consequence for browser tests:** an earlier task built a non-prod, password-less
-`/api/admin/dev-login` so Playwright could mint the old signed admin cookie in-browser;
-that mechanism was superseded by the Clerk migration and no longer exists. To drive
-admin-gated Knowledge Review UI in a real browser now, the test needs a real Clerk
-session for an allowlisted email (e.g. a dedicated test Clerk user + the testing skill's
-Clerk override), OR verify the admin flows below the UI via the API/DB. A Clerk-based
-test sign-in helper is not yet built — treat that as open work if browser-DOM admin
-coverage is required.
+**Browser tests CAN now sign in as admin (helper built) — see
+`docs/testing-admin-flows.md` for the full recipe.** The Replit testing skill
+signs users in programmatically: call `runTest({ testClerkAuth: true })` and add a
+`[Clerk Auth] Sign in as {email}` step. That user is an admin iff `email` is on the
+`ADMIN_EMAILS` allowlist, so the "helper" is just: sign in as an allowlisted email —
+no dev-login route, no cookie minting (the old password-less `/api/admin/dev-login`
+was removed in the Clerk migration). Conventions:
+- Canonical browser-test admin email: `jack-e2e-admin@example.com` (plain — the
+  harness sign-in is programmatic, so no `+clerk_test` needed). Must be added to the
+  `ADMIN_EMAILS` **secret** (never a shared env var → plaintext in tracked `.replit`);
+  it's read once at api-server module load, so **restart the api-server after setting
+  it** and confirm the `ADMIN_EMAILS is not set` warning is gone before spending a
+  runTest cycle. Secrets are global → tell the user to drop the test email before publish.
+- Simplest reopen fixture: a `knowledge_candidates` row `status='rejected'` +
+  non-null random-UUID `mentor_profile_id` (that column has NO FK). Reopen of a
+  rejected row is a pure CAS flip to pending — touches no graph nodes, so it dodges
+  the restore topic-hub FK dance entirely. "Reopen for review" button shows for
+  rejected/accepted/merged AND `candidate.mentorProfileId` set.
 
 **Seeding is the real friction, independent of auth.** The testing subagent's `[DB]`
 step talks to the built-in Replit Postgres, NOT Supabase (this app's source of truth),
