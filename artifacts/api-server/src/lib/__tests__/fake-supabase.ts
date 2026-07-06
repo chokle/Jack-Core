@@ -47,12 +47,23 @@ const NOT_NULL_DEFAULT_COLUMNS: Record<string, string[]> = {
 };
 
 /**
- * Foreign keys the real schema enforces. `knowledge_edges.source_id` and
- * `.target_id` both `REFERENCES knowledge_nodes(id)`, so writing an edge whose
- * endpoint node does not exist yet raises a `..._id_fkey ... is not present in
- * table "knowledge_nodes"` error and 500s in production. Modeling it here means
- * any graph-write path that upserts an edge before its node surfaces as a test
- * failure instead of only blowing up against a live database.
+ * Foreign keys the real schema enforces. Writing a child row whose referenced
+ * parent does not exist yet raises a `..._fkey ... is not present in table "..."`
+ * error and 500s in production. Modeling these here means any write path that
+ * emits a child row before its parent surfaces as a test failure instead of only
+ * blowing up against a live database. The check applies to BOTH `.insert()` and
+ * `.upsert()` since these tables are written via either.
+ *
+ * Mirrors the `REFERENCES ... ON DELETE CASCADE` constraints in
+ * `scripts/src/supabase-schema.sql`:
+ *   - `knowledge_edges.source_id`/`.target_id` -> `knowledge_nodes(id)`
+ *   - `transcript_segments.video_id` -> `videos(id)`
+ *   - `interview_sessions.mentor_profile_id` -> `mentor_profiles(id)`
+ *   - `interview_answers.session_id` -> `interview_sessions(id)` and
+ *     `.mentor_profile_id` -> `mentor_profiles(id)`
+ *   - `parked_thoughts.interview_session_id` -> `interview_sessions(id)` and
+ *     `.mentor_profile_id` -> `mentor_profiles(id)` (both nullable — a NULL is
+ *     allowed and is skipped by the check, only a non-null orphan is rejected)
  */
 const FOREIGN_KEYS: Record<
   string,
@@ -61,6 +72,20 @@ const FOREIGN_KEYS: Record<
   knowledge_edges: [
     { column: "source_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_source_id_fkey" },
     { column: "target_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_target_id_fkey" },
+  ],
+  transcript_segments: [
+    { column: "video_id", refTable: "videos", constraint: "transcript_segments_video_id_fkey" },
+  ],
+  interview_sessions: [
+    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "interview_sessions_mentor_profile_id_fkey" },
+  ],
+  interview_answers: [
+    { column: "session_id", refTable: "interview_sessions", constraint: "interview_answers_session_id_fkey" },
+    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "interview_answers_mentor_profile_id_fkey" },
+  ],
+  parked_thoughts: [
+    { column: "interview_session_id", refTable: "interview_sessions", constraint: "parked_thoughts_interview_session_id_fkey" },
+    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "parked_thoughts_mentor_profile_id_fkey" },
   ],
 };
 
@@ -293,7 +318,41 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this.runSelect();
   }
 
+  /**
+   * Enforce the modeled foreign keys for the current table's write batch. A
+   * non-null value in an FK column with no matching parent row raises the same
+   * `..._fkey ... is not present in table "..."` error the real DB would. A NULL
+   * (or omitted) FK value is allowed here — a required parent is a NOT NULL
+   * concern, not an FK one. Returns an error Result on the first violation, or
+   * null when every referenced parent exists.
+   */
+  private checkForeignKeys(): Result<unknown> | null {
+    const foreignKeys = FOREIGN_KEYS[this.table];
+    if (!foreignKeys) return null;
+    for (const fk of foreignKeys) {
+      const refIds = new Set((this.db.tables[fk.refTable] ?? []).map((r) => r["id"]));
+      for (const r of this.upsertRows) {
+        const val = r[fk.column];
+        if (val === undefined || val === null) continue;
+        if (!refIds.has(val)) {
+          return {
+            data: null,
+            error: {
+              message: `insert or update on table "${this.table}" violates foreign key constraint "${fk.constraint}": Key (${fk.column})=(${String(val)}) is not present in table "${fk.refTable}"`,
+            },
+          };
+        }
+      }
+    }
+    return null;
+  }
+
   private runInsert(): Result<unknown> {
+    // Referential integrity applies to the insert path too — several FK-bearing
+    // tables (transcript_segments, interview_*) are written via `.insert()`.
+    const fkError = this.checkForeignKeys();
+    if (fkError) return fkError;
+
     const now = new Date().toISOString();
     let n = 0;
     for (const incoming of this.upsertRows) {
@@ -368,28 +427,13 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       }
     }
 
-    // Model referential integrity: an edge endpoint (source_id/target_id) must
-    // already exist in knowledge_nodes, mirroring the real FK. A NULL endpoint is
-    // a NOT NULL violation in the real DB, not an FK one, so leave those to the
-    // check above and only reject a non-null id with no matching node row.
-    const foreignKeys = FOREIGN_KEYS[this.table];
-    if (foreignKeys) {
-      for (const fk of foreignKeys) {
-        const refIds = new Set((this.db.tables[fk.refTable] ?? []).map((r) => r["id"]));
-        for (const r of this.upsertRows) {
-          const val = r[fk.column];
-          if (val === undefined || val === null) continue;
-          if (!refIds.has(val)) {
-            return {
-              data: null,
-              error: {
-                message: `insert or update on table "${this.table}" violates foreign key constraint "${fk.constraint}": Key (${fk.column})=(${String(val)}) is not present in table "${fk.refTable}"`,
-              },
-            };
-          }
-        }
-      }
-    }
+    // Model referential integrity: a child row's FK column (e.g. an edge
+    // endpoint source_id/target_id) must already reference an existing parent,
+    // mirroring the real FK. A NULL value is a NOT NULL violation in the real DB,
+    // not an FK one, so leave those to the check above and only reject a non-null
+    // value with no matching parent row.
+    const fkError = this.checkForeignKeys();
+    if (fkError) return fkError;
 
     for (const incoming of this.upsertRows) {
       const id = incoming["id"];
