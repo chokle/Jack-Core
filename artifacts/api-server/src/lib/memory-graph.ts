@@ -1670,6 +1670,14 @@ async function persistMentorResolvedConcepts(
       : [...prevAnswerIds, answerId];
     const prevConf =
       typeof prevMeta["confidence"] === "number" ? (prevMeta["confidence"] as number) : 0;
+    // Per-answer confidence ledger keyed by answerId. Recording it here is what
+    // lets a later withdrawal recompute the true max over the SURVIVING answers,
+    // instead of leaving the edge stuck at a withdrawn answer's high confidence.
+    const prevAnswerConfidences =
+      prevMeta["answerConfidences"] && typeof prevMeta["answerConfidences"] === "object"
+        ? (prevMeta["answerConfidences"] as Record<string, number>)
+        : {};
+    const answerConfidences = { ...prevAnswerConfidences, [answerId]: c.confidence };
     return {
       id,
       source_id: mNode,
@@ -1683,10 +1691,12 @@ async function persistMentorResolvedConcepts(
         mentorProfileId,
         // Typed answers have no media timeline yet (reserved for audio/video).
         timestamps: [],
+        // Additive-forward: the edge confidence never drops on a new answer.
         confidence: Math.max(prevConf, c.confidence),
         trade,
         competencyCode: c.competencyCode,
         answerIds,
+        answerConfidences,
         model,
         extractedAt,
       },
@@ -2774,10 +2784,11 @@ async function rearchiveRestoredCandidateInner(
  *    unattributed alternate wordings, not mentor data — dropping them would break
  *    duplicate-matching for every other source; the retained alias means a
  *    re-taught wording exact-alias-matches back into the reinforce band).
- *  - The edge's scalar `meta.confidence` (a max over the mentor's answers, with no
- *    per-answer ledger) is NOT lowered: exact reversal is impossible, so a kept
- *    edge's node confidence may stay marginally overstated ONLY when the removed
- *    answer held the max and other answers remain. Documented tradeoff.
+ *  - The edge's scalar `meta.confidence` is recomputed as the max over the
+ *    SURVIVING answers' per-answer confidence (`meta.answerConfidences`), so a
+ *    withdrawn high-confidence answer no longer leaves the edge over-confident.
+ *    A legacy edge written before the per-answer ledger existed keeps its prior
+ *    confidence when a surviving answer's value is unknown — never understated.
  */
 async function reverseMentorReinforcement(
   mentorProfileId: string,
@@ -2815,10 +2826,35 @@ async function reverseMentorReinforcement(
         if (delErr) throw delErr;
       } else {
         // Other answers still corroborate — keep the edge, minus this answer.
+        // Recompute the edge confidence as the max over the SURVIVING answers'
+        // recorded per-answer confidence, so withdrawing a high-confidence answer
+        // no longer leaves the edge over-confident. A legacy edge (written before
+        // the per-answer ledger) with any surviving answer whose confidence we do
+        // not know is left at its existing confidence — never understated.
+        const prevAnswerConfidences =
+          meta["answerConfidences"] && typeof meta["answerConfidences"] === "object"
+            ? (meta["answerConfidences"] as Record<string, number>)
+            : {};
+        const answerConfidences: Record<string, number> = {};
+        for (const id of answerIds) {
+          if (typeof prevAnswerConfidences[id] === "number") {
+            answerConfidences[id] = prevAnswerConfidences[id];
+          }
+        }
+        const prevConf = typeof meta["confidence"] === "number" ? (meta["confidence"] as number) : 0;
+        const haveAllSurviving = answerIds.every(
+          (id) => typeof prevAnswerConfidences[id] === "number",
+        );
+        const confidence = haveAllSurviving
+          ? Math.max(...answerIds.map((id) => prevAnswerConfidences[id] as number))
+          : prevConf;
         // (knowledge_edges has no updated_at column; only weight + meta change.)
         const { error: updErr } = await supabase
           .from("knowledge_edges")
-          .update({ weight: answerIds.length, meta: { ...meta, answerIds } })
+          .update({
+            weight: answerIds.length,
+            meta: { ...meta, answerIds, answerConfidences, confidence },
+          })
           .eq("id", edgeId);
         if (updErr) throw updErr;
       }

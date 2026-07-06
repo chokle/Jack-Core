@@ -517,6 +517,56 @@ describe("Knowledge Review — reopen (undo accept/merge)", () => {
     expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
   });
 
+  it("recomputes edge confidence from the surviving answers when a high-confidence answer is withdrawn", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+
+    // Simulate the edge carrying two answers: THIS one (ANSWER_1) at a high 0.95,
+    // plus a second, lower-confidence answer. The edge's max confidence is 0.95.
+    const ANSWER_2 = "22222222-0000-0000-0000-000000000002";
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    const meta = edge["meta"] as Record<string, unknown>;
+    meta["answerIds"] = [ANSWER_1, ANSWER_2];
+    meta["answerConfidences"] = { [ANSWER_1]: 0.95, [ANSWER_2]: 0.6 };
+    meta["confidence"] = 0.95;
+    edge["weight"] = 2;
+
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+
+    // Withdrawing ANSWER_1 (the 0.95 answer) must drop the edge confidence to the
+    // surviving answer's 0.6 — not leave it stranded at the withdrawn 0.95.
+    const after = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+    expect(afterMeta["answerIds"]).toEqual([ANSWER_2]);
+    expect(afterMeta["confidence"]).toBeCloseTo(0.6, 10);
+    expect(afterMeta["answerConfidences"]).toEqual({ [ANSWER_2]: 0.6 });
+  });
+
+  it("leaves a legacy edge's confidence intact when a surviving answer has no recorded per-answer confidence", async () => {
+    await seedPendingCandidate();
+    await resolveKnowledgeCandidate(candidateId, "accept");
+
+    // Legacy edge: two answers but NO answerConfidences ledger (pre-feature).
+    const ANSWER_2 = "22222222-0000-0000-0000-000000000002";
+    const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    const meta = edge["meta"] as Record<string, unknown>;
+    meta["answerIds"] = [ANSWER_1, ANSWER_2];
+    delete meta["answerConfidences"];
+    meta["confidence"] = 0.9;
+    edge["weight"] = 2;
+
+    const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
+    expect(reopened.ok).toBe(true);
+
+    // We cannot know the surviving answer's confidence, so we must not understate:
+    // the edge keeps its prior confidence.
+    const after = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
+    const afterMeta = after["meta"] as Record<string, unknown>;
+    expect(afterMeta["answerIds"]).toEqual([ANSWER_2]);
+    expect(afterMeta["confidence"]).toBeCloseTo(0.9, 10);
+  });
+
   it("replaying reopen after undoing an accept is a no-op success", async () => {
     await seedPendingCandidate();
     await resolveKnowledgeCandidate(candidateId, "accept");
