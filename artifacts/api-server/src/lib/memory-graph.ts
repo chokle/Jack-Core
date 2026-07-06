@@ -3056,7 +3056,13 @@ async function restoreConceptNode(
   );
 
   await ensureCompetencyNodes(record.competencyCode ? [record.competencyCode] : []);
-  await upsertNodes([
+
+  // Scaffold the concept node plus its trade hub. The topic hub is minted here
+  // (consistent with how ingestion scaffolds hubs in writeVideoNode) so that a
+  // restore whose trade hub was never created or was pruned can't 500 on the
+  // concept→topic foreign key. Its own scaffold columns are omitted so this
+  // never clobbers a live hub's fields on conflict.
+  const scaffoldNodes: NodeUpsert[] = [
     {
       id: nodeId,
       kind,
@@ -3075,10 +3081,21 @@ async function restoreConceptNode(
         restoredAt: (prevMeta["restoredAt"] as string) || now,
       },
     },
-  ]);
+  ];
+  if (trade) {
+    scaffoldNodes.push({ id: topicNodeId(trade), kind: "topic", label: trade, trade });
+  }
+  await upsertNodes(scaffoldNodes);
 
   const hubEdges: EdgeUpsert[] = [];
   if (trade) {
+    // Keep the hub wired to the core so a freshly-minted hub isn't orphaned.
+    hubEdges.push({
+      id: edgeKey(GRAPH_CORE_ID, topicNodeId(trade)),
+      source_id: GRAPH_CORE_ID,
+      target_id: topicNodeId(trade),
+      kind: "topic",
+    });
     hubEdges.push({
       id: edgeKey(nodeId, topicNodeId(trade)),
       source_id: nodeId,

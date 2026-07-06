@@ -167,6 +167,36 @@ describe("restore archived knowledge — survives prune + rebuild", () => {
     expect(nodeById(knowledgeNodeId("concept", "Bead Overlap"))).toBeDefined();
   });
 
+  it("restore mints the trade hub when it is missing (no concept→topic FK crash)", async () => {
+    const { conceptId, archiveId } = await seedArchivedConcept("Arc Length Control", 0.72, "W-2");
+
+    // Simulate a trade whose topic hub was never created or was pruned: remove the
+    // topic node and every edge incident to it. In prod this is the exact state
+    // that made restore's concept→topic edge insert 500 on the target FK.
+    const topic = topicId(TRADE);
+    fake.tables["knowledge_nodes"] = nodes().filter((n) => n["id"] !== topic);
+    fake.tables["knowledge_edges"] = edges().filter(
+      (e) => e["source_id"] !== topic && e["target_id"] !== topic,
+    );
+    expect(nodeById(topic)).toBeUndefined();
+
+    const restored = await resolveKnowledgeCandidate(archiveId, "restore");
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) throw new Error("unreachable");
+    expect(restored.replayed).toBe(false);
+
+    // The hub is scaffolded BEFORE its edge, so the restore no longer strands the
+    // concept→topic edge on a missing target.
+    const hub = nodeById(topic);
+    expect(hub).toBeDefined();
+    expect(hub!["kind"]).toBe("topic");
+    // The freshly-minted hub is wired to both the core (so it isn't orphaned) and
+    // the restored concept.
+    expect(hubEdge("__jack__", topic)).toBeDefined();
+    expect(hubEdge(conceptId, topic)).toBeDefined();
+    expect(nodeById(conceptId)).toBeDefined();
+  });
+
   it("restore is replay-safe (second restore is a no-op success)", async () => {
     const { conceptId, archiveId } = await seedArchivedConcept("Puddle Reading", 0.7, "W-3");
 
