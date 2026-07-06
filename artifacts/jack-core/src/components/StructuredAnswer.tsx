@@ -111,7 +111,7 @@ function TrustBadge({
 // trust signal from retrieval: `verified` = a mentor reviewer confirmed a
 // covering concept; `sourceCount` >= 2 = the claim is corroborated across that
 // many videos. Neutral/untrusted citations render nothing (return null).
-function TrustBadges({ verified, sourceCount }: { verified?: boolean; sourceCount?: number | null }) {
+export function TrustBadges({ verified, sourceCount }: { verified?: boolean; sourceCount?: number | null }) {
   const corroborated = typeof sourceCount === "number" && sourceCount >= 2;
   if (!verified && !corroborated) return null;
   return (
