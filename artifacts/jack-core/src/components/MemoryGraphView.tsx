@@ -227,10 +227,58 @@ export function MemoryGraphView({
     // Knowledge Added" feed, so dropping the oldest toast loses nothing.
     setToasts((prev) => [...prev, ...fresh].slice(-3));
   }, [delta]);
-  const dismissToast = useCallback(
-    (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)),
-    [],
-  );
+
+  // Cascading exit: each toast's own 20s (visibility-aware) timer just marks it
+  // "ready" to leave; a single scheduler here decides WHEN each ready toast
+  // actually starts its slide-out, oldest-appeared-first, with a small stagger
+  // between activations so a batch that expires together doesn't all leave at
+  // once. `exitingIds` drives the slide-out animation class on each toast;
+  // `readyIds` is the queue of toasts waiting for their cascade turn.
+  const [exitingIds, setExitingIds] = useState<Set<number>>(new Set());
+  const [readyIds, setReadyIds] = useState<Set<number>>(new Set());
+  const cascadeTimerRef = useRef<number | undefined>(undefined);
+  const lastCascadeStepRef = useRef(0);
+
+  const handleToastExpire = useCallback((id: number) => {
+    setReadyIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
+
+  useEffect(() => {
+    if (cascadeTimerRef.current !== undefined) return; // a step is already queued
+    const nextId = toasts.find(
+      (t) => readyIds.has(t.id) && !exitingIds.has(t.id),
+    )?.id;
+    if (nextId === undefined) return;
+    const sinceLast = Date.now() - lastCascadeStepRef.current;
+    const delay = Math.max(0, TOAST_EXIT_STAGGER_MS - sinceLast);
+    cascadeTimerRef.current = window.setTimeout(() => {
+      cascadeTimerRef.current = undefined;
+      lastCascadeStepRef.current = Date.now();
+      setExitingIds((prev) => new Set(prev).add(nextId));
+    }, delay);
+    return () => {
+      if (cascadeTimerRef.current !== undefined) {
+        window.clearTimeout(cascadeTimerRef.current);
+        cascadeTimerRef.current = undefined;
+      }
+    };
+  }, [toasts, readyIds, exitingIds]);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setReadyIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setExitingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
   // Search: which nodes match, and an arrow-key "cursor" over them. Typing dims
   // everything else on the canvas; Enter jumps to the active match and opens it.
@@ -858,7 +906,9 @@ export function MemoryGraphView({
         {/* Growth toasts — pinned to the sidebar's bottom-right, newest on top,
             max 3, tap to focus the new node. Each toast's 20s timer only elapses
             while this view is mounted (the user is on the Memory Graph) and the
-            tab is visible. */}
+            tab is visible. When toasts expire together they leave in a cascade,
+            oldest first, sliding right off-screen with a small stagger between
+            each — never all at once. */}
         {toasts.length > 0 && (
           <div className="shrink-0 border-t border-border/60 p-3">
             <div className="flex flex-col-reverse gap-2">
@@ -867,6 +917,8 @@ export function MemoryGraphView({
                   key={t.id}
                   text={t.text}
                   reducedMotion={reducedMotion}
+                  exiting={exitingIds.has(t.id)}
+                  onExpire={() => handleToastExpire(t.id)}
                   onDismiss={() => dismissToast(t.id)}
                   onClick={
                     t.nodeId
@@ -1189,8 +1241,11 @@ function GrowthCounter({
 /** How long a growth toast lingers (20s), counting only time the user is on the
  *  Memory Graph with the tab visible. */
 const TOAST_LIFETIME_MS = 20000;
-/** Fade-out duration before the toast is removed from the list. */
-const TOAST_EXIT_MS = 240;
+/** Slide-right + fade-out duration before the toast is removed from the list. */
+const TOAST_EXIT_MS = 300;
+/** Minimum gap between successive toasts starting their cascade exit, so a
+ *  batch that expires together leaves one at a time instead of all at once. */
+const TOAST_EXIT_STAGGER_MS = 150;
 
 /**
  * A single auto-dismissing "Jack just learned…" toast. Lingers 20s but only
@@ -1199,34 +1254,44 @@ const TOAST_EXIT_MS = 240;
  * so a toast is never missed while the user is away. Leaving the Memory Graph
  * unmounts this view, which likewise halts the countdown until the user returns.
  * The countdown is decoupled from parent re-renders (it runs once on mount,
- * reading the latest onDismiss via a ref), then plays a short fade-out before
- * removing itself. Clickable when it can focus a node.
+ * reading the latest onExpire via a ref) and, once elapsed, reports "expired" to
+ * the parent rather than exiting immediately — the parent's cascade scheduler
+ * decides exactly when this toast's slide-out starts (oldest-appeared-first,
+ * staggered) via the `exiting` prop. Once `exiting` flips true, this plays the
+ * slide-to-the-right fade-out then removes itself. Clickable when it can focus a
+ * node.
  */
 function GrowthToast({
   text,
   reducedMotion,
+  exiting,
+  onExpire,
   onDismiss,
   onClick,
 }: {
   text: string;
   reducedMotion: boolean;
+  exiting: boolean;
+  onExpire: () => void;
   onDismiss: () => void;
   onClick?: () => void;
 }) {
-  const [exiting, setExiting] = useState(false);
+  const onExpireRef = useRef(onExpire);
+  onExpireRef.current = onExpire;
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 
   // Visibility-aware lifetime: only elapses while the tab is visible. Runs once
   // on mount so frequent parent re-renders (delta polls, count-ups) never reset
-  // the countdown.
+  // the countdown. Reports expiry upward instead of exiting itself, so the
+  // parent can cascade multiple simultaneous expiries in order.
   useEffect(() => {
     let remaining = TOAST_LIFETIME_MS;
     let startedAt = 0;
     let timerId: number | undefined;
     const start = () => {
       startedAt = Date.now();
-      timerId = window.setTimeout(() => setExiting(true), remaining);
+      timerId = window.setTimeout(() => onExpireRef.current(), remaining);
     };
     const pause = () => {
       if (timerId === undefined) return;
@@ -1249,8 +1314,9 @@ function GrowthToast({
     };
   }, []);
 
-  // Once the lifetime is up, play the fade-out then remove (or remove at once
-  // when the user prefers reduced motion).
+  // Once the parent gives this toast its cascade turn, play the slide-right
+  // fade-out then remove (or remove at once when the user prefers reduced
+  // motion).
   useEffect(() => {
     if (!exiting) return;
     if (reducedMotion) {
@@ -1271,7 +1337,7 @@ function GrowthToast({
         reducedMotion
           ? ""
           : exiting
-            ? "duration-200 fill-mode-forwards animate-out fade-out slide-out-to-bottom-2"
+            ? "duration-300 fill-mode-forwards animate-out fade-out slide-out-to-right-full"
             : "animate-in fade-in slide-in-from-bottom-2"
       }`}
     >
