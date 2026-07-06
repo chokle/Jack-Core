@@ -1,9 +1,30 @@
 import { useState, useRef, useEffect } from "react";
-import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion } from "lucide-react";
+import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useGetVideo, useTranscribeVideo, useAnalyzeVideo, useFetchRelatedVideos } from "@workspace/api-client-react";
+import {
+  useGetVideo,
+  useTranscribeVideo,
+  useAnalyzeVideo,
+  useFetchRelatedVideos,
+  useDeleteVideo,
+  useGetMe,
+  getListVideosQueryKey,
+  getGetVideoStatsQueryKey,
+  getGetRecentVideosQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
@@ -37,6 +58,27 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
 
   const transcribeMutation = useTranscribeVideo();
   const analyzeMutation = useAnalyzeVideo();
+
+  const queryClient = useQueryClient();
+
+  // Admin-only: allow removing a permanently-broken (failed) video straight from
+  // the detail view. The DELETE route is admin-only on the server; hiding the
+  // control for non-admins is just defense-in-depth. Admin status via GET /me.
+  const isAdmin = useGetMe().data?.isAdmin ?? false;
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  const deleteMutation = useDeleteVideo({
+    request: { credentials: "include" },
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getListVideosQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetVideoStatsQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetRecentVideosQueryKey() });
+        setConfirmDeleteOpen(false);
+        onBack();
+      },
+    },
+  });
 
   const seekVideo = (time: number) => {
     const el = videoRef.current;
@@ -127,6 +169,17 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               {video.status === "failed" ? "Retry Processing" : "Run Transcription"}
             </Button>
           )}
+          {isAdmin && video.status === "failed" && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setConfirmDeleteOpen(true)}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          )}
           {video.status === "completed" && !video.analysis && (
             <Button size="sm" onClick={() => analyzeMutation.mutate({ id: video.id })}>
               <BrainCircuit className="h-4 w-4 mr-2" /> Analyze
@@ -167,7 +220,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                   Processing failed{video.lastError ? `: ${video.lastError}` : "."}
                 </p>
                 <p className="font-mono text-xs text-muted-foreground mt-1">
-                  Use "Retry Processing" above to try again.
+                  Use "Retry Processing" above to try again{isAdmin ? ", or Delete to remove this broken entry from the Library." : "."}
                 </p>
               </div>
             )}
@@ -252,6 +305,31 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
           </ScrollArea>
         </div>
       </div>
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this video?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes "{video.title}" and its knowledge-graph node
+              from the Library. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                deleteMutation.mutate({ id: video.id });
+              }}
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </motion.div>
   );
 }
