@@ -47,6 +47,8 @@ const LABELS = [
   "Safety Note",
   "When Not to Use",
   "Confidence",
+  "Verified By",
+  "Evidence Count",
   "Tags",
   "Source Link",
   "Supporting Quote",
@@ -80,6 +82,8 @@ const KEY_OF: Record<string, string> = {
   "Safety Note": "safetyNote",
   "When Not to Use": "whenNotToUse",
   Confidence: "confidence",
+  "Verified By": "verifiedByRaw",
+  "Evidence Count": "evidenceCountRaw",
   Tags: "tagsRaw",
   "Source Link": "sourceLink",
   "Supporting Quote": "supportingQuote",
@@ -98,6 +102,8 @@ interface ParsedObject {
   safetyNote?: string;
   whenNotToUse?: string;
   confidence?: string;
+  verifiedByRaw?: string;
+  evidenceCountRaw?: string;
   tagsRaw?: string;
   sourceLink?: string;
   supportingQuote?: string;
@@ -177,6 +183,18 @@ function cleanProse(value: string | undefined): string {
     .trim();
 }
 
+/**
+ * Count the DISTINCT source citations a "Source Link" lists. The source cites
+ * corroborating references as bare numbers (e.g. "16 18 17", "29 30"), so the
+ * number of unique citations is how many independent sources back the note —
+ * i.e. its corroboration count. Non-numeric notes (e.g. "(implicit summary…)")
+ * yield 0 and are treated as un-corroborated.
+ */
+function distinctSourceCount(sourceLink: string): number {
+  const nums = sourceLink.match(/\d+/g);
+  return nums ? new Set(nums).size : 0;
+}
+
 /** Canonical Red Seal trade label for the well-known trades; raw kept otherwise. */
 function normalizeTrade(raw: string | undefined): string {
   const primary = (raw ?? "").split(/[/(]/)[0]?.trim() ?? "";
@@ -227,7 +245,17 @@ function toEntry(obj: ParsedObject, index: number): KnowledgeEntry {
   const supportingQuote = cleanProse(obj.supportingQuote);
   const confidence = (obj.confidence ?? "").trim();
   const sourceLink = (obj.sourceLink ?? "").trim();
+  const verifiedBy = cleanProse(obj.verifiedByRaw);
   const trade = normalizeTrade(obj.trade);
+
+  // Corroboration count: an explicit "Evidence Count" wins, otherwise fall back
+  // to how many distinct sources the note cites. Only a MEANINGFUL count (>= 2)
+  // is recorded so single-/no-source notes stay genuinely neutral (un-badged).
+  const explicitEvidence = Number.parseInt((obj.evidenceCountRaw ?? "").trim(), 10);
+  const evidenceCount =
+    Number.isFinite(explicitEvidence) && explicitEvidence > 0
+      ? explicitEvidence
+      : distinctSourceCount(sourceLink);
 
   const tags = (obj.tagsRaw ?? "")
     .split(",")
@@ -250,6 +278,7 @@ function toEntry(obj: ParsedObject, index: number): KnowledgeEntry {
     ["Safety Note", safetyNote],
     ["When Not to Use", whenNotToUse],
     ["Confidence", confidence],
+    ["Verified By", verifiedBy],
     ["Tags", tags.join(", ")],
     ["Supporting Quote", supportingQuote],
     ["Source", sourceLink],
@@ -282,6 +311,13 @@ function toEntry(obj: ParsedObject, index: number): KnowledgeEntry {
   setMeta("supportingQuote", supportingQuote);
   setMeta("originalSource", sourceLink);
   if (obj.trade?.trim()) metadata["sourceTrade"] = obj.trade.trim();
+
+  // Trust signals (read by `knowledgeEntryTrust` in chat.ts to badge citations):
+  //   - a stated verifier → the "mentor-verified" badge
+  //   - >= 2 corroborating sources → the "confirmed across N …" badge
+  // A note that states neither stays neutral, so nothing is ever fabricated.
+  if (verifiedBy) metadata.verifiedBy = verifiedBy;
+  if (evidenceCount >= 2) metadata.evidenceCount = evidenceCount;
 
   const id = stableId(`${obj.trade ?? ""}|${title}|${scenario}`);
   return { id, title, trade, category: specialty || "General", tags, description, body, metadata };

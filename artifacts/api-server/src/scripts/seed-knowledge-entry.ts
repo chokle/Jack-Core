@@ -46,6 +46,13 @@ interface Entry {
    * Knowledge Object fields (scenario, rootCause, safetyNote, confidence, …).
    * Every richer field is optional, so existing entries need no change.
    * See `../lib/knowledge-schema.ts` for the full schema.
+   *
+   * Trust fields specifically: set `verifiedBy` when a real verifier confirmed
+   * the note (→ the "mentor-verified" badge) and `evidenceCount` when >= 2
+   * independent sources back it (→ the "confirmed across N …" badge); these are
+   * read by `knowledgeEntryTrust` in chat.ts. Leave them unset when the entry has
+   * no genuine verifier/corroboration — never fabricate trust just to badge it.
+   * The seeded entries below carry neither, so they stay correctly un-badged.
    */
   metadata: KnowledgeObjectMeta;
 }
