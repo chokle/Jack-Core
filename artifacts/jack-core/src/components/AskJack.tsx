@@ -16,9 +16,11 @@ import { timeAgo } from "@/lib/memory-graph";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
-// Session identity is managed entirely by the server via an HttpOnly cookie.
-// The client does not read, store, or transmit any session identifier —
-// the browser sends the cookie automatically on every /api request.
+// Chat history is scoped server-side to the signed-in Clerk account (derived
+// from the auth session on every /api request), so it follows the user across
+// devices and never leaks to another user on the same device. The client does
+// not read, store, or transmit any session/user identifier — auth credentials
+// ride along automatically on same-origin requests.
 
 interface AskJackProps {
   isOpen: boolean;

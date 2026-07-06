@@ -4,7 +4,7 @@ import { chatCompletion, createEmbedding, MODELS } from "../lib/openai.js";
 import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
-import { SESSION_COOKIE, resolveSession } from "../lib/session.js";
+import { resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import { fetchVerificationCoverage, rerankByVerification } from "../lib/verification-rerank.js";
 
@@ -22,8 +22,18 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     if (message.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.` });
     }
-    // Session identity is owned by the server via an HttpOnly cookie.
-    // Any sessionId the client may have included in the body is ignored.
+    // Ownership is the server-derived Clerk user id (set by the app-level
+    // requireAuth gate) — never a client-supplied field. It ties this thread to
+    // the account so history follows the user across devices/browsers and never
+    // leaks to another user on the same device. The HttpOnly session cookie is
+    // still resolved so session_id (NOT NULL) stays populated for continuity,
+    // but it is NOT the ownership key.
+    const userId = req.userId;
+    if (!userId) {
+      // Should be unreachable behind requireAuth; fail closed rather than write
+      // an unowned (globally readable) row.
+      return res.status(401).json({ error: "Unauthorized — sign in required." });
+    }
     const session = resolveSession(req, res);
 
     const embedding = await createEmbedding(message);
@@ -155,7 +165,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     const { data: history } = await supabase
       .from("chat_messages")
       .select("role, content")
-      .eq("session_id", session)
+      .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .limit(10);
 
@@ -174,8 +184,8 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     const answer = completion.choices[0]?.message?.content ?? "I wasn't able to generate a response.";
 
     await supabase.from("chat_messages").insert([
-      { session_id: session, role: "user", content: message, citations: [] },
-      { session_id: session, role: "assistant", content: answer, citations },
+      { session_id: session, user_id: userId, role: "user", content: message, citations: [] },
+      { session_id: session, user_id: userId, role: "assistant", content: answer, citations },
     ]);
 
     return res.json({ answer, citations, usedInternalKnowledge });
@@ -187,15 +197,17 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
 router.get("/chat/history", async (req, res) => {
   try {
-    // Session is bound to the HttpOnly cookie, not a query parameter.
-    // If no session cookie exists, there is no conversation to return.
-    const session = req.cookies?.[SESSION_COOKIE];
-    if (typeof session !== "string" || session.length === 0) return res.json([]);
+    // History is scoped to the signed-in account (server-derived Clerk user id),
+    // so it follows the user across devices and never leaks to another user on
+    // the same device. Fail closed: with no resolvable user (unreachable behind
+    // requireAuth), return nothing rather than any global/other-user rows.
+    const userId = req.userId;
+    if (!userId) return res.json([]);
 
     const { data, error } = await supabase
       .from("chat_messages")
       .select("*")
-      .eq("session_id", session)
+      .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .limit(50);
 
@@ -203,8 +215,8 @@ router.get("/chat/history", async (req, res) => {
     return res.json(
       (data ?? []).map((m: Record<string, unknown>) => ({
         id: m["id"],
-        // sessionId is intentionally omitted — it is the caller's cookie value
-        // and there is no reason to echo it back into the response body.
+        // Ownership fields (session_id / user_id) are intentionally omitted —
+        // they are server-side identity, never echoed back into the response.
         role: m["role"],
         content: m["content"],
         citations: m["citations"] ?? [],

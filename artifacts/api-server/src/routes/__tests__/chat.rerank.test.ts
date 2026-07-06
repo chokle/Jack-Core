@@ -116,6 +116,9 @@ function makeApp(): Express {
       info: noop,
       debug: noop,
     };
+    // Stand in for the app-level requireAuth gate: the chat route now owns
+    // messages by the server-derived Clerk user id, so give the request one.
+    (req as unknown as { userId: string }).userId = "user_test";
     next();
   });
   app.use("/api", chatRouter);

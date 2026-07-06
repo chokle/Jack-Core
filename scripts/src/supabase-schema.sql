@@ -77,21 +77,34 @@ CREATE TABLE IF NOT EXISTS competencies (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Chat messages table
+-- Chat messages table.
+-- user_id is the server-derived Clerk user id that OWNS a chat message. It ties
+-- a conversation to the signed-in account so history follows the user across
+-- devices/browsers (and never leaks to another user on the same device). It is
+-- NULLABLE only so pre-auth legacy rows (which only have a session_id) remain
+-- valid; every message written after auth carries a user_id. session_id is
+-- retained for continuity but ownership scoping is by user_id.
 CREATE TABLE IF NOT EXISTS chat_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id TEXT NOT NULL,
+  user_id TEXT,
   role TEXT NOT NULL CHECK (role IN ('user','assistant')),
   content TEXT NOT NULL,
   citations JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Idempotent migration for pre-existing installs (table predates the user_id
+-- column). Safe to run repeatedly.
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS user_id TEXT;
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
 CREATE INDEX IF NOT EXISTS idx_videos_trade ON videos(trade);
 CREATE INDEX IF NOT EXISTS idx_segments_video_id ON transcript_segments(video_id);
 CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
+-- History is loaded by owner (user_id), so index that lookup.
+CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_messages(user_id);
 
 -- ANN index for fast semantic retrieval at scale (thousands of videos /
 -- 100k+ transcript segments). HNSW builds fine on an empty or growing table

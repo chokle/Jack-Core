@@ -1,20 +1,21 @@
 ---
-name: Chat privacy without auth
-description: How chat history stays private in a no-auth app via server-issued HttpOnly cookies.
+name: Chat privacy — account-scoped
+description: How chat history stays private, now tied to the signed-in Clerk account (not the device cookie).
 ---
 
-# Chat privacy without auth
+# Chat privacy — account-scoped
 
-Jack has **no authentication by design** (a stated user preference in `replit.md`: no auth, billing, or multi-page nav). Privacy of chat history rests on **server-issued HttpOnly session cookies** — the server mints the session UUID on first `/api/chat` request, sets it as `jack_session` (HttpOnly, SameSite=Strict, Path=/api), and never accepts a session identifier from the request body or query string.
+Since auth was added, the whole `/api` surface sits behind `requireAuth`, which sets `req.userId` (the server-derived Clerk user id). **Chat ownership is now the Clerk user id**, not the device-scoped `jack_session` cookie. History follows the account across devices/browsers and never leaks to another user signed in on the same device.
 
-**Rule:** Session identity is always derived from the HttpOnly cookie (`req.cookies["jack_session"]`). Any attempt to pass a `sessionId` in the request body is silently ignored. Any history endpoint must use the cookie value — never a caller-supplied parameter.
+**Rule:** Scope every chat read/write by `req.userId` (never a client-supplied field). `chat_messages.user_id` is the owner column; `session_id` is retained (still populated from the HttpOnly cookie for continuity) but is NOT the ownership key.
 
-**Why:** The original design trusted a caller-supplied `sessionId` from the request body, making every valid UUID a potential session hijack vector: if an attacker knew another user's UUID they could read prior messages and inject new ones. Moving ownership to the server-set cookie means only the originating browser possesses the credential.
+**Why:** The old design scoped chat purely by the `jack_session` cookie. Cookies are per-device, so two Clerk users on the same browser would share one cookie and see each other's history; and history didn't follow a user to another device. Tying ownership to the authenticated user fixes both and never returns global/other-user rows.
 
 **How to apply:**
-- `POST /api/chat` — call `resolveSession(req, res)` which reads the cookie (or sets a fresh UUID cookie and returns it); never read `sessionId` from `req.body`.
-- `GET /api/chat/history` — read `req.cookies["jack_session"]`; return `[]` if absent.
-- The client (`AskJack.tsx`) sends no session identifier; the browser cookie is included automatically on same-origin requests.
-- `ChatInput`, `ChatResponse`, and `ChatMessage` OpenAPI schemas have no `sessionId` field.
-- `GET /chat/history` OpenAPI path has no `sessionId` query param.
-- After any OpenAPI schema change, run `pnpm --filter @workspace/api-spec run codegen`.
+- `POST /api/chat` — read `userId = req.userId`; 401 fail-closed if absent (unreachable behind `requireAuth`, but never write an unowned row). Load the conversation-context history with `.eq("user_id", userId)`; insert new rows with `user_id: userId` (plus `session_id`).
+- `GET /api/chat/history` — read `req.userId`; return `[]` if absent; query `.eq("user_id", userId)`.
+- Legacy pre-auth rows have `user_id = NULL`; the `.eq("user_id", …)` filter naturally excludes them (they are never returned as global rows). `user_id` is a NULLABLE column only so those legacy rows stay valid.
+- The response never echoes `session_id`/`user_id` (server-side identity only).
+- The client (`AskJack.tsx`) sends no session/user id — auth credentials ride same-origin requests automatically.
+- Router unit tests mount the bare router (no `requireAuth`), so they must set `req.userId` in a stand-in middleware (see `chat.privacy.test.ts`, and the `makeApp` middleware in the chat rerank/trust-contract/retrieval-rerank tests).
+- Schema: `chat_messages.user_id TEXT` + `idx_chat_user`, added idempotently (`ADD COLUMN IF NOT EXISTS`) in `scripts/src/supabase-schema.sql`; re-run `setup:supabase` on existing installs.
