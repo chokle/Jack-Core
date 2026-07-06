@@ -22,6 +22,19 @@ if their email is on `ADMIN_EMAILS`.
   **restart the `artifacts/api-server: API Server` workflow**.
 - Ask the user to set `ADMIN_EMAILS` to include this test email **alongside**
   any real admin email(s), e.g. `you@company.com, jack-e2e-admin@example.com`.
+
+> **Gotcha — a shared env var silently overrides the secret.** If `ADMIN_EMAILS`
+> is *also* defined under `[userenv.shared]` in `.replit`, that plaintext value
+> wins in `process.env` and **masks the secret entirely** — editing the secret
+> then does nothing, and admin resolves off the stale committed value. This
+> silently burns `runTest` cycles (the browser just keeps showing the non-admin
+> panel). Before trusting the secret, run `rg -n ADMIN_EMAILS .replit`; if it's
+> there, remove it with
+> `deleteEnvVars({keys:["ADMIN_EMAILS"], environment:"shared"})`, then restart
+> the api-server so the secret becomes authoritative. (Bash / code-execution
+> `process.env` is captured at session start and is **stale** — it cannot
+> confirm a just-edited secret; rely on the restart + app behavior instead.)
+
 - Verify it took effect: after the restart, the api-server logs must **not**
   show the `ADMIN_EMAILS is not set` warning before you spend a `runTest` cycle.
 

@@ -58,7 +58,6 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
-ADMIN_EMAILS = "derek@torchlabs.ca"
 
 [nix]
 channel = "stable-25_05"
