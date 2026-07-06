@@ -63,6 +63,18 @@ beforeEach(async () => {
 });
 
 describe("knowledge_edges NOT NULL / mixed-batch upsert modeling", () => {
+  // These tests exercise the NOT NULL column modeling with placeholder edge
+  // endpoints (s/t/u). Seed matching knowledge_nodes so the endpoints satisfy the
+  // FK the fake now enforces — otherwise the batches would trip the FK check
+  // before the NOT NULL behavior under test is reached.
+  beforeEach(() => {
+    fake.tables["knowledge_nodes"].push(
+      { id: "s", kind: "concept", label: "s" },
+      { id: "t", kind: "topic", label: "t" },
+      { id: "u", kind: "competency", label: "u" },
+    );
+  });
+
   it("the fake rejects a mixed batch where one row omits a NOT NULL column another provides", async () => {
     // A weighted provenance row + a weightless hub row: the union column set
     // includes weight/meta, so the hub row is inserted with an explicit NULL —
@@ -105,6 +117,49 @@ describe("knowledge_edges NOT NULL / mixed-batch upsert modeling", () => {
       { onConflict: "id" },
     );
     expect(error).toBeNull();
+  });
+});
+
+describe("knowledge_edges foreign-key modeling", () => {
+  // Mirrors the real `source_id`/`target_id REFERENCES knowledge_nodes(id)` FK:
+  // an edge whose endpoint node is missing must be rejected the same way the DB
+  // rejects it (`..._id_fkey ... is not present in table "knowledge_nodes"`), so
+  // any graph-write path that emits an edge before its node fails in tests
+  // instead of only 500ing against a live database.
+  it("rejects an edge whose source_id has no matching knowledge_nodes row", async () => {
+    fake.tables["knowledge_nodes"].push({ id: "t", kind: "topic", label: "t" });
+    const { error } = await fake.from("knowledge_edges").upsert(
+      { id: "e:fk-src", source_id: "missing", target_id: "t", kind: "topic", weight: 1, meta: {} },
+      { onConflict: "id" },
+    );
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/foreign key constraint "knowledge_edges_source_id_fkey"/);
+    expect(error!.message).toMatch(/is not present in table "knowledge_nodes"/);
+    expect(edges().some((e) => e["id"] === "e:fk-src")).toBe(false);
+  });
+
+  it("rejects an edge whose target_id has no matching knowledge_nodes row", async () => {
+    fake.tables["knowledge_nodes"].push({ id: "s", kind: "concept", label: "s" });
+    const { error } = await fake.from("knowledge_edges").upsert(
+      { id: "e:fk-tgt", source_id: "s", target_id: "missing", kind: "topic", weight: 1, meta: {} },
+      { onConflict: "id" },
+    );
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/foreign key constraint "knowledge_edges_target_id_fkey"/);
+    expect(edges().some((e) => e["id"] === "e:fk-tgt")).toBe(false);
+  });
+
+  it("accepts an edge once both endpoint nodes exist", async () => {
+    fake.tables["knowledge_nodes"].push(
+      { id: "s", kind: "concept", label: "s" },
+      { id: "t", kind: "topic", label: "t" },
+    );
+    const { error } = await fake.from("knowledge_edges").upsert(
+      { id: "e:fk-ok", source_id: "s", target_id: "t", kind: "topic", weight: 1, meta: {} },
+      { onConflict: "id" },
+    );
+    expect(error).toBeNull();
+    expect(edges().some((e) => e["id"] === "e:fk-ok")).toBe(true);
   });
 });
 

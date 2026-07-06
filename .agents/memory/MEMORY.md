@@ -40,3 +40,4 @@
 - [Core node visual primacy](core-node-visual-primacy.md) — growth-sized trade hubs can outgrow the fixed Jack core; keep core radius above max hub (topic*2.1) or Jack stops reading as the center.
 - [Testing admin-gated browser flows](testing-admin-gated-browser-flows.md) — Playwright subagent can't get the JACK_ADMIN_KEY secret; verify anon gating in-browser + signed-in mutation loop via curl/live Supabase.
 - [Clerk CSP allowlist](clerk-csp.md) — strict index.html meta CSP silently blocks Clerk JS; whitelist *.clerk.accounts.dev + turnstile + blob workers; "failed to load Clerk JS" is CSP, not network.
+- [Fake supabase enforces edge FK](fake-supabase-edge-fk.md) — the test double rejects a knowledge_edges upsert whose source_id/target_id has no knowledge_nodes row; seed nodes before edges in tests.

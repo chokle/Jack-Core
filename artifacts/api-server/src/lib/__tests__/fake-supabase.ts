@@ -11,7 +11,11 @@
  *     re-sync never clobbers an atomic node's description/confidence/status), and
  *   - deleting a knowledge_nodes row CASCADES to knowledge_edges referencing it
  *     (mirrors the ON DELETE CASCADE foreign keys), which pruneOrphanKnowledge and
- *     deleteVideoNode both depend on.
+ *     deleteVideoNode both depend on, and
+ *   - upserting a knowledge_edges row whose source_id/target_id has no matching
+ *     knowledge_nodes row fails the FK constraint (mirrors the REFERENCES
+ *     knowledge_nodes(id)), so any graph-write path that emits an edge before its
+ *     node surfaces as a test failure instead of a production 500.
  */
 
 type Row = Record<string, unknown>;
@@ -40,6 +44,24 @@ interface Result<T> {
  */
 const NOT_NULL_DEFAULT_COLUMNS: Record<string, string[]> = {
   knowledge_edges: ["weight", "meta"],
+};
+
+/**
+ * Foreign keys the real schema enforces. `knowledge_edges.source_id` and
+ * `.target_id` both `REFERENCES knowledge_nodes(id)`, so writing an edge whose
+ * endpoint node does not exist yet raises a `..._id_fkey ... is not present in
+ * table "knowledge_nodes"` error and 500s in production. Modeling it here means
+ * any graph-write path that upserts an edge before its node surfaces as a test
+ * failure instead of only blowing up against a live database.
+ */
+const FOREIGN_KEYS: Record<
+  string,
+  { column: string; refTable: string; constraint: string }[]
+> = {
+  knowledge_edges: [
+    { column: "source_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_source_id_fkey" },
+    { column: "target_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_target_id_fkey" },
+  ],
 };
 
 function cosine(a: number[], b: number[]): number {
@@ -339,6 +361,29 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
               data: null,
               error: {
                 message: `null value in column "${col}" of relation "${this.table}" violates not-null constraint`,
+              },
+            };
+          }
+        }
+      }
+    }
+
+    // Model referential integrity: an edge endpoint (source_id/target_id) must
+    // already exist in knowledge_nodes, mirroring the real FK. A NULL endpoint is
+    // a NOT NULL violation in the real DB, not an FK one, so leave those to the
+    // check above and only reject a non-null id with no matching node row.
+    const foreignKeys = FOREIGN_KEYS[this.table];
+    if (foreignKeys) {
+      for (const fk of foreignKeys) {
+        const refIds = new Set((this.db.tables[fk.refTable] ?? []).map((r) => r["id"]));
+        for (const r of this.upsertRows) {
+          const val = r[fk.column];
+          if (val === undefined || val === null) continue;
+          if (!refIds.has(val)) {
+            return {
+              data: null,
+              error: {
+                message: `insert or update on table "${this.table}" violates foreign key constraint "${fk.constraint}": Key (${fk.column})=(${String(val)}) is not present in table "${fk.refTable}"`,
               },
             };
           }
