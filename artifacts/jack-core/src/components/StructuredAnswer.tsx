@@ -304,6 +304,7 @@ export function StructuredAnswer({
                   {c.text && (
                     <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{c.text}</div>
                   )}
+                  <TrustBadges verified={c.verified} sourceCount={c.sourceCount} />
                   {c.thumbnailUrl && (
                     <div className="overflow-hidden rounded-lg border border-border bg-zinc-900">
                       <img src={c.thumbnailUrl} className="max-h-56 w-full object-contain" alt={c.videoTitle} />
