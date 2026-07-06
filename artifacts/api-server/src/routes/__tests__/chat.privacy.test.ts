@@ -37,6 +37,7 @@ vi.mock("../../lib/openai.js", async () => {
 
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+import { chatCompletion } from "../../lib/openai.js";
 
 const USER_A = "user_aaaaaaaaaaaaaaaaaaaaaa";
 const USER_B = "user_bbbbbbbbbbbbbbbbbbbbbb";
@@ -156,5 +157,39 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const res = await request(app).post("/api/chat").send({ message: "hi" });
     expect(res.status).toBe(401);
     expect(fake.tables["chat_messages"]).toHaveLength(0);
+  });
+
+  it("injects Jack's saved Library analysis when the user asks about a named video", async () => {
+    fake.tables["videos"] = [
+      {
+        id: "11111111-1111-1111-1111-111111111111",
+        title: "3gdemo",
+        trade: "Welder",
+        analysis: "Jack's saved Library analysis: the cap pass is too cold and the bead profile is inconsistent.",
+        key_points: ["Watch travel speed on the cap pass", "Adjust heat before stacking beads"],
+        transcript: "The instructor explains root pass, hot pass, fill pass, and cap pass sequence.",
+        thumbnail_url: null,
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: 'Based on the video "3gdemo", what do you rate it out of 10?' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.usedInternalKnowledge).toBe(true);
+    expect(res.body.citations[0]).toMatchObject({
+      videoId: "11111111-1111-1111-1111-111111111111",
+      videoTitle: "3gdemo",
+      sourceType: "video",
+    });
+
+    const call = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
+    const system = call?.messages?.find((m) => m.role === "system")?.content ?? "";
+    expect(system).toContain("[Matched Library Video: 3gdemo]");
+    expect(system).toContain("Jack's saved Library analysis");
+    expect(system).toContain("Do not claim you lack access to this video");
   });
 });

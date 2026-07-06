@@ -10,6 +10,9 @@ import { fetchVerificationCoverage, rerankByVerification } from "../lib/verifica
 import { readKnowledgeMeta, type KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
+const MAX_VIDEO_CONTEXT_MATCHES = 2;
+const MAX_VIDEO_CONTEXT_SEGMENTS = 6;
+const MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS = 1800;
 
 const router = Router();
 
@@ -198,6 +201,41 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
+    const matchedVideos = await findReferencedVideos(message);
+    for (const video of matchedVideos) {
+      contextText += formatReferencedVideoContext(video);
+      const segments = Array.isArray(video["transcript_segments"])
+        ? (video["transcript_segments"] as Array<Record<string, unknown>>)
+        : [];
+      const citedSegments = segments
+        .filter((s) => typeof s["text"] === "string" && (s["text"] as string).trim().length > 0)
+        .sort((a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0))
+        .slice(0, MAX_VIDEO_CONTEXT_SEGMENTS);
+      if (citedSegments.length === 0) {
+        citations.push({
+          videoId: video["id"] as string,
+          videoTitle: (video["title"] as string) ?? "Uploaded video",
+          startTime: 0,
+          endTime: 0,
+          text: String(video["analysis"] ?? video["description"] ?? "Matched uploaded video."),
+          thumbnailUrl: (video["thumbnail_url"] as string | null) ?? null,
+          sourceType: "video",
+        });
+      } else {
+        for (const seg of citedSegments) {
+          citations.push({
+            videoId: video["id"] as string,
+            videoTitle: (video["title"] as string) ?? "Uploaded video",
+            startTime: Number(seg["start_time"] ?? 0),
+            endTime: Number(seg["end_time"] ?? seg["start_time"] ?? 0),
+            text: seg["text"] as string,
+            thumbnailUrl: (video["thumbnail_url"] as string | null) ?? null,
+            sourceType: "video",
+          });
+        }
+      }
+    }
+
     const usedInternalKnowledge = citations.length > 0;
 
     const systemPrompt = buildChatSystemPrompt({ usedInternalKnowledge, contextText });
@@ -286,6 +324,127 @@ router.delete("/chat/history", async (req, res) => {
     return res.status(500).json({ error: "Failed to clear chat history" });
   }
 });
+
+async function findReferencedVideos(message: string): Promise<Array<Record<string, unknown>>> {
+  const referenced = extractReferencedVideoTitles(message);
+  if (referenced.length === 0) return [];
+
+  // Current schema treats `videos` as Jack's shared Library. There is no
+  // uploaded_by/user_id column yet, so this intentionally matches only against
+  // that Library rather than pretending personal-video privacy is enforceable at
+  // this layer. Add owner scoping here when the videos table grows an owner.
+  const { data, error } = await supabase
+    .from("videos")
+    .select("*, transcript_segments(*)")
+    .limit(200);
+
+  if (error) throw error;
+
+  const videos = ((data ?? []) as Array<Record<string, unknown>>).filter(
+    (v) => typeof v["title"] === "string" && (v["analysis"] || v["transcript"] || v["key_points"]),
+  );
+  const matches: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  for (const wanted of referenced) {
+    const normalizedWanted = normalizeTitle(wanted);
+    let best: { video: Record<string, unknown>; score: number } | null = null;
+    for (const video of videos) {
+      const title = String(video["title"] ?? "");
+      const score = titleMatchScore(normalizedWanted, normalizeTitle(title));
+      if (score >= 0.74 && (!best || score > best.score)) best = { video, score };
+    }
+    const id = best?.video["id"];
+    if (best && typeof id === "string" && !seen.has(id)) {
+      seen.add(id);
+      matches.push(best.video);
+    }
+    if (matches.length >= MAX_VIDEO_CONTEXT_MATCHES) break;
+  }
+
+  return matches;
+}
+
+export function extractReferencedVideoTitles(message: string): string[] {
+  const candidates = new Set<string>();
+  for (const match of message.matchAll(/["“”']([^"“”']{2,120})["“”']/g)) {
+    const title = match[1]?.trim();
+    if (title) candidates.add(title);
+  }
+
+  const patterns = [
+    /\bvideo\s+(?:called|named|titled)\s+([a-z0-9][a-z0-9 _./#-]{1,80})/gi,
+    /\bbased on\s+(?:the\s+)?video\s+([a-z0-9][a-z0-9 _./#-]{1,80})/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of message.matchAll(pattern)) {
+      const title = cleanLooseTitle(match[1] ?? "");
+      if (title) candidates.add(title);
+    }
+  }
+
+  return Array.from(candidates).slice(0, 4);
+}
+
+function formatReferencedVideoContext(video: Record<string, unknown>): string {
+  const title = String(video["title"] ?? "Uploaded video");
+  const trade = typeof video["trade"] === "string" && video["trade"] ? String(video["trade"]) : "general";
+  const analysis = typeof video["analysis"] === "string" ? video["analysis"].trim() : "";
+  const keyPoints = Array.isArray(video["key_points"])
+    ? (video["key_points"] as unknown[]).filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    : [];
+  const transcript = typeof video["transcript"] === "string" ? video["transcript"].trim() : "";
+  const segments = Array.isArray(video["transcript_segments"])
+    ? (video["transcript_segments"] as Array<Record<string, unknown>>)
+    : [];
+  const segmentText = segments
+    .filter((s) => typeof s["text"] === "string" && (s["text"] as string).trim().length > 0)
+    .sort((a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0))
+    .slice(0, MAX_VIDEO_CONTEXT_SEGMENTS)
+    .map((s) => `- ${formatTime(Number(s["start_time"] ?? 0))}: ${String(s["text"]).replace(/\s+/g, " ").trim()}`)
+    .join("\n");
+
+  return [
+    `[Matched Library Video: ${title}]`,
+    `Trade: ${trade}`,
+    "Instruction: The user appears to be asking about this specific video. Acknowledge that you found it in Jack's Library and that you are using Jack's saved analysis/transcript context. If the user asks for a rating, provide a practical score based on the evidence below and state any limits clearly. Do not claim you lack access to this video.",
+    analysis ? `Saved analysis:\n${analysis}` : "",
+    keyPoints.length > 0 ? `Saved key takeaways:\n${keyPoints.map((p) => `- ${p}`).join("\n")}` : "",
+    segmentText ? `Transcript excerpts:\n${segmentText}` : "",
+    !segmentText && transcript ? `Transcript excerpt:\n${transcript.slice(0, MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS)}` : "",
+    "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function cleanLooseTitle(value: string): string {
+  return value
+    .replace(/[?.!,;:].*$/, "")
+    .replace(/\b(what|how|why|can|could|would|should|rate|rating|score|out of|please)\b.*$/i, "")
+    .trim();
+}
+
+function titleMatchScore(wanted: string, title: string): number {
+  if (!wanted || !title) return 0;
+  if (wanted === title) return 1;
+  if (title.includes(wanted) || wanted.includes(title)) return 0.92;
+  const wantedParts = new Set(wanted.split(" ").filter(Boolean));
+  const titleParts = new Set(title.split(" ").filter(Boolean));
+  if (wantedParts.size === 0 || titleParts.size === 0) return 0;
+  let overlap = 0;
+  for (const part of wantedParts) if (titleParts.has(part)) overlap++;
+  return overlap / Math.max(wantedParts.size, titleParts.size);
+}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);

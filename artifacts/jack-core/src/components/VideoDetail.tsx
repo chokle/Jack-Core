@@ -72,9 +72,9 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
 
   const queryClient = useQueryClient();
 
-  // Admin-only: allow removing a permanently-broken (failed) video straight from
-  // the detail view. The DELETE route is admin-only on the server; hiding the
-  // control for non-admins is just defense-in-depth. Admin status via GET /me.
+  // Admin-only: allow removing duplicate/broken videos straight from the detail
+  // view. The DELETE route is admin-only on the server; hiding the control for
+  // non-admins is just defense-in-depth. Admin status via GET /me.
   const isAdmin = useGetMe().data?.isAdmin ?? false;
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -180,7 +180,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               {video.status === "failed" ? "Retry Processing" : "Run Transcription"}
             </Button>
           )}
-          {isAdmin && video.status === "failed" && (
+          {isAdmin && (
             <Button
               size="sm"
               variant="destructive"
@@ -255,7 +255,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                   Processing failed{video.lastError ? `: ${video.lastError}` : "."}
                 </p>
                 <p className="font-mono text-xs text-muted-foreground mt-1">
-                  Use "Retry Processing" above to try again{isAdmin ? ", or Delete to remove this broken entry from the Library." : "."}
+                  Use "Retry Processing" above to try again{isAdmin ? ", or Delete to remove this entry from the Library." : "."}
                 </p>
               </div>
             )}
