@@ -35,6 +35,7 @@
 - [Withdrawn-evidence restore = dismiss](withdrawn-evidence-restore.md) — acting on a concept's rejectedEvidence clears the note (can't safely re-corroborate; source row is gone); concept always has ≥1 live source; recompute only filters.
 - [flex-wrap icon-row overlap](flex-wrap-icon-row-overlap.md) — a `flex-1 min-w-0` item next to `shrink-0` icon buttons squeezes instead of wrapping at 320px; give it a real min-width to force the wrap.
 - [Nested scroll auto-height fix](nested-scroll-auto-height.md) — kill a mobile double-scroll trap by making the two-pane sidebar's fixed height + inner ScrollArea `lg:`-only so it collapses to auto and the page becomes the single scroll owner.
+- [MemoryGraphView inspector tests](memory-graph-inspector-tests.md) — render NodeDetailBody directly; Sections are collapsed (click header to reveal); mock only useGetVideo (no QueryClientProvider); mentor nodes need useGetMentorActiveSession.
 - [Jack SEO canonical & brand origins](jack-seo-brand-origins.md) — canonical/OG pinned to app.torchlabs.ca (not the serving domain); Org=www.torchlabs.ca vs product app.*; apple-touch-icon must be PNG.
 - [Core node visual primacy](core-node-visual-primacy.md) — growth-sized trade hubs can outgrow the fixed Jack core; keep core radius above max hub (topic*2.1) or Jack stops reading as the center.
 - [Testing admin-gated browser flows](testing-admin-gated-browser-flows.md) — Playwright subagent can't get the JACK_ADMIN_KEY secret; verify anon gating in-browser + signed-in mutation loop via curl/live Supabase.
