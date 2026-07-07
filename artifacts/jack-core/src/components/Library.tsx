@@ -2,12 +2,21 @@ import { useState } from "react";
 import { Search, Filter, Upload, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useListVideos, useGetVideoStats, useGetRecentVideos, useListCompetencies, getListVideosQueryKey } from "@workspace/api-client-react";
+import {
+  useListVideos,
+  useGetVideoStats,
+  useGetRecentVideos,
+  useGetMe,
+  getListVideosQueryKey,
+  getGetRecentVideosQueryKey,
+  getGetGraphQueryKey,
+} from "@workspace/api-client-react";
 import { VideoCard } from "./VideoCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion } from "framer-motion";
 import { UploadModal } from "./UploadModal";
 import { IN_FLIGHT_STATUSES } from "@/lib/video-status";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 interface LibraryProps {
   onSelectVideo: (id: string) => void;
@@ -17,6 +26,10 @@ export function Library({ onSelectVideo }: LibraryProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTrade, setSelectedTrade] = useState<string | undefined>();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [attachingId, setAttachingId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const isAdmin = useGetMe().data?.isAdmin ?? false;
 
   // Poll the list while any video is still being processed so cards advance
   // to "completed" on their own (no manual refresh during the demo flow).
@@ -37,6 +50,42 @@ export function Library({ onSelectVideo }: LibraryProps) {
   );
   const { data: stats } = useGetVideoStats();
   const { data: recentVideos } = useGetRecentVideos();
+
+  const hasUploader = (video: unknown) => {
+    const v = video as { uploaderUserId?: string | null; uploader_user_id?: string | null };
+    return Boolean(v.uploaderUserId || v.uploader_user_id);
+  };
+
+  const attachContributor = async (videoId: string) => {
+    setAttachingId(videoId);
+    try {
+      const res = await fetch(`/api/videos/${videoId}/claim-contributor`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Attach failed (${res.status})`);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListVideosQueryKey({ trade: selectedTrade }) }),
+        queryClient.invalidateQueries({ queryKey: getGetRecentVideosQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() }),
+      ]);
+      toast({
+        title: "Contributor attached",
+        description: "That video is now under your node in Jack's memory graph.",
+      });
+    } catch (err) {
+      toast({
+        title: "Could not attach contributor",
+        description: err instanceof Error ? err.message : "Try again after refreshing.",
+        variant: "destructive",
+      });
+    } finally {
+      setAttachingId(null);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto pb-24">
@@ -76,7 +125,14 @@ export function Library({ onSelectVideo }: LibraryProps) {
             <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
               {recentVideos.map((video, idx) => (
                 <div key={video.id} className="min-w-[75vw] w-[75vw] sm:min-w-[300px] sm:w-[300px] flex-shrink-0">
-                  <VideoCard video={video} onClick={() => onSelectVideo(video.id)} index={idx} />
+                  <VideoCard
+                    video={video}
+                    onClick={() => onSelectVideo(video.id)}
+                    index={idx}
+                    canAttachContributor={isAdmin && !hasUploader(video)}
+                    isAttachingContributor={attachingId === video.id}
+                    onAttachContributor={() => attachContributor(video.id)}
+                  />
                 </div>
               ))}
             </div>
@@ -120,7 +176,15 @@ export function Library({ onSelectVideo }: LibraryProps) {
               {videoList?.videos.filter(v => 
                 !searchQuery || v.title.toLowerCase().includes(searchQuery.toLowerCase())
               ).map((video, idx) => (
-                <VideoCard key={video.id} video={video} onClick={() => onSelectVideo(video.id)} index={idx} />
+                <VideoCard
+                  key={video.id}
+                  video={video}
+                  onClick={() => onSelectVideo(video.id)}
+                  index={idx}
+                  canAttachContributor={isAdmin && !hasUploader(video)}
+                  isAttachingContributor={attachingId === video.id}
+                  onAttachContributor={() => attachContributor(video.id)}
+                />
               ))}
             </div>
           )}

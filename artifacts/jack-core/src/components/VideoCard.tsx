@@ -1,15 +1,27 @@
 import { motion } from "framer-motion";
-import { Play, Clock, Activity, CheckCircle2, AlertCircle } from "lucide-react";
+import { Play, Clock, Activity, CheckCircle2, AlertCircle, UserPlus } from "lucide-react";
 import { Video } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { MouseEvent } from "react";
 
 interface VideoCardProps {
   video: Video;
   onClick: () => void;
   index: number;
+  canAttachContributor?: boolean;
+  isAttachingContributor?: boolean;
+  onAttachContributor?: () => void;
 }
 
-export function VideoCard({ video, onClick, index }: VideoCardProps) {
+export function VideoCard({
+  video,
+  onClick,
+  index,
+  canAttachContributor = false,
+  isAttachingContributor = false,
+  onAttachContributor,
+}: VideoCardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "completed": return "text-emerald-400 bg-emerald-400/10 border-emerald-400/20";
@@ -36,6 +48,11 @@ export function VideoCard({ video, onClick, index }: VideoCardProps) {
       case "failed": return <AlertCircle className="h-3 w-3 mr-1" />;
       default: return <Clock className="h-3 w-3 mr-1" />;
     }
+  };
+
+  const handleAttachContributor = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onAttachContributor?.();
   };
 
   return (
@@ -93,6 +110,18 @@ export function VideoCard({ video, onClick, index }: VideoCardProps) {
             </span>
           )}
         </div>
+        {canAttachContributor && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="mt-3 h-8 w-full text-xs"
+            disabled={isAttachingContributor}
+            onClick={handleAttachContributor}
+          >
+            <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+            {isAttachingContributor ? "Attaching..." : "Attach to Me"}
+          </Button>
+        )}
       </div>
     </motion.div>
   );
