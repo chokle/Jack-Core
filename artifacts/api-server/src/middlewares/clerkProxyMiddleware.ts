@@ -81,7 +81,13 @@ export function clerkProxyMiddleware(): RequestHandler {
         proxyReq.setHeader("Clerk-Secret-Key", secretKey);
 
         const xff = req.headers["x-forwarded-for"];
+        const realIp = req.headers["x-real-ip"];
+        const cfIp = req.headers["cf-connecting-ip"];
+        const flyIp = req.headers["fly-client-ip"];
         const clientIp =
+          (Array.isArray(cfIp) ? cfIp[0] : cfIp)?.split(",")[0]?.trim() ||
+          (Array.isArray(realIp) ? realIp[0] : realIp)?.split(",")[0]?.trim() ||
+          (Array.isArray(flyIp) ? flyIp[0] : flyIp)?.split(",")[0]?.trim() ||
           (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim() ||
           req.socket?.remoteAddress ||
           "";

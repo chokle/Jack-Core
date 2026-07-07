@@ -34,10 +34,13 @@ const clerkPubKey = publishableKeyFromHost(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
 );
 
-// REQUIRED — copy verbatim. Empty in dev (Clerk hits dev FAPI directly), auto-set
-// in prod. Do NOT gate on import.meta.env.PROD / NODE_ENV — the empty dev value
-// is intentional, and any branching breaks the prod proxy.
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+// Auth proxy is useful on hosted Replit/custom-domain setups, but if Clerk's
+// abuse controls start rate-limiting the shared proxy path we need an emergency
+// way to send browser auth traffic directly to Clerk again.
+const clerkProxyUrl =
+  import.meta.env.VITE_DISABLE_CLERK_PROXY === "true"
+    ? undefined
+    : import.meta.env.VITE_CLERK_PROXY_URL;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
