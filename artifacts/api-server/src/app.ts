@@ -2,6 +2,9 @@ import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -86,5 +89,18 @@ app.use((req, res, next) => {
 });
 
 app.use("/api", router);
+
+const apiDir = path.dirname(fileURLToPath(import.meta.url));
+const frontendDir = path.resolve(apiDir, "../../jack-core/dist/public");
+const frontendIndex = path.join(frontendDir, "index.html");
+
+if (existsSync(frontendIndex)) {
+  app.use(express.static(frontendDir, { index: false }));
+  app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    res.sendFile(frontendIndex);
+  });
+} else if (process.env.NODE_ENV === "production") {
+  logger.warn({ frontendDir }, "Frontend build not found; serving API only");
+}
 
 export default app;
