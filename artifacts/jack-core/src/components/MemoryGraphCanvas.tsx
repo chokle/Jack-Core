@@ -97,6 +97,8 @@ interface P {
   radius: number;
   /** Knowledge-weighted target radius; `radius` eases toward this each frame. */
   targetRadius: number;
+  /** Topic hubs with no real captured content yet render as invitations. */
+  populated: boolean;
   bornAt: number;
   // Topic hubs orbit a fixed radial anchor; others spring to their hub.
   anchorX?: number;
@@ -388,6 +390,17 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const map = nodesRef.current;
 
       const topics = model.topics;
+      const modelNodeById = new Map(model.nodes.map((n) => [n.id, n]));
+      const topicPopulated = new Map(
+        topics.map((t) => [
+          t.id,
+          t.metrics.knowledge +
+            t.metrics.videos +
+            t.metrics.conversations +
+            (modelNodeById.get(t.id)?.meta.knowledgeObjectCount ?? 0) >
+            0,
+        ]),
+      );
       const ringR = Math.min(w, h) * 0.32;
       const anchorByTopic = new Map<string, { x: number; y: number }>();
       topics.forEach((t, i) => {
@@ -409,6 +422,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           existing.status = n.status;
           existing.topicId = n.topicId;
           existing.kind = n.kind;
+          existing.populated = n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
           // Ease toward the new size in step(); corroboration growth animates.
           existing.targetRadius = target;
           if (n.kind === "topic") {
@@ -423,6 +437,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const node = makeNode(n, anchorByTopic, cx, cy, map, now);
         node.radius = target;
         node.targetRadius = target;
+        node.populated = n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
         map.set(n.id, node);
       }
       for (const id of [...map.keys()]) {
@@ -1062,9 +1077,18 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             hub.x,
             hub.y - hub.radius - 10 / cam.scale,
           );
+          if (!hub.populated) {
+            ctx.font = `500 ${8.5 / cam.scale}px 'Space Mono', monospace`;
+            ctx.fillStyle = rgba([255, 170, 90], faded ? 0.3 : 0.72);
+            ctx.fillText(
+              "+ be the first",
+              hub.x,
+              hub.y + hub.radius + 13 / cam.scale,
+            );
+          }
           // Cluster composition line under the hub — only when zoomed in enough
           // to read it, so far-out views stay clean.
-          if (showTopicMetrics(cam.scale)) {
+          if (hub.populated && showTopicMetrics(cam.scale)) {
             const m = t.metrics;
             const parts: string[] = [];
             if (m.knowledge)
@@ -1207,6 +1231,7 @@ function makeNode(
     vy: 0,
     radius: BASE_RADII[n.kind] ?? 3.2,
     targetRadius: BASE_RADII[n.kind] ?? 3.2,
+    populated: n.kind !== "topic" || (n.meta.knowledgeObjectCount ?? 0) > 0,
     bornAt: now,
     anchorX: n.kind === "topic" ? anchors.get(n.id)?.x : undefined,
     anchorY: n.kind === "topic" ? anchors.get(n.id)?.y : undefined,
@@ -1305,6 +1330,18 @@ function drawNodeGlow(
   const age = time - node.bornAt;
   const grow = Math.min(1, age / 600);
   const r = node.radius * (0.4 + 0.6 * grow);
+  if (node.kind === "topic" && !node.populated && !emphasized) {
+    const breath = 0.5 + 0.5 * Math.sin(time * 0.0018 + node.x * 0.01);
+    const idle = (0.12 + 0.06 * breath) * (dim ? 0.4 : 1);
+    if (idle <= 0) return;
+    const glowR = r * 3.2;
+    const sprite = getGlowSprite(sprites, node.color);
+    const prevAlpha = c.globalAlpha;
+    c.globalAlpha = clamp01(idle);
+    c.drawImage(sprite, node.x - glowR, node.y - glowR, glowR * 2, glowR * 2);
+    c.globalAlpha = prevAlpha;
+    return;
+  }
   let intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1);
   let glowR = r * 5;
   const col =
@@ -1363,10 +1400,21 @@ function drawNodeBody(
       ? ([239, 90, 90] as RGB)
       : node.color;
 
-  c.fillStyle = rgba(col, Math.min(1, 0.8 * intensity + 0.2));
-  c.beginPath();
-  c.arc(node.x, node.y, r, 0, Math.PI * 2);
-  c.fill();
+  if (node.kind === "topic" && !node.populated) {
+    c.save();
+    c.strokeStyle = rgba(col, Math.min(1, 0.6 * intensity + 0.15));
+    c.lineWidth = 1.4 / scale;
+    c.setLineDash([3.5 / scale, 3 / scale]);
+    c.beginPath();
+    c.arc(node.x, node.y, r, 0, Math.PI * 2);
+    c.stroke();
+    c.restore();
+  } else {
+    c.fillStyle = rgba(col, Math.min(1, 0.8 * intensity + 0.2));
+    c.beginPath();
+    c.arc(node.x, node.y, r, 0, Math.PI * 2);
+    c.fill();
+  }
 
   // Spark-in ring for freshly added nodes.
   if (age < 1500) {
