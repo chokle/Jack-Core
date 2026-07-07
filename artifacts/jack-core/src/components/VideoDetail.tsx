@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2, AlertTriangle, Download } from "lucide-react";
+import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2, AlertTriangle, Download, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,8 +13,11 @@ import {
   getListVideosQueryKey,
   getGetVideoStatsQueryKey,
   getGetRecentVideosQueryKey,
+  getGetVideoQueryKey,
+  getGetGraphQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +42,7 @@ interface VideoDetailProps {
 export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailProps) {
   const [activeTab, setActiveTab] = useState<"transcript" | "analysis">("analysis");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { toast } = useToast();
 
   const { data: video, isLoading } = useGetVideo(videoId, {
     query: {
@@ -77,6 +81,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
   // non-admins is just defense-in-depth. Admin status via GET /me.
   const isAdmin = useGetMe().data?.isAdmin ?? false;
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [claimingContributor, setClaimingContributor] = useState(false);
 
   const deleteMutation = useDeleteVideo({
     request: { credentials: "include" },
@@ -90,6 +95,43 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
       },
     },
   });
+
+  const hasUploader =
+    Boolean((video as { uploaderUserId?: string | null } | undefined)?.uploaderUserId) ||
+    Boolean((video as { uploader_user_id?: string | null } | undefined)?.uploader_user_id);
+
+  const claimContributor = async () => {
+    if (!video?.id) return;
+    setClaimingContributor(true);
+    try {
+      const res = await fetch(`/api/videos/${video.id}/claim-contributor`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Attach failed (${res.status})`);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetVideoQueryKey(video.id) }),
+        queryClient.invalidateQueries({ queryKey: getListVideosQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetRecentVideosQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() }),
+      ]);
+      toast({
+        title: "Contributor attached",
+        description: "This video now sits under your node in Jack's memory graph.",
+      });
+    } catch (err) {
+      toast({
+        title: "Could not attach contributor",
+        description: err instanceof Error ? err.message : "Try again after refreshing.",
+        variant: "destructive",
+      });
+    } finally {
+      setClaimingContributor(false);
+    }
+  };
 
   const seekVideo = (time: number) => {
     const el = videoRef.current;
@@ -178,6 +220,17 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
           {(video.status === "queued" || video.status === "uploaded" || video.status === "failed") && (
             <Button size="sm" onClick={() => transcribeMutation.mutate({ id: video.id })}>
               {video.status === "failed" ? "Retry Processing" : "Run Transcription"}
+            </Button>
+          )}
+          {isAdmin && !hasUploader && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={claimContributor}
+              disabled={claimingContributor}
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              {claimingContributor ? "Attaching..." : "Attach to Me"}
             </Button>
           )}
           {isAdmin && (

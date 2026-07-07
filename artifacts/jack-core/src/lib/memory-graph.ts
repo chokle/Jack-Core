@@ -24,6 +24,12 @@ export interface RawVideo {
   status?: string;
   competencyCodes?: string[] | null;
   competency_codes?: string[] | null;
+  uploaderUserId?: string | null;
+  uploader_user_id?: string | null;
+  uploaderEmail?: string | null;
+  uploader_email?: string | null;
+  uploaderName?: string | null;
+  uploader_name?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
   updatedAt?: string | null;
@@ -60,11 +66,15 @@ export type NodeKind =
   | "video"
   | "competency"
   | "mentor"
+  | "contributor"
   | KnowledgeKind;
 
 /** Signature color for mentor (human-sourced) nodes, distinct from the video and
  *  atomic-knowledge strata so mentor-supplied corroboration reads at a glance. */
 export const MENTOR_COLOR: RGB = [255, 205, 120];
+/** Contributor nodes are signed-in uploaders: human provenance for video-based
+ *  submissions, separate from Interview Mode mentor profile nodes. */
+export const CONTRIBUTOR_COLOR: RGB = [120, 220, 255];
 
 const KNOWLEDGE_KIND_SET = new Set<string>(KNOWLEDGE_KINDS);
 
@@ -130,6 +140,12 @@ export interface MemoryNode {
     updatedAt?: string;
     competencyCodes?: string[];
     videoCount?: number;
+    uploaderUserId?: string;
+    uploaderEmail?: string;
+    uploaderName?: string;
+    userId?: string;
+    email?: string;
+    name?: string;
     /** Atomic-knowledge fields (present only for KnowledgeKind nodes). */
     category?: string;
     refId?: string;
@@ -408,6 +424,7 @@ export function kindLabel(kind: NodeKind): string {
   if (kind === "competency") return "Red Seal Competency";
   if (kind === "video") return "Video";
   if (kind === "mentor") return "Mentor";
+  if (kind === "contributor") return "Contributor";
   return KNOWLEDGE_KIND_META[kind as KnowledgeKind]?.label ?? "Knowledge";
 }
 
@@ -478,6 +495,18 @@ export function readCreatedAt(v: RawVideo): string | undefined {
 
 export function readUpdatedAt(v: RawVideo): string | undefined {
   return (v.updatedAt ?? v.updated_at ?? readCreatedAt(v)) || undefined;
+}
+
+export function readUploaderUserId(v: RawVideo): string | undefined {
+  return (v.uploaderUserId ?? v.uploader_user_id ?? undefined) || undefined;
+}
+
+export function readUploaderEmail(v: RawVideo): string | undefined {
+  return (v.uploaderEmail ?? v.uploader_email ?? undefined) || undefined;
+}
+
+export function readUploaderName(v: RawVideo): string | undefined {
+  return (v.uploaderName ?? v.uploader_name ?? readUploaderEmail(v)) || undefined;
 }
 
 export function timeAgo(iso?: string): string {
@@ -625,7 +654,7 @@ export function finalizeModel(
     if (!m) continue;
     if (n.kind === "video") m.videos += 1;
     else if (n.kind === "competency") m.competencies += 1;
-    else if (n.kind === "mentor") m.conversations += 1;
+    else if (n.kind === "mentor" || n.kind === "contributor") m.conversations += 1;
     else if (isKnowledgeKind(n.kind)) {
       m.knowledge += 1;
       if (n.kind === "procedure") m.procedures += 1;
@@ -739,6 +768,26 @@ export function buildGraphModel(
   for (const v of videos) {
     const topic = v.trade ? topicByTrade.get(v.trade) : undefined;
     const id = `video:${v.id}`;
+    const uploaderUserId = readUploaderUserId(v);
+    const contributorId = uploaderUserId ? `contributor:${uploaderUserId}` : undefined;
+    if (contributorId && !nodes.some((n) => n.id === contributorId)) {
+      const name = readUploaderName(v) ?? "Contributor";
+      nodes.push({
+        id: contributorId,
+        kind: "contributor",
+        label: name,
+        topicId: topic?.id,
+        color: CONTRIBUTOR_COLOR,
+        meta: {
+          trade: v.trade ?? undefined,
+          description: "Signed-in uploader whose field evidence feeds Jack's memory.",
+          userId: uploaderUserId,
+          email: readUploaderEmail(v),
+          name,
+        },
+      });
+      edges.push({ a: topic?.id ?? CORE_ID, b: contributorId, kind: "contributor" });
+    }
     nodes.push({
       id,
       kind: "video",
@@ -752,9 +801,12 @@ export function buildGraphModel(
         createdAt: readCreatedAt(v),
         updatedAt: readUpdatedAt(v),
         competencyCodes: readCodes(v),
+        uploaderUserId,
+        uploaderEmail: readUploaderEmail(v),
+        uploaderName: readUploaderName(v),
       },
     });
-    edges.push({ a: topic?.id ?? CORE_ID, b: id, kind: "video" });
+    edges.push({ a: contributorId ?? topic?.id ?? CORE_ID, b: id, kind: "video" });
     for (const code of readCodes(v)) {
       const compId = `comp:${code}`;
       if (compNodeIds.has(compId)) {
@@ -1017,6 +1069,24 @@ export function buildGraphModelFromServer(graph: {
         meta: {
           trade,
           description: n.description ?? metaStr(n.meta, "description"),
+          createdAt: n.createdAt ?? metaStr(n.meta, "createdAt"),
+          updatedAt: n.updatedAt ?? metaStr(n.meta, "updatedAt"),
+        },
+      };
+    }
+    if (n.kind === "contributor") {
+      return {
+        id: n.id,
+        kind: "contributor",
+        label: n.label,
+        topicId: trade ? topicIdForTrade(trade) : undefined,
+        color: CONTRIBUTOR_COLOR,
+        meta: {
+          trade,
+          description: n.description ?? metaStr(n.meta, "description"),
+          userId: metaStr(n.meta, "userId") ?? n.refId ?? undefined,
+          email: metaStr(n.meta, "email"),
+          name: metaStr(n.meta, "name") ?? n.label,
           createdAt: n.createdAt ?? metaStr(n.meta, "createdAt"),
           updatedAt: n.updatedAt ?? metaStr(n.meta, "updatedAt"),
         },

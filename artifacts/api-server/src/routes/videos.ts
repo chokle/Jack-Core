@@ -13,6 +13,7 @@ import {
   CLAIMABLE_STATUSES,
 } from "../lib/jobs.js";
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
+import { resolveIdentity } from "../lib/admin-auth.js";
 import { requireAdmin } from "../lib/admin-auth.js";
 import {
   ListVideosQueryParams,
@@ -54,6 +55,9 @@ function toVideoResponse(v: Record<string, unknown>) {
     tags: v["tags"] ?? [],
     attempts: v["attempts"] ?? null,
     lastError: v["last_error"] ?? null,
+    uploaderUserId: v["uploader_user_id"] ?? null,
+    uploaderEmail: v["uploader_email"] ?? null,
+    uploaderName: v["uploader_name"] ?? null,
     createdAt: v["created_at"],
     updatedAt: v["updated_at"] ?? null,
   };
@@ -207,6 +211,7 @@ router.post(
         typeof req.body["description"] === "string" ? req.body["description"] : undefined;
       const trade =
         typeof req.body["trade"] === "string" ? req.body["trade"] : undefined;
+      const uploader = await resolveIdentity(req);
 
       // 1. Create the DB record. The server itself performs the upload, so the
       //    row starts in "uploading" (heartbeat marks when it started).
@@ -220,6 +225,9 @@ router.post(
           status: "uploading",
           heartbeat_at: new Date().toISOString(),
           competency_codes: [],
+          uploader_user_id: uploader?.userId ?? req.userId ?? null,
+          uploader_email: uploader?.email ?? null,
+          uploader_name: uploader?.name ?? uploader?.email ?? null,
         })
         .select()
         .single();
@@ -403,6 +411,9 @@ router.get("/videos/:id", async (req, res) => {
       keyPoints: data.key_points ?? [],
       attempts: data.attempts ?? null,
       lastError: data.last_error ?? null,
+      uploaderUserId: data.uploader_user_id ?? null,
+      uploaderEmail: data.uploader_email ?? null,
+      uploaderName: data.uploader_name ?? null,
       segments,
       createdAt: data.created_at,
       updatedAt: data.updated_at ?? null,
@@ -410,6 +421,37 @@ router.get("/videos/:id", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "getVideo error");
     return res.status(500).json({ error: "Failed to get video" });
+  }
+});
+
+router.post("/videos/:id/claim-contributor", requireAdmin, async (req, res) => {
+  try {
+    const parsed = GetVideoParams.safeParse(req.params);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
+
+    const identity = await resolveIdentity(req);
+    const userId = identity?.userId ?? req.userId;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const { data, error } = await supabase
+      .from("videos")
+      .update({
+        uploader_user_id: userId,
+        uploader_email: identity?.email ?? null,
+        uploader_name: identity?.name ?? identity?.email ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", parsed.data.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await syncGraphSafe(parsed.data.id);
+    return res.json(toVideoResponse(data as Record<string, unknown>));
+  } catch (err) {
+    req.log.error({ err }, "claimVideoContributor error");
+    return res.status(500).json({ error: "Failed to claim video contributor" });
   }
 });
 

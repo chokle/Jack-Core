@@ -59,6 +59,7 @@ const topicNodeId = (trade: string) => `topic:${trade}`;
 const compNodeId = (code: string) => `comp:${code}`;
 const videoNodeId = (id: string) => `video:${id}`;
 const mentorNodeId = (id: string) => `mentor:${id}`;
+const contributorNodeId = (id: string) => `contributor:${id}`;
 const edgeKey = (source: string, target: string) => `e:${source}->${target}`;
 
 /**
@@ -296,7 +297,7 @@ export async function ensureBaseGraph(): Promise<void> {
 async function writeVideoNode(videoId: string): Promise<void> {
   const { data: video, error } = await supabase
     .from("videos")
-    .select("id, title, trade, status, description, competency_codes, created_at, updated_at")
+    .select("id, title, trade, status, description, competency_codes, uploader_user_id, uploader_email, uploader_name, created_at, updated_at")
     .eq("id", videoId)
     .maybeSingle();
   if (error) throw error;
@@ -312,6 +313,19 @@ async function writeVideoNode(videoId: string): Promise<void> {
     ? (v["competency_codes"] as unknown[]).filter((c): c is string => typeof c === "string")
     : [];
   const vNode = videoNodeId(videoId);
+  const uploaderUserId =
+    typeof v["uploader_user_id"] === "string" && (v["uploader_user_id"] as string).trim()
+      ? (v["uploader_user_id"] as string)
+      : null;
+  const uploaderEmail =
+    typeof v["uploader_email"] === "string" && (v["uploader_email"] as string).trim()
+      ? (v["uploader_email"] as string)
+      : null;
+  const uploaderName =
+    typeof v["uploader_name"] === "string" && (v["uploader_name"] as string).trim()
+      ? (v["uploader_name"] as string)
+      : uploaderEmail;
+  const cNode = uploaderUserId ? contributorNodeId(uploaderUserId) : null;
 
   const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
   const scaffoldEdges: EdgeUpsert[] = [];
@@ -337,10 +351,28 @@ async function writeVideoNode(videoId: string): Promise<void> {
       trade: trade ?? undefined,
       description: v["description"] ?? undefined,
       competencyCodes: codes,
+      uploaderUserId: uploaderUserId ?? undefined,
+      uploaderEmail: uploaderEmail ?? undefined,
+      uploaderName: uploaderName ?? undefined,
       createdAt: v["created_at"] ?? undefined,
       updatedAt: v["updated_at"] ?? v["created_at"] ?? undefined,
     },
   });
+  if (cNode) {
+    nodes.push({
+      id: cNode,
+      kind: "contributor",
+      label: uploaderName ?? "Contributor",
+      trade,
+      ref_id: uploaderUserId,
+      meta: {
+        userId: uploaderUserId,
+        email: uploaderEmail ?? undefined,
+        name: uploaderName ?? undefined,
+        trade: trade ?? undefined,
+      },
+    });
+  }
 
   await upsertNodes(nodes);
   await ensureCompetencyNodes(codes);
@@ -363,7 +395,19 @@ async function writeVideoNode(videoId: string): Promise<void> {
   const parent = trade ? topicNodeId(trade) : GRAPH_CORE_ID;
   const edges: EdgeUpsert[] = [
     ...scaffoldEdges,
-    { id: edgeKey(parent, vNode), source_id: parent, target_id: vNode, kind: "video" },
+    ...(cNode ? [] : [{ id: edgeKey(parent, vNode), source_id: parent, target_id: vNode, kind: "video" }]),
+    ...(cNode
+      ? [
+          { id: edgeKey(parent, cNode), source_id: parent, target_id: cNode, kind: "contributor" },
+          {
+            id: edgeKey(cNode, vNode),
+            source_id: cNode,
+            target_id: vNode,
+            kind: "video",
+            meta: { role: "uploader", userId: uploaderUserId },
+          },
+        ]
+      : []),
     ...codes.map((code) => ({
       id: edgeKey(vNode, compNodeId(code)),
       source_id: vNode,

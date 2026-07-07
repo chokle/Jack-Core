@@ -122,6 +122,7 @@ const BASE_RADII: Record<NodeKind, number> = {
   topic: 12,
   video: 6,
   mentor: 6.5,
+  contributor: 6.5,
   competency: 4.2,
   concept: 4,
   tool: 4,

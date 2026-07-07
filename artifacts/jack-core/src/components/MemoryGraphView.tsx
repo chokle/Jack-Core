@@ -1025,6 +1025,14 @@ function relatedVideoCount(
 ): number {
   if (!node) return 0;
   if (node.kind === "competency") return node.meta.videoCount ?? 0;
+  if (node.kind === "contributor") {
+    const directVideos = new Set<string>();
+    for (const e of model.edges) {
+      const other = e.a === node.id ? e.b : e.b === node.id ? e.a : null;
+      if (other?.startsWith("video:")) directVideos.add(other);
+    }
+    return directVideos.size;
+  }
   const trade = node.meta.trade;
   if (!trade) return 0;
   let n = 0;
@@ -1064,6 +1072,8 @@ function describeNode(node: MemoryNode): string {
       return "A Red Seal competency mapped from Jack's videos.";
     case "mentor":
       return "An experienced tradesperson whose Interview Mode answers reinforce Jack's memory.";
+    case "contributor":
+      return "A signed-in uploader whose field evidence feeds Jack's memory.";
     case "core":
       return "The core of Jack's living memory.";
     default:
@@ -2419,6 +2429,7 @@ export function NodeDetailBody({
     knowledge ||
     node.kind === "video" ||
     node.kind === "competency" ||
+    node.kind === "contributor" ||
     Boolean(node.meta.updatedAt);
 
   return (
@@ -2699,8 +2710,11 @@ export function NodeDetailBody({
             {knowledge && sources.length > 0 && (
               <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
             )}
-            {(node.kind === "video" || node.kind === "competency") && (
+            {(node.kind === "video" || node.kind === "competency" || node.kind === "contributor") && (
               <Row label="Related Videos" value={relatedVideoCount} />
+            )}
+            {node.kind === "contributor" && node.meta.email && (
+              <Row label="Contributor" value={node.meta.email} />
             )}
             {node.meta.updatedAt && (
               <Row label="Last Updated" value={timeAgo(node.meta.updatedAt)} />

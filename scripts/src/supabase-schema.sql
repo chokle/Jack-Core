@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS videos (
   key_points TEXT[] DEFAULT '{}',
   competency_codes TEXT[] DEFAULT '{}',
   tags TEXT[] DEFAULT '{}',
+  uploader_user_id TEXT,
+  uploader_email TEXT,
+  uploader_name TEXT,
   embedding vector(1536),
   -- Durable job state (resilient processing pipeline)
   attempts INT NOT NULL DEFAULT 0,
@@ -48,6 +51,10 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS claimed_by TEXT;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS processing_stage TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS uploader_user_id TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS uploader_email TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS uploader_name TEXT;
+CREATE INDEX IF NOT EXISTS idx_videos_uploader_user_id ON videos(uploader_user_id);
 
 ALTER TABLE videos DROP CONSTRAINT IF EXISTS videos_status_check;
 UPDATE videos SET status = 'queued'    WHERE status = 'pending';
@@ -202,7 +209,7 @@ ON CONFLICT (code) DO NOTHING;
 CREATE TABLE IF NOT EXISTS knowledge_nodes (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN (
-    'core','topic','competency','video','mentor',
+    'core','topic','competency','video','mentor','contributor',
     'concept','tool','equipment','material','procedure',
     'hazard','slang','certification','standard','regional_term'
   )),
@@ -261,7 +268,7 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
   source_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   target_id TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN (
-    'core','topic','competency','video','mentor','knowledge'
+    'core','topic','competency','video','mentor','contributor','knowledge'
   )),
   weight FLOAT NOT NULL DEFAULT 1,
   meta JSONB NOT NULL DEFAULT '{}',
@@ -280,7 +287,7 @@ ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS verification_status TEXT
 ALTER TABLE knowledge_nodes ADD COLUMN IF NOT EXISTS embedding vector(1536);
 ALTER TABLE knowledge_nodes DROP CONSTRAINT IF EXISTS knowledge_nodes_kind_check;
 ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_kind_check CHECK (kind IN (
-  'core','topic','competency','video','mentor',
+  'core','topic','competency','video','mentor','contributor',
   'concept','tool','equipment','material','procedure',
   'hazard','slang','certification','standard','regional_term'
 ));
@@ -291,7 +298,7 @@ ALTER TABLE knowledge_nodes ADD CONSTRAINT knowledge_nodes_verification_status_c
 ALTER TABLE knowledge_edges ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE knowledge_edges DROP CONSTRAINT IF EXISTS knowledge_edges_kind_check;
 ALTER TABLE knowledge_edges ADD CONSTRAINT knowledge_edges_kind_check CHECK (kind IN (
-  'core','topic','competency','video','mentor','knowledge'
+  'core','topic','competency','video','mentor','contributor','knowledge'
 ));
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_kind ON knowledge_nodes(kind);
