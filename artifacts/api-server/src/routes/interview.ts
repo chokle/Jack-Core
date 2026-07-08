@@ -1,8 +1,8 @@
 /**
  * interview routes — Jack Interview Mode.
  *
- * A conversational, no-auth flow where an experienced tradesperson is interviewed
- * by Jack one question at a time. Every answer is stored VERBATIM, distilled into
+ * A conversational flow where an experienced tradesperson is interviewed by Jack
+ * one question at a time. Every answer is stored VERBATIM, distilled into
  * candidate atomic knowledge (best-effort — a distillation failure never loses the
  * answer), and mirrored into the SAME shared knowledge graph as mentor-sourced
  * corroboration. The server is authoritative for the pending question; the session
@@ -190,13 +190,15 @@ async function loadHistory(sessionId: string): Promise<AnsweredTurn[]> {
 /** Fetch a session and its mentor, or null if the id is malformed / not found. */
 async function loadSession(
   rawId: string | string[] | undefined,
+  ownerUserId: string | undefined,
 ): Promise<{ session: Row; mentor: Row } | null> {
   const id = String(rawId ?? "");
-  if (!UUID_RE.test(id)) return null;
+  if (!UUID_RE.test(id) || !ownerUserId) return null;
   const { data: session, error } = await supabase
     .from("interview_sessions")
     .select("*")
     .eq("id", id)
+    .eq("contributor_user_id", ownerUserId)
     .maybeSingle();
   if (error) throw error;
   if (!session) return null;
@@ -213,6 +215,9 @@ async function loadSession(
 
 router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
   try {
+    const ownerUserId = req.userId;
+    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+
     const parsed = StartInterviewBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
     const body = parsed.data;
@@ -230,6 +235,7 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
         specialties: body.specialties ?? [],
         region: body.region ?? null,
         background: body.background ?? null,
+        contributor_user_id: ownerUserId,
       })
       .select("*")
       .single();
@@ -243,6 +249,7 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
       .from("interview_sessions")
       .insert({
         mentor_profile_id: (mentor as Row)["id"],
+        contributor_user_id: ownerUserId,
         trade,
         status: completed ? "completed" : "active",
         current_question: completed ? null : next.question,
@@ -265,7 +272,7 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
 
 router.get("/interview/sessions/:id", async (req, res) => {
   try {
-    const loaded = await loadSession(req.params.id);
+    const loaded = await loadSession(req.params.id, req.userId);
     if (!loaded) return res.status(404).json({ error: "Interview session not found" });
 
     // Return the ordered prior answers alongside the session so the client can
@@ -288,17 +295,18 @@ router.get("/interview/sessions/:id", async (req, res) => {
 });
 
 /**
- * The mentor's in-progress (incomplete) interview session, if any — powers the
- * "Resume Interview" action on their node in the Living Memory graph. Progress
- * is durable on the session/answer rows, so an interrupted interview (tab
- * closed, network dropped, different device) can be picked up exactly where it
- * left off. Public, like `GET /interview/sessions/:id`: the app has no auth and
- * the session id is only actionable through the existing resume flow. Returns
- * `{}` (not 404) when there is nothing to resume, so the client hook stays on
- * its success path.
+ * The signed-in contributor's in-progress interview session for a mentor, if
+ * any — powers "Resume Interview" on their node in the Living Memory graph.
+ * Admins do not get a bypass here: the owner is the authenticated contributor
+ * who created the interview, not a client-supplied or admin-forged identity.
+ * Returns `{}` (not 404) when there is nothing to resume, so the client hook
+ * stays on its success path.
  */
 router.get("/interview/mentors/:id/active-session", async (req, res) => {
   try {
+    const ownerUserId = req.userId;
+    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+
     const id = String(req.params.id ?? "");
     if (!UUID_RE.test(id)) return res.json({});
 
@@ -306,6 +314,7 @@ router.get("/interview/mentors/:id/active-session", async (req, res) => {
       .from("interview_sessions")
       .select("*")
       .eq("mentor_profile_id", id)
+      .eq("contributor_user_id", ownerUserId)
       .eq("status", "active")
       .order("created_at", { ascending: false })
       .limit(1)
@@ -315,11 +324,12 @@ router.get("/interview/mentors/:id/active-session", async (req, res) => {
 
     const { data: mentor, error: mErr } = await supabase
       .from("mentor_profiles")
-      .select("name")
+      .select("name, contributor_user_id")
       .eq("id", id)
       .maybeSingle();
     if (mErr) throw mErr;
     if (!mentor) return res.json({});
+    if ((mentor as Row)["contributor_user_id"] !== ownerUserId) return res.json({});
 
     return res.json({
       session: serializeSession(session as Row, (mentor as Row)["name"] as string),
@@ -342,7 +352,7 @@ router.post("/interview/sessions/:id/answers", aiInterviewLimiter, async (req, r
         .json({ error: `Answer must be ${MAX_ANSWER_LENGTH} characters or fewer.` });
     }
 
-    const loaded = await loadSession(req.params.id);
+    const loaded = await loadSession(req.params.id, req.userId);
     if (!loaded) return res.status(404).json({ error: "Interview session not found" });
     const { session, mentor } = loaded;
 
@@ -454,7 +464,7 @@ router.post(
   aiInterviewLimiter,
   async (req, res, next) => {
     try {
-      const loaded = await loadSession(req.params.id);
+      const loaded = await loadSession(req.params.id, req.userId);
       if (!loaded) return res.status(404).json({ error: "Interview session not found" });
       if ((loaded.session["status"] as string) === "completed") {
         return res.status(409).json({ error: "This interview is already complete." });
@@ -507,7 +517,7 @@ router.post(
 
 router.post("/interview/sessions/:id/skip", aiInterviewLimiter, async (req, res) => {
   try {
-    const loaded = await loadSession(req.params.id);
+    const loaded = await loadSession(req.params.id, req.userId);
     if (!loaded) return res.status(404).json({ error: "Interview session not found" });
     const { session, mentor } = loaded;
 
@@ -641,7 +651,7 @@ router.post("/interview/answers/:id/redistill", requireAdmin, async (req, res) =
 
 router.post("/interview/sessions/:id/finish", async (req, res) => {
   try {
-    const loaded = await loadSession(req.params.id);
+    const loaded = await loadSession(req.params.id, req.userId);
     if (!loaded) return res.status(404).json({ error: "Interview session not found" });
     const { session, mentor } = loaded;
 

@@ -462,6 +462,7 @@ END; $$;
 CREATE TABLE IF NOT EXISTS mentor_profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  contributor_user_id TEXT,
   trade TEXT,
   trade_input TEXT,
   years_experience INT,
@@ -478,6 +479,7 @@ CREATE TABLE IF NOT EXISTS mentor_profiles (
 CREATE TABLE IF NOT EXISTS interview_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mentor_profile_id UUID NOT NULL REFERENCES mentor_profiles(id) ON DELETE CASCADE,
+  contributor_user_id TEXT,
   trade TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
   current_question TEXT,
@@ -512,7 +514,15 @@ CREATE TABLE IF NOT EXISTS interview_answers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE mentor_profiles
+  ADD COLUMN IF NOT EXISTS contributor_user_id TEXT;
+
+ALTER TABLE interview_sessions
+  ADD COLUMN IF NOT EXISTS contributor_user_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_interview_sessions_mentor ON interview_sessions(mentor_profile_id);
+CREATE INDEX IF NOT EXISTS idx_interview_sessions_contributor
+  ON interview_sessions(contributor_user_id);
 CREATE INDEX IF NOT EXISTS idx_interview_answers_session ON interview_answers(session_id);
 CREATE INDEX IF NOT EXISTS idx_interview_answers_mentor ON interview_answers(mentor_profile_id);
 
