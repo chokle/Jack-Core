@@ -76,10 +76,10 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
 
   const queryClient = useQueryClient();
 
-  // Admin-only: allow removing duplicate/broken videos straight from the detail
-  // view. The DELETE route is admin-only on the server; hiding the control for
-  // non-admins is just defense-in-depth. Admin status via GET /me.
-  const isAdmin = useGetMe().data?.isAdmin ?? false;
+  // Admins can remove library records. Non-admins can only remove their own
+  // duplicate uploads; the server enforces that rule and this only reflects it.
+  const me = useGetMe().data;
+  const isAdmin = me?.isAdmin ?? false;
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [claimingContributor, setClaimingContributor] = useState(false);
 
@@ -90,8 +90,16 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
         void queryClient.invalidateQueries({ queryKey: getListVideosQueryKey() });
         void queryClient.invalidateQueries({ queryKey: getGetVideoStatsQueryKey() });
         void queryClient.invalidateQueries({ queryKey: getGetRecentVideosQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
         setConfirmDeleteOpen(false);
         onBack();
+      },
+      onError: (err) => {
+        toast({
+          title: "Could not remove video",
+          description: err instanceof Error ? err.message : "Only your own duplicate uploads can be removed.",
+          variant: "destructive",
+        });
       },
     },
   });
@@ -99,6 +107,19 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
   const hasUploader =
     Boolean((video as { uploaderUserId?: string | null } | undefined)?.uploaderUserId) ||
     Boolean((video as { uploader_user_id?: string | null } | undefined)?.uploader_user_id);
+  const duplicateDelete = video as {
+    uploaderUserId?: string | null;
+    uploader_user_id?: string | null;
+    canDeleteDuplicate?: boolean;
+    duplicateCount?: number;
+  };
+  const uploaderUserId = duplicateDelete.uploaderUserId ?? duplicateDelete.uploader_user_id ?? null;
+  const canRemoveOwnDuplicate =
+    !isAdmin &&
+    Boolean(me?.userId) &&
+    uploaderUserId === me?.userId &&
+    duplicateDelete.canDeleteDuplicate === true;
+  const canDeleteVideo = isAdmin || canRemoveOwnDuplicate;
 
   const claimContributor = async () => {
     if (!video?.id) return;
@@ -233,7 +254,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               {claimingContributor ? "Attaching..." : "Attach to Me"}
             </Button>
           )}
-          {isAdmin && (
+          {canDeleteVideo && (
             <Button
               size="sm"
               variant="destructive"
@@ -241,7 +262,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               disabled={deleteMutation.isPending}
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove duplicate"}
             </Button>
           )}
           {video.status === "completed" && !video.analysis && (
@@ -308,7 +329,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                   Processing failed{video.lastError ? `: ${video.lastError}` : "."}
                 </p>
                 <p className="font-mono text-xs text-muted-foreground mt-1">
-                  Use "Retry Processing" above to try again{isAdmin ? ", or Delete to remove this entry from the Library." : "."}
+                  Use "Retry Processing" above to try again{canDeleteVideo ? ", or remove this entry from the Library." : "."}
                 </p>
               </div>
             )}
@@ -397,10 +418,11 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this video?</AlertDialogTitle>
+            <AlertDialogTitle>{isAdmin ? "Delete this video?" : "Remove duplicate video?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes "{video.title}" and its knowledge-graph node
-              from the Library. This can't be undone.
+              {isAdmin
+                ? `This permanently removes "${video.title}" and its knowledge-graph node from the Library. This can't be undone.`
+                : `This permanently removes your duplicate upload "${video.title}" from the Library. One matching copy must remain.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -413,7 +435,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                 deleteMutation.mutate({ id: video.id });
               }}
             >
-              {deleteMutation.isPending ? "Deleting…" : "Delete"}
+              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove duplicate"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

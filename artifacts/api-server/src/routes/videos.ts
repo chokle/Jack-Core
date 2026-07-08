@@ -63,6 +63,34 @@ function toVideoResponse(v: Record<string, unknown>) {
   };
 }
 
+function normalizeDuplicateValue(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, " ") : "";
+}
+
+async function getDuplicateEligibility(video: Record<string, unknown>, userId?: string | null) {
+  const uploaderUserId = typeof video["uploader_user_id"] === "string" ? video["uploader_user_id"] : "";
+  const title = normalizeDuplicateValue(video["title"]);
+  const trade = normalizeDuplicateValue(video["trade"]);
+
+  if (!userId || !uploaderUserId || userId !== uploaderUserId || !title) {
+    return { duplicateCount: 0, canDeleteDuplicate: false };
+  }
+
+  const { data, error } = await supabase
+    .from("videos")
+    .select("id, title, trade")
+    .eq("uploader_user_id", uploaderUserId);
+
+  if (error) throw error;
+
+  const duplicateCount = (data ?? []).filter((row: Record<string, unknown>) => (
+    normalizeDuplicateValue(row["title"]) === title &&
+    normalizeDuplicateValue(row["trade"]) === trade
+  )).length;
+
+  return { duplicateCount, canDeleteDuplicate: duplicateCount > 1 };
+}
+
 router.get("/videos", async (req, res) => {
   try {
     const query = ListVideosQueryParams.safeParse(req.query);
@@ -394,6 +422,7 @@ router.get("/videos/:id", async (req, res) => {
       text: s["text"],
       confidence: s["confidence"] ?? null,
     }));
+    const duplicateEligibility = await getDuplicateEligibility(data, req.userId);
 
     return res.json({
       id: data.id,
@@ -414,6 +443,8 @@ router.get("/videos/:id", async (req, res) => {
       uploaderUserId: data.uploader_user_id ?? null,
       uploaderEmail: data.uploader_email ?? null,
       uploaderName: data.uploader_name ?? null,
+      duplicateCount: duplicateEligibility.duplicateCount,
+      canDeleteDuplicate: duplicateEligibility.canDeleteDuplicate,
       segments,
       createdAt: data.created_at,
       updatedAt: data.updated_at ?? null,
@@ -489,10 +520,32 @@ router.patch("/videos/:id", requireAdmin, async (req, res) => {
   }
 });
 
-router.delete("/videos/:id", requireAdmin, aiPipelineLimiter, async (req, res) => {
+router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = DeleteVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
+
+    const identity = await resolveIdentity(req);
+    const userId = identity?.userId ?? req.userId;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const { data: video, error: readError } = await supabase
+      .from("videos")
+      .select("id, title, trade, uploader_user_id")
+      .eq("id", parsed.data.id)
+      .maybeSingle();
+
+    if (readError) throw readError;
+    if (!video) return res.status(404).json({ error: "Video not found" });
+
+    if (!identity?.isAdmin) {
+      const duplicateEligibility = await getDuplicateEligibility(video, userId);
+      if (!duplicateEligibility.canDeleteDuplicate) {
+        return res.status(403).json({
+          error: "Only duplicate videos uploaded by your own account can be removed.",
+        });
+      }
+    }
 
     const { error } = await supabase.from("videos").delete().eq("id", parsed.data.id);
     if (error) throw error;
