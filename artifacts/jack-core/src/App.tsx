@@ -237,7 +237,7 @@ function JackApp() {
         onCitationClick={handleCitationClick}
       />
 
-      <TestingOverlay ref={testingOverlayRef} />
+      <TestingOverlay ref={testingOverlayRef} autoPrompt />
     </>
   );
 }

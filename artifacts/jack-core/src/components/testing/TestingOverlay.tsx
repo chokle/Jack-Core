@@ -18,6 +18,16 @@ export interface TestingOverlayHandle {
   open: () => void;
 }
 
+interface TestingOverlayProps {
+  /**
+   * Opens the consent wall once per browser session on Jack entry. This still
+   * never requests screen/mic permission until the tester clicks Start Test.
+   */
+  autoPrompt?: boolean;
+}
+
+const AUTO_PROMPT_SESSION_KEY = "jack.userTesting.promptSeen";
+
 /**
  * Beta user-testing orchestrator — mount once near the root of the
  * authenticated app. Owns the whole idle -> consent -> recording -> uploading
@@ -28,7 +38,10 @@ export interface TestingOverlayHandle {
  * imperative handle via a forwarded ref (e.g. a "Start User Test" button
  * elsewhere in the shell).
  */
-export const TestingOverlay = forwardRef<TestingOverlayHandle>(function TestingOverlay(_props, ref) {
+export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayProps>(function TestingOverlay(
+  { autoPrompt = false },
+  ref,
+) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [isPaused, setIsPaused] = useState(false);
   const [micIncluded, setMicIncluded] = useState(true);
@@ -52,6 +65,29 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle>(function TestingO
       }
     } catch {
       /* malformed search string — ignore, app continues normally */
+    }
+  }, []);
+
+  // For beta testers arriving directly at Jack from another domain, show the
+  // consent wall before they start using the app. Dismissal is remembered for
+  // this browser session only, so the prompt does not keep interrupting them.
+  useEffect(() => {
+    if (!autoPrompt) return;
+
+    try {
+      if (new URLSearchParams(window.location.search).get("test") === "true") return;
+      if (sessionStorage.getItem(AUTO_PROMPT_SESSION_KEY) === "true") return;
+      setPhase((p) => (p === "idle" ? "consent" : p));
+    } catch {
+      setPhase((p) => (p === "idle" ? "consent" : p));
+    }
+  }, [autoPrompt]);
+
+  const markAutoPromptSeen = useCallback(() => {
+    try {
+      sessionStorage.setItem(AUTO_PROMPT_SESSION_KEY, "true");
+    } catch {
+      /* sessionStorage unavailable — prompt behavior remains in-memory only */
     }
   }, []);
 
@@ -87,6 +123,8 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle>(function TestingO
   );
 
   const handleStart = useCallback(async () => {
+    markAutoPromptSeen();
+
     if (!isScreenRecordingSupported()) {
       toast({
         title: "Screen recording isn't available",
@@ -121,9 +159,12 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle>(function TestingO
     setIsPaused(false);
     setShowBanner(true);
     setPhase("recording");
-  }, [handleUpload, toast]);
+  }, [handleUpload, markAutoPromptSeen, toast]);
 
-  const handleCancelConsent = useCallback(() => setPhase("idle"), []);
+  const handleCancelConsent = useCallback(() => {
+    markAutoPromptSeen();
+    setPhase("idle");
+  }, [markAutoPromptSeen]);
 
   const handleStop = useCallback(() => {
     void serviceRef.current?.stop("user");
@@ -145,6 +186,7 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle>(function TestingO
         open={phase === "consent"}
         onStart={() => void handleStart()}
         onCancel={handleCancelConsent}
+        cancelLabel="Continue Without Recording"
       />
       {phase === "recording" && serviceRef.current && (
         <RecordingIndicator

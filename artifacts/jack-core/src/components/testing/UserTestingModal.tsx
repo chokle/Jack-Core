@@ -13,6 +13,7 @@ interface UserTestingModalProps {
   open: boolean;
   onStart: () => void;
   onCancel: () => void;
+  cancelLabel?: string;
 }
 
 /**
@@ -20,7 +21,12 @@ interface UserTestingModalProps {
  * do not paraphrase. No browser permission APIs are called until the user
  * clicks "Start Test" here.
  */
-export function UserTestingModal({ open, onStart, onCancel }: UserTestingModalProps) {
+export function UserTestingModal({
+  open,
+  onStart,
+  onCancel,
+  cancelLabel = "Cancel",
+}: UserTestingModalProps) {
   return (
     <AlertDialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <AlertDialogContent data-testid="user-testing-modal">
@@ -49,7 +55,7 @@ export function UserTestingModal({ open, onStart, onCancel }: UserTestingModalPr
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel data-testid="user-testing-cancel" onClick={onCancel}>
-            Cancel
+            {cancelLabel}
           </AlertDialogCancel>
           <AlertDialogAction data-testid="user-testing-start" onClick={onStart}>
             Start Test
