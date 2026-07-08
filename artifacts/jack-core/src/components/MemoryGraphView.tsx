@@ -2199,6 +2199,7 @@ function MentorResumeAction({
   onResumeInterview: (sessionId: string) => void;
 }) {
   const { data } = useGetMentorActiveSession(mentorId, {
+    request: { credentials: "include", cache: "no-store" },
     query: {
       enabled: mentorId.length > 0,
       queryKey: getGetMentorActiveSessionQueryKey(mentorId),
