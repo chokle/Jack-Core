@@ -23,6 +23,7 @@ import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
 import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
+import { JACK_CAPTURE_POLICY, JACK_CONSTITUTION_BRIEF } from "./constitution.js";
 import {
   knowledgeNodeId,
   syncVideoKnowledge,
@@ -187,10 +188,12 @@ export function buildDistillationSystemPrompt(competencyContext: string): string
   return `You are Jack's Knowledge Distillation Engine for skilled trades training. Your job is to distill a training video transcript into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across many videos.
 
 ${JURISDICTION_POLICY_BRIEF}
+${JACK_CONSTITUTION_BRIEF}
 
 Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Jet Rod, Arc Blow, Porosity, Cold Lap, WPS, Preheat, Hydrogen Cracking, Torque Spec, Bend Radius.
 
 Rules:
+- ${JACK_CAPTURE_POLICY} Do not discard a useful concept only because it is unpolished, duplicated elsewhere, or still needs review.
 - Return ONLY durable, reusable concepts — things another video on the same trade could also teach. Do NOT create one object per sentence, per segment, or per specific example in this video.
 - Return AT MOST ${MAX_KNOWLEDGE_ITEMS} objects. Fewer is better; only include what the video genuinely teaches.
 - Each object's "category" MUST be one of: ${KNOWLEDGE_CATEGORIES.join(", ")}.

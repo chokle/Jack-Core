@@ -17,6 +17,7 @@
 import { chatCompletion, MODELS } from "./openai.js";
 import { logger } from "./logger.js";
 import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
+import { JACK_CONSTITUTION_BRIEF } from "./constitution.js";
 
 /** The trades a mentor can be interviewed for (UI selection list). */
 export const INTERVIEW_TRADES = [
@@ -218,6 +219,7 @@ export function buildInterviewSystemPrompt(args: {
   return `You are Jack, interviewing a seasoned ${name} to capture their hard-won field knowledge for an apprentice-facing knowledge base. Interview like a sharp, curious human — not a form.
 
 ${JURISDICTION_POLICY_BRIEF}
+${JACK_CONSTITUTION_BRIEF}
 
 Rules:
 - Ask EXACTLY ONE question. Keep it short, plainspoken, and conversational — the way a respectful colleague would ask. No preamble, no multi-part questions, no yes/no questions.
