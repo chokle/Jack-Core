@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2, AlertTriangle, Download, UserPlus } from "lucide-react";
+import { X, ArrowLeft, Play, Clock, BrainCircuit, MessageSquare, Subtitles, ListChecks, FileQuestion, Trash2, AlertTriangle, Download, UserPlus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -120,6 +120,14 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
     uploaderUserId === me?.userId &&
     duplicateDelete.canDeleteDuplicate === true;
   const canDeleteVideo = isAdmin || canRemoveOwnDuplicate;
+  const status = video?.status ?? "";
+  const isWorking = IN_FLIGHT_STATUSES.has(status);
+  const isAnalyzingNow = status === "analyzing";
+  const processingSteps = [
+    { id: "transcribing", label: "Reading the footage", active: status === "transcribing", done: Boolean(video?.transcript) },
+    { id: "analyzing", label: "Finding lessons and risks", active: status === "analyzing", done: Boolean(video?.analysis) },
+    { id: "indexing", label: "Linking it into memory", active: status === "indexing", done: status === "completed" },
+  ];
 
   const claimContributor = async () => {
     if (!video?.id) return;
@@ -265,9 +273,18 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove duplicate"}
             </Button>
           )}
-          {video.status === "completed" && !video.analysis && (
-            <Button size="sm" onClick={() => analyzeMutation.mutate({ id: video.id })}>
-              <BrainCircuit className="h-4 w-4 mr-2" /> Analyze
+          {((video.status === "completed" && !video.analysis) || isAnalyzingNow) && (
+            <Button
+              size="sm"
+              onClick={() => analyzeMutation.mutate({ id: video.id })}
+              disabled={isAnalyzingNow || analyzeMutation.isPending}
+            >
+              {isAnalyzingNow || analyzeMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <BrainCircuit className="h-4 w-4 mr-2" />
+              )}
+              {isAnalyzingNow || analyzeMutation.isPending ? "Jack is analyzing..." : "Generate Analysis"}
             </Button>
           )}
           <Button size="sm" variant="secondary" onClick={() => onOpenChat(`Based on the video "${video.title}"...`)}>
@@ -357,6 +374,41 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
             <div className="p-4 space-y-6">
               {activeTab === "analysis" ? (
                 <div className="space-y-6">
+                  {isWorking && !video.analysis && (
+                    <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground">
+                            Jack is working through this upload
+                          </h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Keep this open to watch the analysis take shape, or come back later.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {processingSteps.map((step) => (
+                          <div
+                            key={step.id}
+                            className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${
+                              step.active
+                                ? "border-primary/40 bg-primary/10 text-foreground"
+                                : step.done
+                                  ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+                                  : "border-border/70 bg-muted/20 text-muted-foreground"
+                            }`}
+                          >
+                            <span>{step.label}</span>
+                            <span className="font-mono uppercase tracking-[0.12em]">
+                              {step.active ? "running" : step.done ? "done" : "queued"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {video.analysis ? (
                     <div className="prose prose-invert max-w-none text-sm">
                       <div className="whitespace-pre-wrap break-words">{video.analysis}</div>
@@ -366,8 +418,14 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                       <BrainCircuit className="h-8 w-8 mb-2 opacity-50" />
                       <p className="font-mono text-xs">No analysis available.</p>
                       {video.status === "completed" && (
-                        <Button variant="link" size="sm" className="mt-2 text-primary" onClick={() => analyzeMutation.mutate({ id: video.id })}>
-                          Trigger Analysis
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="mt-2 text-primary"
+                          onClick={() => analyzeMutation.mutate({ id: video.id })}
+                          disabled={analyzeMutation.isPending}
+                        >
+                          {analyzeMutation.isPending ? "Starting Jack..." : "Generate analysis"}
                         </Button>
                       )}
                     </div>

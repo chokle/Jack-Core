@@ -40,6 +40,14 @@ function isTooLarge(file: File): boolean {
   return file.size > MAX_FILE_MB * 1024 * 1024;
 }
 
+function fileKey(file: File): string {
+  return `${file.name.toLowerCase()}::${file.size}::${file.lastModified}`;
+}
+
+function isValidationBlocked(item: UploadItem): boolean {
+  return isTooLarge(item.file) || item.error === "Already selected in this batch";
+}
+
 export function UploadModal({ onClose }: UploadModalProps) {
   const [items, setItems] = useState<UploadItem[]>([]);
   const [trade, setTrade] = useState("");
@@ -53,17 +61,27 @@ export function UploadModal({ onClose }: UploadModalProps) {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []);
-    const additions: UploadItem[] = selected.map((file) => {
-      const tooLarge = isTooLarge(file);
-      return {
-        id: crypto.randomUUID(),
-        file,
-        title: file.name.replace(/\.[^.]+$/, ""),
-        status: tooLarge ? "error" : "pending",
-        error: tooLarge ? `Exceeds the ${MAX_FILE_MB} MB transcription limit` : undefined,
-      };
+    setItems((prev) => {
+      const seen = new Set(prev.map((item) => fileKey(item.file)));
+      const additions: UploadItem[] = selected.map((file) => {
+        const key = fileKey(file);
+        const tooLarge = isTooLarge(file);
+        const duplicateInBatch = seen.has(key);
+        seen.add(key);
+        return {
+          id: crypto.randomUUID(),
+          file,
+          title: file.name.replace(/\.[^.]+$/, ""),
+          status: tooLarge || duplicateInBatch ? "error" : "pending",
+          error: tooLarge
+            ? `Exceeds the ${MAX_FILE_MB} MB transcription limit`
+            : duplicateInBatch
+              ? "Already selected in this batch"
+              : undefined,
+        };
+      });
+      return [...prev, ...additions];
     });
-    setItems((prev) => [...prev, ...additions]);
     // Reset so re-selecting the same file(s) still fires onChange.
     e.target.value = "";
   };
@@ -92,7 +110,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
     // Everything not yet done and within the size limit (retries oversize files
     // are excluded — they can never succeed).
     const runnable = items.filter(
-      (it) => (it.status === "pending" || it.status === "error") && !isTooLarge(it.file),
+      (it) => (it.status === "pending" || it.status === "error") && !isValidationBlocked(it),
     );
     if (runnable.length === 0) return;
 
@@ -132,7 +150,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
   const doneCount = items.filter((it) => it.status === "done").length;
   const errorCount = items.filter((it) => it.status === "error").length;
   const runnableCount = items.filter(
-    (it) => (it.status === "pending" || it.status === "error") && !isTooLarge(it.file),
+    (it) => (it.status === "pending" || it.status === "error") && !isValidationBlocked(it),
   ).length;
 
   const statusIcon = (item: UploadItem) => {
@@ -189,7 +207,7 @@ export function UploadModal({ onClose }: UploadModalProps) {
               {items.length > 0 ? "Add more videos" : "Select Video Files"}
             </p>
             <p className="text-xs font-mono mt-1">
-              MP4, MOV — select multiple, up to {MAX_FILE_MB} MB each
+              Batch upload MP4/MOV files — duplicates are flagged before upload
             </p>
           </button>
 

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { Readable } from "node:stream";
 import { supabase } from "../lib/supabase.js";
 import {
   claimStage,
@@ -169,6 +170,32 @@ const VIDEO_EXTENSION_CONTENT_TYPES: Record<string, string> = {
   ".3gp": "video/3gpp",
   ".3g2": "video/3gpp2",
 };
+
+function contentTypeFromUrl(url: string): string {
+  try {
+    const pathname = new URL(url).pathname;
+    const ext = path.extname(pathname).toLowerCase();
+    return VIDEO_EXTENSION_CONTENT_TYPES[ext] ?? "video/mp4";
+  } catch {
+    return "video/mp4";
+  }
+}
+
+function isAllowedPlaybackUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const supabaseUrl = process.env["SUPABASE_URL"];
+    const allowedSupabaseHost = supabaseUrl ? new URL(supabaseUrl).host : null;
+    return (
+      url.protocol === "https:" &&
+      Boolean(allowedSupabaseHost) &&
+      url.host === allowedSupabaseHost &&
+      url.pathname.includes("/storage/v1/object/")
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolve the content type to trust for a browser-supplied file. Prefers the
@@ -402,6 +429,56 @@ router.get("/videos/recent", async (req, res) => {
   }
 });
 
+router.get("/videos/:id/play", async (req, res) => {
+  try {
+    const parsed = GetVideoParams.safeParse(req.params);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
+
+    const { data, error } = await supabase
+      .from("videos")
+      .select("video_url")
+      .eq("id", parsed.data.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    const videoUrl = typeof data?.["video_url"] === "string" ? data["video_url"] : "";
+    if (!videoUrl) return res.status(404).json({ error: "Video source not found" });
+    if (!isAllowedPlaybackUrl(videoUrl)) {
+      return res.status(400).json({ error: "Unsupported video source" });
+    }
+
+    const upstreamHeaders: Record<string, string> = {};
+    const range = req.headers.range;
+    if (typeof range === "string") upstreamHeaders["range"] = range;
+
+    const upstream = await fetch(videoUrl, { headers: upstreamHeaders });
+    if (!upstream.ok && upstream.status !== 206) {
+      req.log.warn({ status: upstream.status, videoId: parsed.data.id }, "video playback fetch failed");
+      return res.status(upstream.status).send("Video source unavailable");
+    }
+
+    res.status(upstream.status);
+    const contentType = upstream.headers.get("content-type") ?? "";
+    res.setHeader(
+      "Content-Type",
+      contentType.startsWith("video/") ? contentType : contentTypeFromUrl(videoUrl),
+    );
+    res.setHeader("Accept-Ranges", upstream.headers.get("accept-ranges") ?? "bytes");
+    for (const header of ["content-length", "content-range", "etag", "last-modified"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    res.setHeader("Cache-Control", "private, max-age=300");
+
+    if (!upstream.body) return res.end();
+    Readable.fromWeb(upstream.body).pipe(res);
+    return;
+  } catch (err) {
+    req.log.error({ err }, "playVideo error");
+    return res.status(500).json({ error: "Failed to play video" });
+  }
+});
+
 router.get("/videos/:id", async (req, res) => {
   try {
     const parsed = GetVideoParams.safeParse(req.params);
@@ -430,7 +507,7 @@ router.get("/videos/:id", async (req, res) => {
       description: data.description ?? null,
       trade: data.trade ?? null,
       thumbnailUrl: data.thumbnail_url ?? null,
-      videoUrl: data.video_url ?? null,
+      videoUrl: data.video_url ? `/api/videos/${data.id}/play` : null,
       duration: data.duration ?? null,
       status: data.status,
       competencyCodes: data.competency_codes ?? [],

@@ -10,9 +10,9 @@
  * Privacy mirrors chat.ts: chat-sourced rows are scoped to the caller's
  * HttpOnly jack_session cookie, exactly like chat history — a cookie mismatch
  * or missing cookie returns 404, never a "this belongs to someone else"
- * response that would leak existence. Interview-sourced rows are public,
- * consistent with the rest of the app's interview/mentor data having no
- * privacy boundary. mentorProfileId/trade/topic/category for an
+ * response that would leak existence. Interview-sourced rows are scoped to the
+ * authenticated user who owns the underlying interview session. Admin status is
+ * not a bypass: nobody can resume another contributor's interview. mentorProfileId/trade/topic/category for an
  * interview-sourced row are NEVER taken from the client — they are always
  * derived server-side from interviewSessionId so a caller cannot mislabel a
  * bookmark as belonging to a mentor/session it doesn't.
@@ -84,10 +84,31 @@ function serialize(row: Row): Record<string, unknown> {
 }
 
 /**
+ * Check whether the authenticated caller owns the interview session behind a
+ * parked interview thought. This deliberately ignores admin status: resuming an
+ * interview means continuing as the contributor, so ownership is the only gate.
+ */
+async function canAccessInterviewThought(req: Request, row: Row): Promise<boolean> {
+  const sessionId = row["interview_session_id"];
+  if (row["source"] !== "interview") return true;
+  if (typeof sessionId !== "string" || !UUID_RE.test(sessionId) || !req.userId) return false;
+
+  const { data, error } = await supabase
+    .from("interview_sessions")
+    .select("contributor_user_id")
+    .eq("id", sessionId)
+    .eq("contributor_user_id", req.userId)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+/**
  * Load a row by id and enforce the privacy rule: a chat-sourced row is only
- * accessible to the cookie that created it; an interview-sourced row is
- * public. Returns null for "doesn't exist" AND "exists but not yours" so the
- * caller can return a single 404 without leaking which case it was.
+ * accessible to the cookie that created it; an interview-sourced row is only
+ * accessible to the authenticated user who created/owns the interview session.
+ * Returns null for "doesn't exist" AND "exists but not yours" so the caller can
+ * return a single 404 without leaking which case it was.
  */
 async function findAccessibleRow(req: Request, id: string): Promise<Row | null> {
   const { data, error } = await supabase
@@ -101,6 +122,9 @@ async function findAccessibleRow(req: Request, id: string): Promise<Row | null> 
   if (row["source"] === "chat") {
     const session = readSession(req);
     if (!session || row["chat_session_id"] !== session) return null;
+  }
+  if (row["source"] === "interview" && !(await canAccessInterviewThought(req, row))) {
+    return null;
   }
   return row;
 }
@@ -140,6 +164,7 @@ router.post("/parking-lot", parkingLotLimiter, async (req, res) => {
         .from("interview_sessions")
         .select("*")
         .eq("id", sid)
+        .eq("contributor_user_id", req.userId)
         .maybeSingle();
       if (sErr) throw sErr;
       if (!session) return res.status(400).json({ error: "Unknown interviewSessionId" });
@@ -217,8 +242,9 @@ router.get("/parking-lot", async (req, res) => {
     if (status) query = query.eq("status", status);
     if (mentorProfileId) query = query.eq("mentor_profile_id", mentorProfileId);
 
-    // Privacy: interview-sourced rows are public; chat-sourced rows are only
-    // visible to the cookie that created them. `.or()` builds a raw PostgREST
+    // Privacy: chat-sourced rows are only visible to the cookie that created
+    // them; interview-sourced rows are filtered below against the authenticated
+    // session owner. `.or()` builds a raw PostgREST
     // filter string, so the session value MUST be validated as a UUID before
     // being inlined — an unvalidated cookie could inject extra `,`-separated
     // disjuncts and disclose other sessions' chat-sourced parked thoughts.
@@ -226,11 +252,26 @@ router.get("/parking-lot", async (req, res) => {
     query = safeSession
       ? query.or(`source.eq.interview,chat_session_id.eq.${safeSession}`)
       : query.eq("source", "interview");
+    if (req.userId) {
+      // Supabase/PostgREST cannot filter parked_thoughts by the joined
+      // interview session owner here, so we still verify each row below. This
+      // keeps the initial candidate set bounded to interview rows plus the
+      // caller's chat rows without ever trusting the client for ownership.
+    }
 
     const { data, error } = await query;
     if (error) throw error;
 
-    return res.json({ items: (data ?? []).map((r) => serialize(r as Row)) });
+    const visible: Row[] = [];
+    for (const r of data ?? []) {
+      const row = r as Row;
+      if (row["source"] === "interview" && !(await canAccessInterviewThought(req, row))) {
+        continue;
+      }
+      visible.push(row);
+    }
+
+    return res.json({ items: visible.map((r) => serialize(r)) });
   } catch (err) {
     req.log.error({ err }, "listParkedThoughts error");
     return res.status(500).json({ error: "Failed to list parked thoughts" });

@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Activity,
   Play,
-  PlayCircle,
   Pin,
   PinOff,
   ShieldCheck,
@@ -28,7 +27,6 @@ import {
   useSetNodeVerification,
   useRestoreWithdrawnEvidence,
   useGetVideo,
-  useGetMentorActiveSession,
   useGetMe,
   useGetKnowledgeStats,
   getGetKnowledgeStatsQueryKey,
@@ -36,7 +34,6 @@ import {
   getGetConceptAnswerContributionsQueryKey,
   getGetVideoQueryKey,
   getGetGraphQueryKey,
-  getGetMentorActiveSessionQueryKey,
 } from "@workspace/api-client-react";
 import type {
   VerificationUpdateStatus,
@@ -2182,50 +2179,6 @@ function TranscriptContent({
 }
 
 /**
- * Resume-interview affordance shown on a mentor (person) node. Looks up that
- * mentor's in-progress interview and, when one exists, offers a one-click resume
- * that reconnects Interview Mode exactly where they left off (progress is
- * persisted server-side, so it survives refreshes and new devices). Isolated as
- * its own component so the lookup only fires when a mentor node is actually
- * inspected — not for every selected node.
- */
-function MentorResumeAction({
-  mentorId,
-  mentorName,
-  onResumeInterview,
-}: {
-  mentorId: string;
-  mentorName: string;
-  onResumeInterview: (sessionId: string) => void;
-}) {
-  const { data } = useGetMentorActiveSession(mentorId, {
-    request: { credentials: "include", cache: "no-store" },
-    query: {
-      enabled: mentorId.length > 0,
-      queryKey: getGetMentorActiveSessionQueryKey(mentorId),
-    },
-  });
-  const session = data?.session;
-  if (!session || session.complete) return null;
-  const asked = session.questionCount;
-  const firstName = mentorName.trim().split(/\s+/)[0] || mentorName;
-  return (
-    <div className="mb-3">
-      <button
-        onClick={() => onResumeInterview(session.id)}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500/15 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/25"
-      >
-        <PlayCircle className="h-3.5 w-3.5" /> Resume Interview
-      </button>
-      <p className="mt-1 text-center text-[11px] text-muted-foreground">
-        Interview in progress — pick up where {firstName} left off
-        {asked > 0 ? ` (${asked} question${asked === 1 ? "" : "s"} in)` : ""}
-      </p>
-    </div>
-  );
-}
-
-/**
  * Admin-only: how much each mentor answer contributed to this concept's
  * confidence — the per-answer confidence recorded on the mentor→concept edge,
  * paired with the answer's question and a verbatim excerpt. Fetched lazily: it
@@ -2464,11 +2417,6 @@ export function NodeDetailBody({
           the home for future per-node actions, so it always reserves its slot. */}
       {node.kind === "mentor" && (
         <>
-          <MentorResumeAction
-            mentorId={node.id.replace("mentor:", "")}
-            mentorName={node.label}
-            onResumeInterview={onResumeInterview}
-          />
           <div className="mb-3 border-b border-border/60 pb-3">
             <ParkedThoughtsList
               mentorProfileId={node.id.replace("mentor:", "")}
