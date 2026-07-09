@@ -34,13 +34,13 @@ const clerkPubKey = publishableKeyFromHost(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
 );
 
-// Auth proxy is useful on hosted Replit/custom-domain setups, but if Clerk's
-// abuse controls start rate-limiting the shared proxy path we need an emergency
-// way to send browser auth traffic directly to Clerk again.
+// Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
+// opt-in only; the normal production path sends browser auth traffic directly
+// to Clerk.
 const clerkProxyUrl =
-  import.meta.env.VITE_DISABLE_CLERK_PROXY === "true"
-    ? undefined
-    : import.meta.env.VITE_CLERK_PROXY_URL;
+  import.meta.env.VITE_ENABLE_CLERK_PROXY === "true"
+    ? import.meta.env.VITE_CLERK_PROXY_URL
+    : undefined;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
