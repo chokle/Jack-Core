@@ -12,6 +12,7 @@ import {
   buildAdjacency,
   buildHierarchy,
   buildSpatialLayout,
+  buildBranchNavigatorLayout,
   fibonacciSphereDir,
   shellRadius,
   clampPitch,
@@ -20,7 +21,7 @@ import {
   depthCue,
 } from "./graph-spatial";
 import { buildSyntheticServerGraph } from "./graph-stress";
-import { selectMemoryGraphModel, CORE_ID } from "./memory-graph";
+import { selectMemoryGraphModel, CORE_ID, type GraphModel } from "./memory-graph";
 
 function baseModel() {
   // A tiny real-shaped model: core + one seeded trade + two videos.
@@ -36,6 +37,80 @@ function baseModel() {
     ],
   );
 }
+
+function branchModel(): GraphModel {
+  const model = withSeededTrades(baseModel());
+  return {
+    ...model,
+    nodes: [
+      ...model.nodes,
+      {
+        id: "contributor:welder",
+        kind: "contributor",
+        label: "Welder Mentor",
+        topicId: "topic:Welder",
+        color: [120, 220, 255],
+        meta: { trade: "Welder", userId: "welder" },
+      },
+      {
+        id: "mentor-memory",
+        kind: "concept",
+        label: "Watch the puddle",
+        topicId: "topic:Welder",
+        color: [120, 180, 255],
+        meta: { trade: "Welder", confidence: 0.8 },
+      },
+    ],
+    edges: [
+      ...model.edges,
+      { a: "topic:Welder", b: "contributor:welder", kind: "contributor" },
+      { a: "contributor:welder", b: "mentor-memory", kind: "concept" },
+    ],
+    degree: {
+      ...model.degree,
+      "topic:Welder": (model.degree["topic:Welder"] ?? 0) + 1,
+      "contributor:welder": 2,
+      "mentor-memory": 1,
+    },
+  };
+}
+
+describe("branch navigator layout", () => {
+  it("shows only Jack, trades, and human contributors in the overview", () => {
+    const layout = buildBranchNavigatorLayout(branchModel(), CORE_ID);
+    expect(layout.centerId).toBe(CORE_ID);
+    expect(layout.visibleIds).toContain("topic:Welder");
+    expect(layout.visibleIds).toContain("contributor:welder");
+    expect(layout.visibleIds).not.toContain("video:v1");
+    expect(layout.visibleIds).not.toContain("mentor-memory");
+  });
+
+  it("expands the selected trade and retracts the previous trade branch", () => {
+    const model = branchModel();
+    const welder = buildBranchNavigatorLayout(model, "topic:Welder");
+    const electrician = buildBranchNavigatorLayout(model, "topic:Electrician");
+    expect(welder.centerId).toBe("topic:Welder");
+    expect(welder.visibleIds).toContain("video:v1");
+    expect(welder.visibleIds).toContain("mentor-memory");
+    expect(electrician.centerId).toBe("topic:Electrician");
+    expect(electrician.visibleIds).toContain("video:v2");
+    expect(electrician.visibleIds).not.toContain("video:v1");
+    expect(electrician.visibleIds).not.toContain("mentor-memory");
+  });
+
+  it("centers a contributor and expands only that contributor's memories", () => {
+    const layout = buildBranchNavigatorLayout(branchModel(), "contributor:welder");
+    expect(layout.centerId).toBe("contributor:welder");
+    expect(layout.visibleIds).toContain("mentor-memory");
+    expect(layout.visibleIds).not.toContain("video:v1");
+  });
+
+  it("does not allow an atomic memory to become the orbital center", () => {
+    const layout = buildBranchNavigatorLayout(branchModel(), "mentor-memory");
+    expect(layout.centerId).toBe(CORE_ID);
+    expect(layout.visibleIds).not.toContain("mentor-memory");
+  });
+});
 
 describe("withSeededTrades", () => {
   it("adds every major trade hub exactly once and collapses onto existing ones", () => {

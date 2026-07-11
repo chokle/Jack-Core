@@ -39,10 +39,8 @@ import type {
   VerificationUpdateStatus,
   ParkedThought,
 } from "@workspace/api-client-react";
-import {
-  MemoryGraphCanvas,
-  type MemoryGraphHandle,
-} from "./MemoryGraphCanvas";
+import type { MemoryGraphHandle } from "./MemoryGraphCanvas";
+import { SpatialBrainCanvas } from "./SpatialBrainCanvas";
 import { FloatingPanel } from "./FloatingPanel";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
@@ -570,7 +568,7 @@ export function MemoryGraphView({
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
-        <MemoryGraphCanvas
+        <SpatialBrainCanvas
           ref={canvasRef}
           model={model}
           selectedId={selectedId}
@@ -583,6 +581,7 @@ export function MemoryGraphView({
           locked={locked}
           delta={delta}
           onZoomChange={setZoomPct}
+          viewMode="branches"
         />
 
         {/* Header overlay */}
