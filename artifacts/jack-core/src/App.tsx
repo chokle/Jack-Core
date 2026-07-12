@@ -29,7 +29,7 @@ import {
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
-import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
+import { setAuthTokenGetter, useGetMe, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -498,6 +498,15 @@ function AuthReadySignal({ onReady }: { onReady: () => void }) {
   return null;
 }
 
+function ApiAuthTokenBridge() {
+  const { getToken } = useAuth();
+  useEffect(() => {
+    setAuthTokenGetter(() => getToken());
+    return () => setAuthTokenGetter(null);
+  }, [getToken]);
+  return null;
+}
+
 function ClerkProviderWithRoutes({ onAuthReady }: { onAuthReady: () => void }) {
   const [, setLocation] = useLocation();
 
@@ -529,6 +538,7 @@ function ClerkProviderWithRoutes({ onAuthReady }: { onAuthReady: () => void }) {
     >
       <QueryClientProvider client={queryClient}>
         <AuthReadySignal onReady={onAuthReady} />
+        <ApiAuthTokenBridge />
         <ClerkQueryClientCacheInvalidator />
         <AuthBootstrapBoundary />
       </QueryClientProvider>

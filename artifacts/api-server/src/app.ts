@@ -6,11 +6,9 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
-  getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import router from "./routes";
@@ -51,16 +49,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Populate Clerk auth state (reads the session cookie / Authorization header)
 // so getAuth(req) works in the auth gate and route handlers. The publishable
-// key is resolved from the request host to support multiple Clerk custom
-// domains, falling back to CLERK_PUBLISHABLE_KEY.
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+// Validate bearer tokens against the same configured Clerk instance used by
+// the browser. Host-derived keys can point at an unrelated custom domain.
+app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
 
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
