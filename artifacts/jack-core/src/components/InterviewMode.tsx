@@ -50,17 +50,18 @@ const TRADE_OPTIONS = [
 type Stage = "intake" | "interviewing" | "complete";
 
 /**
- * Browser-storage key for the active interview session id. Resume is best-effort
- * within the same browser: the session id is unguessable and there is no user
- * auth (consistent with the rest of the app), so persisting it locally lets an
- * interrupted interview (tab refresh, dropped network, navigation) pick up right
- * where the mentor left off.
+ * Browser-storage key for the active interview session id. Keep this in
+ * sessionStorage, not localStorage: an interview can survive a refresh in the
+ * same tab, but it should not linger for the next person who uses this browser.
+ * The backend still enforces contributor ownership; this prevents stale local
+ * resume state from exposing another tester's in-progress interview UI.
  */
 const ACTIVE_SESSION_KEY = "jack.interview.activeSessionId";
 
 function saveActiveSessionId(id: string) {
   try {
-    localStorage.setItem(ACTIVE_SESSION_KEY, id);
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, id);
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
   } catch {
     // Storage unavailable (private mode / blocked) — resume is best-effort only.
   }
@@ -68,6 +69,7 @@ function saveActiveSessionId(id: string) {
 
 function clearActiveSessionId() {
   try {
+    sessionStorage.removeItem(ACTIVE_SESSION_KEY);
     localStorage.removeItem(ACTIVE_SESSION_KEY);
   } catch {
     // Ignore — nothing to clear if storage is unavailable.
@@ -76,7 +78,11 @@ function clearActiveSessionId() {
 
 function readActiveSessionId(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_SESSION_KEY);
+    const sessionId = sessionStorage.getItem(ACTIVE_SESSION_KEY);
+    // One-time migration: old builds used localStorage, which let an interview
+    // persist across people sharing a browser. Drop that stale key deliberately.
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+    return sessionId;
   } catch {
     return null;
   }

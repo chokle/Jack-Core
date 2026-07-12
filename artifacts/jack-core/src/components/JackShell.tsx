@@ -31,6 +31,8 @@ interface JackShellProps {
   onSignOut?: () => void;
   /** Opens the beta user-testing consent modal. Omit to hide the control entirely. */
   onStartUserTest?: () => void;
+  /** Highlights the control when user-testing is restricting the app. */
+  userTestingRequired?: boolean;
   children: ReactNode;
 }
 
@@ -49,6 +51,7 @@ export function JackShell({
   userSubLabel,
   onSignOut,
   onStartUserTest,
+  userTestingRequired,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -218,15 +221,26 @@ export function JackShell({
             </div>
           </div>
           {onStartUserTest && (
-            <button
-              type="button"
-              onClick={onStartUserTest}
-              data-testid="start-user-test"
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/50 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-            >
-              <Radio className="h-4 w-4" />
-              Start User Test
-            </button>
+            <div className="relative">
+              {userTestingRequired && (
+                <div className="absolute -top-14 left-0 right-0 rounded-lg border border-primary/35 bg-primary/15 px-3 py-2 text-center text-[11px] font-semibold text-primary shadow-[0_0_22px_rgba(255,100,0,0.22)]">
+                  Click start for the full experience
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={onStartUserTest}
+                data-testid="start-user-test"
+                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  userTestingRequired
+                    ? "animate-pulse border-primary bg-primary/20 text-primary shadow-[0_0_24px_rgba(255,100,0,0.35)] hover:bg-primary/25"
+                    : "border-sidebar-border bg-card/50 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                }`}
+              >
+                <Radio className="h-4 w-4" />
+                Start User Test
+              </button>
+            </div>
           )}
           {onSignOut && (
             <button

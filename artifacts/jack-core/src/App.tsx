@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
-import { publishableKeyFromHost } from "@clerk/react/internal";
+import { SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import {
+  InternalClerkProvider as ClerkProvider,
+  publishableKeyFromHost,
+} from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import {
@@ -19,28 +22,47 @@ import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Landing } from "./components/Landing";
-import { TestingOverlay, type TestingOverlayHandle } from "./components/testing/TestingOverlay";
+import {
+  TestingOverlay,
+  type TestingOverlayEvent,
+  type TestingOverlayHandle,
+} from "./components/testing/TestingOverlay";
+import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
 import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
-// REQUIRED — copy verbatim. Resolves the key from window.location.hostname so the
-// same build serves multiple Clerk custom domains. Do not inline the env var, leave
-// publishableKey undefined, or replace publishableKeyFromHost with anything else.
-const clerkPubKey = publishableKeyFromHost(
-  window.location.hostname,
-  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
-);
+const configuredClerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+const isLocalClerkHost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1" ||
+  window.location.hostname === "[::1]";
+
+// Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
+// publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
+// Deployed hosts still use host-aware resolution for Torch's custom domains.
+const clerkPubKey = isLocalClerkHost
+  ? configuredClerkPubKey
+  : publishableKeyFromHost(window.location.hostname, configuredClerkPubKey);
 
 // Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
 // opt-in only; the normal production path sends browser auth traffic directly
 // to Clerk.
 const clerkProxyUrl =
-  import.meta.env.VITE_ENABLE_CLERK_PROXY === "true"
+  isLocalClerkHost
+    ? `${window.location.origin}/api/__clerk`
+    : import.meta.env.VITE_ENABLE_CLERK_PROXY === "true"
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
+
+const localClerkJsUrl = isLocalClerkHost
+  ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
+  : undefined;
+const localClerkUiUrl = isLocalClerkHost
+  ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
+  : undefined;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -124,6 +146,13 @@ function JackApp() {
   // the consent modal via this imperative handle; TestingOverlay also opens
   // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
+  const [testingGate, setTestingGate] = useState<{
+    accepted: boolean;
+    restricted: boolean;
+  }>(() => ({
+    accepted: false,
+    restricted: false,
+  }));
 
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
@@ -163,6 +192,22 @@ function JackApp() {
     setSeek({ time: startTime, token: Date.now() });
   };
 
+  const handleStartUserTest = () => {
+    setTestingGate((prev) => ({ ...prev, restricted: false }));
+    testingOverlayRef.current?.open();
+  };
+
+  const handleTestingEvent = (event: TestingOverlayEvent) => {
+    if (event === "declined") {
+      setTestingGate({ accepted: false, restricted: true });
+      return;
+    }
+    if (event === "started" || event === "unavailable" || event === "cancelled") {
+      setTestingGate({ accepted: true, restricted: false });
+      return;
+    }
+  };
+
   // Resume an interrupted interview from a mentor node in the Living Memory
   // graph. We stash the session id under the SAME localStorage key Interview
   // Mode reads on mount ("jack.interview.activeSessionId") and switch to that
@@ -171,7 +216,8 @@ function JackApp() {
   // InterviewMode) so this path stays decoupled from that component's internals.
   const handleResumeInterview = (sessionId: string) => {
     try {
-      localStorage.setItem("jack.interview.activeSessionId", sessionId);
+      sessionStorage.setItem("jack.interview.activeSessionId", sessionId);
+      localStorage.removeItem("jack.interview.activeSessionId");
     } catch {
       // Storage unavailable (private mode) — Interview Mode will start fresh.
     }
@@ -198,7 +244,8 @@ function JackApp() {
         userLabel={userLabel}
         userSubLabel={userSubLabel}
         onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
-        onStartUserTest={() => testingOverlayRef.current?.open()}
+        onStartUserTest={handleStartUserTest}
+        userTestingRequired={testingGate.restricted}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -225,6 +272,11 @@ function JackApp() {
         )}
       </JackShell>
 
+      <UserTestingGate
+        open={testingGate.restricted && !testingGate.accepted}
+        onStart={handleStartUserTest}
+      />
+
       {/* Chat Drawer overlay */}
       <AskJack
         isOpen={isChatOpen}
@@ -237,7 +289,7 @@ function JackApp() {
         onCitationClick={handleCitationClick}
       />
 
-      <TestingOverlay ref={testingOverlayRef} autoPrompt />
+      <TestingOverlay ref={testingOverlayRef} autoPrompt onEvent={handleTestingEvent} />
     </>
   );
 }
@@ -261,6 +313,7 @@ function SignInPage() {
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up`}
+        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
       />
     </div>
   );
@@ -273,6 +326,7 @@ function SignUpPage() {
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
+        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
       />
     </div>
   );
@@ -338,6 +392,8 @@ function ClerkProviderWithRoutes() {
   return (
     <ClerkProvider
       publishableKey={clerkPubKey}
+      __internal_clerkJSUrl={localClerkJsUrl}
+      __internal_clerkUIUrl={localClerkUiUrl}
       proxyUrl={clerkProxyUrl}
       appearance={clerkAppearance}
       signInUrl={`${basePath}/sign-in`}

@@ -165,6 +165,18 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: {
+      "/api/__clerk": {
+        target: "https://jack.torchlabs.ca",
+        changeOrigin: true,
+        cookieDomainRewrite: "127.0.0.1",
+        configure(proxy) {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("origin", "https://jack.torchlabs.ca");
+          });
+        },
+      },
+    },
     fs: {
       strict: true,
     },
