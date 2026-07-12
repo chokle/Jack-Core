@@ -12,7 +12,14 @@ const router = Router();
 router.get("/me", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) {
-    return res.status(401).json({ error: "Unauthorized — sign in required." });
+    return res.json(
+      GetMeResponse.parse({
+        userId: req.userId ?? "presentation-demo",
+        email: null,
+        name: "Presentation Mode",
+        isAdmin: false,
+      }),
+    );
   }
   return res.json(
     GetMeResponse.parse({

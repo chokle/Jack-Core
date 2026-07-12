@@ -200,9 +200,8 @@ function JackApp() {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  const { signOut, openUserProfile } = useClerk();
-  const userLabel = me?.name ?? me?.email ?? "Account";
-  const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
+  const userLabel = me?.name ?? "Presentation Mode";
+  const userSubLabel = "Demo access";
 
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
@@ -286,10 +285,8 @@ function JackApp() {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
-        onOpenSettings={() => openUserProfile()}
-        onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
-        onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
-        userTestingRequired={me?.isAdmin === false && testingGate.restricted}
+        onStartUserTest={undefined}
+        userTestingRequired={false}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -317,7 +314,7 @@ function JackApp() {
       </JackShell>
 
       <UserTestingGate
-        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
+        open={false}
         onStart={handleStartUserTest}
       />
 
@@ -333,7 +330,7 @@ function JackApp() {
         onCitationClick={handleCitationClick}
       />
 
-      <TestingOverlay ref={testingOverlayRef} autoPrompt={me?.isAdmin === false} onEvent={handleTestingEvent} />
+      <TestingOverlay ref={testingOverlayRef} autoPrompt={false} onEvent={handleTestingEvent} />
     </>
   );
 }
@@ -492,38 +489,10 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
 }
 
 function App() {
-  const [authReady, setAuthReady] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  useEffect(() => {
-    if (authReady) return;
-    const timer = window.setTimeout(() => setTimedOut(true), 8000);
-    return () => window.clearTimeout(timer);
-  }, [authReady]);
-
-  const resetSession = async () => {
-    if (resetting) return;
-    setResetting(true);
-    // A server navigation can clear HttpOnly Clerk cookies; JavaScript cannot.
-    window.location.replace(`${basePath}/api/auth/reset-session`);
-  };
-
   return (
-    <>
-      {!authReady && (
-        <main className="fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
-          <div className="max-w-sm space-y-4">
-            <div className="text-xl font-extrabold">JACK <span className="text-primary">CORE</span></div>
-            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
-            <p className="text-sm text-muted-foreground">{timedOut ? "Your saved session is no longer valid." : "Connecting securely…"}</p>
-            {timedOut && <button disabled={resetting} className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground disabled:opacity-70" onClick={() => void resetSession()}>{resetting ? "Resetting session…" : "Reset session and sign in"}</button>}
-          </div>
-        </main>
-      )}
-      <WouterRouter base={basePath}>
-        <ClerkProviderWithRoutes onReady={() => setAuthReady(true)} />
-      </WouterRouter>
-    </>
+    <QueryClientProvider client={queryClient}>
+      <AppSurface />
+    </QueryClientProvider>
   );
 }
 

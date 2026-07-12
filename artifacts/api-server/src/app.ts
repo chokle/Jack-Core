@@ -71,7 +71,12 @@ app.get("/api/auth/reset-session", (_req, res) => {
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
-app.use("/api", requireAuth);
+// Explicitly authorized public presentation mode. Scope all non-admin demo
+// activity to one stable identity; requireAdmin still protects admin writes.
+app.use("/api", (req, _res, next) => {
+  req.userId = "presentation-demo";
+  next();
+});
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
