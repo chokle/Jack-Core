@@ -18,12 +18,22 @@ export interface TestingOverlayHandle {
   open: () => void;
 }
 
+export type TestingOverlayEvent =
+  | "consent_opened"
+  | "started"
+  | "declined"
+  | "unavailable"
+  | "cancelled"
+  | "stopped";
+
 interface TestingOverlayProps {
   /**
    * Opens the consent wall once per browser session on Jack entry. This still
    * never requests screen/mic permission until the tester clicks Start Test.
    */
   autoPrompt?: boolean;
+  /** Emits state changes so the app shell can gate tester access. */
+  onEvent?: (event: TestingOverlayEvent) => void;
 }
 
 const AUTO_PROMPT_SESSION_KEY = "jack.userTesting.promptSeen";
@@ -39,7 +49,7 @@ const AUTO_PROMPT_SESSION_KEY = "jack.userTesting.promptSeen";
  * elsewhere in the shell).
  */
 export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayProps>(function TestingOverlay(
-  { autoPrompt = false },
+  { autoPrompt = false, onEvent },
   ref,
 ) {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -54,14 +64,24 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
   // stored row, never trusting a client-supplied value (see threat_model.md).
   const { data: me } = useGetMe();
 
-  const open = useCallback(() => setPhase((p) => (p === "idle" ? "consent" : p)), []);
+  const open = useCallback(() => {
+    setPhase((p) => {
+      if (p !== "idle") return p;
+      onEvent?.("consent_opened");
+      return "consent";
+    });
+  }, [onEvent]);
   useImperativeHandle(ref, () => ({ open }), [open]);
 
   // `?test=true` auto-opens the consent modal ONLY — never auto-records.
   useEffect(() => {
     try {
       if (new URLSearchParams(window.location.search).get("test") === "true") {
-        setPhase((p) => (p === "idle" ? "consent" : p));
+        setPhase((p) => {
+          if (p !== "idle") return p;
+          onEvent?.("consent_opened");
+          return "consent";
+        });
       }
     } catch {
       /* malformed search string — ignore, app continues normally */
@@ -77,11 +97,19 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     try {
       if (new URLSearchParams(window.location.search).get("test") === "true") return;
       if (sessionStorage.getItem(AUTO_PROMPT_SESSION_KEY) === "true") return;
-      setPhase((p) => (p === "idle" ? "consent" : p));
+      setPhase((p) => {
+        if (p !== "idle") return p;
+        onEvent?.("consent_opened");
+        return "consent";
+      });
     } catch {
-      setPhase((p) => (p === "idle" ? "consent" : p));
+      setPhase((p) => {
+        if (p !== "idle") return p;
+        onEvent?.("consent_opened");
+        return "consent";
+      });
     }
-  }, [autoPrompt]);
+  }, [autoPrompt, onEvent]);
 
   const markAutoPromptSeen = useCallback(() => {
     try {
@@ -117,9 +145,10 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
           description: `We couldn't reach the upload server, so "${outcome.filename}" was downloaded instead. Please share it with the team.`,
         });
       }
+      onEvent?.("stopped");
       setPhase("idle");
     },
-    [me?.email, toast],
+    [me?.email, onEvent, toast],
   );
 
   const handleStart = useCallback(async () => {
@@ -130,6 +159,7 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
         title: "Screen recording isn't available",
         description: "This browser doesn't support screen recording, so this session won't be captured.",
       });
+      onEvent?.("unavailable");
       setPhase("idle");
       return;
     }
@@ -151,20 +181,23 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
         description: "No screen permission was granted, so nothing was recorded.",
       });
       serviceRef.current = null;
+      onEvent?.("cancelled");
       setPhase("idle");
       return;
     }
 
+    onEvent?.("started");
     setMicIncluded(service.micIncluded);
     setIsPaused(false);
     setShowBanner(true);
     setPhase("recording");
-  }, [handleUpload, markAutoPromptSeen, toast]);
+  }, [handleUpload, markAutoPromptSeen, onEvent, toast]);
 
   const handleCancelConsent = useCallback(() => {
     markAutoPromptSeen();
+    onEvent?.("declined");
     setPhase("idle");
-  }, [markAutoPromptSeen]);
+  }, [markAutoPromptSeen, onEvent]);
 
   const handleStop = useCallback(() => {
     void serviceRef.current?.stop("user");

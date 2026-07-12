@@ -10,7 +10,7 @@ import type {
 
 /**
  * Browser-level regression coverage for the interrupted-interview resume flow in
- * InterviewMode: on mount it reads the stored session id from localStorage,
+ * InterviewMode: on mount it reads the stored session id from sessionStorage,
  * rehydrates the transcript + current question, clears the stored id when the
  * interview wraps up, and falls back to the intake form (without erroring) when
  * the stored id is stale/nonexistent (a 404 from the session fetch).
@@ -98,6 +98,7 @@ function renderInterviewMode() {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   vi.clearAllMocks();
 });
 
@@ -107,7 +108,7 @@ afterEach(() => {
 
 describe("InterviewMode resume flow", () => {
   it("rehydrates an interrupted interview from a stored session id: transcript restored, current question ready", async () => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
     const detail: InterviewSessionDetail = {
       session: makeSession(),
       answers: [
@@ -137,7 +138,7 @@ describe("InterviewMode resume flow", () => {
   });
 
   it("does NOT apply a saved draft typed against a different (stale) question on resume", async () => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
     // A draft was typed against question A, but the session has since advanced to
     // the current question B — the stale draft must never land on question B.
     localStorage.setItem(
@@ -163,7 +164,7 @@ describe("InterviewMode resume flow", () => {
   });
 
   it("restores a saved draft typed against the current question on resume", async () => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
     const draftText = "Half-typed answer to the CURRENT question.";
     localStorage.setItem(
       `${DRAFT_KEY_PREFIX}sess-1`,
@@ -184,7 +185,7 @@ describe("InterviewMode resume flow", () => {
   });
 
   it("clears the stored session when the interview is wrapped up", async () => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
     h.getInterviewSession.mockResolvedValue({
       session: makeSession(),
       answers: [makeAnswer()],
@@ -199,18 +200,18 @@ describe("InterviewMode resume flow", () => {
 
     renderInterviewMode();
     await screen.findByText(CURRENT_QUESTION);
-    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe("sess-1");
+    expect(sessionStorage.getItem(ACTIVE_SESSION_KEY)).toBe("sess-1");
 
     fireEvent.click(screen.getByRole("button", { name: /Wrap up/i }));
 
     // Completion card shown and the stored session cleared, so a later visit
     // starts fresh at the intake form.
     expect(await screen.findByText(/Thanks, Test Mentor/i)).toBeTruthy();
-    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
+    expect(sessionStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
   });
 
   it("falls back to the intake form when the stored session id is stale (404)", async () => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, "does-not-exist");
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "does-not-exist");
     h.getInterviewSession.mockRejectedValue({ status: 404 });
 
     renderInterviewMode();
@@ -218,7 +219,7 @@ describe("InterviewMode resume flow", () => {
     // No crash — the intake form is shown and the stale id is dropped.
     expect(await screen.findByText("Tell Jack who's in the chair")).toBeTruthy();
     await waitFor(() =>
-      expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull(),
+      expect(sessionStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull(),
     );
   });
 

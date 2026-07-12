@@ -359,10 +359,13 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const membersByHub: Record<string, string[]> = {};
       for (const t of model.topics) {
         if (!coreNeighbors?.has(t.id)) continue;
+        const hub = map.get(t.id);
+        if (!hub?.populated) continue;
         hubIds.push(t.id);
         const members: string[] = [];
         for (const nb of adj.get(t.id) ?? []) {
           if (nb === CORE_ID || topicIds.has(nb)) continue;
+          if (!map.get(nb)?.populated) continue;
           members.push(nb);
         }
         membersByHub[t.id] = members;
