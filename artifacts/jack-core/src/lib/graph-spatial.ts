@@ -572,6 +572,79 @@ export function buildSpatialLayout(
   };
 }
 
+/**
+ * Build the progressive-disclosure layout used by Living Memory.
+ *
+ * The permanent navigation layer contains Jack, trade hubs, and human
+ * contributors. Selecting a trade or human expands only that hierarchy branch;
+ * atomic memories never become orbital centers themselves.
+ */
+export function buildBranchNavigatorLayout(
+  model: GraphModel,
+  requestedCenterId: string,
+  hierarchy: Map<string, SpatialNodeInfo> = buildHierarchy(model),
+): SpatialLayout {
+  const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
+  const requested = nodeById.get(requestedCenterId);
+  const canCenter =
+    requestedCenterId === CORE_ID ||
+    requested?.kind === "topic" ||
+    requested?.kind === "mentor" ||
+    requested?.kind === "contributor";
+  const centerId = canCenter ? requestedCenterId : CORE_ID;
+
+  const layout = buildSpatialLayout(model, centerId, {
+    maxHops: 8,
+    maxVisible: Math.max(DEFAULT_MAX_VISIBLE, model.nodes.length),
+    hierarchy,
+  });
+
+  const keep = new Set<string>([CORE_ID]);
+  if (centerId === CORE_ID) {
+    for (const node of model.nodes) {
+      if (
+        node.kind === "topic" ||
+        node.kind === "mentor" ||
+        node.kind === "contributor"
+      ) {
+        keep.add(node.id);
+      }
+    }
+  } else {
+    // Preserve the short route back to Jack without keeping unrelated branches
+    // on-screen. This avoids the label pile-up that occurs when every trade is
+    // projected around a selected branch center.
+    let ancestorId: string | null = centerId;
+    while (ancestorId) {
+      keep.add(ancestorId);
+      ancestorId = hierarchy.get(ancestorId)?.parentId ?? null;
+    }
+
+    const stack = [centerId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      keep.add(id);
+      for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);
+    }
+  }
+
+  const visibleIds = layout.visibleIds.filter((id) => keep.has(id));
+  const visible = new Set(visibleIds);
+  return {
+    ...layout,
+    visibleIds,
+    positions: new Map(
+      [...layout.positions].filter(([id]) => visible.has(id)),
+    ),
+    hopFromCenter: new Map(
+      [...layout.hopFromCenter].filter(([id]) => visible.has(id)),
+    ),
+    layoutParent: new Map(
+      [...layout.layoutParent].filter(([id]) => visible.has(id)),
+    ),
+  };
+}
+
 /** Clamp pitch to a sane orbit range so the graph never flips upside down. */
 export const PITCH_LIMIT = (Math.PI / 180) * 60;
 

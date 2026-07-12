@@ -11,6 +11,7 @@ import {
 } from "../lib/memory-graph";
 import {
   buildHierarchy,
+  buildBranchNavigatorLayout,
   buildSpatialLayout,
   clampPitch,
   depthCue,
@@ -81,7 +82,7 @@ interface Props {
    * picked node and prunes to its local neighborhood (the legacy drill-in view).
    * User-toggled; defaults to full so launch never hides trades on selection.
    */
-  viewMode?: "full" | "focus";
+  viewMode?: "full" | "focus" | "branches";
 }
 
 /** Runtime, per-node render state: eased 3D position + per-frame projection. */
@@ -302,8 +303,16 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
               maxHops: FULL_MAX_HOPS,
               hierarchy: info,
             })
+          : viewModeRef.current === "branches"
+            ? buildBranchNavigatorLayout(m, id, info)
           : buildSpatialLayout(m, id, { hierarchy: info });
       centerRef.current = layout.centerId;
+
+      if (viewModeRef.current === "branches") {
+        const zoom = sizeRef.current.w < 640 ? 0.62 : 0.82;
+        camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom };
+        onZoomChange(Math.round(zoom * 100));
+      }
 
       const map = nodesRef.current;
       const now = performance.now();
@@ -453,6 +462,12 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         // keeps the whole graph and instead swings the orbit camera so the
         // node's branch comes to the front (restores the old canvas's "jump").
         if (viewModeRef.current === "focus") recenterRef.current(id);
+        else if (viewModeRef.current === "branches") {
+          const kind = modelRef.current?.nodes.find((node) => node.id === id)?.kind;
+          if (id === CORE_ID || kind === "topic" || kind === "mentor" || kind === "contributor") {
+            recenterRef.current(id);
+          }
+        }
         else orientCameraTo(id);
       },
       ensureVisible: (id: string) => {
@@ -519,6 +534,11 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const members: string[] = [];
         for (const nb of adj.get(t.id) ?? []) {
           if (nb === CORE_ID || topicIds.has(nb)) continue;
+          // Keep neural-flow honest: pulses should only travel into nodes that
+          // actually carry knowledge/content. Empty competency scaffolds and
+          // other dormant placeholders stay visually quiet until Jack has
+          // something real under them.
+          if (!infoRef.current.get(nb)?.populated) continue;
           members.push(nb);
         }
         membersByHub[t.id] = members;
@@ -550,6 +570,19 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     useEffect(() => {
       if (viewModeRef.current === "focus") {
         recenterRef.current(selectedId ?? CORE_ID);
+      } else if (viewModeRef.current === "branches") {
+        if (!selectedId) {
+          recenterRef.current(CORE_ID);
+          return;
+        }
+        if (selectedId === CORE_ID) {
+          recenterRef.current(CORE_ID);
+          return;
+        }
+        const kind = modelRef.current.nodes.find((node) => node.id === selectedId)?.kind;
+        if (kind === "topic" || kind === "mentor" || kind === "contributor") {
+          recenterRef.current(selectedId);
+        }
       }
     }, [selectedId]);
 
@@ -562,8 +595,16 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         recenterRef.current(CORE_ID);
         camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 };
         onZoomChange(100);
-      } else {
+      } else if (viewMode === "focus") {
         recenterRef.current(selectedRef.current ?? CORE_ID);
+      } else {
+        const selected = selectedRef.current;
+        const kind = modelRef.current.nodes.find((node) => node.id === selected)?.kind;
+        recenterRef.current(
+          selected && (kind === "topic" || kind === "mentor" || kind === "contributor")
+            ? selected
+            : CORE_ID,
+        );
       }
     }, [viewMode]);
 
@@ -1033,6 +1074,11 @@ function nodeIntensity(node: SN, time: number): number {
   return 1;
 }
 
+function populatedLightMultiplier(node: SN, emphasized = false): number {
+  if (node.populated || emphasized) return 1;
+  return 0.48;
+}
+
 function drawBirthBurst(c: CanvasRenderingContext2D, node: SN, p: number) {
   const ease = 1 - (1 - p) * (1 - p);
   const col = node.color;
@@ -1081,7 +1127,11 @@ function drawNodeGlow(
     c.fill();
     return;
   }
-  let intensity = nodeIntensity(node, time) * (dim ? 0.3 : 1) * node.palpha;
+  let intensity =
+    nodeIntensity(node, time) *
+    populatedLightMultiplier(node, emphasized) *
+    (dim ? 0.3 : 1) *
+    node.palpha;
   let glowR = node.sr * 5;
   if (emphasized) {
     const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
@@ -1113,7 +1163,11 @@ function drawNodeBody(
   active = false,
 ) {
   const r = node.sr;
-  const intensity = nodeIntensity(node, time) * (dim ? 0.4 : 1);
+  const emphasized = selected || hovered || pinned || active;
+  const intensity =
+    nodeIntensity(node, time) *
+    populatedLightMultiplier(node, emphasized) *
+    (dim ? 0.4 : 1);
   const a = node.palpha;
   const col =
     node.kind === "video" && node.status === "failed"
