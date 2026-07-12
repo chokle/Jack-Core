@@ -504,22 +504,8 @@ function App() {
   const resetSession = async () => {
     if (resetting) return;
     setResetting(true);
-    try {
-      const clerk = (window as typeof window & { Clerk?: { signOut?: () => Promise<void> } }).Clerk;
-      await Promise.race([
-        clerk?.signOut?.() ?? Promise.resolve(),
-        new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
-      ]);
-    } catch {
-      // Continue with local cleanup when the stale remote session cannot answer.
-    }
-    for (const storage of [window.localStorage, window.sessionStorage]) {
-      for (let i = storage.length - 1; i >= 0; i -= 1) {
-        const key = storage.key(i);
-        if (key?.toLowerCase().includes("clerk")) storage.removeItem(key);
-      }
-    }
-    window.location.replace(`${basePath}/sign-in?session_reset=${Date.now()}`);
+    // A server navigation can clear HttpOnly Clerk cookies; JavaScript cannot.
+    window.location.replace(`${basePath}/api/auth/reset-session`);
   };
 
   return (

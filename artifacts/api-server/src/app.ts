@@ -53,6 +53,20 @@ app.use(express.urlencoded({ extended: true }));
 // domains, falling back to CLERK_PUBLISHABLE_KEY.
 app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
 
+// Recovery for a browser holding a session for a Clerk user that was deleted.
+// This must remain outside the /api auth gate because the stale token cannot
+// authenticate. Clear both JS storage and HttpOnly cookies, then start fresh.
+app.get("/api/auth/reset-session", (_req, res) => {
+  const cookieNames = ["__session", "__client", "__client_uat", "__clerk_db_jwt"];
+  for (const name of cookieNames) {
+    res.clearCookie(name, { path: "/" });
+    res.clearCookie(name, { path: "/", domain: ".torchlabs.ca" });
+  }
+  res.setHeader("Clear-Site-Data", '"cache", "cookies", "storage"');
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.redirect(302, `/sign-in?session_reset=${Date.now()}`);
+});
+
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
