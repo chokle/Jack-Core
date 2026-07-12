@@ -292,8 +292,8 @@ function JackApp() {
         userLabel={userLabel}
         userSubLabel={userSubLabel}
         onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
-        onStartUserTest={handleStartUserTest}
-        userTestingRequired={testingGate.restricted}
+        onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
+        userTestingRequired={me?.isAdmin === false && testingGate.restricted}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -321,7 +321,7 @@ function JackApp() {
       </JackShell>
 
       <UserTestingGate
-        open={testingGate.restricted && !testingGate.accepted}
+        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
         onStart={handleStartUserTest}
       />
 
@@ -337,7 +337,7 @@ function JackApp() {
         onCitationClick={handleCitationClick}
       />
 
-      <TestingOverlay ref={testingOverlayRef} autoPrompt onEvent={handleTestingEvent} />
+      <TestingOverlay ref={testingOverlayRef} autoPrompt={me?.isAdmin === false} onEvent={handleTestingEvent} />
     </>
   );
 }
