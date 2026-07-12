@@ -49,6 +49,16 @@ const TRADE_OPTIONS = [
 
 type Stage = "intake" | "interviewing" | "complete";
 
+export interface TorchInterviewPreload {
+  starvingPointId: string;
+  title: string;
+  trade: string;
+  category: string;
+  description: string;
+  priority: string;
+  evidence: string;
+}
+
 /**
  * Browser-storage key for the active interview session id. Keep this in
  * sessionStorage, not localStorage: an interview can survive a refresh in the
@@ -181,7 +191,7 @@ interface Turn {
   distillationStatus: InterviewAnswerDistillationStatus;
 }
 
-export function InterviewMode() {
+export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) {
   const queryClient = useQueryClient();
 
   const [stage, setStage] = useState<Stage>("intake");
@@ -190,19 +200,26 @@ export function InterviewMode() {
   const [error, setError] = useState<string | null>(null);
   // True while we attempt to resume a stored session on mount, so the intake
   // form doesn't flash before we know whether an interview is still in progress.
-  const [resuming, setResuming] = useState(() => readActiveSessionId() !== null);
+  const [resuming, setResuming] = useState(() => !preload && readActiveSessionId() !== null);
   // Set only when this session was reopened via a Parking Lot "Resume" — shows
   // a one-time reorientation banner, then is cleared.
   const [resumeNote, setResumeNote] = useState<InterviewResumeNote | null>(null);
 
   // Intake form state.
   const [name, setName] = useState("");
-  const [trade, setTrade] = useState<string>("");
-  const [tradeInput, setTradeInput] = useState("");
+  const preloadedTrade = preload && TRADE_OPTIONS.includes(preload.trade as (typeof TRADE_OPTIONS)[number])
+    ? preload.trade
+    : preload?.trade
+      ? "Other"
+      : "";
+  const [trade, setTrade] = useState<string>(preloadedTrade);
+  const [tradeInput, setTradeInput] = useState(preloadedTrade === "Other" ? preload?.trade ?? "" : "");
   const [years, setYears] = useState("");
-  const [specialties, setSpecialties] = useState("");
+  const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : "");
   const [region, setRegion] = useState("");
-  const [background, setBackground] = useState("");
+  const [background, setBackground] = useState(preload
+    ? `Torch Starving Point ${preload.starvingPointId}: ${preload.title}. ${preload.description} Priority: ${preload.priority}. Evidence status: ${preload.evidence}. Focus this interview on closing this exact knowledge gap with specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment.`
+    : "");
 
   // Current answer being typed.
   const [answer, setAnswer] = useState("");
@@ -247,6 +264,12 @@ export function InterviewMode() {
     if (didRehydrate.current) return;
     didRehydrate.current = true;
 
+    if (preload) {
+      clearActiveSessionId();
+      setResuming(false);
+      return;
+    }
+
     const storedId = readActiveSessionId();
     if (!storedId) {
       setResuming(false);
@@ -284,7 +307,7 @@ export function InterviewMode() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preload]);
 
   // Auto-save the in-progress answer to localStorage as the mentor types, keyed
   // by session id + current question. Cleared automatically when the box empties
@@ -456,8 +479,17 @@ export function InterviewMode() {
           )}
 
           {!resuming && stage === "intake" && (
-            <IntakeForm
-              name={name}
+            <>
+              {preload && (
+                <div className="mb-5 rounded-xl border border-primary/35 bg-primary/10 p-4" data-testid="torch-gap-preload">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">Loaded from Torch Command Centre</div>
+                  <h2 className="mt-1 font-bold text-foreground">{preload.title}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">{preload.trade} · {preload.category}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-foreground/85">Jack will use this starving point to ask focused questions that close the selected gap.</p>
+                </div>
+              )}
+              <IntakeForm
+                name={name}
               setName={setName}
               trade={trade}
               setTrade={setTrade}
@@ -473,8 +505,9 @@ export function InterviewMode() {
               setBackground={setBackground}
               onSubmit={handleStart}
               busy={busy}
-              error={error}
-            />
+                error={error}
+              />
+            </>
           )}
 
           {stage === "interviewing" && session && (
