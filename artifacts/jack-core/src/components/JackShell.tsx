@@ -28,6 +28,8 @@ interface JackShellProps {
   lastUpdatedLabel: string;
   userLabel?: string;
   userSubLabel?: string;
+  /** Opens Clerk's secure account profile for password, sessions, and deletion. */
+  onOpenSettings?: () => void;
   onSignOut?: () => void;
   /** Opens the beta user-testing consent modal. Omit to hide the control entirely. */
   onStartUserTest?: () => void;
@@ -49,6 +51,7 @@ export function JackShell({
   lastUpdatedLabel,
   userLabel,
   userSubLabel,
+  onOpenSettings,
   onSignOut,
   onStartUserTest,
   userTestingRequired,
@@ -173,7 +176,15 @@ export function JackShell({
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
           <NavItem icon={<GraduationCap className="h-4 w-4" />} label="Competencies" soon />
           <NavItem icon={<Lightbulb className="h-4 w-4" />} label="Insights" soon />
-          <NavItem icon={<Settings className="h-4 w-4" />} label="Settings" soon />
+          <NavItem
+            icon={<Settings className="h-4 w-4" />}
+            label="Account Settings"
+            onClick={() => {
+              onOpenSettings?.();
+              setIsPanelOpen(false);
+            }}
+            testId="account-settings"
+          />
         </nav>
 
         {/* Graph stats */}

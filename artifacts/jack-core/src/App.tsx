@@ -205,7 +205,7 @@ function JackApp() {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  const { signOut } = useClerk();
+  const { signOut, openUserProfile } = useClerk();
   const userLabel = me?.name ?? me?.email ?? "Account";
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
 
@@ -291,6 +291,7 @@ function JackApp() {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
+        onOpenSettings={() => openUserProfile()}
         onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
         onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
         userTestingRequired={me?.isAdmin === false && testingGate.restricted}
