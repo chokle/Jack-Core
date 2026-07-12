@@ -321,6 +321,21 @@ export const EMPTY_DELTA: GraphDelta = {
   addedByTrade: [],
 };
 
+/** Only genuinely fresh persisted nodes may produce a "just learned" toast. */
+export const GROWTH_TOAST_RECENCY_MS = 60_000;
+
+export function isRecentGrowthNode(
+  node: MemoryNode,
+  generatedAt?: string,
+  windowMs = GROWTH_TOAST_RECENCY_MS,
+): boolean {
+  const nodeTime = Date.parse(node.meta.createdAt ?? node.meta.updatedAt ?? "");
+  if (!Number.isFinite(nodeTime)) return false;
+  const snapshotTime = Date.parse(generatedAt ?? "");
+  const now = Number.isFinite(snapshotTime) ? snapshotTime : Date.now();
+  return nodeTime <= now + 5_000 && now - nodeTime <= windowMs;
+}
+
 /**
  * Diff two built models. `prev === null` (first load) yields an empty delta so
  * the whole graph never "births" on initial render — only genuinely-new nodes
@@ -362,7 +377,7 @@ export function computeGraphDelta(
   for (const id of addedNodeIds) {
     const n = nextById.get(id);
     if (!n) continue;
-    if (isKnowledgeKind(n.kind)) {
+    if (isKnowledgeKind(n.kind) && isRecentGrowthNode(n, generatedAt)) {
       addedKnowledgeCount += 1;
       const trade = n.meta.trade ?? "General";
       byTrade.set(trade, (byTrade.get(trade) ?? 0) + 1);

@@ -223,7 +223,7 @@ export function MemoryGraphView({
     setToasts((prev) => [...prev, ...fresh].slice(-3));
   }, [delta]);
 
-  // Cascading exit: each toast's own 20s (visibility-aware) timer just marks it
+  // Cascading exit: each toast's own 15s (visibility-aware) timer just marks it
   // "ready" to leave; a single scheduler here decides WHEN each ready toast
   // actually starts its slide-out, oldest-appeared-first, with a small stagger
   // between activations so a batch that expires together doesn't all leave at
@@ -1244,9 +1244,9 @@ function GrowthCounter({
   );
 }
 
-/** How long a growth toast lingers (20s), counting only time the user is on the
+/** How long a growth toast lingers (15s), counting only time the user is on the
  *  Memory Graph with the tab visible. */
-const TOAST_LIFETIME_MS = 20000;
+const TOAST_LIFETIME_MS = 15000;
 /** Slide-right + fade-out duration before the toast is removed from the list. */
 const TOAST_EXIT_MS = 300;
 /** Minimum gap between successive toasts starting their cascade exit, so a
@@ -1254,7 +1254,7 @@ const TOAST_EXIT_MS = 300;
 const TOAST_EXIT_STAGGER_MS = 150;
 
 /**
- * A single auto-dismissing "Jack just learned…" toast. Lingers 20s but only
+ * A single auto-dismissing "Jack just learned…" toast. Lingers 15s but only
  * counts down while the user is actively on the page — the timer pauses whenever
  * the tab is hidden/backgrounded and resumes with the remaining time on return,
  * so a toast is never missed while the user is away. Leaving the Memory Graph
