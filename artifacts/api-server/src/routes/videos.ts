@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import multer from "multer";
 import fs from "node:fs";
 import os from "node:os";
@@ -90,6 +90,26 @@ async function getDuplicateEligibility(video: Record<string, unknown>, userId?: 
   )).length;
 
   return { duplicateCount, canDeleteDuplicate: duplicateCount > 1 };
+}
+
+async function canProcessVideo(videoId: string, req: Request) {
+  const identity = await resolveIdentity(req);
+  const userId = identity?.userId ?? req.userId;
+  if (!userId) return { ok: false as const, status: 401, error: "Unauthorized" };
+  if (identity?.isAdmin) return { ok: true as const };
+
+  const { data, error } = await supabase
+    .from("videos")
+    .select("uploader_user_id")
+    .eq("id", videoId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return { ok: false as const, status: 404, error: "Video not found" };
+  if (data["uploader_user_id"] !== userId) {
+    return { ok: false as const, status: 403, error: "Only the uploader can process this video." };
+  }
+  return { ok: true as const };
 }
 
 router.get("/videos", async (req, res) => {
@@ -636,11 +656,13 @@ router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
   }
 });
 
-router.post("/videos/:id/transcribe", requireAdmin, aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/transcribe", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = TranscribeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
     const videoId = parsed.data.id;
+    const access = await canProcessVideo(videoId, req);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
     // Atomically claim the transcription slot. The conditional UPDATE only
     // matches a row with no transcript in a claimable (non-in-flight) status,
@@ -688,11 +710,13 @@ router.post("/videos/:id/transcribe", requireAdmin, aiPipelineLimiter, async (re
   }
 });
 
-router.post("/videos/:id/analyze", requireAdmin, aiPipelineLimiter, async (req, res) => {
+router.post("/videos/:id/analyze", aiPipelineLimiter, async (req, res) => {
   try {
     const parsed = AnalyzeVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
     const videoId = parsed.data.id;
+    const access = await canProcessVideo(videoId, req);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
     // Atomically claim the analysis slot. The conditional UPDATE only matches
     // a row that has a transcript, no cached analysis, and is not already

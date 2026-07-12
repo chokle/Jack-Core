@@ -187,7 +187,7 @@ async function loadHistory(sessionId: string): Promise<AnsweredTurn[]> {
   }));
 }
 
-/** Fetch a session and its mentor, or null if the id is malformed / not found. */
+/** Fetch a session and its mentor only when both belong to the signed-in contributor. */
 async function loadSession(
   rawId: string | string[] | undefined,
   ownerUserId: string | undefined,
@@ -210,6 +210,10 @@ async function loadSession(
     .maybeSingle();
   if (mErr) throw mErr;
   if (!mentor) return null;
+  // Personal interviews do not have an admin bypass. The contributor owns both
+  // the session and the mentor profile; stale ids or cross-account resume
+  // attempts must fail closed.
+  if (mentor["contributor_user_id"] !== ownerUserId) return null;
   return { session: session as Row, mentor: mentor as Row };
 }
 
