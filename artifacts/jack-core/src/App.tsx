@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import { SignIn, SignUp, Show, useAuth, useClerk } from "@clerk/react";
 import {
   InternalClerkProvider as ClerkProvider,
   publishableKeyFromHost,
@@ -436,7 +436,70 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function ClerkProviderWithRoutes() {
+function AuthBootstrapBoundary() {
+  const { isLoaded } = useAuth();
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (isLoaded) {
+      setTimedOut(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setTimedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [isLoaded]);
+
+  if (!isLoaded) {
+    // The public home page must remain presentable even if the auth provider is
+    // slow or blocked. Auth resolution will redirect signed-in users afterward.
+    if (window.location.pathname === `${basePath}/` || window.location.pathname === basePath) {
+      return <Landing />;
+    }
+    return (
+      <main className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
+        <div className="max-w-sm space-y-4">
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
+          <h1 className="text-xl font-bold">Connecting securely</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {timedOut
+              ? "Your secure session did not finish loading. Retry the connection or return to Jack’s overview."
+              : "Restoring your Jack session…"}
+          </p>
+          {timedOut && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => window.location.reload()}>
+                Retry connection
+              </button>
+              <a className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border px-5 font-semibold" href={`${basePath}/`}>
+                Open overview
+              </a>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <Switch>
+      <Route path="/" component={HomeRedirect} />
+      <Route path="/app" component={ProtectedApp} />
+      <Route path="/sign-in/*?" component={SignInPage} />
+      <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route><Redirect to="/" /></Route>
+    </Switch>
+  );
+}
+
+function AuthReadySignal({ onReady }: { onReady: () => void }) {
+  const { isLoaded } = useAuth();
+  useEffect(() => {
+    if (isLoaded) onReady();
+  }, [isLoaded, onReady]);
+  return null;
+}
+
+function ClerkProviderWithRoutes({ onAuthReady }: { onAuthReady: () => void }) {
   const [, setLocation] = useLocation();
 
   return (
@@ -466,29 +529,46 @@ function ClerkProviderWithRoutes() {
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
       <QueryClientProvider client={queryClient}>
+        <AuthReadySignal onReady={onAuthReady} />
         <ClerkQueryClientCacheInvalidator />
-        <Switch>
-          <Route path="/" component={HomeRedirect} />
-          <Route path="/app" component={ProtectedApp} />
-          {/* REQUIRED — copy "/sign-in/*?" and "/sign-up/*?" verbatim. The /*?
-              optional wildcard is the only wouter syntax that matches both the
-              bare URL and Clerk's OAuth sub-paths. */}
-          <Route path="/sign-in/*?" component={SignInPage} />
-          <Route path="/sign-up/*?" component={SignUpPage} />
-          <Route>
-            <Redirect to="/" />
-          </Route>
-        </Switch>
+        <AuthBootstrapBoundary />
       </QueryClientProvider>
     </ClerkProvider>
   );
 }
 
 function App() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (authReady) return;
+    const timer = window.setTimeout(() => setAuthTimedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [authReady]);
+
   return (
-    <WouterRouter base={basePath}>
-      <ClerkProviderWithRoutes />
-    </WouterRouter>
+    <>
+      {!authReady && (
+        <main className="fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
+          <div className="max-w-sm space-y-4">
+            <div className="text-xl font-extrabold">JACK <span className="text-primary">CORE</span></div>
+            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
+            <p className="text-sm text-muted-foreground">
+              {authTimedOut ? "The secure session is taking too long to respond." : "Connecting securely…"}
+            </p>
+            {authTimedOut && (
+              <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => window.location.reload()}>
+                Retry connection
+              </button>
+            )}
+          </div>
+        </main>
+      )}
+      <WouterRouter base={basePath}>
+        <ClerkProviderWithRoutes onAuthReady={() => setAuthReady(true)} />
+      </WouterRouter>
+    </>
   );
 }
 
