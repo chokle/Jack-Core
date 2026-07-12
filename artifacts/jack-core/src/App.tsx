@@ -57,12 +57,13 @@ const clerkProxyUrl =
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
-const localClerkJsUrl = isLocalClerkHost
-  ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
-  : undefined;
-const localClerkUiUrl = isLocalClerkHost
-  ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : undefined;
+// Serve Clerk's browser bundles from the same reliable CDN path used by the
+// Torch app. The instance API still comes from the signed publishable key, but
+// a slow custom-domain bundle endpoint can no longer leave the React tree blank.
+const localClerkJsUrl =
+  "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
+const localClerkUiUrl =
+  "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
