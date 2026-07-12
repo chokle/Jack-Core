@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -40,7 +40,6 @@ import type {
   ParkedThought,
 } from "@workspace/api-client-react";
 import type { MemoryGraphHandle } from "./MemoryGraphCanvas";
-import { SpatialBrainCanvas } from "./SpatialBrainCanvas";
 import { FloatingPanel } from "./FloatingPanel";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
@@ -79,6 +78,10 @@ import {
   type MemoryVitality,
   type Topic,
 } from "../lib/memory-graph";
+
+const OrbitalMemoryCanvas = lazy(() =>
+  import("./OrbitalMemoryCanvas").then((module) => ({ default: module.OrbitalMemoryCanvas })),
+);
 
 interface MemoryGraphViewProps {
   data: MemoryGraphData;
@@ -568,21 +571,22 @@ export function MemoryGraphView({
     <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
-        <SpatialBrainCanvas
-          ref={canvasRef}
-          model={model}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onHover={setHoveredId}
-          onTogglePin={togglePin}
-          pinnedIds={pinnedIds}
-          search={search}
-          activeMatchId={activeMatchId}
-          locked={locked}
-          delta={delta}
-          onZoomChange={setZoomPct}
-          viewMode="branches"
-        />
+        <Suspense fallback={<div className="flex h-full items-center justify-center font-mono text-xs uppercase tracking-[0.18em] text-white/55">Loading orbital memory…</div>}>
+          <OrbitalMemoryCanvas
+            ref={canvasRef}
+            model={model}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onHover={setHoveredId}
+            onTogglePin={togglePin}
+            pinnedIds={pinnedIds}
+            search={search}
+            activeMatchId={activeMatchId}
+            locked={locked}
+            delta={delta}
+            onZoomChange={setZoomPct}
+          />
+        </Suspense>
 
         {/* Header overlay */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-4 p-6 lg:flex-row lg:items-start lg:justify-between">

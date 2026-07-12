@@ -348,6 +348,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         adj.get(e.b)!.add(e.a);
       }
       adjacencyRef.current = adj;
+      const map = nodesRef.current;
 
       // Derive the neural-flow topology from the LIVE graph (never hardcoded to
       // specific trades): hubs are the topic cluster-heads bridged to the core,
@@ -390,8 +391,6 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const cx = w / 2;
       const cy = h / 2;
       const now = performance.now();
-      const map = nodesRef.current;
-
       const topics = model.topics;
       const modelNodeById = new Map(model.nodes.map((n) => [n.id, n]));
       const topicPopulated = new Map(
