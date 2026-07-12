@@ -106,38 +106,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body>
-    <div id="root">
-      <div id="jack-bootstrap" role="status" aria-live="polite">
-        <div class="jack-bootstrap-mark">JACK <span>CORE</span></div>
-        <div class="jack-bootstrap-pulse" aria-hidden="true"></div>
-        <p>Connecting securely…</p>
-      </div>
-    </div>
-    <style>
-      #jack-bootstrap {
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 14px;
-        background: #0d1729;
-        color: #f8fafc;
-        font-family: Inter, system-ui, sans-serif;
-      }
-      .jack-bootstrap-mark { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
-      .jack-bootstrap-mark span { color: #ff5a1f; }
-      .jack-bootstrap-pulse {
-        width: 28px;
-        height: 28px;
-        border: 3px solid rgba(255,255,255,.14);
-        border-top-color: #ff5a1f;
-        border-radius: 999px;
-        animation: jack-bootstrap-spin .8s linear infinite;
-      }
-      #jack-bootstrap p { margin: 0; color: #94a3b8; font-size: 14px; }
-      @keyframes jack-bootstrap-spin { to { transform: rotate(360deg); } }
-    </style>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

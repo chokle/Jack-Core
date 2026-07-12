@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { SignIn, SignUp, Show, useAuth, useClerk } from "@clerk/react";
+import { SignIn, SignUp, Show, useClerk } from "@clerk/react";
 import {
   InternalClerkProvider as ClerkProvider,
+  publishableKeyFromHost,
 } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
@@ -29,7 +30,7 @@ import {
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
-import { setAuthTokenGetter, useGetMe, type ParkedThought } from "@workspace/api-client-react";
+import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -39,10 +40,12 @@ const isLocalClerkHost =
   window.location.hostname === "127.0.0.1" ||
   window.location.hostname === "[::1]";
 
-// Use the configured Clerk instance unchanged, matching Torch's shared-login
-// integration. Host-derived keys can redirect session traffic to a custom
-// Clerk hostname that is not valid for this development instance.
-const clerkPubKey = configuredClerkPubKey;
+// Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
+// publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
+// Deployed hosts still use host-aware resolution for Torch's custom domains.
+const clerkPubKey = isLocalClerkHost
+  ? configuredClerkPubKey
+  : publishableKeyFromHost(window.location.hostname, configuredClerkPubKey);
 
 // Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
 // opt-in only; the normal production path sends browser auth traffic directly
@@ -54,15 +57,12 @@ const clerkProxyUrl =
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
-// Production serves Clerk's browser bundles through Jack's own origin. This
-// avoids VPN/privacy filters blocking a third-party CDN before auth can mount.
-// Local development keeps the public CDN because the production proxy is off.
 const localClerkJsUrl = isLocalClerkHost
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
-  : `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`;
+  : undefined;
 const localClerkUiUrl = isLocalClerkHost
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`;
+  : undefined;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
@@ -435,79 +435,7 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function AuthBootstrapBoundary() {
-  const { isLoaded } = useAuth();
-  const [timedOut, setTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (isLoaded) {
-      setTimedOut(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setTimedOut(true), 8000);
-    return () => window.clearTimeout(timer);
-  }, [isLoaded]);
-
-  if (!isLoaded) {
-    // The public home page must remain presentable even if the auth provider is
-    // slow or blocked. Auth resolution will redirect signed-in users afterward.
-    if (window.location.pathname === `${basePath}/` || window.location.pathname === basePath) {
-      return <Landing />;
-    }
-    return (
-      <main className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
-        <div className="max-w-sm space-y-4">
-          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
-          <h1 className="text-xl font-bold">Connecting securely</h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {timedOut
-              ? "Your secure session did not finish loading. Retry the connection or return to Jack’s overview."
-              : "Restoring your Jack session…"}
-          </p>
-          {timedOut && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-              <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => window.location.reload()}>
-                Retry connection
-              </button>
-              <a className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border px-5 font-semibold" href={`${basePath}/`}>
-                Open overview
-              </a>
-            </div>
-          )}
-        </div>
-      </main>
-    );
-  }
-
-  return (
-    <Switch>
-      <Route path="/" component={HomeRedirect} />
-      <Route path="/app" component={ProtectedApp} />
-      <Route path="/sign-in/*?" component={SignInPage} />
-      <Route path="/sign-up/*?" component={SignUpPage} />
-      <Route><Redirect to="/" /></Route>
-    </Switch>
-  );
-}
-
-function AuthReadySignal({ onReady }: { onReady: () => void }) {
-  const { isLoaded } = useAuth();
-  useEffect(() => {
-    if (isLoaded) onReady();
-  }, [isLoaded, onReady]);
-  return null;
-}
-
-function ApiAuthTokenBridge() {
-  const { getToken } = useAuth();
-  useEffect(() => {
-    setAuthTokenGetter(() => getToken());
-    return () => setAuthTokenGetter(null);
-  }, [getToken]);
-  return null;
-}
-
-function ClerkProviderWithRoutes({ onAuthReady }: { onAuthReady: () => void }) {
+function ClerkProviderWithRoutes() {
   const [, setLocation] = useLocation();
 
   return (
@@ -537,47 +465,29 @@ function ClerkProviderWithRoutes({ onAuthReady }: { onAuthReady: () => void }) {
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
       <QueryClientProvider client={queryClient}>
-        <AuthReadySignal onReady={onAuthReady} />
-        <ApiAuthTokenBridge />
         <ClerkQueryClientCacheInvalidator />
-        <AuthBootstrapBoundary />
+        <Switch>
+          <Route path="/" component={HomeRedirect} />
+          <Route path="/app" component={ProtectedApp} />
+          {/* REQUIRED — copy "/sign-in/*?" and "/sign-up/*?" verbatim. The /*?
+              optional wildcard is the only wouter syntax that matches both the
+              bare URL and Clerk's OAuth sub-paths. */}
+          <Route path="/sign-in/*?" component={SignInPage} />
+          <Route path="/sign-up/*?" component={SignUpPage} />
+          <Route>
+            <Redirect to="/" />
+          </Route>
+        </Switch>
       </QueryClientProvider>
     </ClerkProvider>
   );
 }
 
 function App() {
-  const [authReady, setAuthReady] = useState(false);
-  const [authTimedOut, setAuthTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (authReady) return;
-    const timer = window.setTimeout(() => setAuthTimedOut(true), 8000);
-    return () => window.clearTimeout(timer);
-  }, [authReady]);
-
   return (
-    <>
-      {!authReady && (
-        <main className="fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
-          <div className="max-w-sm space-y-4">
-            <div className="text-xl font-extrabold">JACK <span className="text-primary">CORE</span></div>
-            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
-            <p className="text-sm text-muted-foreground">
-              {authTimedOut ? "The secure session is taking too long to respond." : "Connecting securely…"}
-            </p>
-            {authTimedOut && (
-              <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => window.location.reload()}>
-                Retry connection
-              </button>
-            )}
-          </div>
-        </main>
-      )}
-      <WouterRouter base={basePath}>
-        <ClerkProviderWithRoutes onAuthReady={() => setAuthReady(true)} />
-      </WouterRouter>
-    </>
+    <WouterRouter base={basePath}>
+      <ClerkProviderWithRoutes />
+    </WouterRouter>
   );
 }
 
