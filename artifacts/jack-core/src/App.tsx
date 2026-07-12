@@ -494,6 +494,7 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
 function App() {
   const [authReady, setAuthReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+  const [resetting, setResetting] = useState(false);
   useEffect(() => {
     if (authReady) return;
     const timer = window.setTimeout(() => setTimedOut(true), 8000);
@@ -501,9 +502,14 @@ function App() {
   }, [authReady]);
 
   const resetSession = async () => {
+    if (resetting) return;
+    setResetting(true);
     try {
       const clerk = (window as typeof window & { Clerk?: { signOut?: () => Promise<void> } }).Clerk;
-      await clerk?.signOut?.();
+      await Promise.race([
+        clerk?.signOut?.() ?? Promise.resolve(),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+      ]);
     } catch {
       // Continue with local cleanup when the stale remote session cannot answer.
     }
@@ -513,7 +519,7 @@ function App() {
         if (key?.toLowerCase().includes("clerk")) storage.removeItem(key);
       }
     }
-    window.location.replace(`${basePath}/sign-in?session_reset=1`);
+    window.location.replace(`${basePath}/sign-in?session_reset=${Date.now()}`);
   };
 
   return (
@@ -524,7 +530,7 @@ function App() {
             <div className="text-xl font-extrabold">JACK <span className="text-primary">CORE</span></div>
             <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
             <p className="text-sm text-muted-foreground">{timedOut ? "Your saved session is no longer valid." : "Connecting securely…"}</p>
-            {timedOut && <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => void resetSession()}>Reset session and sign in</button>}
+            {timedOut && <button disabled={resetting} className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground disabled:opacity-70" onClick={() => void resetSession()}>{resetting ? "Resetting session…" : "Reset session and sign in"}</button>}
           </div>
         </main>
       )}
