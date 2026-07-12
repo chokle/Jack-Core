@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { SignIn, SignUp, Show, useAuth, useClerk } from "@clerk/react";
 import {
   InternalClerkProvider as ClerkProvider,
-  publishableKeyFromHost,
 } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
@@ -40,12 +39,10 @@ const isLocalClerkHost =
   window.location.hostname === "127.0.0.1" ||
   window.location.hostname === "[::1]";
 
-// Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
-// publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
-// Deployed hosts still use host-aware resolution for Torch's custom domains.
-const clerkPubKey = isLocalClerkHost
-  ? configuredClerkPubKey
-  : publishableKeyFromHost(window.location.hostname, configuredClerkPubKey);
+// Use the configured Clerk instance unchanged, matching Torch's shared-login
+// integration. Host-derived keys can redirect session traffic to a custom
+// Clerk hostname that is not valid for this development instance.
+const clerkPubKey = configuredClerkPubKey;
 
 // Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
 // opt-in only; the normal production path sends browser auth traffic directly
