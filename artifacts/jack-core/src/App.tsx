@@ -15,7 +15,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
-import { InterviewMode } from "./components/InterviewMode";
+import { InterviewMode, type TorchInterviewPreload } from "./components/InterviewMode";
 import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
@@ -65,6 +65,53 @@ const localClerkUiUrl = isLocalClerkHost
   : undefined;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
+
+function captureTorchInterviewHandoff() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("view") !== "interview" || params.get("source") !== "torch-command-centre") return;
+  try {
+    sessionStorage.setItem(TORCH_INTERVIEW_HANDOFF_KEY, params.toString().slice(0, 4000));
+  } catch {
+    // Storage can be blocked; signed-in users still consume the live URL.
+  }
+}
+
+captureTorchInterviewHandoff();
+
+function readTorchInterviewPreload(): TorchInterviewPreload | undefined {
+  const liveParams = new URLSearchParams(window.location.search);
+  let params = liveParams;
+  if (liveParams.get("source") !== "torch-command-centre") {
+    try {
+      params = new URLSearchParams(sessionStorage.getItem(TORCH_INTERVIEW_HANDOFF_KEY) ?? "");
+    } catch {
+      return undefined;
+    }
+  }
+  if (params.get("view") !== "interview" || params.get("source") !== "torch-command-centre") {
+    return undefined;
+  }
+
+  const value = (key: string, maxLength: number) => (params.get(key) ?? "").trim().slice(0, maxLength);
+  const preload = {
+    starvingPointId: value("starvingPointId", 120),
+    title: value("title", 180),
+    trade: value("trade", 100),
+    category: value("category", 100),
+    description: value("description", 800),
+    priority: value("priority", 40),
+    evidence: value("evidence", 800),
+  };
+
+  if (!preload.starvingPointId || !preload.title || !preload.trade) return undefined;
+  try {
+    sessionStorage.removeItem(TORCH_INTERVIEW_HANDOFF_KEY);
+  } catch {
+    // Best-effort cleanup only.
+  }
+  return preload;
+}
 
 // Clerk passes full paths to routerPush/routerReplace, but wouter's setLocation
 // prepends the base — strip it to avoid doubling.
@@ -128,7 +175,8 @@ const clerkAppearance = {
 };
 
 function JackApp() {
-  const [view, setView] = useState<JackView>("graph");
+  const [interviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
+  const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
@@ -264,7 +312,7 @@ function JackApp() {
             onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
-          <InterviewMode />
+          <InterviewMode preload={interviewPreload} />
         ) : view === "review" ? (
           <KnowledgeReview />
         ) : (
