@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { SignIn, SignUp, Show, useClerk } from "@clerk/react";
-import {
-  InternalClerkProvider as ClerkProvider,
-  publishableKeyFromHost,
-} from "@clerk/react/internal";
+import { SignIn, SignUp, Show, useAuth, useClerk } from "@clerk/react";
+import { InternalClerkProvider as ClerkProvider } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import {
@@ -30,7 +27,7 @@ import {
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
-import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
+import { setAuthTokenGetter, useGetMe, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -43,9 +40,7 @@ const isLocalClerkHost =
 // Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
 // publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
 // Deployed hosts still use host-aware resolution for Torch's custom domains.
-const clerkPubKey = isLocalClerkHost
-  ? configuredClerkPubKey
-  : publishableKeyFromHost(window.location.hostname, configuredClerkPubKey);
+const clerkPubKey = configuredClerkPubKey;
 
 // Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
 // opt-in only; the normal production path sends browser auth traffic directly
@@ -59,10 +54,10 @@ const clerkProxyUrl =
 
 const localClerkJsUrl = isLocalClerkHost
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
-  : undefined;
+  : `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`;
 const localClerkUiUrl = isLocalClerkHost
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : undefined;
+  : `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
@@ -435,7 +430,19 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function ClerkProviderWithRoutes() {
+function AuthBridge({ onReady }: { onReady: () => void }) {
+  const { isLoaded, getToken } = useAuth();
+  useEffect(() => {
+    setAuthTokenGetter(() => getToken());
+    return () => setAuthTokenGetter(null);
+  }, [getToken]);
+  useEffect(() => {
+    if (isLoaded) onReady();
+  }, [isLoaded, onReady]);
+  return null;
+}
+
+function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
   const [, setLocation] = useLocation();
 
   return (
@@ -465,6 +472,7 @@ function ClerkProviderWithRoutes() {
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
       <QueryClientProvider client={queryClient}>
+        <AuthBridge onReady={onReady} />
         <ClerkQueryClientCacheInvalidator />
         <Switch>
           <Route path="/" component={HomeRedirect} />
@@ -484,10 +492,46 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
+  const [authReady, setAuthReady] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (authReady) return;
+    const timer = window.setTimeout(() => setTimedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [authReady]);
+
+  const resetSession = async () => {
+    try {
+      const clerk = (window as typeof window & { Clerk?: { signOut?: () => Promise<void> } }).Clerk;
+      await clerk?.signOut?.();
+    } catch {
+      // Continue with local cleanup when the stale remote session cannot answer.
+    }
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (let i = storage.length - 1; i >= 0; i -= 1) {
+        const key = storage.key(i);
+        if (key?.toLowerCase().includes("clerk")) storage.removeItem(key);
+      }
+    }
+    window.location.replace(`${basePath}/sign-in?session_reset=1`);
+  };
+
   return (
-    <WouterRouter base={basePath}>
-      <ClerkProviderWithRoutes />
-    </WouterRouter>
+    <>
+      {!authReady && (
+        <main className="fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center text-foreground">
+          <div className="max-w-sm space-y-4">
+            <div className="text-xl font-extrabold">JACK <span className="text-primary">CORE</span></div>
+            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-white/15 border-t-primary" />
+            <p className="text-sm text-muted-foreground">{timedOut ? "Your saved session is no longer valid." : "Connecting securely…"}</p>
+            {timedOut && <button className="min-h-11 rounded-lg bg-primary px-5 font-semibold text-primary-foreground" onClick={() => void resetSession()}>Reset session and sign in</button>}
+          </div>
+        </main>
+      )}
+      <WouterRouter base={basePath}>
+        <ClerkProviderWithRoutes onReady={() => setAuthReady(true)} />
+      </WouterRouter>
+    </>
   );
 }
 
