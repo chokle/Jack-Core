@@ -3,12 +3,10 @@ import { getAuth, clerkClient } from "@clerk/express";
 import { logger } from "./logger.js";
 
 /**
- * Admin access is ROLE-BASED BY EMAIL: `ADMIN_EMAILS` is a comma/whitespace
- * separated allowlist. Anyone who signs in (via Clerk) with one of these emails
- * is an admin; everyone else is a regular authenticated user. Enforcement is
- * server-side and fail-closed — if `ADMIN_EMAILS` is unset, NO ONE is an admin,
- * so admin-only routes (Knowledge Review, analytics, exports, moderation,
- * system tools) stay locked even to signed-in users.
+ * Admin access is resolved server-side from either the `ADMIN_EMAILS` allowlist
+ * or Clerk public metadata with `role: "admin"`. Public metadata is writable by
+ * the backend only, so client-supplied fields and unsafe metadata never grant
+ * access. Resolution remains fail-closed when Clerk cannot confirm the user.
  */
 const ADMIN_EMAILS: ReadonlySet<string> = new Set(
   (process.env["ADMIN_EMAILS"] ?? "")
@@ -56,6 +54,13 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
+function hasAdminRole(user: { publicMetadata?: unknown }): boolean {
+  const metadata = user.publicMetadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const role = (metadata as Record<string, unknown>)["role"];
+  return typeof role === "string" && role.trim().toLowerCase() === "admin";
+}
+
 function displayName(user: { firstName: string | null; lastName: string | null }): string | null {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   return name.length > 0 ? name : null;
@@ -64,7 +69,8 @@ function displayName(user: { firstName: string | null; lastName: string | null }
 /**
  * Resolve the Clerk-authenticated caller's identity and admin status, or null
  * when there is no signed-in user. Looks the user up server-side (email is not
- * carried in the default session claims) and checks the email allowlist.
+ * carried in the default session claims) and checks the email allowlist plus
+ * trusted Clerk public metadata.
  */
 export async function resolveIdentity(req: Request): Promise<CallerIdentity | null> {
   let userId: string | null | undefined;
@@ -79,7 +85,12 @@ export async function resolveIdentity(req: Request): Promise<CallerIdentity | nu
     const user = await clerkClient.users.getUser(userId);
     const email =
       user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress ?? null;
-    return { userId, email, name: displayName(user), isAdmin: isAdminEmail(email) };
+    return {
+      userId,
+      email,
+      name: displayName(user),
+      isAdmin: isAdminEmail(email) || hasAdminRole(user),
+    };
   } catch (err) {
     // Fail closed: if we cannot confirm the email, the caller is not an admin.
     req.log?.error({ err, userId }, "failed to resolve Clerk user");

@@ -1,7 +1,7 @@
 /**
- * Unit tests for the Clerk email-role admin boundary. Admin status is derived
- * server-side from the signed-in Clerk user's email against the ADMIN_EMAILS
- * allowlist — never from a client-supplied field — and the reviewer identity
+ * Unit tests for the Clerk admin boundary. Admin status is derived server-side
+ * from the signed-in Clerk user's email allowlist or trusted public metadata —
+ * never from a client-supplied field — and the reviewer identity
  * used for attribution comes from that same resolved profile. The boundary is
  * fail-closed: no session, an unknown email, or a Clerk lookup failure all
  * resolve to "not an admin".
@@ -37,7 +37,13 @@ beforeEach(() => {
 
 /** Shape a minimal Clerk user record the way clerkClient.users.getUser returns it. */
 function clerkUser(
-  opts: { email?: string | null; firstName?: string | null; lastName?: string | null } = {},
+  opts: {
+    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    publicMetadata?: Record<string, unknown>;
+    unsafeMetadata?: Record<string, unknown>;
+  } = {},
 ) {
   const email = opts.email === undefined ? "admin@torchlabs.ca" : opts.email;
   return {
@@ -45,6 +51,8 @@ function clerkUser(
     lastName: opts.lastName ?? null,
     primaryEmailAddress: email ? { emailAddress: email } : null,
     emailAddresses: email ? [{ emailAddress: email }] : [],
+    publicMetadata: opts.publicMetadata ?? {},
+    unsafeMetadata: opts.unsafeMetadata ?? {},
   };
 }
 
@@ -100,6 +108,28 @@ describe("resolveIdentity", () => {
       name: null,
       isAdmin: false,
     });
+  });
+
+  it("recognizes a trusted Clerk public-metadata admin role", async () => {
+    getAuth.mockReturnValue({ userId: "u_shared_admin" });
+    getUser.mockResolvedValue(
+      clerkUser({ email: "shared@example.com", publicMetadata: { role: "ADMIN" } }),
+    );
+
+    expect(await resolveIdentity({} as Request)).toMatchObject({
+      userId: "u_shared_admin",
+      email: "shared@example.com",
+      isAdmin: true,
+    });
+  });
+
+  it("does not trust user-writable unsafe metadata for admin access", async () => {
+    getAuth.mockReturnValue({ userId: "u_spoof" });
+    getUser.mockResolvedValue(
+      clerkUser({ email: "spoof@example.com", unsafeMetadata: { role: "admin" } }),
+    );
+
+    expect(await resolveIdentity({} as Request)).toMatchObject({ isAdmin: false });
   });
 
   it("fails closed to non-admin when the Clerk user lookup throws", async () => {
