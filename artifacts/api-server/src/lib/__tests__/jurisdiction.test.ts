@@ -151,6 +151,8 @@ describe("Canadian jurisdiction policy", () => {
       }
       expect(prompt).toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
       expect(prompt).toMatch(/not an isolated generic chatbot/i);
+      expect(prompt).toMatch(/supersedes any contradictory assistant statement in conversation history/i);
+      expect(prompt).toMatch(/correct that statement directly/i);
       expect(prompt).toMatch(/cannot store information[^\n]*false descriptions/i);
       expect(prompt).toContain(
         "I do not have that record in my current retrieval context yet.",
