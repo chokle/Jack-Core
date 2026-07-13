@@ -346,6 +346,10 @@ export const AskJackBody = zod.object({
   "message": zod.string().min(1)
 })
 
+export const askJackResponseLearningExtractedCountMin = 0;
+
+
+
 export const AskJackResponse = zod.object({
   "answer": zod.string(),
   "citations": zod.array(zod.object({
@@ -360,7 +364,12 @@ export const AskJackResponse = zod.object({
   "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
   "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
 })),
-  "usedInternalKnowledge": zod.boolean().optional()
+  "usedInternalKnowledge": zod.boolean().optional(),
+  "learning": zod.object({
+  "status": zod.enum(['verified', 'discarded', 'failed']),
+  "extractedCount": zod.number().min(askJackResponseLearningExtractedCountMin),
+  "summary": zod.string().optional()
+})
 })
 
 

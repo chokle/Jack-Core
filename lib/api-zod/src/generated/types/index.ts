@@ -16,6 +16,8 @@ export * from './chatInput';
 export * from './chatMessage';
 export * from './chatMessageRole';
 export * from './chatResponse';
+export * from './chatResponseLearning';
+export * from './chatResponseLearningStatus';
 export * from './citation';
 export * from './citationSourceType';
 export * from './competency';

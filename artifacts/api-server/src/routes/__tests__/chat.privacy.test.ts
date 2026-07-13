@@ -35,6 +35,13 @@ vi.mock("../../lib/openai.js", async () => {
   };
 });
 
+vi.mock("../../lib/ask-learning.js", () => ({
+  learnFromAskInteraction: vi.fn(async () => ({
+    status: "discarded",
+    extractedCount: 0,
+  })),
+}));
+
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
 import { chatCompletion } from "../../lib/openai.js";
@@ -84,9 +91,33 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
     // Both users share the SAME session cookie (same device), but each owns
     // distinct messages by user_id.
     fake.tables["chat_messages"] = [
-      { id: "a1", session_id: SHARED_SESSION, user_id: USER_A, role: "user", content: "A question", citations: [], created_at: "2026-01-01T00:00:00Z" },
-      { id: "a2", session_id: SHARED_SESSION, user_id: USER_A, role: "assistant", content: "A answer", citations: [], created_at: "2026-01-01T00:00:01Z" },
-      { id: "b1", session_id: SHARED_SESSION, user_id: USER_B, role: "user", content: "B secret", citations: [], created_at: "2026-01-01T00:00:02Z" },
+      {
+        id: "a1",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "user",
+        content: "A question",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "a2",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "assistant",
+        content: "A answer",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+      {
+        id: "b1",
+        session_id: SHARED_SESSION,
+        user_id: USER_B,
+        role: "user",
+        content: "B secret",
+        citations: [],
+        created_at: "2026-01-01T00:00:02Z",
+      },
     ];
 
     const resA = await request(app)
@@ -104,12 +135,22 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
       .set("x-test-user", USER_B)
       .set("Cookie", `jack_session=${SHARED_SESSION}`);
     expect(resB.status).toBe(200);
-    expect((resB.body as HistoryRow[]).map((r) => r.content)).toEqual(["B secret"]);
+    expect((resB.body as HistoryRow[]).map((r) => r.content)).toEqual([
+      "B secret",
+    ]);
   });
 
   it("never returns legacy pre-auth rows (user_id NULL) as global rows", async () => {
     fake.tables["chat_messages"] = [
-      { id: "legacy", session_id: SHARED_SESSION, user_id: null, role: "user", content: "orphaned legacy", citations: [], created_at: "2025-01-01T00:00:00Z" },
+      {
+        id: "legacy",
+        session_id: SHARED_SESSION,
+        user_id: null,
+        role: "user",
+        content: "orphaned legacy",
+        citations: [],
+        created_at: "2025-01-01T00:00:00Z",
+      },
     ];
 
     const res = await request(app)
@@ -122,7 +163,15 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
 
   it("returns nothing when there is no resolvable user (fail-closed)", async () => {
     fake.tables["chat_messages"] = [
-      { id: "a1", session_id: SHARED_SESSION, user_id: USER_A, role: "user", content: "A question", citations: [], created_at: "2026-01-01T00:00:00Z" },
+      {
+        id: "a1",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "user",
+        content: "A question",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
     ];
     const res = await request(app).get("/api/chat/history");
     expect(res.status).toBe(200);
@@ -135,7 +184,15 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     // A prior message from a DIFFERENT user on the same device must not leak into
     // this user's conversation context — and the new rows must be owned by USER_A.
     fake.tables["chat_messages"] = [
-      { id: "b1", session_id: SHARED_SESSION, user_id: USER_B, role: "user", content: "B earlier turn", citations: [], created_at: "2026-01-01T00:00:00Z" },
+      {
+        id: "b1",
+        session_id: SHARED_SESSION,
+        user_id: USER_B,
+        role: "user",
+        content: "B earlier turn",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
     ];
 
     const res = await request(app)
@@ -165,9 +222,14 @@ describe("POST /api/chat — writes carry the owner and load account history", (
         id: "11111111-1111-1111-1111-111111111111",
         title: "3gdemo",
         trade: "Welder",
-        analysis: "Jack's saved Library analysis: the cap pass is too cold and the bead profile is inconsistent.",
-        key_points: ["Watch travel speed on the cap pass", "Adjust heat before stacking beads"],
-        transcript: "The instructor explains root pass, hot pass, fill pass, and cap pass sequence.",
+        analysis:
+          "Jack's saved Library analysis: the cap pass is too cold and the bead profile is inconsistent.",
+        key_points: [
+          "Watch travel speed on the cap pass",
+          "Adjust heat before stacking beads",
+        ],
+        transcript:
+          "The instructor explains root pass, hot pass, fill pass, and cap pass sequence.",
         thumbnail_url: null,
       },
     ];
@@ -176,7 +238,9 @@ describe("POST /api/chat — writes carry the owner and load account history", (
       .post("/api/chat")
       .set("x-test-user", USER_A)
       .set("Cookie", `jack_session=${SHARED_SESSION}`)
-      .send({ message: 'Based on the video "3gdemo", what do you rate it out of 10?' });
+      .send({
+        message: 'Based on the video "3gdemo", what do you rate it out of 10?',
+      });
 
     expect(res.status).toBe(200);
     expect(res.body.usedInternalKnowledge).toBe(true);
@@ -187,9 +251,49 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     });
 
     const call = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
-    const system = call?.messages?.find((m) => m.role === "system")?.content ?? "";
+    const system =
+      call?.messages?.find((m) => m.role === "system")?.content ?? "";
     expect(system).toContain("[Matched Library Video: 3gdemo]");
     expect(system).toContain("Jack's saved Library analysis");
     expect(system).toContain("Do not claim you lack access to this video");
+  });
+
+  it("injects matching Living Memory graph knowledge into Ask Jack", async () => {
+    fake.tables["knowledge_nodes"] = [
+      {
+        id: "k:ask-memory:split-ferrule",
+        kind: "knowledge",
+        label: "Split TIG torch ferrule check",
+        description:
+          "A split TIG torch power-cable ferrule creates an unstable electrical connection. Inspect the ferrule for radial cracks before assembly and replace it if cracked.",
+        verification_status: "verified",
+        meta: { sourceCount: 2 },
+        embedding: JSON.stringify([1, 0, 0]),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: "What should I inspect on a split TIG torch ferrule?" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.usedInternalKnowledge).toBe(true);
+    expect(res.body.citations).toContainEqual(
+      expect.objectContaining({
+        entryId: "k:ask-memory:split-ferrule",
+        sourceType: "knowledge",
+        videoTitle: "Split TIG torch ferrule check",
+        verified: true,
+        sourceCount: 2,
+      }),
+    );
+
+    const call = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
+    const system =
+      call?.messages?.find((m) => m.role === "system")?.content ?? "";
+    expect(system).toContain("[Living Memory: Split TIG torch ferrule check");
+    expect(system).toContain("radial cracks before assembly");
   });
 });

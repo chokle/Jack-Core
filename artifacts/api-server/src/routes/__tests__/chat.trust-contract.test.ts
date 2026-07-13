@@ -41,16 +41,28 @@ vi.mock("../../lib/openai.js", async () => {
   return {
     createEmbedding: m.createEmbedding,
     chatCompletion: vi.fn(async () => ({
-      choices: [{ message: { content: "Answer text is irrelevant to this test." } }],
+      choices: [
+        { message: { content: "Answer text is irrelevant to this test." } },
+      ],
     })),
     MODELS: m.MODELS,
     openai: m.openai,
   };
 });
 
+vi.mock("../../lib/ask-learning.js", () => ({
+  learnFromAskInteraction: vi.fn(async () => ({
+    status: "discarded",
+    extractedCount: 0,
+  })),
+}));
+
 import chatRouter, { describeTrust, knowledgeEntryTrust } from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
-import { buildCoverageFromNodes, rerankByVerification } from "../../lib/verification-rerank.js";
+import {
+  buildCoverageFromNodes,
+  rerankByVerification,
+} from "../../lib/verification-rerank.js";
 
 const VID_VERIFIED = "11111111-1111-1111-1111-111111111111";
 const VID_CORROB_2 = "22222222-2222-2222-2222-222222222222";
@@ -106,17 +118,36 @@ const NODES = [
     id: CONCEPT_LONE,
     verification_status: "unverified",
     confidence: 0.3,
-    meta: { sourceCount: 1, sources: [{ videoId: VID_LONE, timestamps: [102] }] },
+    meta: {
+      sourceCount: 1,
+      sources: [{ videoId: VID_LONE, timestamps: [102] }],
+    },
   },
 ];
 
 function seedGraph(): void {
   fake.tables["transcript_segments"] = RAW_SEGMENTS.map((s) => ({ ...s }));
   fake.tables["knowledge_edges"] = [
-    { source_id: `video:${VID_VERIFIED}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_CORROB_2}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_CORROB_3}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_LONE}`, target_id: CONCEPT_LONE, kind: "knowledge" },
+    {
+      source_id: `video:${VID_VERIFIED}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_CORROB_2}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_CORROB_3}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_LONE}`,
+      target_id: CONCEPT_LONE,
+      kind: "knowledge",
+    },
   ];
   fake.tables["knowledge_nodes"] = NODES.map((n) => ({ ...n }));
 }
@@ -127,7 +158,10 @@ function seedGraph(): void {
  * from. If the route's citation-build loop drifts from the reranker, the
  * per-video comparison below fails.
  */
-function expectedTrustByVideo(): Map<string, { verified: boolean; sourceCount: number }> {
+function expectedTrustByVideo(): Map<
+  string,
+  { verified: boolean; sourceCount: number }
+> {
   const coverage = buildCoverageFromNodes(NODES, [VID_VERIFIED, VID_LONE]);
   const ranked = rerankByVerification(
     RAW_SEGMENTS,
@@ -188,11 +222,15 @@ describe("chat citations — badge trust matches the reranker", () => {
   it("gives each VIDEO citation verified === (verification === 'verified') and the reranker's sourceCount", async () => {
     seedGraph();
 
-    const res = await request(app).post("/api/chat").send({ message: "What torch angle should I use?" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "What torch angle should I use?" });
     expect(res.status).toBe(200);
 
     const expected = expectedTrustByVideo();
-    const videoCitations = (res.body.citations as Citation[]).filter((c) => c.sourceType === "video");
+    const videoCitations = (res.body.citations as Citation[]).filter(
+      (c) => c.sourceType === "video",
+    );
     expect(videoCitations.length).toBe(expected.size);
 
     for (const c of videoCitations) {
@@ -206,7 +244,9 @@ describe("chat citations — badge trust matches the reranker", () => {
 
     // Sanity: the seeded scenario actually exercises a verified, multi-video
     // citation (otherwise the assertion above could pass vacuously).
-    const verifiedCitation = videoCitations.find((c) => c.videoId === VID_VERIFIED);
+    const verifiedCitation = videoCitations.find(
+      (c) => c.videoId === VID_VERIFIED,
+    );
     expect(verifiedCitation).toMatchObject({ verified: true, sourceCount: 3 });
   });
 
@@ -225,7 +265,9 @@ describe("chat citations — badge trust matches the reranker", () => {
       },
     ];
 
-    const res = await request(app).post("/api/chat").send({ message: "torch angle" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "torch angle" });
     expect(res.status).toBe(200);
 
     const knowledgeCitations = (res.body.citations as Citation[]).filter(
@@ -271,7 +313,9 @@ describe("chat citations — badge trust matches the reranker", () => {
       },
     ];
 
-    const res = await request(app).post("/api/chat").send({ message: "field note" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "field note" });
     expect(res.status).toBe(200);
 
     const byId = new Map(
@@ -307,14 +351,22 @@ describe("knowledgeEntryTrust — field-note metadata maps to badge gating", () 
   });
 
   it("sets verified from any non-empty verifiedBy (string or list)", () => {
-    expect(knowledgeEntryTrust({ verifiedBy: "A Mentor" })).toEqual({ verified: true });
-    expect(knowledgeEntryTrust({ verifiedBy: ["", "A Mentor"] })).toEqual({ verified: true });
+    expect(knowledgeEntryTrust({ verifiedBy: "A Mentor" })).toEqual({
+      verified: true,
+    });
+    expect(knowledgeEntryTrust({ verifiedBy: ["", "A Mentor"] })).toEqual({
+      verified: true,
+    });
     expect(knowledgeEntryTrust({ verifiedBy: [] })).toEqual({});
   });
 
   it("sets sourceCount only when evidenceCount >= 2 (floored)", () => {
-    expect(knowledgeEntryTrust({ evidenceCount: 2 })).toEqual({ sourceCount: 2 });
-    expect(knowledgeEntryTrust({ evidenceCount: 3.9 })).toEqual({ sourceCount: 3 });
+    expect(knowledgeEntryTrust({ evidenceCount: 2 })).toEqual({
+      sourceCount: 2,
+    });
+    expect(knowledgeEntryTrust({ evidenceCount: 3.9 })).toEqual({
+      sourceCount: 3,
+    });
     expect(knowledgeEntryTrust({ verifiedBy: "M", evidenceCount: 5 })).toEqual({
       verified: true,
       sourceCount: 5,
@@ -345,7 +397,8 @@ describe("describeTrust — prose gating matches the badge gating", () => {
         expect(hasCorroborationProse).toBe(sourceCount >= 2);
         // When present, the prose count is the exact citation sourceCount, so the
         // badge ("N videos") and the answer text can't cite different numbers.
-        if (sourceCount >= 2) expect(prose).toContain(`confirmed across ${sourceCount} videos`);
+        if (sourceCount >= 2)
+          expect(prose).toContain(`confirmed across ${sourceCount} videos`);
       }
     }
   });

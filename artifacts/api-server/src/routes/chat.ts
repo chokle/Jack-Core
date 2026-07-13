@@ -6,25 +6,41 @@ import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
-import { fetchVerificationCoverage, rerankByVerification } from "../lib/verification-rerank.js";
-import { readKnowledgeMeta, type KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
+import {
+  fetchVerificationCoverage,
+  rerankByVerification,
+} from "../lib/verification-rerank.js";
+import {
+  readKnowledgeMeta,
+  type KnowledgeObjectMeta,
+} from "../lib/knowledge-schema.js";
+import {
+  learnFromAskInteraction,
+  type AskLearningResult,
+} from "../lib/ask-learning.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
 const MAX_VIDEO_CONTEXT_SEGMENTS = 6;
 const MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS = 1800;
+const MAX_GRAPH_MEMORY_MATCHES = 4;
 
 const router = Router();
 
 router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
+    if (!parsed.success)
+      return res.status(400).json({ error: parsed.error.message });
 
     const { message } = parsed.data;
 
     if (message.length > MAX_MESSAGE_LENGTH) {
-      return res.status(400).json({ error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.` });
+      return res
+        .status(400)
+        .json({
+          error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.`,
+        });
     }
     // Ownership is the server-derived Clerk user id (set by the app-level
     // requireAuth gate) — never a client-supplied field. It ties this thread to
@@ -36,18 +52,23 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     if (!userId) {
       // Should be unreachable behind requireAuth; fail closed rather than write
       // an unowned (globally readable) row.
-      return res.status(401).json({ error: "Unauthorized — sign in required." });
+      return res
+        .status(401)
+        .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
 
     const embedding = await createEmbedding(message);
 
-    const { data: segments, error: rpcError } = await supabase.rpc("match_transcript_segments", {
-      query_embedding: embedding,
-      match_threshold: 0.5,
-      match_count: 8,
-      filter_trade: null,
-    });
+    const { data: segments, error: rpcError } = await supabase.rpc(
+      "match_transcript_segments",
+      {
+        query_embedding: embedding,
+        match_threshold: 0.5,
+        match_count: 8,
+        filter_trade: null,
+      },
+    );
     // Don't silently swallow a vector-search failure as "no internal knowledge" —
     // that would mask a broken RAG path (missing pgvector fn, schema drift) and
     // strip every citation. Log loudly; the request continues with general
@@ -59,15 +80,20 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     // Also search non-video Knowledge Entries (written field notes, sketches,
     // etc.) with the SAME query embedding, so Jack can surface knowledge that
     // never came from a video. Same threshold contract as the transcript search.
-    const { data: entries, error: entryError } = await supabase.rpc("match_knowledge_entries", {
-      query_embedding: embedding,
-      match_threshold: 0.5,
-      match_count: 4,
-      filter_trade: null,
-    });
+    const { data: entries, error: entryError } = await supabase.rpc(
+      "match_knowledge_entries",
+      {
+        query_embedding: embedding,
+        match_threshold: 0.5,
+        match_count: 4,
+        filter_trade: null,
+      },
+    );
     if (entryError) {
       req.log.error({ err: entryError }, "match_knowledge_entries RPC failed");
     }
+
+    const graphMemories = await findGraphMemoryMatches(embedding, req.log);
 
     // Report the RAG lookup to the Vitality Engine ("Searching Memory").
     publish({ type: "memory:search" });
@@ -114,10 +140,22 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         : rerankByVerification(
             rawSegments,
             (s) => ({
-              videoId: typeof s["video_id"] === "string" ? (s["video_id"] as string) : "",
-              startTime: typeof s["start_time"] === "number" ? (s["start_time"] as number) : 0,
-              endTime: typeof s["end_time"] === "number" ? (s["end_time"] as number) : 0,
-              score: typeof s["similarity"] === "number" ? (s["similarity"] as number) : 0,
+              videoId:
+                typeof s["video_id"] === "string"
+                  ? (s["video_id"] as string)
+                  : "",
+              startTime:
+                typeof s["start_time"] === "number"
+                  ? (s["start_time"] as number)
+                  : 0,
+              endTime:
+                typeof s["end_time"] === "number"
+                  ? (s["end_time"] as number)
+                  : 0,
+              score:
+                typeof s["similarity"] === "number"
+                  ? (s["similarity"] as number)
+                  : 0,
             }),
             coverage,
           );
@@ -159,11 +197,15 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .select("id, metadata")
         .in("id", entryIds);
       if (metaError) {
-        req.log.error({ err: metaError }, "knowledge_entries metadata fetch failed; skipping field-note trust");
+        req.log.error(
+          { err: metaError },
+          "knowledge_entries metadata fetch failed; skipping field-note trust",
+        );
       } else {
         for (const row of (metaRows ?? []) as Array<Record<string, unknown>>) {
           const id = row["id"];
-          if (typeof id === "string") metaByEntryId.set(id, readKnowledgeMeta(row["metadata"]));
+          if (typeof id === "string")
+            metaByEntryId.set(id, readKnowledgeMeta(row["metadata"]));
         }
       }
     }
@@ -172,9 +214,14 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       const title = (e["title"] as string) ?? "Knowledge Entry";
       const description = (e["description"] as string) ?? "";
       const body = (e["body"] as string) ?? "";
-      const images = Array.isArray(e["images"]) ? (e["images"] as Array<Record<string, unknown>>) : [];
+      const images = Array.isArray(e["images"])
+        ? (e["images"] as Array<Record<string, unknown>>)
+        : [];
       const imageUrl = (images[0]?.["url"] as string | undefined) ?? null;
-      const snippet = (description || body).replace(/\s+/g, " ").trim().slice(0, 240);
+      const snippet = (description || body)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 240);
       const entryId = e["id"] as string;
       // Surface the field note's OWN trust signal (verifiedBy / evidenceCount from
       // its Knowledge Object metadata), mirroring how video citations carry the
@@ -197,7 +244,37 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         entryId,
         // Only set when meaningful — knowledgeEntryTrust omits neutral signals.
         ...(trust.verified ? { verified: true } : {}),
-        ...(trust.sourceCount !== undefined ? { sourceCount: trust.sourceCount } : {}),
+        ...(trust.sourceCount !== undefined
+          ? { sourceCount: trust.sourceCount }
+          : {}),
+      });
+    }
+
+    for (const memory of graphMemories) {
+      const title = memory.label || "Living Memory";
+      const description = memory.description || "";
+      const snippet = (description || title)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 240);
+      const verified = memory.verificationStatus === "verified";
+      const sourceCount =
+        memory.sourceCount >= 2 ? memory.sourceCount : undefined;
+      contextText += `[Living Memory: ${title}${describeTrust(
+        verified ? "verified" : "neutral",
+        sourceCount ?? 0,
+      )}]\n${description || title}\n\n`;
+      citations.push({
+        videoId: "",
+        videoTitle: title,
+        startTime: 0,
+        endTime: 0,
+        text: snippet,
+        thumbnailUrl: null,
+        sourceType: "knowledge",
+        entryId: memory.id,
+        ...(verified ? { verified: true } : {}),
+        ...(sourceCount !== undefined ? { sourceCount } : {}),
       });
     }
 
@@ -208,8 +285,14 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         ? (video["transcript_segments"] as Array<Record<string, unknown>>)
         : [];
       const citedSegments = segments
-        .filter((s) => typeof s["text"] === "string" && (s["text"] as string).trim().length > 0)
-        .sort((a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0))
+        .filter(
+          (s) =>
+            typeof s["text"] === "string" &&
+            (s["text"] as string).trim().length > 0,
+        )
+        .sort(
+          (a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0),
+        )
         .slice(0, MAX_VIDEO_CONTEXT_SEGMENTS);
       if (citedSegments.length === 0) {
         citations.push({
@@ -217,7 +300,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
           videoTitle: (video["title"] as string) ?? "Uploaded video",
           startTime: 0,
           endTime: 0,
-          text: String(video["analysis"] ?? video["description"] ?? "Matched uploaded video."),
+          text: String(
+            video["analysis"] ??
+              video["description"] ??
+              "Matched uploaded video.",
+          ),
           thumbnailUrl: (video["thumbnail_url"] as string | null) ?? null,
           sourceType: "video",
         });
@@ -238,7 +325,10 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
     const usedInternalKnowledge = citations.length > 0;
 
-    const systemPrompt = buildChatSystemPrompt({ usedInternalKnowledge, contextText });
+    const systemPrompt = buildChatSystemPrompt({
+      usedInternalKnowledge,
+      contextText,
+    });
 
     const { data: history } = await supabase
       .from("chat_messages")
@@ -247,26 +337,83 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       .order("created_at", { ascending: true })
       .limit(10);
 
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    const messages: Array<{
+      role: "system" | "user" | "assistant";
+      content: string;
+    }> = [
       { role: "system", content: systemPrompt },
-      ...((history ?? []) as Array<{ role: "user" | "assistant"; content: string }>),
+      ...((history ?? []) as Array<{
+        role: "user" | "assistant";
+        content: string;
+      }>),
       { role: "user", content: message },
     ];
 
-    const completion = await chatCompletion({
+    // Save the contributor's words verbatim before any downstream AI work so a
+    // distillation or answer failure cannot lose the interaction.
+    const { data: userMessage, error: userMessageError } = await supabase
+      .from("chat_messages")
+      .insert({
+        session_id: session,
+        user_id: userId,
+        role: "user",
+        content: message,
+        citations: [],
+      })
+      .select("id")
+      .single();
+    if (userMessageError) throw userMessageError;
+    const chatMessageId =
+      userMessage &&
+      typeof (userMessage as Record<string, unknown>)["id"] === "string"
+        ? String((userMessage as Record<string, unknown>)["id"])
+        : session;
+
+    // Answering and learning run concurrently: Ask Jack stays responsive while
+    // the same interaction is filtered for durable knowledge and, when useful,
+    // verified into Living Memory.
+    const learningPromise: Promise<AskLearningResult> = learnFromAskInteraction(
+      {
+        userId,
+        chatMessageId,
+        sessionId: session,
+        message,
+      },
+    ).catch((err) => {
+      req.log.error({ err, chatMessageId }, "Ask Jack learning failed");
+      return { status: "failed", extractedCount: 0 };
+    });
+    publish({ type: "memory:write:start" });
+    const trackedLearningPromise = learningPromise.finally(() => {
+      publish({ type: "memory:write:end" });
+    });
+
+    const completionPromise = chatCompletion({
       model: MODELS.chat,
       messages,
       max_tokens: 1024,
     });
-
-    const answer = completion.choices[0]?.message?.content ?? "I wasn't able to generate a response.";
-
-    await supabase.from("chat_messages").insert([
-      { session_id: session, user_id: userId, role: "user", content: message, citations: [] },
-      { session_id: session, user_id: userId, role: "assistant", content: answer, citations },
+    const [completion, learning] = await Promise.all([
+      completionPromise,
+      trackedLearningPromise,
     ]);
 
-    return res.json({ answer, citations, usedInternalKnowledge });
+    const answer =
+      completion.choices[0]?.message?.content ??
+      "I wasn't able to generate a response.";
+
+    const { error: assistantMessageError } = await supabase
+      .from("chat_messages")
+      .insert({
+        session_id: session,
+        user_id: userId,
+        role: "assistant",
+        content: answer,
+        citations,
+      });
+    if (assistantMessageError) throw assistantMessageError;
+
+    return res.json({ answer, citations, usedInternalKnowledge, learning });
   } catch (err) {
     req.log.error({ err }, "askJack error");
     return res.status(500).json({ error: "Jack encountered an error" });
@@ -299,7 +446,7 @@ router.get("/chat/history", async (req, res) => {
         content: m["content"],
         citations: m["citations"] ?? [],
         createdAt: m["created_at"],
-      }))
+      })),
     );
   } catch (err) {
     req.log.error({ err }, "getChatHistory error");
@@ -313,9 +460,15 @@ router.delete("/chat/history", async (req, res) => {
     // Clerk user id, never a client-supplied field. Fail closed rather than
     // deleting/matching on anything broader than "this account's own rows".
     const userId = req.userId;
-    if (!userId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+    if (!userId)
+      return res
+        .status(401)
+        .json({ error: "Unauthorized — sign in required." });
 
-    const { error } = await supabase.from("chat_messages").delete().eq("user_id", userId);
+    const { error } = await supabase
+      .from("chat_messages")
+      .delete()
+      .eq("user_id", userId);
     if (error) throw error;
 
     return res.status(204).end();
@@ -325,7 +478,77 @@ router.delete("/chat/history", async (req, res) => {
   }
 });
 
-async function findReferencedVideos(message: string): Promise<Array<Record<string, unknown>>> {
+interface GraphMemoryMatch {
+  id: string;
+  label: string;
+  description: string;
+  verificationStatus: string;
+  sourceCount: number;
+}
+
+async function findGraphMemoryMatches(
+  embedding: number[],
+  log: { error: (obj: Record<string, unknown>, msg: string) => void },
+): Promise<GraphMemoryMatch[]> {
+  const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
+    query_embedding: embedding,
+    filter_category: "knowledge",
+    match_threshold: 0.5,
+    match_count: MAX_GRAPH_MEMORY_MATCHES,
+    exclude_ids: [],
+  });
+  if (error) {
+    log.error({ err: error }, "match_knowledge_nodes RPC failed");
+    return [];
+  }
+
+  const ids = ((matches ?? []) as Array<Record<string, unknown>>)
+    .map((m) => m["id"])
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (ids.length === 0) return [];
+
+  const { data: rows, error: rowError } = await supabase
+    .from("knowledge_nodes")
+    .select("id, label, description, verification_status, meta")
+    .in("id", ids);
+  if (rowError) {
+    log.error({ err: rowError }, "knowledge_nodes memory fetch failed");
+    return [];
+  }
+
+  const byId = new Map(
+    (rows ?? []).map((row) => [
+      String((row as Record<string, unknown>)["id"]),
+      row as Record<string, unknown>,
+    ]),
+  );
+  return ids
+    .map((id) => byId.get(id))
+    .filter((row): row is Record<string, unknown> => !!row)
+    .map((row) => {
+      const meta = row["meta"] as Record<string, unknown> | null | undefined;
+      const sourceCount =
+        typeof meta?.["sourceCount"] === "number"
+          ? Math.floor(meta["sourceCount"] as number)
+          : 0;
+      return {
+        id: String(row["id"]),
+        label:
+          typeof row["label"] === "string" ? row["label"] : "Living Memory",
+        description:
+          typeof row["description"] === "string" ? row["description"] : "",
+        verificationStatus:
+          typeof row["verification_status"] === "string"
+            ? row["verification_status"]
+            : "unverified",
+        sourceCount,
+      };
+    });
+}
+
+async function findReferencedVideos(
+  message: string,
+): Promise<Array<Record<string, unknown>>> {
   const referenced = extractReferencedVideoTitles(message);
   if (referenced.length === 0) return [];
 
@@ -341,7 +564,9 @@ async function findReferencedVideos(message: string): Promise<Array<Record<strin
   if (error) throw error;
 
   const videos = ((data ?? []) as Array<Record<string, unknown>>).filter(
-    (v) => typeof v["title"] === "string" && (v["analysis"] || v["transcript"] || v["key_points"]),
+    (v) =>
+      typeof v["title"] === "string" &&
+      (v["analysis"] || v["transcript"] || v["key_points"]),
   );
   const matches: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
@@ -352,7 +577,8 @@ async function findReferencedVideos(message: string): Promise<Array<Record<strin
     for (const video of videos) {
       const title = String(video["title"] ?? "");
       const score = titleMatchScore(normalizedWanted, normalizeTitle(title));
-      if (score >= 0.74 && (!best || score > best.score)) best = { video, score };
+      if (score >= 0.74 && (!best || score > best.score))
+        best = { video, score };
     }
     const id = best?.video["id"];
     if (best && typeof id === "string" && !seen.has(id)) {
@@ -388,20 +614,34 @@ export function extractReferencedVideoTitles(message: string): string[] {
 
 function formatReferencedVideoContext(video: Record<string, unknown>): string {
   const title = String(video["title"] ?? "Uploaded video");
-  const trade = typeof video["trade"] === "string" && video["trade"] ? String(video["trade"]) : "general";
-  const analysis = typeof video["analysis"] === "string" ? video["analysis"].trim() : "";
+  const trade =
+    typeof video["trade"] === "string" && video["trade"]
+      ? String(video["trade"])
+      : "general";
+  const analysis =
+    typeof video["analysis"] === "string" ? video["analysis"].trim() : "";
   const keyPoints = Array.isArray(video["key_points"])
-    ? (video["key_points"] as unknown[]).filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    ? (video["key_points"] as unknown[]).filter(
+        (p): p is string => typeof p === "string" && p.trim().length > 0,
+      )
     : [];
-  const transcript = typeof video["transcript"] === "string" ? video["transcript"].trim() : "";
+  const transcript =
+    typeof video["transcript"] === "string" ? video["transcript"].trim() : "";
   const segments = Array.isArray(video["transcript_segments"])
     ? (video["transcript_segments"] as Array<Record<string, unknown>>)
     : [];
   const segmentText = segments
-    .filter((s) => typeof s["text"] === "string" && (s["text"] as string).trim().length > 0)
+    .filter(
+      (s) =>
+        typeof s["text"] === "string" &&
+        (s["text"] as string).trim().length > 0,
+    )
     .sort((a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0))
     .slice(0, MAX_VIDEO_CONTEXT_SEGMENTS)
-    .map((s) => `- ${formatTime(Number(s["start_time"] ?? 0))}: ${String(s["text"]).replace(/\s+/g, " ").trim()}`)
+    .map(
+      (s) =>
+        `- ${formatTime(Number(s["start_time"] ?? 0))}: ${String(s["text"]).replace(/\s+/g, " ").trim()}`,
+    )
     .join("\n");
 
   return [
@@ -409,9 +649,13 @@ function formatReferencedVideoContext(video: Record<string, unknown>): string {
     `Trade: ${trade}`,
     "Instruction: The user appears to be asking about this specific video. Acknowledge that you found it in Jack's Library and that you are using Jack's saved analysis/transcript context. If the user asks for a rating, provide a practical score based on the evidence below and state any limits clearly. Do not claim you lack access to this video.",
     analysis ? `Saved analysis:\n${analysis}` : "",
-    keyPoints.length > 0 ? `Saved key takeaways:\n${keyPoints.map((p) => `- ${p}`).join("\n")}` : "",
+    keyPoints.length > 0
+      ? `Saved key takeaways:\n${keyPoints.map((p) => `- ${p}`).join("\n")}`
+      : "",
     segmentText ? `Transcript excerpts:\n${segmentText}` : "",
-    !segmentText && transcript ? `Transcript excerpt:\n${transcript.slice(0, MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS)}` : "",
+    !segmentText && transcript
+      ? `Transcript excerpt:\n${transcript.slice(0, MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS)}`
+      : "",
     "",
   ]
     .filter(Boolean)
@@ -430,7 +674,10 @@ function normalizeTitle(value: string): string {
 function cleanLooseTitle(value: string): string {
   return value
     .replace(/[?.!,;:].*$/, "")
-    .replace(/\b(what|how|why|can|could|would|should|rate|rating|score|out of|please)\b.*$/i, "")
+    .replace(
+      /\b(what|how|why|can|could|would|should|rate|rating|score|out of|please)\b.*$/i,
+      "",
+    )
     .trim();
 }
 
@@ -457,7 +704,10 @@ function formatTime(seconds: number): string {
  * can optionally cite how trustworthy the claim is. Returns "" when there is no
  * signal worth surfacing (a lone, unreviewed mention), keeping the context clean.
  */
-export function describeTrust(verification: "verified" | "rejected" | "neutral", sourceCount: number): string {
+export function describeTrust(
+  verification: "verified" | "rejected" | "neutral",
+  sourceCount: number,
+): string {
   const parts: string[] = [];
   if (verification === "verified") parts.push("mentor-verified");
   if (sourceCount >= 2) parts.push(`confirmed across ${sourceCount} videos`);
@@ -478,9 +728,10 @@ export function describeTrust(verification: "verified" | "rejected" | "neutral",
  * object so the route omits both fields and the client leaves it un-badged.
  * Missing/malformed metadata is treated as neutral (never fabricated trust).
  */
-export function knowledgeEntryTrust(
-  meta: KnowledgeObjectMeta | undefined,
-): { verified?: boolean; sourceCount?: number } {
+export function knowledgeEntryTrust(meta: KnowledgeObjectMeta | undefined): {
+  verified?: boolean;
+  sourceCount?: number;
+} {
   if (!meta) return {};
   const result: { verified?: boolean; sourceCount?: number } = {};
 
@@ -491,7 +742,11 @@ export function knowledgeEntryTrust(
   if (hasVerifier) result.verified = true;
 
   const evidenceCount = meta.evidenceCount;
-  if (typeof evidenceCount === "number" && Number.isFinite(evidenceCount) && evidenceCount >= 2) {
+  if (
+    typeof evidenceCount === "number" &&
+    Number.isFinite(evidenceCount) &&
+    evidenceCount >= 2
+  ) {
     result.sourceCount = Math.floor(evidenceCount);
   }
 

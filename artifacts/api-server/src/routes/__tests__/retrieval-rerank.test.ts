@@ -50,6 +50,12 @@ vi.mock("../../lib/rate-limit.js", () => ({
   aiQueryLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 vi.mock("../../lib/vitality.js", () => ({ publish: vi.fn() }));
+vi.mock("../../lib/ask-learning.js", () => ({
+  learnFromAskInteraction: vi.fn(async () => ({
+    status: "discarded",
+    extractedCount: 0,
+  })),
+}));
 
 import searchRouter from "../search.js";
 import chatRouter from "../chat.js";
@@ -75,25 +81,75 @@ function seed(): void {
   embedRegistry.set(QUERY, [1, 0]);
 
   fake.tables["videos"] = [
-    { id: V_VERIFIED, title: "Verified clip", thumbnail_url: "v.jpg", trade: "Welder" },
-    { id: V_NEUTRAL, title: "Neutral clip", thumbnail_url: "n.jpg", trade: "Welder" },
-    { id: V_REJECTED, title: "Rejected clip", thumbnail_url: "r.jpg", trade: "Welder" },
+    {
+      id: V_VERIFIED,
+      title: "Verified clip",
+      thumbnail_url: "v.jpg",
+      trade: "Welder",
+    },
+    {
+      id: V_NEUTRAL,
+      title: "Neutral clip",
+      thumbnail_url: "n.jpg",
+      trade: "Welder",
+    },
+    {
+      id: V_REJECTED,
+      title: "Rejected clip",
+      thumbnail_url: "r.jpg",
+      trade: "Welder",
+    },
   ];
 
   fake.tables["transcript_segments"] = [
     // verified: LOWER raw score (0.60) — must still win after the +0.15 boost.
-    { id: "s-ver", video_id: V_VERIFIED, start_time: 60, end_time: 70, text: "shield the pool", embedding: unit(0.6) },
+    {
+      id: "s-ver",
+      video_id: V_VERIFIED,
+      start_time: 60,
+      end_time: 70,
+      text: "shield the pool",
+      embedding: unit(0.6),
+    },
     // neutral: HIGHER raw score (0.70), no covering concept.
-    { id: "s-neu", video_id: V_NEUTRAL, start_time: 10, end_time: 20, text: "grind the joint", embedding: unit(0.7) },
+    {
+      id: "s-neu",
+      video_id: V_NEUTRAL,
+      start_time: 10,
+      end_time: 20,
+      text: "grind the joint",
+      embedding: unit(0.7),
+    },
     // rejected: any score above the 0.5 threshold — it must be dropped regardless.
-    { id: "s-rej", video_id: V_REJECTED, start_time: 30, end_time: 40, text: "bad advice", embedding: unit(0.65) },
+    {
+      id: "s-rej",
+      video_id: V_REJECTED,
+      start_time: 30,
+      end_time: 40,
+      text: "bad advice",
+      embedding: unit(0.65),
+    },
   ];
 
   // Provenance edges tie each concept to its source video (video:<id> -> concept),
   // which is how fetchVerificationCoverage resolves the concepts for a video.
   fake.tables["knowledge_edges"] = [
-    { id: "e-ver", source_id: `video:${V_VERIFIED}`, target_id: "k:concept:verified", kind: "knowledge", weight: 1, meta: {} },
-    { id: "e-rej", source_id: `video:${V_REJECTED}`, target_id: "k:concept:rejected", kind: "knowledge", weight: 1, meta: {} },
+    {
+      id: "e-ver",
+      source_id: `video:${V_VERIFIED}`,
+      target_id: "k:concept:verified",
+      kind: "knowledge",
+      weight: 1,
+      meta: {},
+    },
+    {
+      id: "e-rej",
+      source_id: `video:${V_REJECTED}`,
+      target_id: "k:concept:rejected",
+      kind: "knowledge",
+      weight: 1,
+      meta: {},
+    },
     // V_NEUTRAL intentionally has no knowledge edge -> it stays neutral.
   ];
 
@@ -105,13 +161,19 @@ function seed(): void {
       id: "k:concept:verified",
       verification_status: "verified",
       confidence: 0.5,
-      meta: { sources: [{ videoId: V_VERIFIED, timestamps: [62] }], sourceCount: 1 },
+      meta: {
+        sources: [{ videoId: V_VERIFIED, timestamps: [62] }],
+        sourceCount: 1,
+      },
     },
     {
       id: "k:concept:rejected",
       verification_status: "rejected",
       confidence: 0.5,
-      meta: { sources: [{ videoId: V_REJECTED, timestamps: [33] }], sourceCount: 1 },
+      meta: {
+        sources: [{ videoId: V_REJECTED, timestamps: [33] }],
+        sourceCount: 1,
+      },
     },
   ];
 }
@@ -150,7 +212,9 @@ describe("POST /search — honors reviewer decisions end-to-end", () => {
   it("drops a segment covered only by a rejected concept", async () => {
     const res = await request(app).post("/api/search").send({ query: QUERY });
     expect(res.status).toBe(200);
-    const ids = (res.body.results as Array<{ videoId: string }>).map((r) => r.videoId);
+    const ids = (res.body.results as Array<{ videoId: string }>).map(
+      (r) => r.videoId,
+    );
     expect(ids).not.toContain(V_REJECTED);
     // Sanity: the other two survived, so the drop isn't just an empty result.
     expect(ids).toContain(V_VERIFIED);
@@ -160,7 +224,10 @@ describe("POST /search — honors reviewer decisions end-to-end", () => {
   it("boosts a verified segment above a higher-raw-score neutral one", async () => {
     const res = await request(app).post("/api/search").send({ query: QUERY });
     expect(res.status).toBe(200);
-    const results = res.body.results as Array<{ videoId: string; score: number }>;
+    const results = res.body.results as Array<{
+      videoId: string;
+      score: number;
+    }>;
     const ver = results.find((r) => r.videoId === V_VERIFIED);
     const neu = results.find((r) => r.videoId === V_NEUTRAL);
     expect(ver).toBeDefined();
@@ -182,11 +249,13 @@ describe("POST /chat — Ask Jack never cites rejected content", () => {
     expect(res.status).toBe(200);
     expect(res.body.usedInternalKnowledge).toBe(true);
 
-    const videoCites = (res.body.citations as Array<{
-      videoId: string;
-      sourceType: string;
-      verified?: boolean;
-    }>).filter((c) => c.sourceType === "video");
+    const videoCites = (
+      res.body.citations as Array<{
+        videoId: string;
+        sourceType: string;
+        verified?: boolean;
+      }>
+    ).filter((c) => c.sourceType === "video");
     const ids = videoCites.map((c) => c.videoId);
 
     // The rejected concept's segment is never surfaced to the model or the user.
