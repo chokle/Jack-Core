@@ -3,6 +3,7 @@ import { clerkClient, getAuth } from "@clerk/express";
 import { supabase } from "../lib/supabase.js";
 import { removeGraphSafe } from "../lib/jobs.js";
 import { withdrawMentor } from "../lib/memory-graph.js";
+import { removeVideoAssets } from "../lib/video-storage.js";
 
 const router = Router();
 
@@ -23,13 +24,14 @@ router.delete("/account", async (req, res) => {
 
     const { data: videos, error: videoReadError } = await supabase
       .from("videos")
-      .select("id")
+      .select("id, video_url, thumbnail_url")
       .eq("uploader_user_id", userId);
     if (videoReadError) throw videoReadError;
     for (const row of videos ?? []) {
       const id = (row as Record<string, unknown>)["id"];
       if (typeof id === "string") await removeGraphSafe(id);
     }
+    await removeVideoAssets((videos ?? []) as Array<Record<string, unknown>>);
     const { error: videoDeleteError } = await supabase.from("videos").delete().eq("uploader_user_id", userId);
     if (videoDeleteError) throw videoDeleteError;
 

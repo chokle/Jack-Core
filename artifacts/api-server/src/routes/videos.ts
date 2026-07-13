@@ -16,6 +16,7 @@ import {
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { requireAdmin } from "../lib/admin-auth.js";
+import { removeVideoAssets } from "../lib/video-storage.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -602,7 +603,7 @@ router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
 
     const { data: video, error: readError } = await supabase
       .from("videos")
-      .select("id, title, trade, uploader_user_id")
+      .select("id, title, trade, uploader_user_id, video_url, thumbnail_url")
       .eq("id", parsed.data.id)
       .maybeSingle();
 
@@ -615,6 +616,7 @@ router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
         });
     }
 
+    await removeVideoAssets([video as Record<string, unknown>]);
     const { error } = await supabase.from("videos").delete().eq("id", parsed.data.id);
     if (error) throw error;
 
