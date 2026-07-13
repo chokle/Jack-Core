@@ -36,6 +36,8 @@ const isLocalClerkHost =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1" ||
   window.location.hostname === "[::1]";
+const isRailwayPreviewHost = window.location.hostname.endsWith(".up.railway.app");
+const useDirectClerkAssets = isLocalClerkHost || isRailwayPreviewHost;
 
 // Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
 // publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
@@ -52,10 +54,10 @@ const clerkProxyUrl =
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
-const localClerkJsUrl = isLocalClerkHost
+const localClerkJsUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
   : `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`;
-const localClerkUiUrl = isLocalClerkHost
+const localClerkUiUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
   : `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`;
 
@@ -354,7 +356,7 @@ function SignInPage() {
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up`}
-        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
+        forceRedirectUrl={useDirectClerkAssets ? `${window.location.origin}${basePath}/app` : undefined}
       />
     </div>
   );
@@ -367,7 +369,7 @@ function SignUpPage() {
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
-        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
+        forceRedirectUrl={useDirectClerkAssets ? `${window.location.origin}${basePath}/app` : undefined}
       />
     </div>
   );
