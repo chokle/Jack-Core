@@ -322,7 +322,11 @@ export const EMPTY_DELTA: GraphDelta = {
 };
 
 /** Only genuinely fresh persisted nodes may produce a "just learned" toast. */
-export const GROWTH_TOAST_RECENCY_MS = 60_000;
+// Distillation plus the idle graph polling interval can take over a minute in
+// production. The snapshot baseline prevents pre-open memories from firing,
+// while this window tolerates that processing delay and still excludes stale
+// placeholder data.
+export const GROWTH_TOAST_RECENCY_MS = 5 * 60_000;
 
 export function isRecentGrowthNode(
   node: MemoryNode,
