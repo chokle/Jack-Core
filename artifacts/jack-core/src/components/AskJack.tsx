@@ -20,6 +20,7 @@ import {
   useClearChatHistory,
   getGetChatHistoryQueryKey,
   ChatMessage,
+  type Citation,
   type ParkedThought,
 } from "@workspace/api-client-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -40,6 +41,7 @@ interface AskJackProps {
   onClose: () => void;
   initialContext?: string;
   onCitationClick: (videoId: string, startTime: number) => void;
+  onFieldNoteClick: (citation: Citation) => void;
   /** Set when the drawer was opened via "Resume" on a parked thought. */
   resumedThought?: ParkedThought;
 }
@@ -49,6 +51,7 @@ export function AskJack({
   onClose,
   initialContext,
   onCitationClick,
+  onFieldNoteClick,
   resumedThought,
 }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
@@ -235,6 +238,7 @@ export function AskJack({
                           citations={msg.citations}
                           usedInternalKnowledge={msg.usedInternalKnowledge}
                           onCitationClick={onCitationClick}
+                          onFieldNoteClick={onFieldNoteClick}
                         />
                       )}
                     </div>

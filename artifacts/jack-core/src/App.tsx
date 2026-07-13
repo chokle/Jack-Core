@@ -12,7 +12,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
-import { InterviewMode, type TorchInterviewPreload } from "./components/InterviewMode";
+import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
 import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
@@ -27,7 +27,7 @@ import {
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
-import { setAuthTokenGetter, useGetMe, type ParkedThought } from "@workspace/api-client-react";
+import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -173,6 +173,7 @@ const clerkAppearance = {
 
 function JackApp() {
   const [interviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
+  const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
   const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -228,7 +229,16 @@ function JackApp() {
 
   const handleNavigate = (next: JackView) => {
     setSelectedVideoId(null);
+    setFieldNotePreload(undefined);
     setView(next);
+  };
+
+  const handleFieldNoteClick = (citation: Citation) => {
+    setIsChatOpen(false);
+    setResumedThought(null);
+    setSelectedVideoId(null);
+    setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
+    setView("interview");
   };
 
   const handleCitationClick = (videoId: string, startTime: number) => {
@@ -307,7 +317,7 @@ function JackApp() {
             onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
-          <InterviewMode preload={interviewPreload} />
+          <InterviewMode key={fieldNotePreload?.title ?? "interview"} preload={interviewPreload} fieldNote={fieldNotePreload} />
         ) : view === "review" ? (
           <KnowledgeReview />
         ) : (
@@ -330,6 +340,7 @@ function JackApp() {
         resumedThought={resumedThought ?? undefined}
         initialContext={chatContext}
         onCitationClick={handleCitationClick}
+        onFieldNoteClick={handleFieldNoteClick}
       />
 
       <TestingOverlay ref={testingOverlayRef} autoPrompt={false} onEvent={handleTestingEvent} />

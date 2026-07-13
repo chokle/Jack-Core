@@ -59,6 +59,11 @@ export interface TorchInterviewPreload {
   evidence: string;
 }
 
+export interface FieldNoteInterviewPreload {
+  title: string;
+  text: string;
+}
+
 /**
  * Browser-storage key for the active interview session id. Keep this in
  * sessionStorage, not localStorage: an interview can survive a refresh in the
@@ -191,7 +196,13 @@ interface Turn {
   distillationStatus: InterviewAnswerDistillationStatus;
 }
 
-export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) {
+export function InterviewMode({
+  preload,
+  fieldNote,
+}: {
+  preload?: TorchInterviewPreload;
+  fieldNote?: FieldNoteInterviewPreload;
+}) {
   const queryClient = useQueryClient();
 
   const [stage, setStage] = useState<Stage>("intake");
@@ -200,7 +211,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
   const [error, setError] = useState<string | null>(null);
   // True while we attempt to resume a stored session on mount, so the intake
   // form doesn't flash before we know whether an interview is still in progress.
-  const [resuming, setResuming] = useState(() => !preload && readActiveSessionId() !== null);
+  const [resuming, setResuming] = useState(() => !preload && !fieldNote && readActiveSessionId() !== null);
   // Set only when this session was reopened via a Parking Lot "Resume" — shows
   // a one-time reorientation banner, then is cleared.
   const [resumeNote, setResumeNote] = useState<InterviewResumeNote | null>(null);
@@ -215,11 +226,13 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
   const [trade, setTrade] = useState<string>(preloadedTrade);
   const [tradeInput, setTradeInput] = useState(preloadedTrade === "Other" ? preload?.trade ?? "" : "");
   const [years, setYears] = useState("");
-  const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : "");
+  const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : fieldNote?.title ?? "");
   const [region, setRegion] = useState("");
   const [background, setBackground] = useState(preload
     ? `Torch Starving Point ${preload.starvingPointId}: ${preload.title}. ${preload.description} Priority: ${preload.priority}. Evidence status: ${preload.evidence}. Focus this interview on closing this exact knowledge gap with specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment.`
-    : "");
+    : fieldNote
+      ? `Ask Jack opened this interview from the Field Note "${fieldNote.title}". Use the note as context, then ask for specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment. Field Note: ${fieldNote.text}`
+      : "");
 
   // Current answer being typed.
   const [answer, setAnswer] = useState("");
@@ -264,7 +277,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
     if (didRehydrate.current) return;
     didRehydrate.current = true;
 
-    if (preload) {
+    if (preload || fieldNote) {
       clearActiveSessionId();
       setResuming(false);
       return;
@@ -307,7 +320,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
     return () => {
       cancelled = true;
     };
-  }, [preload]);
+  }, [preload, fieldNote]);
 
   // Auto-save the in-progress answer to localStorage as the mentor types, keyed
   // by session id + current question. Cleared automatically when the box empties
@@ -486,6 +499,13 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
                   <h2 className="mt-1 font-bold text-foreground">{preload.title}</h2>
                   <p className="mt-1 text-sm text-muted-foreground">{preload.trade} · {preload.category}</p>
                   <p className="mt-2 text-sm leading-relaxed text-foreground/85">Jack will use this starving point to ask focused questions that close the selected gap.</p>
+                </div>
+              )}
+              {fieldNote && (
+                <div className="mb-5 rounded-xl border border-primary/35 bg-primary/10 p-4" data-testid="field-note-preload">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">Opened from Ask Jack Field Note</div>
+                  <h2 className="mt-1 font-bold text-foreground">{fieldNote.title}</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-foreground/85">Jack will use this note to ask focused follow-up questions and deepen the field evidence.</p>
                 </div>
               )}
               <IntakeForm

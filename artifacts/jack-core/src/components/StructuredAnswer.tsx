@@ -15,6 +15,7 @@ import {
   BookMarked,
   ListOrdered,
   Link2,
+  MessageSquare,
   Layers,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +29,7 @@ interface StructuredAnswerProps {
   citations?: Citation[];
   usedInternalKnowledge?: boolean;
   onCitationClick: (videoId: string, startTime: number) => void;
+  onFieldNoteClick?: (citation: Citation) => void;
 }
 
 const SECTION_ICONS: Record<string, LucideIcon> = {
@@ -215,6 +217,7 @@ export function StructuredAnswer({
   citations,
   usedInternalKnowledge,
   onCitationClick,
+  onFieldNoteClick,
 }: StructuredAnswerProps) {
   const [open, setOpen] = useState(false);
   const parsed = parseAnswer(content);
@@ -305,6 +308,17 @@ export function StructuredAnswer({
                     <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{c.text}</div>
                   )}
                   <TrustBadges verified={c.verified} sourceCount={c.sourceCount} />
+                  {onFieldNoteClick && (
+                    <button
+                      type="button"
+                      onClick={() => onFieldNoteClick(c)}
+                      className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/35 bg-primary/10 text-sm font-semibold text-primary transition-colors hover:bg-primary/20"
+                      aria-label={`Discuss ${c.videoTitle} in Interview Mode`}
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Discuss in Interview
+                    </button>
+                  )}
                   {c.thumbnailUrl && (
                     <div className="overflow-hidden rounded-lg border border-border bg-zinc-900">
                       <img src={c.thumbnailUrl} className="max-h-56 w-full object-contain" alt={c.videoTitle} />
