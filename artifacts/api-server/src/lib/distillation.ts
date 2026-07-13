@@ -24,6 +24,7 @@ import { logger } from "./logger.js";
 import { supabase } from "./supabase.js";
 import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
 import { JACK_CAPTURE_POLICY, JACK_CONSTITUTION_BRIEF } from "./constitution.js";
+import { JACK_CORE_SYSTEM_MAP_BRIEF } from "./system-map.js";
 import {
   knowledgeNodeId,
   syncVideoKnowledge,
@@ -189,6 +190,7 @@ export function buildDistillationSystemPrompt(competencyContext: string): string
 
 ${JURISDICTION_POLICY_BRIEF}
 ${JACK_CONSTITUTION_BRIEF}
+${JACK_CORE_SYSTEM_MAP_BRIEF}
 
 Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Jet Rod, Arc Blow, Porosity, Cold Lap, WPS, Preheat, Hydrogen Cracking, Torque Spec, Bend Radius.
 
@@ -362,6 +364,8 @@ export async function distillAnswer(input: {
       {
         role: "system",
         content: `You are Jack's Knowledge Distillation Engine for skilled trades. You are distilling an answer an EXPERIENCED tradesperson gave in a spoken-style interview into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across a whole trade, not a retelling of this one person's story.
+
+${JACK_CORE_SYSTEM_MAP_BRIEF}
 
 Examples of good atomic knowledge (reusable concepts, NOT sentences): Voltage Selection, Travel Speed, Root Opening, Arc Blow, Porosity, WPS, Preheat, Lockout-Tagout, Grade Staking, Track Tension, Two-Block.
 
