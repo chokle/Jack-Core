@@ -111,6 +111,9 @@ export function useMemoryGraphData(): MemoryGraphData {
 
   const generatedAt = (graph as { generatedAt?: string } | undefined)
     ?.generatedAt;
+  const hasServerSnapshot =
+    Array.isArray((graph as { nodes?: unknown } | undefined)?.nodes) &&
+    Array.isArray((graph as { edges?: unknown } | undefined)?.edges);
 
   const vitality = useMemo(() => computeVitality(model), [model]);
 
@@ -120,6 +123,10 @@ export function useMemoryGraphData(): MemoryGraphData {
   const prevModelRef = useRef<GraphModel | null>(null);
   const seqRef = useRef(0);
   const delta = useMemo(() => {
+    // The client-derived fallback is only a loading state. Never compare it
+    // with the first persisted server snapshot or pre-existing memories can be
+    // announced as if they were ingested while this screen was open.
+    if (!hasServerSnapshot && stressCount === 0) return EMPTY_DELTA;
     const prev = prevModelRef.current;
     const d = computeGraphDelta(prev, model, seqRef.current + 1, generatedAt);
     // Only advance the shared sequence when something actually changed, so
@@ -128,7 +135,7 @@ export function useMemoryGraphData(): MemoryGraphData {
     prevModelRef.current = model;
     return d;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, generatedAt]);
+  }, [model, generatedAt, hasServerSnapshot, stressCount]);
 
   const readyCount = videos.filter((v) => v.status === "completed").length;
 
