@@ -10,6 +10,18 @@ import {
 } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
@@ -178,6 +190,11 @@ function JackApp() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
+  const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [accountDeleteError, setAccountDeleteError] = useState<string | null>(null);
   // Set when the drawer is opened via "Resume" on a parked chat thought — shows
   // a reorientation banner atop the conversation. Cleared on close so the next
   // plain "Ask Jack" open (no resume) doesn't show a stale banner.
@@ -203,6 +220,7 @@ function JackApp() {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
+  const { isSignedIn } = useAuth();
   const userLabel = me?.name ?? "Presentation Mode";
   const userSubLabel = "Demo access";
 
@@ -239,6 +257,23 @@ function JackApp() {
     setSelectedVideoId(null);
     setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
     setView("interview");
+  };
+
+  const deleteAccount = async () => {
+    if (deletePhrase !== "DELETE" || deletingAccount) return;
+    setDeletingAccount(true);
+    setAccountDeleteError(null);
+    try {
+      const response = await fetch("/api/account", { method: "DELETE", credentials: "include" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not delete your account.");
+      }
+      window.location.assign("/api/auth/reset-session");
+    } catch (error) {
+      setAccountDeleteError(error instanceof Error ? error.message : "Could not delete your account.");
+      setDeletingAccount(false);
+    }
   };
 
   const handleCitationClick = (videoId: string, startTime: number) => {
@@ -297,6 +332,9 @@ function JackApp() {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
+        onOpenSettings={() => {
+          if (isSignedIn) setAccountSettingsOpen(true);
+        }}
         onStartUserTest={undefined}
         userTestingRequired={false}
       >
@@ -344,6 +382,44 @@ function JackApp() {
       />
 
       <TestingOverlay ref={testingOverlayRef} autoPrompt={false} onEvent={handleTestingEvent} />
+
+      <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Account & privacy</AlertDialogTitle>
+            <AlertDialogDescription>
+              You control your participation. You can remove videos you uploaded from the Library, or permanently delete your account and its associated Jack data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+            <p className="font-semibold text-destructive">Delete account</p>
+            <p className="mt-1 text-sm text-muted-foreground">This removes your sign-in, uploaded videos, interviews, chat history, parked thoughts, and test recordings. It cannot be undone.</p>
+            <Button className="mt-3" variant="destructive" onClick={() => { setAccountDeleteError(null); setDeletePhrase(""); setAccountDeleteOpen(true); }}>
+              Delete my account
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setAccountSettingsOpen(false)}>Done</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={accountDeleteOpen} onOpenChange={setAccountDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete your account?</AlertDialogTitle>
+            <AlertDialogDescription>Type DELETE to confirm. This cannot be reversed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input value={deletePhrase} onChange={(event) => setDeletePhrase(event.target.value)} placeholder="Type DELETE" aria-label="Account deletion confirmation" autoComplete="off" />
+          {accountDeleteError && <p className="text-sm text-destructive">{accountDeleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAccount}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={deletePhrase !== "DELETE" || deletingAccount} onClick={(event) => { event.preventDefault(); void deleteAccount(); }}>
+              {deletingAccount ? "Deleting..." : "Delete account"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

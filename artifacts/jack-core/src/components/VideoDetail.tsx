@@ -114,12 +114,11 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
     duplicateCount?: number;
   };
   const uploaderUserId = duplicateDelete.uploaderUserId ?? duplicateDelete.uploader_user_id ?? null;
-  const canRemoveOwnDuplicate =
+  const canRemoveOwnVideo =
     !isAdmin &&
     Boolean(me?.userId) &&
-    uploaderUserId === me?.userId &&
-    duplicateDelete.canDeleteDuplicate === true;
-  const canDeleteVideo = isAdmin || canRemoveOwnDuplicate;
+    uploaderUserId === me?.userId;
+  const canDeleteVideo = isAdmin || canRemoveOwnVideo;
   const status = video?.status ?? "";
   const isWorking = IN_FLIGHT_STATUSES.has(status);
   const isAnalyzingNow = status === "analyzing";
@@ -270,7 +269,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
               disabled={deleteMutation.isPending}
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove duplicate"}
+              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove my video"}
             </Button>
           )}
           {((video.status === "completed" && !video.analysis) || isAnalyzingNow) && (
@@ -476,11 +475,11 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
       <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{isAdmin ? "Delete this video?" : "Remove duplicate video?"}</AlertDialogTitle>
+          <AlertDialogTitle>{isAdmin ? "Delete this video?" : "Remove your video?"}</AlertDialogTitle>
             <AlertDialogDescription>
               {isAdmin
                 ? `This permanently removes "${video.title}" and its knowledge-graph node from the Library. This can't be undone.`
-                : `This permanently removes your duplicate upload "${video.title}" from the Library. One matching copy must remain.`}
+                : `This permanently removes "${video.title}" and its knowledge-graph node from the Library. This can't be undone.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -493,7 +492,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
                 deleteMutation.mutate({ id: video.id });
               }}
             >
-              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove duplicate"}
+              {deleteMutation.isPending ? "Deleting..." : isAdmin ? "Delete" : "Remove my video"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
