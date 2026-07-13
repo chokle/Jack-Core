@@ -107,7 +107,7 @@ export function VideoDetail({ videoId, onBack, onOpenChat, seek }: VideoDetailPr
   const hasUploader =
     Boolean((video as { uploaderUserId?: string | null } | undefined)?.uploaderUserId) ||
     Boolean((video as { uploader_user_id?: string | null } | undefined)?.uploader_user_id);
-  const duplicateDelete = video as {
+  const duplicateDelete = (video ?? {}) as {
     uploaderUserId?: string | null;
     uploader_user_id?: string | null;
     canDeleteDuplicate?: boolean;
