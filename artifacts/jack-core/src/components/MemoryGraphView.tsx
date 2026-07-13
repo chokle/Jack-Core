@@ -900,12 +900,12 @@ export function MemoryGraphView({
           {import.meta.env.DEV && <BrainStatsPanel model={model} />}
         </div>
         {/* Growth toasts — pinned to the sidebar's bottom-right, newest on top,
-            max 3, tap to focus the new node. Each toast's 20s timer only elapses
+            max 3, tap to focus the new node. Each toast's 15s timer only elapses
             while this view is mounted (the user is on the Memory Graph) and the
             tab is visible. When toasts expire together they leave in a cascade,
             oldest first, sliding right off-screen with a small stagger between
             each — never all at once. */}
-        {toasts.length > 0 && (
+        {isDesktop && toasts.length > 0 && (
           <div className="shrink-0 border-t border-border/60 p-3">
             <div className="flex flex-col-reverse gap-2">
               {toasts.map((t) => (
@@ -931,6 +931,30 @@ export function MemoryGraphView({
           </div>
         )}
       </aside>
+
+      {/* Phones/tablets have no right rail. Keep the same recent-memory toast
+          visible above the bottom controls instead of mounting it invisibly. */}
+      {!isDesktop && toasts.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-3 bottom-20 z-40">
+          <div className="ml-auto flex max-w-sm flex-col-reverse gap-2">
+            {toasts.map((t) => (
+              <GrowthToast
+                key={t.id}
+                text={t.text}
+                reducedMotion={reducedMotion}
+                exiting={exitingIds.has(t.id)}
+                onExpire={() => handleToastExpire(t.id)}
+                onDismiss={() => dismissToast(t.id)}
+                onClick={t.nodeId ? () => {
+                  setSelectedId(t.nodeId!);
+                  canvasRef.current?.focusNode(t.nodeId!);
+                  dismissToast(t.id);
+                } : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
