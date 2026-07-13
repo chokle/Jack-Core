@@ -18,6 +18,7 @@ import {
   learnFromAskInteraction,
   type AskLearningResult,
 } from "../lib/ask-learning.js";
+import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -490,21 +491,32 @@ async function findGraphMemoryMatches(
   embedding: number[],
   log: { error: (obj: Record<string, unknown>, msg: string) => void },
 ): Promise<GraphMemoryMatch[]> {
-  const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
-    query_embedding: embedding,
-    filter_category: "knowledge",
-    match_threshold: 0.5,
-    match_count: MAX_GRAPH_MEMORY_MATCHES,
-    exclude_ids: [],
-  });
-  if (error) {
-    log.error({ err: error }, "match_knowledge_nodes RPC failed");
-    return [];
-  }
+  const matchResults = await Promise.all(
+    KNOWLEDGE_NODE_KINDS.map(async (kind) => {
+      const { data, error } = await supabase.rpc("match_knowledge_nodes", {
+        query_embedding: embedding,
+        filter_category: kind,
+        match_threshold: 0.5,
+        match_count: MAX_GRAPH_MEMORY_MATCHES,
+        exclude_ids: [],
+      });
+      if (error) {
+        log.error({ err: error, kind }, "match_knowledge_nodes RPC failed");
+        return [];
+      }
+      return (data ?? []) as Array<Record<string, unknown>>;
+    }),
+  );
 
-  const ids = ((matches ?? []) as Array<Record<string, unknown>>)
-    .map((m) => m["id"])
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const ids = Array.from(
+    new Set(
+      matchResults
+        .flat()
+        .sort((a, b) => Number(b["similarity"] ?? 0) - Number(a["similarity"] ?? 0))
+        .map((m) => m["id"])
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ).slice(0, MAX_GRAPH_MEMORY_MATCHES);
   if (ids.length === 0) return [];
 
   const { data: rows, error: rowError } = await supabase

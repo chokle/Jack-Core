@@ -262,7 +262,7 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     fake.tables["knowledge_nodes"] = [
       {
         id: "k:ask-memory:split-ferrule",
-        kind: "knowledge",
+        kind: "procedure",
         label: "Split TIG torch ferrule check",
         description:
           "A split TIG torch power-cable ferrule creates an unstable electrical connection. Inspect the ferrule for radial cracks before assembly and replace it if cracked.",
