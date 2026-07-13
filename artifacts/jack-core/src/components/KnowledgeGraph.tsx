@@ -357,7 +357,10 @@ export function KnowledgeGraph() {
         r = n.baseRadius * (1 + 0.08 * Math.sin(time * 0.002));
       }
 
-      const grow = Math.min(1, age / 600);
+      // A newly scheduled animation frame can precede a node's recorded birth
+      // timestamp by a few milliseconds. Clamp at zero so the intro pulse never
+      // passes a negative radius to canvas.arc().
+      const grow = Math.max(0, Math.min(1, age / 600));
       r *= 0.4 + 0.6 * grow;
 
       const glowR = r * 5;
@@ -389,7 +392,7 @@ export function KnowledgeGraph() {
       c.fill();
 
       if (age < 1500) {
-        const p = age / 1500;
+        const p = Math.max(0, age / 1500);
         c.strokeStyle = rgba(col, (1 - p) * 0.6);
         c.lineWidth = 1.2 * (1 - p) + 0.3;
         c.beginPath();
