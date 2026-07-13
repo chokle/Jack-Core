@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { isRecentGrowthNode, type MemoryNode } from "./memory-graph";
 
-function node(createdAt?: string): MemoryNode {
+function node(createdAt?: string, firstExtractedAt?: string): MemoryNode {
   return {
     id: "k:procedure:test",
     kind: "procedure",
     label: "Test",
     color: [255, 100, 0],
-    meta: { createdAt },
+    meta: { createdAt, firstExtractedAt },
   } as MemoryNode;
 }
 
@@ -16,6 +16,7 @@ describe("growth toast freshness", () => {
 
   it("accepts knowledge created in the current ingestion window", () => {
     expect(isRecentGrowthNode(node("2026-07-12T19:59:45.000Z"), snapshot)).toBe(true);
+    expect(isRecentGrowthNode(node(undefined, "2026-07-12T19:59:45.000Z"), snapshot)).toBe(true);
   });
 
   it("rejects week-old and undated placeholder knowledge", () => {

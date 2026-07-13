@@ -329,7 +329,13 @@ export function isRecentGrowthNode(
   generatedAt?: string,
   windowMs = GROWTH_TOAST_RECENCY_MS,
 ): boolean {
-  const nodeTime = Date.parse(node.meta.createdAt ?? node.meta.updatedAt ?? "");
+  const nodeTime = Date.parse(
+    node.meta.createdAt ??
+      node.meta.firstExtractedAt ??
+      node.meta.updatedAt ??
+      node.meta.lastExtractedAt ??
+      "",
+  );
   if (!Number.isFinite(nodeTime)) return false;
   const snapshotTime = Date.parse(generatedAt ?? "");
   const now = Number.isFinite(snapshotTime) ? snapshotTime : Date.now();
