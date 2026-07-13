@@ -220,7 +220,9 @@ function JackApp() {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  const { isSignedIn } = useAuth();
+  // Jack also runs in public presentation mode, outside ClerkProvider. The
+  // current-user response is only populated for an authenticated session.
+  const isSignedIn = Boolean(me);
   const userLabel = me?.name ?? "Presentation Mode";
   const userSubLabel = "Demo access";
 
