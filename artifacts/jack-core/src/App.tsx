@@ -335,7 +335,13 @@ function JackApp() {
         userLabel={userLabel}
         userSubLabel={userSubLabel}
         onOpenSettings={() => {
-          if (isSignedIn) setAccountSettingsOpen(true);
+          if (isSignedIn) {
+            setAccountSettingsOpen(true);
+            return;
+          }
+          // The public demo deliberately has no identity. Send contributors to
+          // the isolated Clerk flow rather than leaving a dead settings item.
+          window.location.assign(`${basePath}/sign-in`);
         }}
         onStartUserTest={undefined}
         userTestingRequired={false}
@@ -580,6 +586,17 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
 }
 
 function App() {
+  // Keep the root presentation surface free of an auth dependency, while
+  // retaining the existing protected management path for contributors and
+  // administrators. This is critical for owner-only video removal and review.
+  const managementPath = ["/app", "/sign-in", "/sign-up"].some(
+    (path) => window.location.pathname === `${basePath}${path}` || window.location.pathname.startsWith(`${basePath}${path}/`),
+  );
+
+  if (managementPath && clerkPubKey) {
+    return <ClerkProviderWithRoutes onReady={() => {}} />;
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <AppSurface />
