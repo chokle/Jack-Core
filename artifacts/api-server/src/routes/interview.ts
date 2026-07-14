@@ -170,6 +170,23 @@ function toProfileLite(mentor: Row): MentorProfileLite {
   };
 }
 
+/** Public API shape for the signed-in contributor's reusable intake profile. */
+function serializeProfile(mentor: Row): Record<string, unknown> {
+  return {
+    id: mentor["id"],
+    name: mentor["name"],
+    trade: (mentor["trade"] as string | null) ?? null,
+    tradeInput: (mentor["trade_input"] as string | null) ?? null,
+    yearsExperience: (mentor["years_experience"] as number | null) ?? null,
+    specialties: Array.isArray(mentor["specialties"])
+      ? (mentor["specialties"] as string[])
+      : [],
+    region: (mentor["region"] as string | null) ?? null,
+    background: (mentor["background"] as string | null) ?? null,
+    createdAt: mentor["created_at"],
+  };
+}
+
 /** Build the ordered conversation history for the question engine. */
 async function loadHistory(sessionId: string): Promise<AnsweredTurn[]> {
   const { data, error } = await supabase
@@ -217,6 +234,29 @@ async function loadSession(
   return { session: session as Row, mentor: mentor as Row };
 }
 
+/** Restore intake fields from the current signed-in account. */
+router.get("/interview/profile", async (req, res) => {
+  try {
+    const ownerUserId = req.userId;
+    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+
+    const { data: mentor, error } = await supabase
+      .from("mentor_profiles")
+      .select("*")
+      .eq("contributor_user_id", ownerUserId)
+      .not("trade", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+
+    return res.json(mentor ? { profile: serializeProfile(mentor as Row) } : {});
+  } catch (err) {
+    req.log.error({ err }, "getInterviewProfile error");
+    return res.status(500).json({ error: "Failed to load interview profile" });
+  }
+});
+
 router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
   try {
     const ownerUserId = req.userId;
@@ -229,24 +269,43 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
     const trade = normalizeTrade(body.trade, body.tradeInput ?? null);
     const tradeInput = body.trade === "Other" ? (body.tradeInput ?? null) : body.trade;
 
-    const { data: mentor, error: mErr } = await supabase
+    const profileValues = {
+      name: body.name,
+      trade,
+      trade_input: tradeInput,
+      years_experience: body.yearsExperience ?? null,
+      specialties: body.specialties ?? [],
+      region: body.region ?? null,
+      background: body.background ?? null,
+      contributor_user_id: ownerUserId,
+    };
+
+    // One reusable identity per account. Historical profiles remain attached to
+    // their old sessions, but every new interview updates/reuses the latest
+    // account profile instead of asking Jack to learn the same person again.
+    const { data: existing, error: existingErr } = await supabase
       .from("mentor_profiles")
-      .insert({
-        name: body.name,
-        trade,
-        trade_input: tradeInput,
-        years_experience: body.yearsExperience ?? null,
-        specialties: body.specialties ?? [],
-        region: body.region ?? null,
-        background: body.background ?? null,
-        contributor_user_id: ownerUserId,
-      })
+      .select("id")
+      .eq("contributor_user_id", ownerUserId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+
+    const mentorQuery = existing
+      ? supabase
+          .from("mentor_profiles")
+          .update(profileValues)
+          .eq("id", (existing as Row)["id"])
+          .eq("contributor_user_id", ownerUserId)
+      : supabase.from("mentor_profiles").insert(profileValues);
+    const { data: mentor, error: mErr } = await mentorQuery
       .select("*")
       .single();
     if (mErr) throw mErr;
 
     const profile = toProfileLite(mentor as Row);
-    const next = await generateNextQuestion(profile, []);
+    const next = await generateNextQuestion(profile, [], body.focus ?? null);
     const completed = next.complete || !next.question;
 
     const { data: session, error: sErr } = await supabase

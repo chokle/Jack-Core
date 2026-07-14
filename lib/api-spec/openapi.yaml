@@ -597,11 +597,24 @@ paths:
         "401":
           description: Admin session required
 
+  /interview/profile:
+    get:
+      operationId: getInterviewProfile
+      tags: [interview]
+      summary: Get the signed-in contributor's saved interview profile
+      responses:
+        "200":
+          description: The account-bound profile, omitted when the contributor has not completed intake yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentInterviewProfile"
+
   /interview/sessions:
     post:
       operationId: startInterview
       tags: [interview]
-      summary: Create a mentor profile and start an interview session
+      summary: Save the contributor's profile and start an interview session
       requestBody:
         required: true
         content:
@@ -1520,6 +1533,12 @@ components:
         createdAt:
           type: string
 
+    CurrentInterviewProfile:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/MentorProfile"
+
     StartInterviewInput:
       type: object
       required: [name, trade]
@@ -1543,6 +1562,9 @@ components:
           type: ["string", "null"]
         background:
           type: ["string", "null"]
+        focus:
+          type: ["string", "null"]
+          description: Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
 
     SubmitAnswerInput:
       type: object

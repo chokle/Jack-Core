@@ -354,14 +354,19 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     if (fkError) return fkError;
 
     const now = new Date().toISOString();
+    const inserted: Row[] = [];
     let n = 0;
     for (const incoming of this.upsertRows) {
       const row: Row = { created_at: now, ...incoming };
       if (row["id"] === undefined) row["id"] = `fake-${this.table}-${this.rows.length + n}`;
       this.rows.push(row);
+      inserted.push({ ...row });
       n++;
     }
-    return { data: null, error: null };
+    if (this.singleMode !== "none") {
+      return { data: inserted[0] ?? null, error: null };
+    }
+    return { data: inserted, error: null };
   }
 
   private runUpdate(): Result<unknown> {

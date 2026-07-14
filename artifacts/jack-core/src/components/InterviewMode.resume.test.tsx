@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   submitMutate: vi.fn(),
   skipMutate: vi.fn(),
   finishMutate: vi.fn(),
+  profileHook: vi.fn(),
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -33,6 +34,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useSubmitInterviewAnswer: () => ({ mutate: h.submitMutate, isPending: false }),
   useSkipInterviewQuestion: () => ({ mutate: h.skipMutate, isPending: false }),
   useFinishInterview: () => ({ mutate: h.finishMutate, isPending: false }),
+  useGetInterviewProfile: () => h.profileHook(),
   getInterviewSession: h.getInterviewSession,
   getGetGraphQueryKey: () => ["graph"],
 }));
@@ -100,6 +102,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   vi.clearAllMocks();
+  h.profileHook.mockReturnValue({ data: {}, isLoading: false });
 });
 
 afterEach(() => {
@@ -228,5 +231,76 @@ describe("InterviewMode resume flow", () => {
 
     expect(await screen.findByText("Tell Jack who's in the chair")).toBeTruthy();
     expect(h.getInterviewSession).not.toHaveBeenCalled();
+  });
+
+  it("restores every intake field from the signed-in account profile", async () => {
+    h.profileHook.mockReturnValue({
+      data: {
+        profile: {
+          id: "profile-derek",
+          name: "Derek Chok",
+          trade: "Welder",
+          tradeInput: "Welding",
+          yearsExperience: 18,
+          specialties: ["Combo Disc", "TIG"],
+          region: "British Columbia",
+          background: "Industrial repair welding.",
+          createdAt: "2026-07-12T00:00:00.000Z",
+        },
+      },
+      isLoading: false,
+    });
+
+    renderInterviewMode();
+
+    expect(await screen.findByDisplayValue("Derek Chok")).toBeTruthy();
+    expect(screen.getByDisplayValue("18")).toBeTruthy();
+    expect(screen.getByDisplayValue("British Columbia")).toBeTruthy();
+    expect(screen.getByDisplayValue("Combo Disc, TIG")).toBeTruthy();
+    expect(screen.getByDisplayValue("Industrial repair welding.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Welding" }).className).toContain("border-primary");
+  });
+
+  it("keeps a Field Note as session focus without overwriting saved profile fields", async () => {
+    h.profileHook.mockReturnValue({
+      data: {
+        profile: {
+          id: "profile-derek",
+          name: "Derek Chok",
+          trade: "Welder",
+          tradeInput: "Welding",
+          yearsExperience: 18,
+          specialties: ["TIG"],
+          region: "British Columbia",
+          background: "Industrial repair welding.",
+          createdAt: "2026-07-12T00:00:00.000Z",
+        },
+      },
+      isLoading: false,
+    });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <InterviewMode fieldNote={{ title: "Combo Disc", text: "Use it for tight repair access." }} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByDisplayValue("Derek Chok");
+    fireEvent.click(screen.getByRole("button", { name: /Begin interview/i }));
+
+    expect(h.startMutate).toHaveBeenCalledTimes(1);
+    const request = h.startMutate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(request.data).toMatchObject({
+      name: "Derek Chok",
+      trade: "Welding",
+      yearsExperience: 18,
+      specialties: ["TIG"],
+      region: "British Columbia",
+      background: "Industrial repair welding.",
+    });
+    expect(request.data.focus).toContain('Field Note "Combo Disc"');
   });
 });

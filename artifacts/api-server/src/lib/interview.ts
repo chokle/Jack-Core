@@ -246,6 +246,7 @@ Respond with a JSON object: {"question": string, "category": string, "topic": st
 export async function generateNextQuestion(
   profile: MentorProfileLite,
   history: AnsweredTurn[],
+  focus?: string | null,
 ): Promise<NextQuestion> {
   if (history.length >= MAX_INTERVIEW_QUESTIONS) {
     return { question: "", category: "wrap_up", topic: null, complete: true };
@@ -288,6 +289,8 @@ export async function generateNextQuestion(
 
   const user = `Mentor profile:
 ${profileLines}
+
+${focus?.trim() ? `Interview focus for this session:\n${focus.trim()}\n` : ""}
 
 Conversation so far:
 ${transcript}

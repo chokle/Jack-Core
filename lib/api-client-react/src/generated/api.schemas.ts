@@ -454,6 +454,10 @@ export interface MentorProfile {
   createdAt: string;
 }
 
+export interface CurrentInterviewProfile {
+  profile?: MentorProfile;
+}
+
 export interface StartInterviewInput {
   /** The mentor's name */
   name: string;
@@ -471,6 +475,11 @@ export interface StartInterviewInput {
   region?: string | null;
   /** @nullable */
   background?: string | null;
+  /**
+     * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
+     * @nullable
+     */
+  focus?: string | null;
 }
 
 export interface SubmitAnswerInput {

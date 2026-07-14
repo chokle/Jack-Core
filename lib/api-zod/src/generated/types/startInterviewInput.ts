@@ -23,4 +23,9 @@ export interface StartInterviewInput {
   region?: string | null;
   /** @nullable */
   background?: string | null;
+  /**
+     * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
+     * @nullable
+     */
+  focus?: string | null;
 }

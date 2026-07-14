@@ -17,6 +17,7 @@ import { VoiceAnswerInput } from "@/components/VoiceAnswerInput";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useStartInterview,
+  useGetInterviewProfile,
   useSubmitInterviewAnswer,
   useSkipInterviewQuestion,
   useFinishInterview,
@@ -226,18 +227,20 @@ export function InterviewMode({
   const [trade, setTrade] = useState<string>(preloadedTrade);
   const [tradeInput, setTradeInput] = useState(preloadedTrade === "Other" ? preload?.trade ?? "" : "");
   const [years, setYears] = useState("");
-  const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : fieldNote?.title ?? "");
+  const [specialties, setSpecialties] = useState("");
   const [region, setRegion] = useState("");
-  const [background, setBackground] = useState(preload
+  const [background, setBackground] = useState("");
+  const interviewFocus = preload
     ? `Torch Starving Point ${preload.starvingPointId}: ${preload.title}. ${preload.description} Priority: ${preload.priority}. Evidence status: ${preload.evidence}. Focus this interview on closing this exact knowledge gap with specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment.`
     : fieldNote
       ? `Ask Jack opened this interview from the Field Note "${fieldNote.title}". Use the note as context, then ask for specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment. Field Note: ${fieldNote.text}`
-      : "");
+      : "";
 
   // Current answer being typed.
   const [answer, setAnswer] = useState("");
 
   const startInterview = useStartInterview();
+  const interviewProfile = useGetInterviewProfile();
   const submitAnswer = useSubmitInterviewAnswer();
   const skipQuestion = useSkipInterviewQuestion();
   const finishInterview = useFinishInterview();
@@ -251,6 +254,32 @@ export function InterviewMode({
   const refreshGraph = () =>
     queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
 
+  // Hydrate the intake form once from the signed-in account. A command-centre
+  // handoff may intentionally choose a different trade for this session, so it
+  // keeps that explicit trade while restoring the person's other saved fields.
+  const didRestoreProfile = useRef(false);
+  useEffect(() => {
+    if (didRestoreProfile.current || interviewProfile.isLoading) return;
+    didRestoreProfile.current = true;
+    const profile = interviewProfile.data?.profile;
+    if (!profile) return;
+    setName(profile.name);
+    if (!preloadedTrade) {
+      const savedTrade = profile.tradeInput || profile.trade || "";
+      if (TRADE_OPTIONS.includes(savedTrade as (typeof TRADE_OPTIONS)[number])) {
+        setTrade(savedTrade);
+        setTradeInput("");
+      } else if (savedTrade) {
+        setTrade("Other");
+        setTradeInput(savedTrade);
+      }
+    }
+    setYears(profile.yearsExperience == null ? "" : String(profile.yearsExperience));
+    setSpecialties((profile.specialties ?? []).join(", "));
+    setRegion(profile.region ?? "");
+    setBackground(profile.background ?? "");
+  }, [interviewProfile.data, interviewProfile.isLoading, preloadedTrade]);
+
   const resetAll = () => {
     clearActiveSessionId();
     setStage("intake");
@@ -258,13 +287,7 @@ export function InterviewMode({
     setTranscript([]);
     setAnswer("");
     setError(null);
-    setName("");
-    setTrade("");
-    setTradeInput("");
-    setYears("");
-    setSpecialties("");
-    setRegion("");
-    setBackground("");
+    // Keep the account-bound profile in the form for the next interview.
   };
 
   // Resume an interrupted interview: on mount, if a session id is stored, fetch
@@ -361,6 +384,7 @@ export function InterviewMode({
           specialties: specialtyList,
           region: region.trim() || null,
           background: background.trim() || null,
+          focus: interviewFocus || null,
         },
       },
       {
@@ -482,7 +506,7 @@ export function InterviewMode({
 
       <ScrollArea className="flex-1">
         <div className="mx-auto w-full max-w-2xl px-5 py-6 md:px-8 md:py-10">
-          {resuming && (
+          {(resuming || (stage === "intake" && interviewProfile.isLoading)) && (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
               <p className="font-mono text-xs uppercase tracking-[0.18em]">
@@ -491,7 +515,7 @@ export function InterviewMode({
             </div>
           )}
 
-          {!resuming && stage === "intake" && (
+          {!resuming && !interviewProfile.isLoading && stage === "intake" && (
             <>
               {preload && (
                 <div className="mb-5 rounded-xl border border-primary/35 bg-primary/10 p-4" data-testid="torch-gap-preload">

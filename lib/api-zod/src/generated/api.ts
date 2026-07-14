@@ -655,7 +655,25 @@ export const GetConceptAnswerContributionsResponse = zod.object({
 
 
 /**
- * @summary Create a mentor profile and start an interview session
+ * @summary Get the signed-in contributor's saved interview profile
+ */
+export const GetInterviewProfileResponse = zod.object({
+  "profile": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "trade": zod.string().nullish(),
+  "tradeInput": zod.string().nullish(),
+  "yearsExperience": zod.number().nullish(),
+  "specialties": zod.array(zod.string()).optional(),
+  "region": zod.string().nullish(),
+  "background": zod.string().nullish(),
+  "createdAt": zod.string()
+}).optional()
+})
+
+
+/**
+ * @summary Save the contributor's profile and start an interview session
  */
 export const StartInterviewBody = zod.object({
   "name": zod.string().describe('The mentor\'s name'),
@@ -664,7 +682,8 @@ export const StartInterviewBody = zod.object({
   "yearsExperience": zod.number().nullish(),
   "specialties": zod.array(zod.string()).optional(),
   "region": zod.string().nullish(),
-  "background": zod.string().nullish()
+  "background": zod.string().nullish(),
+  "focus": zod.string().nullish().describe('Per-interview topic or handoff context; used for questioning but not saved into the contributor profile')
 })
 
 export const StartInterviewResponse = zod.object({
