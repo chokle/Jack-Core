@@ -239,6 +239,9 @@ router.get("/interview/profile", async (req, res) => {
   try {
     const ownerUserId = req.userId;
     if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+    // Presentation mode deliberately has no personal account. Never expose a
+    // previous guest's intake details to the next person using the shared demo.
+    if (ownerUserId === "presentation-demo") return res.json({});
 
     const { data: mentor, error } = await supabase
       .from("mentor_profiles")
@@ -283,14 +286,19 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
     // One reusable identity per account. Historical profiles remain attached to
     // their old sessions, but every new interview updates/reuses the latest
     // account profile instead of asking Jack to learn the same person again.
-    const { data: existing, error: existingErr } = await supabase
-      .from("mentor_profiles")
-      .select("id")
-      .eq("contributor_user_id", ownerUserId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existingErr) throw existingErr;
+    const isPresentationGuest = ownerUserId === "presentation-demo";
+    let existing: Row | null = null;
+    if (!isPresentationGuest) {
+      const { data, error: existingErr } = await supabase
+        .from("mentor_profiles")
+        .select("id")
+        .eq("contributor_user_id", ownerUserId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+      existing = (data as Row | null) ?? null;
+    }
 
     const mentorQuery = existing
       ? supabase

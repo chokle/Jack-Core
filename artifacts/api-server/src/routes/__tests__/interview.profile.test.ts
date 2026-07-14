@@ -114,6 +114,24 @@ describe("account-bound interview profile", () => {
     expect(response.body.profile.name).not.toBe("Another Contributor");
   });
 
+  it("never restores one presentation guest's profile for another guest", async () => {
+    fake.tables["mentor_profiles"].push({
+      id: "presentation-profile",
+      contributor_user_id: "presentation-demo",
+      name: "Previous Guest",
+      trade: "Welder",
+      trade_input: "Welding",
+      created_at: "2026-07-14T00:00:00.000Z",
+    });
+
+    const response = await request(app)
+      .get("/api/interview/profile")
+      .set("x-test-user", "presentation-demo");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
+  });
+
   it("updates and reuses the account profile instead of creating a duplicate", async () => {
     const response = await request(app)
       .post("/api/interview/sessions")
@@ -145,5 +163,27 @@ describe("account-bound interview profile", () => {
       [],
       "Field Note: safe combo-disc use in tight repair access.",
     );
+  });
+
+  it("creates an isolated profile for each presentation interview", async () => {
+    fake.tables["mentor_profiles"].push({
+      id: "presentation-profile",
+      contributor_user_id: "presentation-demo",
+      name: "Previous Guest",
+      trade: "Welder",
+      trade_input: "Welding",
+      created_at: "2026-07-14T00:00:00.000Z",
+    });
+
+    const response = await request(app)
+      .post("/api/interview/sessions")
+      .set("x-test-user", "presentation-demo")
+      .send({ name: "Current Guest", trade: "Electrical" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.mentorProfileId).not.toBe("presentation-profile");
+    expect(fake.tables["mentor_profiles"]).toHaveLength(4);
+    expect(fake.tables["mentor_profiles"].find((row) => row["id"] === "presentation-profile"))
+      .toMatchObject({ name: "Previous Guest", trade: "Welder" });
   });
 });
