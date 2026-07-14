@@ -24,6 +24,7 @@ import {
   useGridRepulsion,
 } from "../lib/graph-perf";
 import {
+  buildPulseTopology,
   MemoryGraphPulseController,
   pulseSegment,
 } from "../lib/memory-graph-pulse";
@@ -350,33 +351,6 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       adjacencyRef.current = adj;
       const map = nodesRef.current;
 
-      // Derive the neural-flow topology from the LIVE graph (never hardcoded to
-      // specific trades): hubs are the topic cluster-heads bridged to the core,
-      // and a hub's members are its non-core, non-topic neighbors. New clusters
-      // therefore light up automatically as the graph grows.
-      const topicIds = new Set(model.topics.map((t) => t.id));
-      const coreNeighbors = adj.get(CORE_ID);
-      const hubIds: string[] = [];
-      const membersByHub: Record<string, string[]> = {};
-      for (const t of model.topics) {
-        if (!coreNeighbors?.has(t.id)) continue;
-        const hub = map.get(t.id);
-        if (!hub?.populated) continue;
-        hubIds.push(t.id);
-        const members: string[] = [];
-        for (const nb of adj.get(t.id) ?? []) {
-          if (nb === CORE_ID || topicIds.has(nb)) continue;
-          if (!map.get(nb)?.populated) continue;
-          members.push(nb);
-        }
-        membersByHub[t.id] = members;
-      }
-      pulseCtrlRef.current?.setTopology({
-        coreId: CORE_ID,
-        hubIds,
-        membersByHub,
-      });
-
       // Measure the canvas directly so layout is correct even when we mount
       // with already-cached data (before the ResizeObserver first fires).
       const canvas = canvasRef.current;
@@ -402,6 +376,25 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             (modelNodeById.get(t.id)?.meta.knowledgeObjectCount ?? 0) >
             0,
         ]),
+      );
+      // Derive neural routes from this model snapshot rather than the previous
+      // canvas cache. On first load the hubs and their sub-nodes arrive together;
+      // using the old cache made the pulse reach a trade and stop there.
+      const populatedNodeIds = new Set(
+        model.nodes
+          .filter(
+            (node) =>
+              node.kind !== "topic" || (topicPopulated.get(node.id) ?? true),
+          )
+          .map((node) => node.id),
+      );
+      pulseCtrlRef.current?.setTopology(
+        buildPulseTopology(
+          CORE_ID,
+          model.topics.map((topic) => topic.id),
+          model.edges,
+          populatedNodeIds,
+        ),
       );
       const ringR = Math.min(w, h) * 0.32;
       const anchorByTopic = new Map<string, { x: number; y: number }>();
