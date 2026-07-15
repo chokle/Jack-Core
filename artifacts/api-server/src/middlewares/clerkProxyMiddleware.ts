@@ -81,13 +81,17 @@ export function clerkProxyMiddleware(): RequestHandler {
     return (_req, _res, next) => next();
   }
 
-  const secretKey = process.env.CLERK_SECRET_KEY;
+  const pinnedSecretKey = process.env.JACK_CLERK_PROXY_SECRET;
+  const secretKey = pinnedSecretKey || process.env.CLERK_SECRET_KEY;
   if (!secretKey) {
     return (_req, _res, next) => next();
   }
 
   const target = getClerkProxyTarget();
-  logger.info({ target }, "Clerk proxy configured");
+  logger.info(
+    { target, secretSource: pinnedSecretKey ? "pinned" : "clerk" },
+    "Clerk proxy configured",
+  );
 
   return createProxyMiddleware({
     target,
