@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SignIn, SignUp, Show, useAuth, useClerk } from "@clerk/react";
+import { AuthenticateWithRedirectCallback, SignUp, Show, useAuth, useClerk } from "@clerk/react";
 import { InternalClerkProvider as ClerkProvider } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
@@ -22,6 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { EmailCodeSignIn } from "@/components/EmailCodeSignIn";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
@@ -444,15 +445,12 @@ function AppSurface() {
 }
 
 function SignInPage() {
+  if (window.location.pathname.endsWith("/sso-callback")) {
+    return <AuthenticateWithRedirectCallback />;
+  }
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      {/* path must be the full browser path — Clerk reads window.location.pathname directly */}
-      <SignIn
-        routing="path"
-        path={`${basePath}/sign-in`}
-        signUpUrl={`${basePath}/sign-up`}
-        forceRedirectUrl={useDirectClerkAssets ? `${window.location.origin}${basePath}/app` : undefined}
-      />
+      <EmailCodeSignIn />
     </div>
   );
 }
