@@ -23,13 +23,26 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import type { RequestHandler } from "express";
 import type { IncomingHttpHeaders } from "http";
 import { parsePublishableKey } from "@clerk/shared/keys";
+import { logger } from "../lib/logger";
 
 const CLERK_PROXY_FAPI = "https://frontend-api.clerk.dev";
 export const CLERK_PROXY_PATH = "/api/__clerk";
 
 export function getClerkProxyTarget(
   publishableKey = process.env.CLERK_PUBLISHABLE_KEY,
+  configuredTarget = process.env.JACK_CLERK_PROXY_TARGET,
 ): string {
+  if (configuredTarget) {
+    try {
+      const target = new URL(configuredTarget);
+      const allowedHost =
+        target.hostname === "frontend-api.clerk.dev" ||
+        target.hostname.endsWith(".clerk.accounts.dev");
+      if (target.protocol === "https:" && allowedHost) return target.origin;
+    } catch {
+      // Fall through to the publishable-key-derived target.
+    }
+  }
   const parsedKey = parsePublishableKey(publishableKey);
   return parsedKey?.instanceType === "development"
     ? `https://${parsedKey.frontendApi}`
@@ -73,8 +86,11 @@ export function clerkProxyMiddleware(): RequestHandler {
     return (_req, _res, next) => next();
   }
 
+  const target = getClerkProxyTarget();
+  logger.info({ target }, "Clerk proxy configured");
+
   return createProxyMiddleware({
-    target: getClerkProxyTarget(),
+    target,
     changeOrigin: true,
     // Take over the response so it can be re-sent with a Content-Length (see
     // proxyRes); the deployment edge rejects chunked proxied responses.
