@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useSignIn } from "@clerk/react/legacy";
+import { useClerk } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -11,11 +12,13 @@ function messageFrom(error: unknown): string {
   const clerkError = error as ClerkError;
   return clerkError.errors?.[0]?.longMessage
     ?? clerkError.errors?.[0]?.message
+    ?? (error instanceof Error ? error.message : null)
     ?? "Sign-in could not continue. Please try again.";
 }
 
 export function EmailCodeSignIn() {
   const { isLoaded, signIn, setActive } = useSignIn();
+  const clerk = useClerk();
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -75,7 +78,10 @@ export function EmailCodeSignIn() {
     setBusy(true);
     setError(null);
     try {
-      await signIn.authenticateWithRedirect({
+      // Use the loaded Clerk client directly for OAuth. The legacy sign-in hook
+      // remains appropriate for email-code factors, but its redirect wrapper
+      // can hold a stale attempt in embedded/mobile browser sessions.
+      await clerk.client.signIn.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: `${window.location.origin}/sign-in/sso-callback`,
         redirectUrlComplete: `${window.location.origin}/app`,

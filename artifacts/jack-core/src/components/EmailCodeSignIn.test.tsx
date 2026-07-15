@@ -23,6 +23,12 @@ vi.mock("@clerk/react/legacy", () => ({
   }),
 }));
 
+vi.mock("@clerk/react", () => ({
+  useClerk: () => ({
+    client: { signIn: { authenticateWithRedirect: h.google } },
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   h.prepare.mockResolvedValue({});
