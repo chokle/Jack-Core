@@ -57,9 +57,8 @@ const useDirectClerkAssets = isLocalClerkHost || isRailwayPreviewHost;
 // Deployed hosts still use host-aware resolution for Torch's custom domains.
 const clerkPubKey = configuredClerkPubKey;
 
-// Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
-// opt-in only; the normal production path sends browser auth traffic directly
-// to Clerk.
+// Production auth can be routed through Jack's same-origin server proxy so
+// privacy tools and restrictive networks do not need direct Clerk FAPI access.
 const clerkProxyUrl =
   isLocalClerkHost
     ? `${window.location.origin}/api/__clerk`

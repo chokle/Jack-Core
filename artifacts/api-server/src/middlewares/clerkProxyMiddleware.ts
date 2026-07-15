@@ -22,9 +22,19 @@
 import { createProxyMiddleware } from "http-proxy-middleware";
 import type { RequestHandler } from "express";
 import type { IncomingHttpHeaders } from "http";
+import { parsePublishableKey } from "@clerk/shared/keys";
 
-const CLERK_FAPI = "https://frontend-api.clerk.dev";
+const CLERK_PROXY_FAPI = "https://frontend-api.clerk.dev";
 export const CLERK_PROXY_PATH = "/api/__clerk";
+
+export function getClerkProxyTarget(
+  publishableKey = process.env.CLERK_PUBLISHABLE_KEY,
+): string {
+  const parsedKey = parsePublishableKey(publishableKey);
+  return parsedKey?.instanceType === "development"
+    ? `https://${parsedKey.frontendApi}`
+    : CLERK_PROXY_FAPI;
+}
 
 /**
  * Returns the first effective public hostname for the given request,
@@ -64,7 +74,7 @@ export function clerkProxyMiddleware(): RequestHandler {
   }
 
   return createProxyMiddleware({
-    target: CLERK_FAPI,
+    target: getClerkProxyTarget(),
     changeOrigin: true,
     // Take over the response so it can be re-sent with a Content-Length (see
     // proxyRes); the deployment edge rejects chunked proxied responses.

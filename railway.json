@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "RAILPACK",
-    "buildCommand": "PORT=4173 BASE_PATH=/ PUBLIC_SITE_URL=https://jack.torchlabs.ca VITE_DISABLE_CLERK_PROXY=true pnpm --filter ./artifacts/jack-core build && pnpm --filter ./artifacts/api-server build",
+    "buildCommand": "PORT=4173 BASE_PATH=/ PUBLIC_SITE_URL=https://jack.torchlabs.ca VITE_ENABLE_CLERK_PROXY=true VITE_CLERK_PROXY_URL=https://jack.torchlabs.ca/api/__clerk pnpm --filter ./artifacts/jack-core build && pnpm --filter ./artifacts/api-server build",
     "watchPatterns": [
       "/artifacts/jack-core/**",
       "/artifacts/api-server/**",
