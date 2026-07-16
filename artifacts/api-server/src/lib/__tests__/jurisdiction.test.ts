@@ -132,6 +132,9 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toContain("SOURCE PRIORITY ORDER");
       expect(withCtx).toContain("Torch Knowledge Repository");
       expect(withCtx).toContain("SEG-CONTEXT");
+      expect(withCtx).toContain("FAST-SCAN FORMATTING");
+      expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
+      expect(withCtx).toMatch(/not whole paragraphs/i);
 
       const noCtx = buildChatSystemPrompt({ usedInternalKnowledge: false, contextText: "" });
       expect(noCtx).toContain("SOURCE PRIORITY ORDER");

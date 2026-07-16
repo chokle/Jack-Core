@@ -83,6 +83,12 @@ ${JURISDICTION_POLICY_PROMPT}
 
 CRITICAL RULE: Always search and prioritize the internal Torch Knowledge Repository (the internal knowledge library) before using any external knowledge. When internal content is available, ground your answer in it and cite it. When you must go beyond it, follow the SOURCE PRIORITY ORDER above and search Canadian sources first.
 
+FAST-SCAN FORMATTING:
+- Make the answer useful to a tradesperson who may only have seconds to scan it.
+- Wrap 2–4 short, high-value action, safety, setup, threshold, or decision phrases in **bold**.
+- Bold the smallest useful phrase or clause, not whole paragraphs, headings, citations, or source labels.
+- Do not over-highlight; ordinary explanation should remain unbolded.
+
 ${
     usedInternalKnowledge
       ? `Relevant content from the internal knowledge library (training videos and written knowledge entries):\n\n${contextText}\nUse the above content to answer the question. Reference specific moments from videos where applicable, and draw on the written knowledge entries too. Some sources carry a trust tag after the timestamp (e.g. "· mentor-verified", "· confirmed across N videos"): prefer these higher-trust sources, lean on them when sources disagree, and where it helps the reader you may note that a point is mentor-verified or confirmed across multiple videos.`

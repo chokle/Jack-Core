@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Film,
   PlayCircle,
@@ -21,7 +21,13 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Citation } from "@workspace/api-client-react";
-import { parseAnswer, type AnswerSection, type Block, type Run } from "@/lib/parse-answer";
+import {
+  parseAnswer,
+  runsToText,
+  type AnswerSection,
+  type Block,
+  type Run,
+} from "@/lib/parse-answer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface StructuredAnswerProps {
@@ -138,18 +144,40 @@ export function TrustBadges({ verified, sourceCount }: { verified?: boolean; sou
   );
 }
 
+const FAST_SCAN_SIGNAL =
+  /\b(?:must|should|critical|crucial|important|importance|ensure|avoid|never|always|required|requirement|make sure|warning|hazard|best practice|key point)\b/i;
+
+export function fastScanRuns(runs: Run[]): Run[] {
+  if (runs.some((run) => run.bold)) return runs;
+
+  const chunks =
+    runsToText(runs).match(/[^,;.!?]+(?:[,;.!?]+|$)/g)?.map((text) => text.trim()).filter(Boolean) ?? [];
+  let highlighted = 0;
+  const emphasized = chunks.map((text) => {
+    const bold = highlighted < 3 && FAST_SCAN_SIGNAL.test(text);
+    if (bold) highlighted += 1;
+    return { text, ...(bold ? { bold: true } : {}) };
+  });
+
+  return highlighted > 0 ? emphasized : runs;
+}
+
 function Runs({ runs }: { runs: Run[] }) {
+  const fastScan = fastScanRuns(runs);
   return (
     <>
-      {runs.map((r, i) =>
-        r.bold ? (
-          <strong key={i} className="font-semibold text-white">
-            {r.text}
-          </strong>
-        ) : (
-          <span key={i}>{r.text}</span>
-        )
-      )}
+      {fastScan.map((r, i) => (
+        <Fragment key={i}>
+          {i > 0 ? " " : null}
+          {r.bold ? (
+            <mark className="box-decoration-clone rounded-sm bg-primary/20 px-0.5 font-semibold text-white underline decoration-primary/70 decoration-2 underline-offset-2">
+              {r.text}
+            </mark>
+          ) : (
+            <span>{r.text}</span>
+          )}
+        </Fragment>
+      ))}
     </>
   );
 }
