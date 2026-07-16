@@ -48,8 +48,10 @@ import { chatCompletion } from "../../lib/openai.js";
 
 const USER_A = "user_aaaaaaaaaaaaaaaaaaaaaa";
 const USER_B = "user_bbbbbbbbbbbbbbbbbbbbbb";
+const PRESENTATION_USER = "presentation-demo";
 // A device-scoped session cookie shared by whoever uses this browser.
 const SHARED_SESSION = "11111111-1111-1111-1111-111111111111";
+const OTHER_SESSION = "22222222-2222-2222-2222-222222222222";
 
 // The middleware reads `x-test-user` and sets req.userId from it, mimicking the
 // requireAuth gate resolving the Clerk user. An absent header means "no user".
@@ -177,6 +179,44 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
+
+  it("isolates public presentation history by the server-issued device session", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "p1",
+        session_id: SHARED_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "This browser",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "p2",
+        session_id: OTHER_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "Another browser",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ];
+
+    const noCookie = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", PRESENTATION_USER);
+    expect(noCookie.status).toBe(200);
+    expect(noCookie.body).toEqual([]);
+
+    const ownSession = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", PRESENTATION_USER)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`);
+    expect(ownSession.status).toBe(200);
+    expect((ownSession.body as HistoryRow[]).map((row) => row.content)).toEqual(
+      ["This browser"],
+    );
+  });
 });
 
 describe("POST /api/chat — writes carry the owner and load account history", () => {
@@ -208,6 +248,47 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     expect(aRows.map((r) => r["role"])).toEqual(["user", "assistant"]);
     // The other user's row is untouched and still owned by B.
     expect(rows.filter((r) => r["user_id"] === USER_B)).toHaveLength(1);
+  });
+
+  it("threads only the current presentation session into the model request", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "p1",
+        session_id: SHARED_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "Own earlier turn",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "p2",
+        session_id: OTHER_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "Other browser secret",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", PRESENTATION_USER)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: "Current question" });
+    expect(res.status).toBe(200);
+
+    const requestMessages =
+      vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages ?? [];
+    expect(
+      requestMessages.some((message) => message.content === "Own earlier turn"),
+    ).toBe(true);
+    expect(
+      requestMessages.some(
+        (message) => message.content === "Other browser secret",
+      ),
+    ).toBe(false);
   });
 
   it("rejects an unauthenticated write (fail-closed) rather than writing an unowned row", async () => {
@@ -295,5 +376,39 @@ describe("POST /api/chat — writes carry the owner and load account history", (
       call?.messages?.find((m) => m.role === "system")?.content ?? "";
     expect(system).toContain("[Living Memory: Split TIG torch ferrule check");
     expect(system).toContain("radial cracks before assembly");
+  });
+});
+
+describe("DELETE /api/chat/history — presentation sessions", () => {
+  it("clears only the current public browser session", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "p1",
+        session_id: SHARED_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "Delete me",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "p2",
+        session_id: OTHER_SESSION,
+        user_id: PRESENTATION_USER,
+        role: "user",
+        content: "Keep me",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ];
+
+    const res = await request(app)
+      .delete("/api/chat/history")
+      .set("x-test-user", PRESENTATION_USER)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`);
+    expect(res.status).toBe(204);
+    expect(fake.tables["chat_messages"].map((row) => row["content"])).toEqual([
+      "Keep me",
+    ]);
   });
 });

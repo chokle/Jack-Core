@@ -4,7 +4,7 @@ import { chatCompletion, createEmbedding, MODELS } from "../lib/openai.js";
 import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
-import { resolveSession } from "../lib/session.js";
+import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import {
   fetchVerificationCoverage,
@@ -25,6 +25,7 @@ const MAX_VIDEO_CONTEXT_MATCHES = 2;
 const MAX_VIDEO_CONTEXT_SEGMENTS = 6;
 const MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS = 1800;
 const MAX_GRAPH_MEMORY_MATCHES = 4;
+const PRESENTATION_USER_ID = "presentation-demo";
 
 const router = Router();
 
@@ -37,11 +38,9 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     const { message } = parsed.data;
 
     if (message.length > MAX_MESSAGE_LENGTH) {
-      return res
-        .status(400)
-        .json({
-          error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.`,
-        });
+      return res.status(400).json({
+        error: `Message must be ${MAX_MESSAGE_LENGTH} characters or fewer.`,
+      });
     }
     // Ownership is the server-derived Clerk user id (set by the app-level
     // requireAuth gate) — never a client-supplied field. It ties this thread to
@@ -331,10 +330,14 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       contextText,
     });
 
-    const { data: history } = await supabase
+    let historyQuery = supabase
       .from("chat_messages")
       .select("role, content")
-      .eq("user_id", userId)
+      .eq("user_id", userId);
+    if (userId === PRESENTATION_USER_ID) {
+      historyQuery = historyQuery.eq("session_id", session);
+    }
+    const { data: history } = await historyQuery
       .order("created_at", { ascending: true })
       .limit(10);
 
@@ -430,10 +433,16 @@ router.get("/chat/history", async (req, res) => {
     const userId = req.userId;
     if (!userId) return res.json([]);
 
-    const { data, error } = await supabase
+    let historyQuery = supabase
       .from("chat_messages")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", userId);
+    if (userId === PRESENTATION_USER_ID) {
+      const session = readSession(req);
+      if (!session) return res.json([]);
+      historyQuery = historyQuery.eq("session_id", session);
+    }
+    const { data, error } = await historyQuery
       .order("created_at", { ascending: true })
       .limit(50);
 
@@ -466,10 +475,16 @@ router.delete("/chat/history", async (req, res) => {
         .status(401)
         .json({ error: "Unauthorized — sign in required." });
 
-    const { error } = await supabase
+    let deleteQuery = supabase
       .from("chat_messages")
       .delete()
       .eq("user_id", userId);
+    if (userId === PRESENTATION_USER_ID) {
+      const session = readSession(req);
+      if (!session) return res.status(204).end();
+      deleteQuery = deleteQuery.eq("session_id", session);
+    }
+    const { error } = await deleteQuery;
     if (error) throw error;
 
     return res.status(204).end();
@@ -512,7 +527,9 @@ async function findGraphMemoryMatches(
     new Set(
       matchResults
         .flat()
-        .sort((a, b) => Number(b["similarity"] ?? 0) - Number(a["similarity"] ?? 0))
+        .sort(
+          (a, b) => Number(b["similarity"] ?? 0) - Number(a["similarity"] ?? 0),
+        )
         .map((m) => m["id"])
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
