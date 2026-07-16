@@ -22,9 +22,6 @@
  * The scoring/overlap logic is pure and independently testable; only
  * `fetchVerificationCoverage` touches the database.
  */
-import { supabase } from "./supabase.js";
-import { logger } from "./logger.js";
-
 /** Additive similarity bump applied to a segment covered by a verified concept. */
 export const VERIFIED_SCORE_BOOST = 0.15;
 
@@ -101,9 +98,15 @@ function clamp01(n: number): number {
  * gets nothing — one mention is not corroboration. Breadth scales linearly up to
  * CORROBORATION_FULL_SOURCES, where it saturates.
  */
-export function corroborationBoost(confidence: number, sourceCount: number): number {
+export function corroborationBoost(
+  confidence: number,
+  sourceCount: number,
+): number {
   if (sourceCount <= 1) return 0;
-  const breadth = Math.min(1, (sourceCount - 1) / (CORROBORATION_FULL_SOURCES - 1));
+  const breadth = Math.min(
+    1,
+    (sourceCount - 1) / (CORROBORATION_FULL_SOURCES - 1),
+  );
   return CORROBORATION_MAX_BOOST * clamp01(confidence) * breadth;
 }
 
@@ -117,7 +120,11 @@ export function corroborationBoost(confidence: number, sourceCount: number): num
  * never boost or suppress a whole video off a single node).
  */
 export function buildCoverageFromNodes(
-  rows: Array<{ verification_status?: unknown; confidence?: unknown; meta?: unknown }>,
+  rows: Array<{
+    verification_status?: unknown;
+    confidence?: unknown;
+    meta?: unknown;
+  }>,
   videoIds: string[],
 ): ConceptCoverage[] {
   const wanted = new Set(videoIds);
@@ -125,18 +132,30 @@ export function buildCoverageFromNodes(
   for (const row of rows) {
     const rawStatus = row.verification_status;
     const status: ConceptStatus =
-      rawStatus === "verified" ? "verified" : rawStatus === "rejected" ? "rejected" : "unverified";
+      rawStatus === "verified"
+        ? "verified"
+        : rawStatus === "rejected"
+          ? "rejected"
+          : "unverified";
     const meta = (row.meta ?? {}) as Record<string, unknown>;
-    const confidence = typeof row.confidence === "number" ? clamp01(row.confidence) : 0;
-    const sources = Array.isArray(meta["sources"]) ? (meta["sources"] as unknown[]) : [];
+    const confidence =
+      typeof row.confidence === "number" ? clamp01(row.confidence) : 0;
+    const sources = Array.isArray(meta["sources"])
+      ? (meta["sources"] as unknown[])
+      : [];
     const sourceCount =
-      typeof meta["sourceCount"] === "number" ? (meta["sourceCount"] as number) : sources.length;
+      typeof meta["sourceCount"] === "number"
+        ? (meta["sourceCount"] as number)
+        : sources.length;
     for (const s of sources) {
       const src = (s ?? {}) as Record<string, unknown>;
-      const videoId = typeof src["videoId"] === "string" ? (src["videoId"] as string) : null;
+      const videoId =
+        typeof src["videoId"] === "string" ? (src["videoId"] as string) : null;
       if (!videoId || !wanted.has(videoId)) continue;
       const timestamps = Array.isArray(src["timestamps"])
-        ? (src["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
+        ? (src["timestamps"] as unknown[]).filter(
+            (t): t is number => typeof t === "number",
+          )
         : [];
       if (timestamps.length === 0) continue;
       coverage.push({ videoId, timestamps, status, confidence, sourceCount });
@@ -158,7 +177,10 @@ export function buildCoverageFromNodes(
  * A reviewer rejection outranks automatic corroboration, but never outranks a
  * verified decision on the same window.
  */
-export function segmentTrust(segment: SegmentWindow, coverage: ConceptCoverage[]): SegmentTrust {
+export function segmentTrust(
+  segment: SegmentWindow,
+  coverage: ConceptCoverage[],
+): SegmentTrust {
   let verified: SegmentTrust | null = null;
   let unverified: SegmentTrust | null = null;
   let rejected = false;
@@ -168,7 +190,8 @@ export function segmentTrust(segment: SegmentWindow, coverage: ConceptCoverage[]
     if (c.videoId !== segment.videoId) continue;
     if (!c.timestamps.some((t) => t >= lo && t <= hi)) continue;
     if (c.status === "verified") {
-      const boost = VERIFIED_SCORE_BOOST + corroborationBoost(c.confidence, c.sourceCount);
+      const boost =
+        VERIFIED_SCORE_BOOST + corroborationBoost(c.confidence, c.sourceCount);
       if (!verified || boost > verified.boost) {
         verified = {
           verification: "verified",
@@ -192,7 +215,13 @@ export function segmentTrust(segment: SegmentWindow, coverage: ConceptCoverage[]
     }
   }
   if (verified) return verified;
-  if (rejected) return { verification: "rejected", confidence: 0, sourceCount: 0, boost: 0 };
+  if (rejected)
+    return {
+      verification: "rejected",
+      confidence: 0,
+      sourceCount: 0,
+      boost: 0,
+    };
   if (unverified) return unverified;
   return { verification: "neutral", confidence: 0, sourceCount: 0, boost: 0 };
 }
@@ -230,7 +259,12 @@ export interface RerankResult<T> {
  */
 export function rerankByVerification<T>(
   items: T[],
-  accessor: (item: T) => { videoId: string; startTime: number; endTime: number; score: number },
+  accessor: (item: T) => {
+    videoId: string;
+    startTime: number;
+    endTime: number;
+    score: number;
+  },
   coverage: ConceptCoverage[],
 ): Array<RerankResult<T>> {
   const kept: Array<RerankResult<T> & { order: number }> = [];
@@ -266,9 +300,22 @@ export function rerankByVerification<T>(
  * degrades to its un-reranked behavior rather than failing the whole request —
  * trust is an enhancement to ranking, never a hard dependency of answering.
  */
-export async function fetchVerificationCoverage(videoIds: string[]): Promise<ConceptCoverage[]> {
-  const unique = [...new Set(videoIds.filter((v): v is string => typeof v === "string" && !!v))];
+export async function fetchVerificationCoverage(
+  videoIds: string[],
+): Promise<ConceptCoverage[]> {
+  const unique = [
+    ...new Set(
+      videoIds.filter((v): v is string => typeof v === "string" && !!v),
+    ),
+  ];
   if (unique.length === 0) return [];
+
+  // Keep the pure reranking helpers importable without database credentials.
+  // This function is the module's only infrastructure boundary.
+  const [{ supabase }, { logger }] = await Promise.all([
+    import("./supabase.js"),
+    import("./logger.js"),
+  ]);
 
   const { data: edges, error: edgeError } = await supabase
     .from("knowledge_edges")
@@ -279,7 +326,10 @@ export async function fetchVerificationCoverage(videoIds: string[]): Promise<Con
       unique.map((v) => `video:${v}`),
     );
   if (edgeError) {
-    logger.error({ err: edgeError }, "fetchVerificationCoverage edges failed; skipping rerank");
+    logger.error(
+      { err: edgeError },
+      "fetchVerificationCoverage edges failed; skipping rerank",
+    );
     return [];
   }
   const conceptIds = [
@@ -296,11 +346,18 @@ export async function fetchVerificationCoverage(videoIds: string[]): Promise<Con
     .select("verification_status, confidence, meta")
     .in("id", conceptIds);
   if (error) {
-    logger.error({ err: error }, "fetchVerificationCoverage nodes failed; skipping rerank");
+    logger.error(
+      { err: error },
+      "fetchVerificationCoverage nodes failed; skipping rerank",
+    );
     return [];
   }
   return buildCoverageFromNodes(
-    (data ?? []) as Array<{ verification_status?: unknown; confidence?: unknown; meta?: unknown }>,
+    (data ?? []) as Array<{
+      verification_status?: unknown;
+      confidence?: unknown;
+      meta?: unknown;
+    }>,
     unique,
   );
 }
