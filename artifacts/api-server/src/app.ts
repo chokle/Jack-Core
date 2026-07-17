@@ -105,8 +105,22 @@ const frontendDir = path.resolve(apiDir, "../../jack-core/dist/public");
 const frontendIndex = path.join(frontendDir, "index.html");
 
 if (existsSync(frontendIndex)) {
+  app.use((req, res, next) => {
+    if (
+      req.path === "/" ||
+      req.path.endsWith(".html") ||
+      req.path === "/sw.js" ||
+      req.path === "/manifest.webmanifest"
+    ) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+    } else if (req.path.startsWith("/assets/")) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+    next();
+  });
   app.use(express.static(frontendDir, { index: false }));
   app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.sendFile(frontendIndex);
   });
 } else if (process.env.NODE_ENV === "production") {

@@ -108,6 +108,72 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (() => {
+        const shouldClearKey = (key) => {
+          const normalized = key.toLowerCase();
+          return normalized.startsWith("jack.") ||
+            normalized.startsWith("floating-panel:") ||
+            normalized.includes("clerk") ||
+            normalized.includes("supabase");
+        };
+
+        const clearStorageKeys = (storage) => {
+          for (let index = storage.length - 1; index >= 0; index -= 1) {
+            const key = storage.key(index);
+            if (key && shouldClearKey(key)) storage.removeItem(key);
+          }
+        };
+
+        window.__JACK_REPAIR_SESSION__ = async () => {
+          try {
+            clearStorageKeys(window.localStorage);
+            clearStorageKeys(window.sessionStorage);
+
+            if ("serviceWorker" in navigator) {
+              const registrations = await navigator.serviceWorker.getRegistrations();
+              await Promise.allSettled(registrations.map((registration) => registration.unregister()));
+            }
+
+            if ("caches" in window) {
+              const cacheKeys = await caches.keys();
+              await Promise.allSettled(cacheKeys.map((key) => caches.delete(key)));
+            }
+
+            if ("indexedDB" in window && typeof indexedDB.databases === "function") {
+              const databases = await indexedDB.databases();
+              for (const database of databases) {
+                if (database.name && shouldClearKey(database.name)) {
+                  indexedDB.deleteDatabase(database.name);
+                }
+              }
+            }
+          } catch (error) {
+            console.warn("Jack browser repair encountered a cleanup error", error);
+          } finally {
+            window.location.assign(`/api/auth/reset-session?reason=browser_repair&at=${Date.now()}`);
+          }
+        };
+
+        const timeout = window.setTimeout(() => {
+          if (document.getElementById("jack-startup-recovery")) return;
+          const recovery = document.createElement("div");
+          recovery.id = "jack-startup-recovery";
+          recovery.setAttribute("role", "alert");
+          recovery.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:24px;background:#050914;color:#f8fafc;font:16px/1.5 Inter,system-ui,sans-serif";
+          recovery.innerHTML = '<div style="max-width:520px;padding:24px;border:1px solid #334155;border-radius:16px;background:#0f172a;box-shadow:0 24px 80px #000"><div style="color:#ff5a1f;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase">Jack recovery</div><h1 style="margin:8px 0 10px;font-size:26px">Jack is taking too long to load</h1><p style="margin:0;color:#94a3b8">This browser may be holding an expired session or an older application cache. Repairing clears this site’s saved browser state and asks you to sign in again.</p><button id="jack-repair-session" style="margin-top:20px;padding:11px 16px;border:0;border-radius:9px;background:#ff3c00;color:white;font-weight:700;cursor:pointer">Repair browser session</button></div>';
+          document.body.appendChild(recovery);
+          document.getElementById("jack-repair-session")?.addEventListener("click", () => {
+            void window.__JACK_REPAIR_SESSION__();
+          });
+        }, 12000);
+
+        window.__JACK_MARK_READY__ = () => {
+          window.clearTimeout(timeout);
+          document.getElementById("jack-startup-recovery")?.remove();
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

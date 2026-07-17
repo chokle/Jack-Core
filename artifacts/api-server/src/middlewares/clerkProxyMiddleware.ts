@@ -81,6 +81,13 @@ export function clerkProxyMiddleware(): RequestHandler {
     return (_req, _res, next) => next();
   }
 
+  if (process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
+    logger.error(
+      "Clerk Frontend API proxying does not support development instances. " +
+        "Configure matching pk_live_/sk_live_ keys before enabling the production proxy.",
+    );
+  }
+
   const pinnedSecretKey = process.env.JACK_CLERK_PROXY_SECRET;
   const secretKey = pinnedSecretKey || process.env.CLERK_SECRET_KEY;
   if (!secretKey) {

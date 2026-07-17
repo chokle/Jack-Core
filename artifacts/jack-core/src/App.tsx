@@ -75,6 +75,7 @@ const localClerkUiUrl = useDirectClerkAssets
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
+const AUTH_STARTUP_TIMEOUT_MS = 6_000;
 
 function captureTorchInterviewHandoff() {
   const params = new URLSearchParams(window.location.search);
@@ -204,6 +205,12 @@ function JackApp() {
   const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
 
   const graph = useMemoryGraphData();
+
+  useEffect(() => {
+    if (!graph.isLoading) {
+      window.__JACK_MARK_READY__?.();
+    }
+  }, [graph.isLoading]);
 
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
@@ -443,12 +450,20 @@ function AppSurface() {
   );
 }
 
+function StartupReady() {
+  useEffect(() => {
+    window.__JACK_MARK_READY__?.();
+  }, []);
+  return null;
+}
+
 function SignInPage() {
   if (window.location.pathname.endsWith("/sso-callback")) {
     return <AuthenticateWithRedirectCallback />;
   }
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+      <StartupReady />
       <EmailCodeSignIn />
     </div>
   );
@@ -457,6 +472,7 @@ function SignInPage() {
 function SignUpPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+      <StartupReady />
       <SignUp
         routing="path"
         path={`${basePath}/sign-up`}
@@ -475,6 +491,7 @@ function HomeRedirect() {
         <Redirect to="/app" />
       </Show>
       <Show when="signed-out">
+        <StartupReady />
         <Landing />
       </Show>
     </>
@@ -582,6 +599,73 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
   );
 }
 
+function AuthStartupScreen() {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <div>
+        <img className="mx-auto h-16 w-16" src={`${basePath}/logo.svg`} alt="" />
+        <p className="mt-5 text-lg font-semibold text-foreground">Starting Jack…</p>
+        <p className="mt-1 text-sm text-muted-foreground">Connecting your secure session</p>
+      </div>
+    </div>
+  );
+}
+
+function AuthUnavailableScreen() {
+  useEffect(() => {
+    window.__JACK_MARK_READY__?.();
+  }, []);
+
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
+      <div className="max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl">
+        <img className="mx-auto h-14 w-14" src={`${basePath}/logo.svg`} alt="" />
+        <h1 className="mt-5 text-2xl font-semibold text-foreground">Sign-in is temporarily unavailable</h1>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Jack is still available in presentation mode while the secure session service reconnects.
+        </p>
+        <Button className="mt-6" onClick={() => window.location.assign(basePath || "/")}>Open Jack</Button>
+      </div>
+    </div>
+  );
+}
+
+function ManagedAppEntry() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+  const isProtectedAppPath =
+    window.location.pathname === `${basePath}/app` ||
+    window.location.pathname.startsWith(`${basePath}/app/`);
+
+  useEffect(() => {
+    if (authReady) return;
+    const timeout = window.setTimeout(() => setAuthTimedOut(true), AUTH_STARTUP_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [authReady]);
+
+  if (authTimedOut && !authReady) {
+    if (isProtectedAppPath) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <AppSurface />
+        </QueryClientProvider>
+      );
+    }
+    return <AuthUnavailableScreen />;
+  }
+
+  return (
+    <>
+      {!authReady && <AuthStartupScreen />}
+      <ClerkProviderWithRoutes onReady={() => setAuthReady(true)} />
+    </>
+  );
+}
+
 function App() {
   // Keep the root presentation surface free of an auth dependency, while
   // retaining the existing protected management path for contributors and
@@ -591,7 +675,7 @@ function App() {
   );
 
   if (managementPath && clerkPubKey) {
-    return <ClerkProviderWithRoutes onReady={() => {}} />;
+    return <ManagedAppEntry />;
   }
 
   return (
