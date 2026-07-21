@@ -548,7 +548,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       // Keep the current center if it still exists, else fall back to the core.
       const exists = model.nodes.some((n) => n.id === centerRef.current);
       // Polling may move nodes, but must not discard the camera the user chose.
-      recenterRef.current(exists ? centerRef.current : CORE_ID, false);
+      recenterRef.current(exists ? centerRef.current : CORE_ID, !exists);
 
       // Track edge births so new connections fade in.
       const born = edgeBornRef.current;

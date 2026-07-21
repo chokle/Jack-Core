@@ -187,6 +187,7 @@ const clerkAppearance = {
 function JackApp() {
   const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
   const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
+  const fieldNoteHandoffToken = useRef(0);
   const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -273,6 +274,8 @@ function JackApp() {
     setIsChatOpen(false);
     setResumedThought(null);
     setSelectedVideoId(null);
+    setInterviewPreload(undefined);
+    fieldNoteHandoffToken.current += 1;
     setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
     setView("interview");
   };
@@ -379,7 +382,11 @@ function JackApp() {
             onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
-          <InterviewMode key={fieldNotePreload?.title ?? "interview"} preload={interviewPreload} fieldNote={fieldNotePreload} />
+          <InterviewMode
+            key={fieldNotePreload ? `field-note-${fieldNoteHandoffToken.current}` : "interview"}
+            preload={interviewPreload}
+            fieldNote={fieldNotePreload}
+          />
         ) : view === "review" ? (
           <KnowledgeReview />
         ) : (
