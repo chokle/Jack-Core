@@ -388,6 +388,11 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
               clamp01(childIds.length / 8) * 0.4,
           );
 
+    const populated =
+      n.kind === "topic" || n.kind === "competency"
+        ? contentCount > 0
+        : true;
+
     info.set(id, {
       id,
       parentId: p,
@@ -396,7 +401,7 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
       depth: depth.get(id) ?? 0,
       strength,
       contentCount,
-      populated: contentCount > 0,
+      populated,
     });
   }
   return info;

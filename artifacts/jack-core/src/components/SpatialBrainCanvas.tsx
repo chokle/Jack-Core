@@ -289,7 +289,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     // ----- recenter: re-fan the graph around a new center -------------------
     // Reads/writes refs only, so it can be called freely from effects and the
     // imperative handle without being a dependency.
-    const recenterTo = (id: string) => {
+    const recenterTo = (id: string, resetBranchCamera = true) => {
       const m = modelRef.current;
       const info = infoRef.current;
       if (!m || m.nodes.length === 0) return;
@@ -308,7 +308,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           : buildSpatialLayout(m, id, { hierarchy: info });
       centerRef.current = layout.centerId;
 
-      if (viewModeRef.current === "branches") {
+      if (viewModeRef.current === "branches" && resetBranchCamera) {
         const zoom = sizeRef.current.w < 640 ? 0.62 : 0.82;
         camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom };
         onZoomChange(Math.round(zoom * 100));
@@ -547,7 +547,8 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
       // Keep the current center if it still exists, else fall back to the core.
       const exists = model.nodes.some((n) => n.id === centerRef.current);
-      recenterRef.current(exists ? centerRef.current : CORE_ID);
+      // Polling may move nodes, but must not discard the camera the user chose.
+      recenterRef.current(exists ? centerRef.current : CORE_ID, !exists);
 
       // Track edge births so new connections fade in.
       const born = edgeBornRef.current;

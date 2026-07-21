@@ -227,7 +227,7 @@ export function InterviewMode({
   const [trade, setTrade] = useState<string>(preloadedTrade);
   const [tradeInput, setTradeInput] = useState(preloadedTrade === "Other" ? preload?.trade ?? "" : "");
   const [years, setYears] = useState("");
-  const [specialties, setSpecialties] = useState("");
+  const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : "");
   const [region, setRegion] = useState("");
   const [background, setBackground] = useState("");
   const interviewFocus = preload

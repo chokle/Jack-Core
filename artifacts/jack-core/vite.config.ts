@@ -162,7 +162,8 @@ export default defineConfig({
       "/api/__clerk": {
         target: "https://jack.torchlabs.ca",
         changeOrigin: true,
-        cookieDomainRewrite: "127.0.0.1",
+        // Host-only cookies work for localhost, 127.0.0.1, and [::1].
+        cookieDomainRewrite: "",
         configure(proxy) {
           proxy.on("proxyReq", (proxyReq) => {
             proxyReq.setHeader("origin", "https://jack.torchlabs.ca");

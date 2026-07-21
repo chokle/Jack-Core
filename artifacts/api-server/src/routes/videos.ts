@@ -14,8 +14,7 @@ import {
   CLAIMABLE_STATUSES,
 } from "../lib/jobs.js";
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
-import { resolveIdentity } from "../lib/admin-auth.js";
-import { requireAdmin } from "../lib/admin-auth.js";
+import { requireAdmin, resolveIdentity } from "../lib/admin-auth.js";
 import { removeVideoAssets } from "../lib/video-storage.js";
 import {
   ListVideosQueryParams,

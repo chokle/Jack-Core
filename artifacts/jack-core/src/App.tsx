@@ -185,8 +185,9 @@ const clerkAppearance = {
 };
 
 function JackApp() {
-  const [interviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
+  const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
   const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
+  const fieldNoteHandoffToken = useRef(0);
   const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -211,6 +212,15 @@ function JackApp() {
       window.__JACK_MARK_READY__?.();
     }
   }, [graph.isLoading]);
+
+  // Keep the Torch handoff for the initial interview, then consume it before
+  // navigation can unmount InterviewMode. A later remount must resume the real
+  // active session instead of treating this stale handoff as a fresh interview.
+  useEffect(() => {
+    if (!interviewPreload) return;
+    if (view === "interview" && !selectedVideoId && !fieldNotePreload) return;
+    setInterviewPreload(undefined);
+  }, [fieldNotePreload, interviewPreload, selectedVideoId, view]);
 
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
@@ -264,6 +274,8 @@ function JackApp() {
     setIsChatOpen(false);
     setResumedThought(null);
     setSelectedVideoId(null);
+    setInterviewPreload(undefined);
+    fieldNoteHandoffToken.current += 1;
     setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
     setView("interview");
   };
@@ -370,7 +382,11 @@ function JackApp() {
             onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
-          <InterviewMode key={fieldNotePreload?.title ?? "interview"} preload={interviewPreload} fieldNote={fieldNotePreload} />
+          <InterviewMode
+            key={fieldNotePreload ? `field-note-${fieldNoteHandoffToken.current}` : "interview"}
+            preload={interviewPreload}
+            fieldNote={fieldNotePreload}
+          />
         ) : view === "review" ? (
           <KnowledgeReview />
         ) : (
