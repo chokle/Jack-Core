@@ -21,6 +21,7 @@ import {
   ArrowUp,
   ArrowDown,
   CornerDownLeft,
+  CircleHelp,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,6 +45,10 @@ import { SpatialBrainCanvas } from "./SpatialBrainCanvas";
 import { FloatingPanel } from "./FloatingPanel";
 import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { ParkedThoughtsList } from "./ParkedThoughts";
+import {
+  MemoryGraphOnboarding,
+  useMemoryGraphOnboarding,
+} from "./MemoryGraphOnboarding";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -180,6 +185,8 @@ export function MemoryGraphView({
   // The graph stage is the positioning context for the floating hover preview,
   // which we anchor to the hovered node and keep there as the sim drifts.
   const stageRef = useRef<HTMLDivElement>(null);
+  const onboardingConnectionsRef = useRef<HTMLDivElement>(null);
+  const onboardingGrowthRef = useRef<HTMLDivElement>(null);
   const hoverCardRef = useRef<HTMLDivElement>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -196,6 +203,7 @@ export function MemoryGraphView({
   );
   const isDesktop = useIsDesktop();
   const reducedMotion = usePrefersReducedMotion();
+  const onboarding = useMemoryGraphOnboarding();
 
   // Non-intrusive "Jack just learned…" toasts, driven by real graph deltas.
   // Keyed on delta.seq (which only advances on an actual change) so a re-render
@@ -584,6 +592,14 @@ export function MemoryGraphView({
           viewMode="branches"
         />
 
+        {/* Semantic walkthrough anchor only. It never receives input and does
+            not participate in graph rendering, layout, or simulation. */}
+        <div
+          ref={onboardingConnectionsRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-[15%] top-[24%] h-[42%]"
+        />
+
         {/* Header overlay */}
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-4 p-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="pointer-events-none">
@@ -596,14 +612,25 @@ export function MemoryGraphView({
             <p className="mt-1 font-mono text-xs text-white/55 md:hidden">
               Tap a node for details · long-press to pin
             </p>
-            <GrowthCounter
-              knowledge={model.counts.knowledge}
-              connections={model.counts.connections}
-              delta={delta}
-              reducedMotion={reducedMotion}
-            />
+            <div ref={onboardingGrowthRef} className="w-fit">
+              <GrowthCounter
+                knowledge={model.counts.knowledge}
+                connections={model.counts.connections}
+                delta={delta}
+                reducedMotion={reducedMotion}
+              />
+            </div>
           </div>
           <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onboarding.reopen}
+              aria-label="How the Memory Graph works"
+              className="inline-flex min-h-11 min-w-11 items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-3 text-xs font-semibold text-white/75 outline-none backdrop-blur transition-colors hover:border-white/20 hover:bg-black/60 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-300"
+            >
+              <CircleHelp className="h-4 w-4" aria-hidden="true" />
+              <span>How this works</span>
+            </button>
             <div className="relative min-w-[160px] flex-1 lg:flex-none">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -872,6 +899,14 @@ export function MemoryGraphView({
             <NodeDetailBody {...detailProps} />
           </FloatingPanel>
         )}
+
+        <MemoryGraphOnboarding
+          controller={onboarding}
+          stageRef={stageRef}
+          connectionTargetRef={onboardingConnectionsRef}
+          growthTargetRef={onboardingGrowthRef}
+          reducedMotion={reducedMotion}
+        />
       </div>
 
       {/* Right rail — ambient panels only; per-node detail lives in the inspector.

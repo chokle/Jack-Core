@@ -72,6 +72,55 @@ paths:
               schema:
                 $ref: "#/components/schemas/CurrentUser"
 
+  /me/preferences/memory-graph-onboarding:
+    get:
+      operationId: getMemoryGraphOnboardingPreference
+      tags: [auth]
+      summary: Read the signed-in user's Memory Graph onboarding preference
+      responses:
+        "200":
+          description: Current versioned onboarding preference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryGraphOnboardingPreferenceResponse"
+    put:
+      operationId: updateMemoryGraphOnboardingPreference
+      tags: [auth]
+      summary: Persist the signed-in user's Memory Graph onboarding preference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryGraphOnboardingPreference"
+      responses:
+        "200":
+          description: Updated onboarding preference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryGraphOnboardingPreferenceResponse"
+
+  /me/analytics/memory-graph-onboarding:
+    post:
+      operationId: trackMemoryGraphOnboardingEvent
+      tags: [auth]
+      summary: Log an allowlisted Memory Graph onboarding event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryGraphOnboardingEvent"
+      responses:
+        "202":
+          description: Event accepted for best-effort structured logging
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsEventAccepted"
+
   /videos:
     get:
       operationId: listVideos
@@ -921,6 +970,60 @@ components:
         name:
           type: ["string", "null"]
         isAdmin:
+          type: boolean
+
+    MemoryGraphOnboardingPreference:
+      type: object
+      additionalProperties: false
+      required: [version, status]
+      properties:
+        version:
+          type: integer
+          enum: [1]
+        status:
+          type: string
+          enum: [completed, skipped]
+
+    MemoryGraphOnboardingPreferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [preference]
+      properties:
+        preference:
+          oneOf:
+            - $ref: "#/components/schemas/MemoryGraphOnboardingPreference"
+            - type: "null"
+
+    MemoryGraphOnboardingEvent:
+      type: object
+      additionalProperties: false
+      required: [event, source, version]
+      properties:
+        event:
+          type: string
+          enum:
+            - memory_onboarding_started
+            - memory_onboarding_step_viewed
+            - memory_onboarding_skipped
+            - memory_onboarding_completed
+            - memory_onboarding_reopened
+        source:
+          type: string
+          enum: [automatic, replay]
+        version:
+          type: integer
+          enum: [1]
+        step:
+          type: integer
+          minimum: 1
+          maximum: 3
+
+    AnalyticsEventAccepted:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted:
           type: boolean
     HealthStatus:
       type: object

@@ -47,6 +47,52 @@ export const GetMeResponse = zod.object({
 
 
 /**
+ * @summary Read the signed-in user's Memory Graph onboarding preference
+ */
+export const GetMemoryGraphOnboardingPreferenceResponse = zod.object({
+  "preference": zod.union([zod.object({
+  "version": zod.literal(1),
+  "status": zod.enum(['completed', 'skipped'])
+}),zod.null()])
+})
+
+
+/**
+ * @summary Persist the signed-in user's Memory Graph onboarding preference
+ */
+export const UpdateMemoryGraphOnboardingPreferenceBody = zod.object({
+  "version": zod.literal(1),
+  "status": zod.enum(['completed', 'skipped'])
+})
+
+export const UpdateMemoryGraphOnboardingPreferenceResponse = zod.object({
+  "preference": zod.union([zod.object({
+  "version": zod.literal(1),
+  "status": zod.enum(['completed', 'skipped'])
+}),zod.null()])
+})
+
+
+/**
+ * @summary Log an allowlisted Memory Graph onboarding event
+ */
+export const trackMemoryGraphOnboardingEventBodyStepMax = 3;
+
+
+
+export const TrackMemoryGraphOnboardingEventBody = zod.object({
+  "event": zod.enum(['memory_onboarding_started', 'memory_onboarding_step_viewed', 'memory_onboarding_skipped', 'memory_onboarding_completed', 'memory_onboarding_reopened']),
+  "source": zod.enum(['automatic', 'replay']),
+  "version": zod.literal(1),
+  "step": zod.number().min(1).max(trackMemoryGraphOnboardingEventBodyStepMax).optional()
+})
+
+export const TrackMemoryGraphOnboardingEventResponse = zod.object({
+  "accepted": zod.boolean()
+})
+
+
+/**
  * @summary List all videos in the knowledge library
  */
 export const listVideosQueryLimitDefault = 20;

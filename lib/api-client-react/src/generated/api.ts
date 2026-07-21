@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AnalyticsEventAccepted,
   AnswerContributionList,
   CandidateResolutionConflict,
   CandidateResolutionInput,
@@ -42,6 +43,9 @@ import type {
   ListKnowledgeCandidatesParams,
   ListParkedThoughtsParams,
   ListVideosParams,
+  MemoryGraphOnboardingEvent,
+  MemoryGraphOnboardingPreference,
+  MemoryGraphOnboardingPreferenceResponse,
   MentorActiveSession,
   MentorContributionList,
   MentorList,
@@ -327,6 +331,223 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
 
 
 
+
+export const getGetMemoryGraphOnboardingPreferenceUrl = () => {
+
+
+
+
+  return `/api/me/preferences/memory-graph-onboarding`
+}
+
+/**
+ * @summary Read the signed-in user's Memory Graph onboarding preference
+ */
+export const getMemoryGraphOnboardingPreference = async ( options?: RequestInit): Promise<MemoryGraphOnboardingPreferenceResponse> => {
+
+  return customFetch<MemoryGraphOnboardingPreferenceResponse>(getGetMemoryGraphOnboardingPreferenceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMemoryGraphOnboardingPreferenceQueryKey = () => {
+    return [
+    `/api/me/preferences/memory-graph-onboarding`
+    ] as const;
+    }
+
+
+export const getGetMemoryGraphOnboardingPreferenceQueryOptions = <TData = Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMemoryGraphOnboardingPreferenceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>> = ({ signal }) => getMemoryGraphOnboardingPreference({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMemoryGraphOnboardingPreferenceQueryResult = NonNullable<Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>>
+export type GetMemoryGraphOnboardingPreferenceQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the signed-in user's Memory Graph onboarding preference
+ */
+
+export function useGetMemoryGraphOnboardingPreference<TData = Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMemoryGraphOnboardingPreference>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMemoryGraphOnboardingPreferenceQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateMemoryGraphOnboardingPreferenceUrl = () => {
+
+
+
+
+  return `/api/me/preferences/memory-graph-onboarding`
+}
+
+/**
+ * @summary Persist the signed-in user's Memory Graph onboarding preference
+ */
+export const updateMemoryGraphOnboardingPreference = async (memoryGraphOnboardingPreference: MemoryGraphOnboardingPreference, options?: RequestInit): Promise<MemoryGraphOnboardingPreferenceResponse> => {
+
+  return customFetch<MemoryGraphOnboardingPreferenceResponse>(getUpdateMemoryGraphOnboardingPreferenceUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memoryGraphOnboardingPreference)
+  }
+);}
+
+
+
+
+export const getUpdateMemoryGraphOnboardingPreferenceMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>, TError,{data: BodyType<MemoryGraphOnboardingPreference>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>, TError,{data: BodyType<MemoryGraphOnboardingPreference>}, TContext> => {
+
+const mutationKey = ['updateMemoryGraphOnboardingPreference'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>, {data: BodyType<MemoryGraphOnboardingPreference>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateMemoryGraphOnboardingPreference(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateMemoryGraphOnboardingPreferenceMutationResult = NonNullable<Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>>
+    export type UpdateMemoryGraphOnboardingPreferenceMutationBody = BodyType<MemoryGraphOnboardingPreference>
+    export type UpdateMemoryGraphOnboardingPreferenceMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Persist the signed-in user's Memory Graph onboarding preference
+ */
+export const useUpdateMemoryGraphOnboardingPreference = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>, TError,{data: BodyType<MemoryGraphOnboardingPreference>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateMemoryGraphOnboardingPreference>>,
+        TError,
+        {data: BodyType<MemoryGraphOnboardingPreference>},
+        TContext
+      > => {
+      return useMutation(getUpdateMemoryGraphOnboardingPreferenceMutationOptions(options));
+    }
+
+export const getTrackMemoryGraphOnboardingEventUrl = () => {
+
+
+
+
+  return `/api/me/analytics/memory-graph-onboarding`
+}
+
+/**
+ * @summary Log an allowlisted Memory Graph onboarding event
+ */
+export const trackMemoryGraphOnboardingEvent = async (memoryGraphOnboardingEvent: MemoryGraphOnboardingEvent, options?: RequestInit): Promise<AnalyticsEventAccepted> => {
+
+  return customFetch<AnalyticsEventAccepted>(getTrackMemoryGraphOnboardingEventUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memoryGraphOnboardingEvent)
+  }
+);}
+
+
+
+
+export const getTrackMemoryGraphOnboardingEventMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>, TError,{data: BodyType<MemoryGraphOnboardingEvent>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>, TError,{data: BodyType<MemoryGraphOnboardingEvent>}, TContext> => {
+
+const mutationKey = ['trackMemoryGraphOnboardingEvent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>, {data: BodyType<MemoryGraphOnboardingEvent>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  trackMemoryGraphOnboardingEvent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TrackMemoryGraphOnboardingEventMutationResult = NonNullable<Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>>
+    export type TrackMemoryGraphOnboardingEventMutationBody = BodyType<MemoryGraphOnboardingEvent>
+    export type TrackMemoryGraphOnboardingEventMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Log an allowlisted Memory Graph onboarding event
+ */
+export const useTrackMemoryGraphOnboardingEvent = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>, TError,{data: BodyType<MemoryGraphOnboardingEvent>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof trackMemoryGraphOnboardingEvent>>,
+        TError,
+        {data: BodyType<MemoryGraphOnboardingEvent>},
+        TContext
+      > => {
+      return useMutation(getTrackMemoryGraphOnboardingEventMutationOptions(options));
+    }
 
 export const getListVideosUrl = (params?: ListVideosParams,) => {
   const normalizedParams = new URLSearchParams();

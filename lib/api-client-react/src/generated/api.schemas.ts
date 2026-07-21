@@ -14,6 +14,71 @@ export interface CurrentUser {
   isAdmin: boolean;
 }
 
+export type MemoryGraphOnboardingPreferenceVersion = typeof MemoryGraphOnboardingPreferenceVersion[keyof typeof MemoryGraphOnboardingPreferenceVersion];
+
+
+export const MemoryGraphOnboardingPreferenceVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type MemoryGraphOnboardingPreferenceStatus = typeof MemoryGraphOnboardingPreferenceStatus[keyof typeof MemoryGraphOnboardingPreferenceStatus];
+
+
+export const MemoryGraphOnboardingPreferenceStatus = {
+  completed: 'completed',
+  skipped: 'skipped',
+} as const;
+
+export interface MemoryGraphOnboardingPreference {
+  version: MemoryGraphOnboardingPreferenceVersion;
+  status: MemoryGraphOnboardingPreferenceStatus;
+}
+
+export interface MemoryGraphOnboardingPreferenceResponse {
+  preference: MemoryGraphOnboardingPreference | null;
+}
+
+export type MemoryGraphOnboardingEventEvent = typeof MemoryGraphOnboardingEventEvent[keyof typeof MemoryGraphOnboardingEventEvent];
+
+
+export const MemoryGraphOnboardingEventEvent = {
+  memory_onboarding_started: 'memory_onboarding_started',
+  memory_onboarding_step_viewed: 'memory_onboarding_step_viewed',
+  memory_onboarding_skipped: 'memory_onboarding_skipped',
+  memory_onboarding_completed: 'memory_onboarding_completed',
+  memory_onboarding_reopened: 'memory_onboarding_reopened',
+} as const;
+
+export type MemoryGraphOnboardingEventSource = typeof MemoryGraphOnboardingEventSource[keyof typeof MemoryGraphOnboardingEventSource];
+
+
+export const MemoryGraphOnboardingEventSource = {
+  automatic: 'automatic',
+  replay: 'replay',
+} as const;
+
+export type MemoryGraphOnboardingEventVersion = typeof MemoryGraphOnboardingEventVersion[keyof typeof MemoryGraphOnboardingEventVersion];
+
+
+export const MemoryGraphOnboardingEventVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export interface MemoryGraphOnboardingEvent {
+  event: MemoryGraphOnboardingEventEvent;
+  source: MemoryGraphOnboardingEventSource;
+  version: MemoryGraphOnboardingEventVersion;
+  /**
+     * @minimum 1
+     * @maximum 3
+     */
+  step?: number;
+}
+
+export interface AnalyticsEventAccepted {
+  accepted: boolean;
+}
+
 export interface HealthStatus {
   status: string;
 }
