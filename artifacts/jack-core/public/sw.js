@@ -11,7 +11,11 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      Promise.all(
+        keys
+          .filter((key) => key.startsWith("jack-shell-") && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      )
     )
   );
   self.clients.claim();
@@ -19,5 +23,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.mode !== "navigate") return;
-  event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE_URL)));
+  event.respondWith(
+    fetch(event.request).catch(async () => {
+      const offline = await caches.match(OFFLINE_URL);
+      return offline ?? new Response("Jack is offline. Reconnect and try again.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    })
+  );
 });

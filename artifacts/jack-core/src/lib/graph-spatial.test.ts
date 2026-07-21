@@ -172,6 +172,12 @@ describe("buildHierarchy", () => {
     expect(welder.populated).toBe(true);
   });
 
+  it("keeps captured leaf memories populated even when they have no children", () => {
+    expect(info.get("video:v1")?.childIds).toHaveLength(0);
+    expect(info.get("video:v1")?.populated).toBe(true);
+    expect(info.get("video:v2")?.populated).toBe(true);
+  });
+
   it("keeps parent/child relationships mutually consistent", () => {
     for (const node of info.values()) {
       for (const child of node.childIds) {

@@ -185,7 +185,7 @@ const clerkAppearance = {
 };
 
 function JackApp() {
-  const [interviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
+  const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
   const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
   const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
@@ -211,6 +211,15 @@ function JackApp() {
       window.__JACK_MARK_READY__?.();
     }
   }, [graph.isLoading]);
+
+  // Keep the Torch handoff for the initial interview, then consume it before
+  // navigation can unmount InterviewMode. A later remount must resume the real
+  // active session instead of treating this stale handoff as a fresh interview.
+  useEffect(() => {
+    if (!interviewPreload) return;
+    if (view === "interview" && !selectedVideoId && !fieldNotePreload) return;
+    setInterviewPreload(undefined);
+  }, [fieldNotePreload, interviewPreload, selectedVideoId, view]);
 
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens

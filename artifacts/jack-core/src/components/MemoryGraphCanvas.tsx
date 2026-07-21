@@ -349,33 +349,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         adj.get(e.b)!.add(e.a);
       }
       adjacencyRef.current = adj;
-
-      // Derive the neural-flow topology from the LIVE graph (never hardcoded to
-      // specific trades): hubs are the topic cluster-heads bridged to the core,
-      // and a hub's members are its non-core, non-topic neighbors. New clusters
-      // therefore light up automatically as the graph grows.
-      const topicIds = new Set(model.topics.map((t) => t.id));
-      const coreNeighbors = adj.get(CORE_ID);
-      const hubIds: string[] = [];
-      const membersByHub: Record<string, string[]> = {};
-      for (const t of model.topics) {
-        if (!coreNeighbors?.has(t.id)) continue;
-        const hub = map.get(t.id);
-        if (!hub?.populated) continue;
-        hubIds.push(t.id);
-        const members: string[] = [];
-        for (const nb of adj.get(t.id) ?? []) {
-          if (nb === CORE_ID || topicIds.has(nb)) continue;
-          if (!map.get(nb)?.populated) continue;
-          members.push(nb);
-        }
-        membersByHub[t.id] = members;
-      }
-      pulseCtrlRef.current?.setTopology({
-        coreId: CORE_ID,
-        hubIds,
-        membersByHub,
-      });
+      const map = nodesRef.current;
 
       // Measure the canvas directly so layout is correct even when we mount
       // with already-cached data (before the ResizeObserver first fires).

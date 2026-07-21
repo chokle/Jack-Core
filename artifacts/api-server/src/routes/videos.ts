@@ -14,8 +14,7 @@ import {
   CLAIMABLE_STATUSES,
 } from "../lib/jobs.js";
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
-import { resolveIdentity } from "../lib/admin-auth.js";
-import { requireAdmin } from "../lib/admin-auth.js";
+import { requireAdmin, resolveIdentity } from "../lib/admin-auth.js";
 import { removeVideoAssets } from "../lib/video-storage.js";
 import {
   ListVideosQueryParams,
@@ -67,26 +66,6 @@ function toVideoResponse(v: Record<string, unknown>) {
 
 function normalizeDuplicateValue(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, " ") : "";
-}
-
-async function canProcessVideo(videoId: string, req: Request) {
-  const identity = await resolveIdentity(req);
-  const userId = identity?.userId ?? req.userId;
-  if (!userId) return { ok: false as const, status: 401, error: "Unauthorized" };
-  if (identity?.isAdmin) return { ok: true as const };
-
-  const { data, error } = await supabase
-    .from("videos")
-    .select("uploader_user_id")
-    .eq("id", videoId)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) return { ok: false as const, status: 404, error: "Video not found" };
-  if (data["uploader_user_id"] !== userId) {
-    return { ok: false as const, status: 403, error: "Only the uploader can process this video." };
-  }
-  return { ok: true as const };
 }
 
 async function canProcessVideo(videoId: string, req: Request) {
