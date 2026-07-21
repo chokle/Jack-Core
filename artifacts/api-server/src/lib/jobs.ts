@@ -29,6 +29,7 @@ import { logger } from "./logger.js";
 import { transcribeFromUrl } from "./transcription.js";
 import { syncVideoGraph, removeVideoGraph, verifyAndRecordGraphWrite } from "./memory-graph.js";
 import { runDistillation } from "./distillation.js";
+import { JACK_CORE_SYSTEM_MAP_BRIEF } from "./system-map.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -313,7 +314,7 @@ async function stageAnalyze(videoId: string): Promise<void> {
     messages: [
       {
         role: "system",
-        content: `You are Jack — an AI assistant specialized in skilled trades training and Red Seal certification. Analyze training video transcripts and map them to Red Seal competencies.\n\nAvailable Red Seal competencies:\n${competencyContext}`,
+        content: `You are Jack Core's Library Analysis Engine, one working part of Torch's shared intelligence system. Analyze training video transcripts and map them to Red Seal competencies.\n\n${JACK_CORE_SYSTEM_MAP_BRIEF}\n\nAvailable Red Seal competencies:\n${competencyContext}`,
       },
       {
         role: "user",

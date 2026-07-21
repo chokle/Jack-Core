@@ -136,7 +136,18 @@ paths:
           in: query
           schema:
             type: string
-            enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
+            enum:
+              [
+                queued,
+                uploading,
+                uploaded,
+                transcribing,
+                analyzing,
+                indexing,
+                completed,
+                failed,
+                retrying,
+              ]
           description: Filter by processing status
         - name: limit
           in: query
@@ -635,11 +646,24 @@ paths:
         "401":
           description: Admin session required
 
+  /interview/profile:
+    get:
+      operationId: getInterviewProfile
+      tags: [interview]
+      summary: Get the signed-in contributor's saved interview profile
+      responses:
+        "200":
+          description: The account-bound profile, omitted when the contributor has not completed intake yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentInterviewProfile"
+
   /interview/sessions:
     post:
       operationId: startInterview
       tags: [interview]
-      summary: Create a mentor profile and start an interview session
+      summary: Save the contributor's profile and start an interview session
       requestBody:
         required: true
         content:
@@ -1050,7 +1074,15 @@ components:
           enum: [green, purple, orange, red]
         status:
           type: string
-          enum: [Healthy, Listening, Searching Memory, Reasoning, Writing Memory, Warning]
+          enum:
+            [
+              Healthy,
+              Listening,
+              Searching Memory,
+              Reasoning,
+              Writing Memory,
+              Warning,
+            ]
         state:
           type: string
           enum: [idle, listening, searching, reasoning, writing, error]
@@ -1075,7 +1107,18 @@ components:
           type: ["number", "null"]
         status:
           type: string
-          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
+          enum:
+            [
+              queued,
+              uploading,
+              uploaded,
+              transcribing,
+              analyzing,
+              indexing,
+              completed,
+              failed,
+              retrying,
+            ]
         competencyCodes:
           type: array
           items:
@@ -1113,7 +1156,18 @@ components:
           type: ["number", "null"]
         status:
           type: string
-          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
+          enum:
+            [
+              queued,
+              uploading,
+              uploaded,
+              transcribing,
+              analyzing,
+              indexing,
+              completed,
+              failed,
+              retrying,
+            ]
         competencyCodes:
           type: array
           items:
@@ -1186,7 +1240,18 @@ components:
             type: string
         status:
           type: string
-          enum: [queued, uploading, uploaded, transcribing, analyzing, indexing, completed, failed, retrying]
+          enum:
+            [
+              queued,
+              uploading,
+              uploaded,
+              transcribing,
+              analyzing,
+              indexing,
+              completed,
+              failed,
+              retrying,
+            ]
 
     VideoStats:
       type: object
@@ -1299,7 +1364,7 @@ components:
 
     ChatResponse:
       type: object
-      required: [answer, citations]
+      required: [answer, citations, learning]
       properties:
         answer:
           type: string
@@ -1309,6 +1374,18 @@ components:
             $ref: "#/components/schemas/Citation"
         usedInternalKnowledge:
           type: boolean
+        learning:
+          type: object
+          required: [status, extractedCount]
+          properties:
+            status:
+              type: string
+              enum: [verified, discarded, failed]
+            extractedCount:
+              type: integer
+              minimum: 0
+            summary:
+              type: string
 
     Citation:
       type: object
@@ -1431,7 +1508,17 @@ components:
     KnowledgeNode:
       type: object
       required:
-        [id, kind, label, description, confidence, verificationStatus, meta, createdAt, updatedAt]
+        [
+          id,
+          kind,
+          label,
+          description,
+          confidence,
+          verificationStatus,
+          meta,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id:
           type: string
@@ -1549,6 +1636,12 @@ components:
         createdAt:
           type: string
 
+    CurrentInterviewProfile:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/MentorProfile"
+
     StartInterviewInput:
       type: object
       required: [name, trade]
@@ -1572,6 +1665,9 @@ components:
           type: ["string", "null"]
         background:
           type: ["string", "null"]
+        focus:
+          type: ["string", "null"]
+          description: Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
 
     SubmitAnswerInput:
       type: object
@@ -1584,7 +1680,15 @@ components:
     InterviewSession:
       type: object
       required:
-        [id, mentorProfileId, mentorName, status, questionCount, complete, createdAt]
+        [
+          id,
+          mentorProfileId,
+          mentorName,
+          status,
+          questionCount,
+          complete,
+          createdAt,
+        ]
       properties:
         id:
           type: string
@@ -1831,7 +1935,14 @@ components:
     MentorContribution:
       type: object
       required:
-        [mentorProfileId, conceptsCreated, conceptsReinforced, accepted, rejected, pending]
+        [
+          mentorProfileId,
+          conceptsCreated,
+          conceptsReinforced,
+          accepted,
+          rejected,
+          pending,
+        ]
       properties:
         mentorProfileId:
           type: string
@@ -1868,7 +1979,15 @@ components:
 
     AnswerContribution:
       type: object
-      required: [answerId, confidence, mentorProfileId, mentorName, question, answerExcerpt]
+      required:
+        [
+          answerId,
+          confidence,
+          mentorProfileId,
+          mentorName,
+          question,
+          answerExcerpt,
+        ]
       properties:
         answerId:
           type: string
@@ -1946,7 +2065,13 @@ components:
     MentorWithdrawalResult:
       type: object
       required:
-        [mentorProfileId, conceptsRetained, conceptsArchived, candidatesDeleted, candidatesScrubbed]
+        [
+          mentorProfileId,
+          conceptsRetained,
+          conceptsArchived,
+          candidatesDeleted,
+          candidatesScrubbed,
+        ]
       properties:
         mentorProfileId:
           type: string
@@ -2043,7 +2168,13 @@ components:
     GraphWriteChecks:
       type: object
       required:
-        [nodesExist, edgesExist, provenanceStored, confidenceUpdated, searchIndexUpdated]
+        [
+          nodesExist,
+          edgesExist,
+          provenanceStored,
+          confidenceUpdated,
+          searchIndexUpdated,
+        ]
       properties:
         nodesExist:
           $ref: "#/components/schemas/WriteCheck"

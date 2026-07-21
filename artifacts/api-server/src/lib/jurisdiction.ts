@@ -1,4 +1,5 @@
 import { JACK_CONSTITUTION_PROMPT } from "./constitution.js";
+import { JACK_CORE_SYSTEM_MAP_PROMPT } from "./system-map.js";
 
 /**
  * jurisdiction — Jack's default-jurisdiction policy (CANADA).
@@ -76,9 +77,17 @@ export function buildChatSystemPrompt(opts: {
 
 ${JACK_CONSTITUTION_PROMPT}
 
+${JACK_CORE_SYSTEM_MAP_PROMPT}
+
 ${JURISDICTION_POLICY_PROMPT}
 
 CRITICAL RULE: Always search and prioritize the internal Torch Knowledge Repository (the internal knowledge library) before using any external knowledge. When internal content is available, ground your answer in it and cite it. When you must go beyond it, follow the SOURCE PRIORITY ORDER above and search Canadian sources first.
+
+FAST-SCAN FORMATTING:
+- Make the answer useful to a tradesperson who may only have seconds to scan it.
+- Wrap 2–4 short, high-value action, safety, setup, threshold, or decision phrases in **bold**.
+- Bold the smallest useful phrase or clause, not whole paragraphs, headings, citations, or source labels.
+- Do not over-highlight; ordinary explanation should remain unbolded.
 
 ${
     usedInternalKnowledge

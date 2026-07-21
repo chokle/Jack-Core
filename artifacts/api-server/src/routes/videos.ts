@@ -16,6 +16,7 @@ import {
 import { aiPipelineLimiter, ingestLimiter } from "../lib/rate-limit.js";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { requireAdmin } from "../lib/admin-auth.js";
+import { removeVideoAssets } from "../lib/video-storage.js";
 import {
   ListVideosQueryParams,
   CreateVideoBody,
@@ -68,28 +69,24 @@ function normalizeDuplicateValue(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, " ") : "";
 }
 
-async function getDuplicateEligibility(video: Record<string, unknown>, userId?: string | null) {
-  const uploaderUserId = typeof video["uploader_user_id"] === "string" ? video["uploader_user_id"] : "";
-  const title = normalizeDuplicateValue(video["title"]);
-  const trade = normalizeDuplicateValue(video["trade"]);
-
-  if (!userId || !uploaderUserId || userId !== uploaderUserId || !title) {
-    return { duplicateCount: 0, canDeleteDuplicate: false };
-  }
+async function canProcessVideo(videoId: string, req: Request) {
+  const identity = await resolveIdentity(req);
+  const userId = identity?.userId ?? req.userId;
+  if (!userId) return { ok: false as const, status: 401, error: "Unauthorized" };
+  if (identity?.isAdmin) return { ok: true as const };
 
   const { data, error } = await supabase
     .from("videos")
-    .select("id, title, trade")
-    .eq("uploader_user_id", uploaderUserId);
+    .select("uploader_user_id")
+    .eq("id", videoId)
+    .maybeSingle();
 
   if (error) throw error;
-
-  const duplicateCount = (data ?? []).filter((row: Record<string, unknown>) => (
-    normalizeDuplicateValue(row["title"]) === title &&
-    normalizeDuplicateValue(row["trade"]) === trade
-  )).length;
-
-  return { duplicateCount, canDeleteDuplicate: duplicateCount > 1 };
+  if (!data) return { ok: false as const, status: 404, error: "Video not found" };
+  if (data["uploader_user_id"] !== userId) {
+    return { ok: false as const, status: 403, error: "Only the uploader can process this video." };
+  }
+  return { ok: true as const };
 }
 
 async function canProcessVideo(videoId: string, req: Request) {
@@ -519,8 +516,6 @@ router.get("/videos/:id", async (req, res) => {
       text: s["text"],
       confidence: s["confidence"] ?? null,
     }));
-    const duplicateEligibility = await getDuplicateEligibility(data, req.userId);
-
     return res.json({
       id: data.id,
       title: data.title,
@@ -540,8 +535,8 @@ router.get("/videos/:id", async (req, res) => {
       uploaderUserId: data.uploader_user_id ?? null,
       uploaderEmail: data.uploader_email ?? null,
       uploaderName: data.uploader_name ?? null,
-      duplicateCount: duplicateEligibility.duplicateCount,
-      canDeleteDuplicate: duplicateEligibility.canDeleteDuplicate,
+      duplicateCount: 0,
+      canDeleteDuplicate: data.uploader_user_id === req.userId,
       segments,
       createdAt: data.created_at,
       updatedAt: data.updated_at ?? null,
@@ -628,22 +623,20 @@ router.delete("/videos/:id", aiPipelineLimiter, async (req, res) => {
 
     const { data: video, error: readError } = await supabase
       .from("videos")
-      .select("id, title, trade, uploader_user_id")
+      .select("id, title, trade, uploader_user_id, video_url, thumbnail_url")
       .eq("id", parsed.data.id)
       .maybeSingle();
 
     if (readError) throw readError;
     if (!video) return res.status(404).json({ error: "Video not found" });
 
-    if (!identity?.isAdmin) {
-      const duplicateEligibility = await getDuplicateEligibility(video, userId);
-      if (!duplicateEligibility.canDeleteDuplicate) {
+    if (!identity?.isAdmin && video.uploader_user_id !== userId) {
         return res.status(403).json({
-          error: "Only duplicate videos uploaded by your own account can be removed.",
+          error: "Only videos uploaded by your own account can be removed.",
         });
-      }
     }
 
+    await removeVideoAssets([video as Record<string, unknown>]);
     const { error } = await supabase.from("videos").delete().eq("id", parsed.data.id);
     if (error) throw error;
 

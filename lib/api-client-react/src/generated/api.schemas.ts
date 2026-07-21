@@ -324,6 +324,22 @@ export interface ChatInput {
   message: string;
 }
 
+export type ChatResponseLearningStatus = typeof ChatResponseLearningStatus[keyof typeof ChatResponseLearningStatus];
+
+
+export const ChatResponseLearningStatus = {
+  verified: 'verified',
+  discarded: 'discarded',
+  failed: 'failed',
+} as const;
+
+export type ChatResponseLearning = {
+  status: ChatResponseLearningStatus;
+  /** @minimum 0 */
+  extractedCount: number;
+  summary?: string;
+};
+
 /**
  * Origin of the citation. "video" (the default when omitted) cites a transcript segment. "knowledge" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).
  */
@@ -360,6 +376,7 @@ export interface ChatResponse {
   answer: string;
   citations: Citation[];
   usedInternalKnowledge?: boolean;
+  learning: ChatResponseLearning;
 }
 
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
@@ -502,6 +519,10 @@ export interface MentorProfile {
   createdAt: string;
 }
 
+export interface CurrentInterviewProfile {
+  profile?: MentorProfile;
+}
+
 export interface StartInterviewInput {
   /** The mentor's name */
   name: string;
@@ -519,6 +540,11 @@ export interface StartInterviewInput {
   region?: string | null;
   /** @nullable */
   background?: string | null;
+  /**
+     * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
+     * @nullable
+     */
+  focus?: string | null;
 }
 
 export interface SubmitAnswerInput {

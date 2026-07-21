@@ -1,9 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPulseTopology,
   MemoryGraphPulseController,
   pulseSegment,
   type PulseTopology,
 } from "./memory-graph-pulse";
+
+describe("buildPulseTopology", () => {
+  it("routes each populated trade hub into its current populated sub-nodes", () => {
+    const topology = buildPulseTopology(
+      "core",
+      ["trade:welder", "trade:empty"],
+      [
+        { a: "core", b: "trade:welder" },
+        { a: "core", b: "trade:empty" },
+        { a: "trade:welder", b: "procedure:cutting" },
+        { a: "trade:welder", b: "concept:heat" },
+        { a: "trade:welder", b: "placeholder:missing" },
+      ],
+      new Set([
+        "core",
+        "trade:welder",
+        "procedure:cutting",
+        "concept:heat",
+      ]),
+    );
+
+    expect(topology).toEqual({
+      coreId: "core",
+      hubIds: ["trade:welder"],
+      membersByHub: {
+        "trade:welder": ["procedure:cutting", "concept:heat"],
+      },
+    });
+  });
+});
 
 const TOPOLOGY: PulseTopology = {
   coreId: "core",

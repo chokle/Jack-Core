@@ -49,6 +49,53 @@ export interface PulseTopology {
   membersByHub: Record<string, string[]>;
 }
 
+/** Minimal edge shape needed to derive the firing routes from the live graph. */
+export interface PulseTopologyEdge {
+  a: string;
+  b: string;
+}
+
+/**
+ * Build Core → trade → sub-node routes from the current graph snapshot.
+ *
+ * The populated ids come from the model being rendered, not the previous
+ * canvas-node cache. That distinction matters on the first graph load: the
+ * trade hubs and their children are created in the same render pass, so reading
+ * the old cache would leave every hub with an empty fan-out until another poll.
+ */
+export function buildPulseTopology(
+  coreId: string,
+  topicIds: readonly string[],
+  edges: readonly PulseTopologyEdge[],
+  populatedNodeIds: ReadonlySet<string>,
+): PulseTopology {
+  const adjacency = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.a)) adjacency.set(edge.a, new Set());
+    if (!adjacency.has(edge.b)) adjacency.set(edge.b, new Set());
+    adjacency.get(edge.a)!.add(edge.b);
+    adjacency.get(edge.b)!.add(edge.a);
+  }
+
+  const topicIdSet = new Set(topicIds);
+  const coreNeighbors = adjacency.get(coreId);
+  const hubIds: string[] = [];
+  const membersByHub: Record<string, string[]> = {};
+
+  for (const topicId of topicIds) {
+    if (!coreNeighbors?.has(topicId) || !populatedNodeIds.has(topicId)) continue;
+    hubIds.push(topicId);
+    membersByHub[topicId] = [...(adjacency.get(topicId) ?? [])].filter(
+      (nodeId) =>
+        nodeId !== coreId &&
+        !topicIdSet.has(nodeId) &&
+        populatedNodeIds.has(nodeId),
+    );
+  }
+
+  return { coreId, hubIds, membersByHub };
+}
+
 export interface PulseControllerOptions {
   /** Min seconds between neural events. */
   minIntervalSec?: number;

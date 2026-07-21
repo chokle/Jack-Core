@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { SignIn, SignUp, Show, useClerk } from "@clerk/react";
-import {
-  InternalClerkProvider as ClerkProvider,
-  publishableKeyFromHost,
-} from "@clerk/react/internal";
+import { AuthenticateWithRedirectCallback, SignUp, Show, useAuth, useClerk } from "@clerk/react";
+import { InternalClerkProvider as ClerkProvider } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
 import {
@@ -13,9 +10,22 @@ import {
 } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { EmailCodeSignIn } from "@/components/EmailCodeSignIn";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
-import { InterviewMode, type TorchInterviewPreload } from "./components/InterviewMode";
+import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
 import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
@@ -30,7 +40,7 @@ import {
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
-import { useGetMe, type ParkedThought } from "@workspace/api-client-react";
+import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -39,17 +49,16 @@ const isLocalClerkHost =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1" ||
   window.location.hostname === "[::1]";
+const isRailwayPreviewHost = window.location.hostname.endsWith(".up.railway.app");
+const useDirectClerkAssets = isLocalClerkHost || isRailwayPreviewHost;
 
 // Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
 // publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
 // Deployed hosts still use host-aware resolution for Torch's custom domains.
-const clerkPubKey = isLocalClerkHost
-  ? configuredClerkPubKey
-  : publishableKeyFromHost(window.location.hostname, configuredClerkPubKey);
+const clerkPubKey = configuredClerkPubKey;
 
-// Auth proxying caused rate-limit/OAuth fragility on custom domains. Keep it
-// opt-in only; the normal production path sends browser auth traffic directly
-// to Clerk.
+// Production auth can be routed through Jack's same-origin server proxy so
+// privacy tools and restrictive networks do not need direct Clerk FAPI access.
 const clerkProxyUrl =
   isLocalClerkHost
     ? `${window.location.origin}/api/__clerk`
@@ -57,15 +66,16 @@ const clerkProxyUrl =
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
-const localClerkJsUrl = isLocalClerkHost
+const localClerkJsUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
-  : undefined;
-const localClerkUiUrl = isLocalClerkHost
+  : `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`;
+const localClerkUiUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : undefined;
+  : `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
+const AUTH_STARTUP_TIMEOUT_MS = 6_000;
 
 function captureTorchInterviewHandoff() {
   const params = new URLSearchParams(window.location.search);
@@ -176,10 +186,16 @@ const clerkAppearance = {
 
 function JackApp() {
   const [interviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
+  const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
   const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
+  const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [accountDeleteError, setAccountDeleteError] = useState<string | null>(null);
   // Set when the drawer is opened via "Resume" on a parked chat thought — shows
   // a reorientation banner atop the conversation. Cleared on close so the next
   // plain "Ask Jack" open (no resume) doesn't show a stale banner.
@@ -189,6 +205,12 @@ function JackApp() {
   const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
 
   const graph = useMemoryGraphData();
+
+  useEffect(() => {
+    if (!graph.isLoading) {
+      window.__JACK_MARK_READY__?.();
+    }
+  }, [graph.isLoading]);
 
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
@@ -205,9 +227,11 @@ function JackApp() {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  const { signOut } = useClerk();
-  const userLabel = me?.name ?? me?.email ?? "Account";
-  const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
+  // Jack also runs in public presentation mode, outside ClerkProvider. The
+  // current-user response is only populated for an authenticated session.
+  const isSignedIn = Boolean(me);
+  const userLabel = me?.name ?? "Presentation Mode";
+  const userSubLabel = "Demo access";
 
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
@@ -232,7 +256,33 @@ function JackApp() {
 
   const handleNavigate = (next: JackView) => {
     setSelectedVideoId(null);
+    setFieldNotePreload(undefined);
     setView(next);
+  };
+
+  const handleFieldNoteClick = (citation: Citation) => {
+    setIsChatOpen(false);
+    setResumedThought(null);
+    setSelectedVideoId(null);
+    setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
+    setView("interview");
+  };
+
+  const deleteAccount = async () => {
+    if (deletePhrase !== "DELETE" || deletingAccount) return;
+    setDeletingAccount(true);
+    setAccountDeleteError(null);
+    try {
+      const response = await fetch("/api/account", { method: "DELETE", credentials: "include" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not delete your account.");
+      }
+      window.location.assign("/api/auth/reset-session");
+    } catch (error) {
+      setAccountDeleteError(error instanceof Error ? error.message : "Could not delete your account.");
+      setDeletingAccount(false);
+    }
   };
 
   const handleCitationClick = (videoId: string, startTime: number) => {
@@ -291,9 +341,17 @@ function JackApp() {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
-        onSignOut={() => void signOut({ redirectUrl: basePath || "/" })}
-        onStartUserTest={handleStartUserTest}
-        userTestingRequired={testingGate.restricted}
+        onOpenSettings={() => {
+          if (isSignedIn) {
+            setAccountSettingsOpen(true);
+            return;
+          }
+          // The public demo deliberately has no identity. Send contributors to
+          // the isolated Clerk flow rather than leaving a dead settings item.
+          window.location.assign(`${basePath}/sign-in`);
+        }}
+        onStartUserTest={undefined}
+        userTestingRequired={false}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -312,7 +370,7 @@ function JackApp() {
             onStartInterview={() => handleNavigate("interview")}
           />
         ) : view === "interview" ? (
-          <InterviewMode preload={interviewPreload} />
+          <InterviewMode key={fieldNotePreload?.title ?? "interview"} preload={interviewPreload} fieldNote={fieldNotePreload} />
         ) : view === "review" ? (
           <KnowledgeReview />
         ) : (
@@ -321,7 +379,7 @@ function JackApp() {
       </JackShell>
 
       <UserTestingGate
-        open={testingGate.restricted && !testingGate.accepted}
+        open={false}
         onStart={handleStartUserTest}
       />
 
@@ -335,9 +393,48 @@ function JackApp() {
         resumedThought={resumedThought ?? undefined}
         initialContext={chatContext}
         onCitationClick={handleCitationClick}
+        onFieldNoteClick={handleFieldNoteClick}
       />
 
-      <TestingOverlay ref={testingOverlayRef} autoPrompt onEvent={handleTestingEvent} />
+      <TestingOverlay ref={testingOverlayRef} autoPrompt={false} onEvent={handleTestingEvent} />
+
+      <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Account & privacy</AlertDialogTitle>
+            <AlertDialogDescription>
+              You control your participation. You can remove videos you uploaded from the Library, or permanently delete your account and its associated Jack data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-4">
+            <p className="font-semibold text-destructive">Delete account</p>
+            <p className="mt-1 text-sm text-muted-foreground">This removes your sign-in, uploaded videos, interviews, chat history, parked thoughts, and test recordings. It cannot be undone.</p>
+            <Button className="mt-3" variant="destructive" onClick={() => { setAccountDeleteError(null); setDeletePhrase(""); setAccountDeleteOpen(true); }}>
+              Delete my account
+            </Button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setAccountSettingsOpen(false)}>Done</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={accountDeleteOpen} onOpenChange={setAccountDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete your account?</AlertDialogTitle>
+            <AlertDialogDescription>Type DELETE to confirm. This cannot be reversed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input value={deletePhrase} onChange={(event) => setDeletePhrase(event.target.value)} placeholder="Type DELETE" aria-label="Account deletion confirmation" autoComplete="off" />
+          {accountDeleteError && <p className="text-sm text-destructive">{accountDeleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAccount}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={deletePhrase !== "DELETE" || deletingAccount} onClick={(event) => { event.preventDefault(); void deleteAccount(); }}>
+              {deletingAccount ? "Deleting..." : "Delete account"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -353,16 +450,21 @@ function AppSurface() {
   );
 }
 
+function StartupReady() {
+  useEffect(() => {
+    window.__JACK_MARK_READY__?.();
+  }, []);
+  return null;
+}
+
 function SignInPage() {
+  if (window.location.pathname.endsWith("/sso-callback")) {
+    return <AuthenticateWithRedirectCallback />;
+  }
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      {/* path must be the full browser path — Clerk reads window.location.pathname directly */}
-      <SignIn
-        routing="path"
-        path={`${basePath}/sign-in`}
-        signUpUrl={`${basePath}/sign-up`}
-        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
-      />
+      <StartupReady />
+      <EmailCodeSignIn />
     </div>
   );
 }
@@ -370,11 +472,12 @@ function SignInPage() {
 function SignUpPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
+      <StartupReady />
       <SignUp
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
-        forceRedirectUrl={isLocalClerkHost ? `${window.location.origin}${basePath}/app` : undefined}
+        forceRedirectUrl={useDirectClerkAssets ? `${window.location.origin}${basePath}/app` : undefined}
       />
     </div>
   );
@@ -388,6 +491,7 @@ function HomeRedirect() {
         <Redirect to="/app" />
       </Show>
       <Show when="signed-out">
+        <StartupReady />
         <Landing />
       </Show>
     </>
@@ -434,7 +538,19 @@ function ClerkQueryClientCacheInvalidator() {
   return null;
 }
 
-function ClerkProviderWithRoutes() {
+function AuthBridge({ onReady }: { onReady: () => void }) {
+  const { isLoaded, getToken } = useAuth();
+  useEffect(() => {
+    setAuthTokenGetter(() => getToken());
+    return () => setAuthTokenGetter(null);
+  }, [getToken]);
+  useEffect(() => {
+    if (isLoaded) onReady();
+  }, [isLoaded, onReady]);
+  return null;
+}
+
+function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
   const [, setLocation] = useLocation();
 
   return (
@@ -464,6 +580,7 @@ function ClerkProviderWithRoutes() {
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
       <QueryClientProvider client={queryClient}>
+        <AuthBridge onReady={onReady} />
         <ClerkQueryClientCacheInvalidator />
         <Switch>
           <Route path="/" component={HomeRedirect} />
@@ -482,11 +599,89 @@ function ClerkProviderWithRoutes() {
   );
 }
 
-function App() {
+function AuthStartupScreen() {
   return (
-    <WouterRouter base={basePath}>
-      <ClerkProviderWithRoutes />
-    </WouterRouter>
+    <div
+      className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <div>
+        <img className="mx-auto h-16 w-16" src={`${basePath}/logo.svg`} alt="" />
+        <p className="mt-5 text-lg font-semibold text-foreground">Starting Jack…</p>
+        <p className="mt-1 text-sm text-muted-foreground">Connecting your secure session</p>
+      </div>
+    </div>
+  );
+}
+
+function AuthUnavailableScreen() {
+  useEffect(() => {
+    window.__JACK_MARK_READY__?.();
+  }, []);
+
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
+      <div className="max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl">
+        <img className="mx-auto h-14 w-14" src={`${basePath}/logo.svg`} alt="" />
+        <h1 className="mt-5 text-2xl font-semibold text-foreground">Sign-in is temporarily unavailable</h1>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Jack is still available in presentation mode while the secure session service reconnects.
+        </p>
+        <Button className="mt-6" onClick={() => window.location.assign(basePath || "/")}>Open Jack</Button>
+      </div>
+    </div>
+  );
+}
+
+function ManagedAppEntry() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+  const isProtectedAppPath =
+    window.location.pathname === `${basePath}/app` ||
+    window.location.pathname.startsWith(`${basePath}/app/`);
+
+  useEffect(() => {
+    if (authReady) return;
+    const timeout = window.setTimeout(() => setAuthTimedOut(true), AUTH_STARTUP_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [authReady]);
+
+  if (authTimedOut && !authReady) {
+    if (isProtectedAppPath) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <AppSurface />
+        </QueryClientProvider>
+      );
+    }
+    return <AuthUnavailableScreen />;
+  }
+
+  return (
+    <>
+      {!authReady && <AuthStartupScreen />}
+      <ClerkProviderWithRoutes onReady={() => setAuthReady(true)} />
+    </>
+  );
+}
+
+function App() {
+  // Keep the root presentation surface free of an auth dependency, while
+  // retaining the existing protected management path for contributors and
+  // administrators. This is critical for owner-only video removal and review.
+  const managementPath = ["/app", "/sign-in", "/sign-up"].some(
+    (path) => window.location.pathname === `${basePath}${path}` || window.location.pathname.startsWith(`${basePath}${path}/`),
+  );
+
+  if (managementPath && clerkPubKey) {
+    return <ManagedAppEntry />;
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppSurface />
+    </QueryClientProvider>
   );
 }
 

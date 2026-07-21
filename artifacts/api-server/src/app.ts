@@ -6,11 +6,9 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
-  getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import router from "./routes";
@@ -53,20 +51,32 @@ app.use(express.urlencoded({ extended: true }));
 // so getAuth(req) works in the auth gate and route handlers. The publishable
 // key is resolved from the request host to support multiple Clerk custom
 // domains, falling back to CLERK_PUBLISHABLE_KEY.
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
+
+// Recovery for a browser holding a session for a Clerk user that was deleted.
+// This must remain outside the /api auth gate because the stale token cannot
+// authenticate. Clear both JS storage and HttpOnly cookies, then start fresh.
+app.get("/api/auth/reset-session", (_req, res) => {
+  const cookieNames = ["__session", "__client", "__client_uat", "__clerk_db_jwt"];
+  for (const name of cookieNames) {
+    res.clearCookie(name, { path: "/" });
+    res.clearCookie(name, { path: "/", domain: ".torchlabs.ca" });
+  }
+  res.setHeader("Clear-Site-Data", '"cache", "cookies", "storage"');
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.redirect(302, `/sign-in?session_reset=${Date.now()}`);
+});
 
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
-app.use("/api", requireAuth);
+// Explicitly authorized public presentation mode. Scope all non-admin demo
+// activity to one stable identity; requireAdmin still protects admin writes.
+app.use("/api", (req, _res, next) => {
+  req.userId = "presentation-demo";
+  next();
+});
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
@@ -95,8 +105,22 @@ const frontendDir = path.resolve(apiDir, "../../jack-core/dist/public");
 const frontendIndex = path.join(frontendDir, "index.html");
 
 if (existsSync(frontendIndex)) {
+  app.use((req, res, next) => {
+    if (
+      req.path === "/" ||
+      req.path.endsWith(".html") ||
+      req.path === "/sw.js" ||
+      req.path === "/manifest.webmanifest"
+    ) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+    } else if (req.path.startsWith("/assets/")) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+    next();
+  });
   app.use(express.static(frontendDir, { index: false }));
   app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.sendFile(frontendIndex);
   });
 } else if (process.env.NODE_ENV === "production") {

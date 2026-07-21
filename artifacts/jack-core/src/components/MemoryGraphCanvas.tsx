@@ -24,6 +24,7 @@ import {
   useGridRepulsion,
 } from "../lib/graph-perf";
 import {
+  buildPulseTopology,
   MemoryGraphPulseController,
   pulseSegment,
 } from "../lib/memory-graph-pulse";
@@ -390,8 +391,6 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const cx = w / 2;
       const cy = h / 2;
       const now = performance.now();
-      const map = nodesRef.current;
-
       const topics = model.topics;
       const modelNodeById = new Map(model.nodes.map((n) => [n.id, n]));
       const topicPopulated = new Map(
@@ -403,6 +402,25 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             (modelNodeById.get(t.id)?.meta.knowledgeObjectCount ?? 0) >
             0,
         ]),
+      );
+      // Derive neural routes from this model snapshot rather than the previous
+      // canvas cache. On first load the hubs and their sub-nodes arrive together;
+      // using the old cache made the pulse reach a trade and stop there.
+      const populatedNodeIds = new Set(
+        model.nodes
+          .filter(
+            (node) =>
+              node.kind !== "topic" || (topicPopulated.get(node.id) ?? true),
+          )
+          .map((node) => node.id),
+      );
+      pulseCtrlRef.current?.setTopology(
+        buildPulseTopology(
+          CORE_ID,
+          model.topics.map((topic) => topic.id),
+          model.edges,
+          populatedNodeIds,
+        ),
       );
       const ringR = Math.min(w, h) * 0.32;
       const anchorByTopic = new Map<string, { x: number; y: number }>();

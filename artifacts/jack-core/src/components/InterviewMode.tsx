@@ -17,6 +17,7 @@ import { VoiceAnswerInput } from "@/components/VoiceAnswerInput";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useStartInterview,
+  useGetInterviewProfile,
   useSubmitInterviewAnswer,
   useSkipInterviewQuestion,
   useFinishInterview,
@@ -57,6 +58,11 @@ export interface TorchInterviewPreload {
   description: string;
   priority: string;
   evidence: string;
+}
+
+export interface FieldNoteInterviewPreload {
+  title: string;
+  text: string;
 }
 
 /**
@@ -191,7 +197,13 @@ interface Turn {
   distillationStatus: InterviewAnswerDistillationStatus;
 }
 
-export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) {
+export function InterviewMode({
+  preload,
+  fieldNote,
+}: {
+  preload?: TorchInterviewPreload;
+  fieldNote?: FieldNoteInterviewPreload;
+}) {
   const queryClient = useQueryClient();
 
   const [stage, setStage] = useState<Stage>("intake");
@@ -200,7 +212,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
   const [error, setError] = useState<string | null>(null);
   // True while we attempt to resume a stored session on mount, so the intake
   // form doesn't flash before we know whether an interview is still in progress.
-  const [resuming, setResuming] = useState(() => !preload && readActiveSessionId() !== null);
+  const [resuming, setResuming] = useState(() => !preload && !fieldNote && readActiveSessionId() !== null);
   // Set only when this session was reopened via a Parking Lot "Resume" — shows
   // a one-time reorientation banner, then is cleared.
   const [resumeNote, setResumeNote] = useState<InterviewResumeNote | null>(null);
@@ -217,14 +229,18 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
   const [years, setYears] = useState("");
   const [specialties, setSpecialties] = useState(preload ? `${preload.title}, ${preload.category}` : "");
   const [region, setRegion] = useState("");
-  const [background, setBackground] = useState(preload
+  const [background, setBackground] = useState("");
+  const interviewFocus = preload
     ? `Torch Starving Point ${preload.starvingPointId}: ${preload.title}. ${preload.description} Priority: ${preload.priority}. Evidence status: ${preload.evidence}. Focus this interview on closing this exact knowledge gap with specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment.`
-    : "");
+    : fieldNote
+      ? `Ask Jack opened this interview from the Field Note "${fieldNote.title}". Use the note as context, then ask for specific field examples, warning signs, safe procedures, common mistakes, and mentor judgment. Field Note: ${fieldNote.text}`
+      : "";
 
   // Current answer being typed.
   const [answer, setAnswer] = useState("");
 
   const startInterview = useStartInterview();
+  const interviewProfile = useGetInterviewProfile();
   const submitAnswer = useSubmitInterviewAnswer();
   const skipQuestion = useSkipInterviewQuestion();
   const finishInterview = useFinishInterview();
@@ -238,6 +254,32 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
   const refreshGraph = () =>
     queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
 
+  // Hydrate the intake form once from the signed-in account. A command-centre
+  // handoff may intentionally choose a different trade for this session, so it
+  // keeps that explicit trade while restoring the person's other saved fields.
+  const didRestoreProfile = useRef(false);
+  useEffect(() => {
+    if (didRestoreProfile.current || interviewProfile.isLoading) return;
+    didRestoreProfile.current = true;
+    const profile = interviewProfile.data?.profile;
+    if (!profile) return;
+    setName(profile.name);
+    if (!preloadedTrade) {
+      const savedTrade = profile.tradeInput || profile.trade || "";
+      if (TRADE_OPTIONS.includes(savedTrade as (typeof TRADE_OPTIONS)[number])) {
+        setTrade(savedTrade);
+        setTradeInput("");
+      } else if (savedTrade) {
+        setTrade("Other");
+        setTradeInput(savedTrade);
+      }
+    }
+    setYears(profile.yearsExperience == null ? "" : String(profile.yearsExperience));
+    setSpecialties((profile.specialties ?? []).join(", "));
+    setRegion(profile.region ?? "");
+    setBackground(profile.background ?? "");
+  }, [interviewProfile.data, interviewProfile.isLoading, preloadedTrade]);
+
   const resetAll = () => {
     clearActiveSessionId();
     setStage("intake");
@@ -245,13 +287,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
     setTranscript([]);
     setAnswer("");
     setError(null);
-    setName("");
-    setTrade("");
-    setTradeInput("");
-    setYears("");
-    setSpecialties("");
-    setRegion("");
-    setBackground("");
+    // Keep the account-bound profile in the form for the next interview.
   };
 
   // Resume an interrupted interview: on mount, if a session id is stored, fetch
@@ -264,7 +300,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
     if (didRehydrate.current) return;
     didRehydrate.current = true;
 
-    if (preload) {
+    if (preload || fieldNote) {
       clearActiveSessionId();
       setResuming(false);
       return;
@@ -307,7 +343,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
     return () => {
       cancelled = true;
     };
-  }, [preload]);
+  }, [preload, fieldNote]);
 
   // Auto-save the in-progress answer to localStorage as the mentor types, keyed
   // by session id + current question. Cleared automatically when the box empties
@@ -348,6 +384,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
           specialties: specialtyList,
           region: region.trim() || null,
           background: background.trim() || null,
+          focus: interviewFocus || null,
         },
       },
       {
@@ -469,7 +506,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
 
       <ScrollArea className="flex-1">
         <div className="mx-auto w-full max-w-2xl px-5 py-6 md:px-8 md:py-10">
-          {resuming && (
+          {(resuming || (stage === "intake" && interviewProfile.isLoading)) && (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
               <p className="font-mono text-xs uppercase tracking-[0.18em]">
@@ -478,7 +515,7 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
             </div>
           )}
 
-          {!resuming && stage === "intake" && (
+          {!resuming && !interviewProfile.isLoading && stage === "intake" && (
             <>
               {preload && (
                 <div className="mb-5 rounded-xl border border-primary/35 bg-primary/10 p-4" data-testid="torch-gap-preload">
@@ -486,6 +523,13 @@ export function InterviewMode({ preload }: { preload?: TorchInterviewPreload }) 
                   <h2 className="mt-1 font-bold text-foreground">{preload.title}</h2>
                   <p className="mt-1 text-sm text-muted-foreground">{preload.trade} · {preload.category}</p>
                   <p className="mt-2 text-sm leading-relaxed text-foreground/85">Jack will use this starving point to ask focused questions that close the selected gap.</p>
+                </div>
+              )}
+              {fieldNote && (
+                <div className="mb-5 rounded-xl border border-primary/35 bg-primary/10 p-4" data-testid="field-note-preload">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">Opened from Ask Jack Field Note</div>
+                  <h2 className="mt-1 font-bold text-foreground">{fieldNote.title}</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-foreground/85">Jack will use this note to ask focused follow-up questions and deepen the field evidence.</p>
                 </div>
               )}
               <IntakeForm

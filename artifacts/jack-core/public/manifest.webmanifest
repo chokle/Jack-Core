@@ -2,7 +2,7 @@
   "name": "Jack Core by Torch",
   "short_name": "Jack",
   "description": "Jack Core is Torch's trade intelligence engine for field knowledge, retrieval, and Red Seal learning support.",
-  "start_url": "/app",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#050914",
@@ -10,22 +10,22 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/favicon-512.png?v=3",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/apple-touch-icon.png",
+      "src": "/apple-touch-icon.png?v=3",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/torch-logo.jpg",
+      "src": "/favicon-512.png?v=3",
       "sizes": "512x512",
-      "type": "image/jpeg",
-      "purpose": "any"
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

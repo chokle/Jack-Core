@@ -28,6 +28,7 @@ import type {
   ChatMessage,
   ChatResponse,
   Competency,
+  CurrentInterviewProfile,
   CurrentUser,
   GraphHealthReport,
   HealthStatus,
@@ -2411,6 +2412,83 @@ export function useGetConceptAnswerContributions<TData = Awaited<ReturnType<type
 
 
 
+export const getGetInterviewProfileUrl = () => {
+
+
+
+
+  return `/api/interview/profile`
+}
+
+/**
+ * @summary Get the signed-in contributor's saved interview profile
+ */
+export const getInterviewProfile = async ( options?: RequestInit): Promise<CurrentInterviewProfile> => {
+
+  return customFetch<CurrentInterviewProfile>(getGetInterviewProfileUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInterviewProfileQueryKey = () => {
+    return [
+    `/api/interview/profile`
+    ] as const;
+    }
+
+
+export const getGetInterviewProfileQueryOptions = <TData = Awaited<ReturnType<typeof getInterviewProfile>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInterviewProfile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInterviewProfileQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInterviewProfile>>> = ({ signal }) => getInterviewProfile({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInterviewProfile>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInterviewProfileQueryResult = NonNullable<Awaited<ReturnType<typeof getInterviewProfile>>>
+export type GetInterviewProfileQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the signed-in contributor's saved interview profile
+ */
+
+export function useGetInterviewProfile<TData = Awaited<ReturnType<typeof getInterviewProfile>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInterviewProfile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInterviewProfileQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getStartInterviewUrl = () => {
 
 
@@ -2420,7 +2498,7 @@ export const getStartInterviewUrl = () => {
 }
 
 /**
- * @summary Create a mentor profile and start an interview session
+ * @summary Save the contributor's profile and start an interview session
  */
 export const startInterview = async (startInterviewInput: StartInterviewInput, options?: RequestInit): Promise<InterviewSession> => {
 
@@ -2468,7 +2546,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type StartInterviewMutationError = ErrorType<unknown>
 
     /**
- * @summary Create a mentor profile and start an interview session
+ * @summary Save the contributor's profile and start an interview session
  */
 export const useStartInterview = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInterview>>, TError,{data: BodyType<StartInterviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

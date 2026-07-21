@@ -92,7 +92,9 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
   // consent wall before they start using the app. Dismissal is remembered for
   // this browser session only, so the prompt does not keep interrupting them.
   useEffect(() => {
-    if (!autoPrompt) return;
+    // Wait for server-resolved identity and never auto-enrol administrators.
+    // Undefined means /me is still loading; false is the only tester-eligible state.
+    if (!autoPrompt || me?.isAdmin !== false) return;
 
     try {
       if (new URLSearchParams(window.location.search).get("test") === "true") return;
@@ -109,7 +111,7 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
         return "consent";
       });
     }
-  }, [autoPrompt, onEvent]);
+  }, [autoPrompt, me?.isAdmin, onEvent]);
 
   const markAutoPromptSeen = useCallback(() => {
     try {

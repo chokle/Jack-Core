@@ -58,7 +58,8 @@ export function PendingKnowledgePanel({ limit = 6 }: { limit?: number } = {}) {
         <>
           <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
             Mentor-taught concepts Jack queued for a reviewer. They aren't lost
-            — they join the graph once reviewed.
+            — they join the graph once reviewed. This public presentation view
+            is read-only; <a href="/sign-in" className="font-medium text-primary underline underline-offset-2">sign in as an administrator</a> to resolve them.
           </p>
           <ul className="space-y-3">
             {candidates.slice(0, limit).map((cand: KnowledgeCandidate) => (

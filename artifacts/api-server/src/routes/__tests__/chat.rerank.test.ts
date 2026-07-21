@@ -50,6 +50,13 @@ vi.mock("../../lib/openai.js", async () => {
   };
 });
 
+vi.mock("../../lib/ask-learning.js", () => ({
+  learnFromAskInteraction: vi.fn(async () => ({
+    status: "discarded",
+    extractedCount: 0,
+  })),
+}));
+
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
 
@@ -97,10 +104,26 @@ function seedSegments(): void {
  */
 function seedEdges(): void {
   fake.tables["knowledge_edges"] = [
-    { source_id: `video:${VID_VERIFIED}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_CORROB_2}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_CORROB_3}`, target_id: CONCEPT_VERIFIED, kind: "knowledge" },
-    { source_id: `video:${VID_LONE}`, target_id: CONCEPT_LONE, kind: "knowledge" },
+    {
+      source_id: `video:${VID_VERIFIED}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_CORROB_2}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_CORROB_3}`,
+      target_id: CONCEPT_VERIFIED,
+      kind: "knowledge",
+    },
+    {
+      source_id: `video:${VID_LONE}`,
+      target_id: CONCEPT_LONE,
+      kind: "knowledge",
+    },
   ];
 }
 
@@ -162,11 +185,16 @@ describe("POST /api/chat — trust steers citations end-to-end", () => {
         id: CONCEPT_LONE,
         verification_status: "unverified",
         confidence: 0.3,
-        meta: { sourceCount: 1, sources: [{ videoId: VID_LONE, timestamps: [102] }] },
+        meta: {
+          sourceCount: 1,
+          sources: [{ videoId: VID_LONE, timestamps: [102] }],
+        },
       },
     ];
 
-    const res = await request(app).post("/api/chat").send({ message: "What torch angle should I use?" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "What torch angle should I use?" });
 
     expect(res.status).toBe(200);
     const citations = res.body.citations as Citation[];
@@ -201,23 +229,34 @@ describe("POST /api/chat — trust steers citations end-to-end", () => {
         id: CONCEPT_VERIFIED,
         verification_status: "unverified",
         confidence: 0.3,
-        meta: { sourceCount: 1, sources: [{ videoId: VID_VERIFIED, timestamps: [12] }] },
+        meta: {
+          sourceCount: 1,
+          sources: [{ videoId: VID_VERIFIED, timestamps: [12] }],
+        },
       },
       {
         id: CONCEPT_LONE,
         verification_status: "unverified",
         confidence: 0.3,
-        meta: { sourceCount: 1, sources: [{ videoId: VID_LONE, timestamps: [102] }] },
+        meta: {
+          sourceCount: 1,
+          sources: [{ videoId: VID_LONE, timestamps: [102] }],
+        },
       },
     ];
 
-    const res = await request(app).post("/api/chat").send({ message: "What torch angle should I use?" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "What torch angle should I use?" });
 
     expect(res.status).toBe(200);
     const citations = res.body.citations as Citation[];
     expect(citations).toHaveLength(2);
     expect(citations[0]).toMatchObject({ videoId: VID_LONE, verified: false });
-    expect(citations[1]).toMatchObject({ videoId: VID_VERIFIED, verified: false });
+    expect(citations[1]).toMatchObject({
+      videoId: VID_VERIFIED,
+      verified: false,
+    });
   });
 
   it("drops a segment covered only by a reviewer-rejected concept, end-to-end", async () => {
@@ -243,16 +282,24 @@ describe("POST /api/chat — trust steers citations end-to-end", () => {
         id: CONCEPT_LONE,
         verification_status: "rejected",
         confidence: 0.3,
-        meta: { sourceCount: 1, sources: [{ videoId: VID_LONE, timestamps: [102] }] },
+        meta: {
+          sourceCount: 1,
+          sources: [{ videoId: VID_LONE, timestamps: [102] }],
+        },
       },
     ];
 
-    const res = await request(app).post("/api/chat").send({ message: "What torch angle should I use?" });
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "What torch angle should I use?" });
 
     expect(res.status).toBe(200);
     const citations = res.body.citations as Citation[];
     expect(citations).toHaveLength(1);
-    expect(citations[0]).toMatchObject({ videoId: VID_VERIFIED, verified: true });
+    expect(citations[0]).toMatchObject({
+      videoId: VID_VERIFIED,
+      verified: true,
+    });
     expect(citations.some((c) => c.videoId === VID_LONE)).toBe(false);
   });
 });

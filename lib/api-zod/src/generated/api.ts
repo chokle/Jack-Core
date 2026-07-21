@@ -392,6 +392,10 @@ export const AskJackBody = zod.object({
   "message": zod.string().min(1)
 })
 
+export const askJackResponseLearningExtractedCountMin = 0;
+
+
+
 export const AskJackResponse = zod.object({
   "answer": zod.string(),
   "citations": zod.array(zod.object({
@@ -406,7 +410,12 @@ export const AskJackResponse = zod.object({
   "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
   "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
 })),
-  "usedInternalKnowledge": zod.boolean().optional()
+  "usedInternalKnowledge": zod.boolean().optional(),
+  "learning": zod.object({
+  "status": zod.enum(['verified', 'discarded', 'failed']),
+  "extractedCount": zod.number().min(askJackResponseLearningExtractedCountMin),
+  "summary": zod.string().optional()
+})
 })
 
 
@@ -692,7 +701,25 @@ export const GetConceptAnswerContributionsResponse = zod.object({
 
 
 /**
- * @summary Create a mentor profile and start an interview session
+ * @summary Get the signed-in contributor's saved interview profile
+ */
+export const GetInterviewProfileResponse = zod.object({
+  "profile": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "trade": zod.string().nullish(),
+  "tradeInput": zod.string().nullish(),
+  "yearsExperience": zod.number().nullish(),
+  "specialties": zod.array(zod.string()).optional(),
+  "region": zod.string().nullish(),
+  "background": zod.string().nullish(),
+  "createdAt": zod.string()
+}).optional()
+})
+
+
+/**
+ * @summary Save the contributor's profile and start an interview session
  */
 export const StartInterviewBody = zod.object({
   "name": zod.string().describe('The mentor\'s name'),
@@ -701,7 +728,8 @@ export const StartInterviewBody = zod.object({
   "yearsExperience": zod.number().nullish(),
   "specialties": zod.array(zod.string()).optional(),
   "region": zod.string().nullish(),
-  "background": zod.string().nullish()
+  "background": zod.string().nullish(),
+  "focus": zod.string().nullish().describe('Per-interview topic or handoff context; used for questioning but not saved into the contributor profile')
 })
 
 export const StartInterviewResponse = zod.object({

@@ -1,4 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Search,
   SlidersHorizontal,
@@ -177,7 +184,8 @@ export function MemoryGraphView({
   // stays derived from the RAW model, so a freshly-seeded (but empty) trade — or
   // one populated only by written notes — never fires a "Jack just learned…" toast.
   const model = useMemo(
-    () => withKnowledgeCounts(withSeededTrades(rawModel), knowledgeCounts ?? {}),
+    () =>
+      withKnowledgeCounts(withSeededTrades(rawModel), knowledgeCounts ?? {}),
     [rawModel, knowledgeCounts],
   );
   const canvasRef = useRef<MemoryGraphHandle>(null);
@@ -231,7 +239,7 @@ export function MemoryGraphView({
     setToasts((prev) => [...prev, ...fresh].slice(-3));
   }, [delta]);
 
-  // Cascading exit: each toast's own 20s (visibility-aware) timer just marks it
+  // Cascading exit: each toast's own 15s (visibility-aware) timer just marks it
   // "ready" to leave; a single scheduler here decides WHEN each ready toast
   // actually starts its slide-out, oldest-appeared-first, with a small stagger
   // between activations so a batch that expires together doesn't all leave at
@@ -356,7 +364,9 @@ export function MemoryGraphView({
   const presentKnowledgeKinds = useMemo(() => {
     const seen = new Set<string>();
     for (const n of model.nodes) if (isKnowledgeKind(n.kind)) seen.add(n.kind);
-    return (Object.keys(KNOWLEDGE_KIND_META) as (keyof typeof KNOWLEDGE_KIND_META)[])
+    return (
+      Object.keys(KNOWLEDGE_KIND_META) as (keyof typeof KNOWLEDGE_KIND_META)[]
+    )
       .filter((k) => seen.has(k))
       .map((k) => ({ kind: k, ...KNOWLEDGE_KIND_META[k] }));
   }, [model]);
@@ -400,7 +410,7 @@ export function MemoryGraphView({
 
   const activeMatchId =
     matchIds.length > 0
-      ? matchIds[Math.min(activeMatch, matchIds.length - 1)] ?? null
+      ? (matchIds[Math.min(activeMatch, matchIds.length - 1)] ?? null)
       : null;
 
   const onSearchKeyDown = useCallback(
@@ -450,15 +460,17 @@ export function MemoryGraphView({
     });
   }, [selectedId, hoveredId, nodeById]);
 
-  const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
-  const hovered = hoveredId ? nodeById.get(hoveredId) ?? null : null;
+  const selected = selectedId ? (nodeById.get(selectedId) ?? null) : null;
+  const hovered = hoveredId ? (nodeById.get(hoveredId) ?? null) : null;
 
   // Breadcrumb trail for the current selection: Jack › Trade hub › Node. Each
   // crumb is a live node the reviewer can jump back to, so exploration always
   // has an "up" path even after diving deep into a cluster.
   const trail = useMemo(() => {
     if (!selected) return [] as { id: string; label: string }[];
-    const items: { id: string; label: string }[] = [{ id: CORE_ID, label: "Jack" }];
+    const items: { id: string; label: string }[] = [
+      { id: CORE_ID, label: "Jack" },
+    ];
     if (selected.kind !== "core") {
       const topicId = selected.topicId;
       if (topicId && topicId !== selected.id) {
@@ -573,7 +585,10 @@ export function MemoryGraphView({
     : null;
 
   return (
-    <div ref={containerRef} className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]">
+    <div
+      ref={containerRef}
+      className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]"
+    >
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
         <SpatialBrainCanvas
@@ -638,6 +653,7 @@ export function MemoryGraphView({
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={onSearchKeyDown}
                 placeholder="Search the graph..."
+                aria-label="Search the memory graph"
                 className="h-10 w-full rounded-lg border border-white/10 bg-black/40 pl-9 pr-16 text-sm text-white outline-none backdrop-blur placeholder:text-white/40 focus:border-primary/60 md:h-9 lg:w-56"
               />
               {query && (
@@ -669,7 +685,10 @@ export function MemoryGraphView({
             >
               <SlidersHorizontal className="h-4 w-4" />
             </IconButton>
-            <IconButton title="Recenter" onClick={() => canvasRef.current?.reset()}>
+            <IconButton
+              title="Recenter"
+              onClick={() => canvasRef.current?.reset()}
+            >
               <Crosshair className="h-4 w-4" />
             </IconButton>
             <IconButton title="Fullscreen" onClick={toggleFullscreen}>
@@ -705,7 +724,9 @@ export function MemoryGraphView({
                           </BreadcrumbLink>
                         )}
                       </BreadcrumbItem>
-                      {!last && <BreadcrumbSeparator className="text-white/30" />}
+                      {!last && (
+                        <BreadcrumbSeparator className="text-white/30" />
+                      )}
                     </Fragment>
                   );
                 })}
@@ -761,13 +782,19 @@ export function MemoryGraphView({
         {/* Zoom controls */}
         <div className="absolute bottom-6 right-6 flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/45 p-1 backdrop-blur">
-            <IconButton title="Zoom out" onClick={() => canvasRef.current?.zoomOut()}>
+            <IconButton
+              title="Zoom out"
+              onClick={() => canvasRef.current?.zoomOut()}
+            >
               <Minus className="h-4 w-4" />
             </IconButton>
             <span className="w-12 text-center font-mono text-xs tabular-nums text-white/80">
               {zoomPct}%
             </span>
-            <IconButton title="Zoom in" onClick={() => canvasRef.current?.zoomIn()}>
+            <IconButton
+              title="Zoom in"
+              onClick={() => canvasRef.current?.zoomIn()}
+            >
               <Plus className="h-4 w-4" />
             </IconButton>
           </div>
@@ -776,7 +803,11 @@ export function MemoryGraphView({
             active={locked}
             onClick={() => setLocked((v) => !v)}
           >
-            {locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+            {locked ? (
+              <Lock className="h-4 w-4" />
+            ) : (
+              <Unlock className="h-4 w-4" />
+            )}
           </IconButton>
         </div>
 
@@ -823,7 +854,9 @@ export function MemoryGraphView({
             ) : (
               <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-white/60">
                 {hovered.meta.trade && (
-                  <span className="max-w-[8rem] truncate">{hovered.meta.trade}</span>
+                  <span className="max-w-[8rem] truncate">
+                    {hovered.meta.trade}
+                  </span>
                 )}
                 <span>
                   <b className="font-semibold tabular-nums text-white/85">
@@ -935,12 +968,12 @@ export function MemoryGraphView({
           {import.meta.env.DEV && <BrainStatsPanel model={model} />}
         </div>
         {/* Growth toasts — pinned to the sidebar's bottom-right, newest on top,
-            max 3, tap to focus the new node. Each toast's 20s timer only elapses
+            max 3, tap to focus the new node. Each toast's 15s timer only elapses
             while this view is mounted (the user is on the Memory Graph) and the
             tab is visible. When toasts expire together they leave in a cascade,
             oldest first, sliding right off-screen with a small stagger between
             each — never all at once. */}
-        {toasts.length > 0 && (
+        {isDesktop && toasts.length > 0 && (
           <div className="shrink-0 border-t border-border/60 p-3">
             <div className="flex flex-col-reverse gap-2">
               {toasts.map((t) => (
@@ -966,6 +999,34 @@ export function MemoryGraphView({
           </div>
         )}
       </aside>
+
+      {/* Phones/tablets have no right rail. Keep the same recent-memory toast
+          visible above the bottom controls instead of mounting it invisibly. */}
+      {!isDesktop && toasts.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-3 bottom-20 z-40">
+          <div className="ml-auto flex max-w-sm flex-col-reverse gap-2">
+            {toasts.map((t) => (
+              <GrowthToast
+                key={t.id}
+                text={t.text}
+                reducedMotion={reducedMotion}
+                exiting={exitingIds.has(t.id)}
+                onExpire={() => handleToastExpire(t.id)}
+                onDismiss={() => dismissToast(t.id)}
+                onClick={
+                  t.nodeId
+                    ? () => {
+                        setSelectedId(t.nodeId!);
+                        canvasRef.current?.focusNode(t.nodeId!);
+                        dismissToast(t.id);
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1259,10 +1320,14 @@ function GrowthCounter({
   return (
     <div className="mt-2.5 flex items-center gap-2">
       <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 font-mono text-xs text-white/80 backdrop-blur">
-        <span className="font-semibold tabular-nums text-white">{kDisplay}</span>
+        <span className="font-semibold tabular-nums text-white">
+          {kDisplay}
+        </span>
         concepts
         <span className="text-white/30">·</span>
-        <span className="font-semibold tabular-nums text-white">{cDisplay}</span>
+        <span className="font-semibold tabular-nums text-white">
+          {cDisplay}
+        </span>
         connections
       </span>
       {pulse && (
@@ -1279,9 +1344,9 @@ function GrowthCounter({
   );
 }
 
-/** How long a growth toast lingers (20s), counting only time the user is on the
+/** How long a growth toast lingers (15s), counting only time the user is on the
  *  Memory Graph with the tab visible. */
-const TOAST_LIFETIME_MS = 20000;
+const TOAST_LIFETIME_MS = 15000;
 /** Slide-right + fade-out duration before the toast is removed from the list. */
 const TOAST_EXIT_MS = 300;
 /** Minimum gap between successive toasts starting their cascade exit, so a
@@ -1289,7 +1354,7 @@ const TOAST_EXIT_MS = 300;
 const TOAST_EXIT_STAGGER_MS = 150;
 
 /**
- * A single auto-dismissing "Jack just learned…" toast. Lingers 20s but only
+ * A single auto-dismissing "Jack just learned…" toast. Lingers 15s but only
  * counts down while the user is actively on the page — the timer pauses whenever
  * the tab is hidden/backgrounded and resumes with the remaining time on return,
  * so a toast is never missed while the user is away. Leaving the Memory Graph
@@ -1457,7 +1522,9 @@ function VitalityPanel({
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
               <div
-                className={reducedMotion ? "" : "transition-[width] duration-700"}
+                className={
+                  reducedMotion ? "" : "transition-[width] duration-700"
+                }
                 style={{
                   width: pct(r.value),
                   height: "100%",
@@ -1540,7 +1607,11 @@ const VERIFICATION_META: Record<
   { label: string; color: RGB; Icon: typeof ShieldCheck }
 > = {
   verified: { label: "Verified", color: [99, 214, 142], Icon: ShieldCheck },
-  unverified: { label: "Unverified", color: [245, 197, 66], Icon: ShieldQuestion },
+  unverified: {
+    label: "Unverified",
+    color: [245, 197, 66],
+    Icon: ShieldQuestion,
+  },
   rejected: { label: "Rejected", color: [239, 90, 90], Icon: ShieldAlert },
   mentor_supplied: {
     label: "Mentor-supplied",
@@ -1770,7 +1841,9 @@ export function ProvenanceContent({
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             <span>
               First:{" "}
-              <b className="font-semibold text-foreground">{formatDate(first)}</b>
+              <b className="font-semibold text-foreground">
+                {formatDate(first)}
+              </b>
             </span>
             {last && last !== first && (
               <span>
@@ -1855,7 +1928,9 @@ export function ProvenanceContent({
                     )}
                   </div>
                   <div className="mt-0.5 text-muted-foreground">
-                    {r.reason ? r.reason : "No longer corroborates this concept"}
+                    {r.reason
+                      ? r.reason
+                      : "No longer corroborates this concept"}
                     {r.at ? ` · ${timeAgo(r.at)}` : ""}
                   </div>
                 </li>
@@ -1955,7 +2030,7 @@ function InspectorHeaderContent({
         ? node.meta.trade
           ? `${kLabel} · ${node.meta.trade}`
           : kLabel
-        : node.meta.trade ?? kLabel;
+        : (node.meta.trade ?? kLabel);
 
   return (
     <div className="flex min-w-0 items-start gap-2.5">
@@ -2054,7 +2129,9 @@ function AnalysisContent({ node }: { node: MemoryNode }) {
 
   if (!enabled) return null;
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>;
+    return (
+      <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>
+    );
   }
 
   const hasContent =
@@ -2114,7 +2191,8 @@ function TranscriptContent({
   } else if (knowledge) {
     const sources = [...(node.meta.sources ?? [])].sort(
       (a, b) =>
-        b.timestamps.length - a.timestamps.length || b.confidence - a.confidence,
+        b.timestamps.length - a.timestamps.length ||
+        b.confidence - a.confidence,
     );
     videoId = sources[0]?.videoId ?? "";
     stamps = sources[0]?.timestamps ?? [];
@@ -2154,7 +2232,9 @@ function TranscriptContent({
   }
 
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>;
+    return (
+      <p className="text-xs text-muted-foreground">Reading Jack's capture…</p>
+    );
   }
 
   const hasContent = (isVideo && segments.length > 0) || passages.length > 0;
@@ -2232,7 +2312,9 @@ function AnswerContributionsContent({ nodeId }: { nodeId: string }) {
 
   if (isLoading) {
     return (
-      <p className="text-xs text-muted-foreground">Reading the confidence ledger…</p>
+      <p className="text-xs text-muted-foreground">
+        Reading the confidence ledger…
+      </p>
     );
   }
 
@@ -2283,8 +2365,8 @@ function AnswerContributionsContent({ nodeId }: { nodeId: string }) {
               </div>
             ) : (
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">
-                Recorded before per-answer confidence tracking — contribution not
-                scored.
+                Recorded before per-answer confidence tracking — contribution
+                not scored.
               </p>
             )}
             {c.question && (
@@ -2338,8 +2420,8 @@ export function NodeDetailBody({
   const verifyKey = (node.meta.verificationStatus ?? "").toLowerCase();
   const verify = VERIFICATION_META[verifyKey];
 
-  const sources: NodeSource[] = knowledge ? node.meta.sources ?? [] : [];
-  const aliases = knowledge ? node.meta.aliases ?? [] : [];
+  const sources: NodeSource[] = knowledge ? (node.meta.sources ?? []) : [];
+  const aliases = knowledge ? (node.meta.aliases ?? []) : [];
 
   // The originating source: a concept's most-cited video, or the video itself.
   const primarySource = knowledge
@@ -2388,8 +2470,7 @@ export function NodeDetailBody({
     }
   }
   const mentorSupplied =
-    knowledge &&
-    (verifyKey === "mentor_supplied" || linkedMentors.length > 0);
+    knowledge && (verifyKey === "mentor_supplied" || linkedMentors.length > 0);
 
   const isVideo = node.kind === "video";
   // Which collapsible sections are worth offering for this node.
@@ -2542,7 +2623,11 @@ export function NodeDetailBody({
                   key={rn.id}
                   onClick={() => onSelectNode(rn.id)}
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[11px] font-medium text-white/80 transition-colors hover:border-primary/50 hover:text-primary"
-                  title={shared > 0 ? `Shares ${shared} source${shared === 1 ? "" : "s"}` : kindLabelFor(rn.kind)}
+                  title={
+                    shared > 0
+                      ? `Shares ${shared} source${shared === 1 ? "" : "s"}`
+                      : kindLabelFor(rn.kind)
+                  }
                 >
                   <span
                     className="h-2 w-2 shrink-0 rounded-full"
@@ -2607,7 +2692,10 @@ export function NodeDetailBody({
 
         {hasTranscript && (
           <Section title="Transcript">
-            <TranscriptContent node={node} onJumpToTimestamp={onJumpToTimestamp} />
+            <TranscriptContent
+              node={node}
+              onJumpToTimestamp={onJumpToTimestamp}
+            />
           </Section>
         )}
 
@@ -2661,52 +2749,63 @@ export function NodeDetailBody({
         )}
 
         {hasMetadata && (
-        <Section title="Metadata">
-          <div className="divide-y divide-border/60 rounded-lg border border-border/60">
-            {knowledge && (
-              <Row
-                label="Knowledge ID"
-                value={
-                  <span className="max-w-[10rem] truncate" title={node.meta.refId ?? node.id}>
-                    {node.meta.refId ?? node.id}
-                  </span>
-                }
-              />
-            )}
-            {knowledge && verify && (
-              <Row
-                label="Verification"
-                value={
-                  <span
-                    className="inline-flex items-center gap-1"
-                    style={{ color: rgbCss(verify.color) }}
-                  >
-                    <verify.Icon className="h-3.5 w-3.5" />
-                    {verify.label}
-                  </span>
-                }
-              />
-            )}
-            {node.kind === "video" && node.status && (
-              <Row label="Status" value={node.status} />
-            )}
-            {knowledge && sources.length > 0 && (
-              <Row label="Sources" value={node.meta.sourceCount ?? sources.length} />
-            )}
-            {(node.kind === "video" || node.kind === "competency" || node.kind === "contributor") && (
-              <Row label="Related Videos" value={relatedVideoCount} />
-            )}
-            {node.kind === "contributor" && node.meta.email && (
-              <Row label="Contributor" value={node.meta.email} />
-            )}
-            {node.meta.updatedAt && (
-              <Row label="Last Updated" value={timeAgo(node.meta.updatedAt)} />
-            )}
-            {node.kind === "competency" && node.meta.code && (
-              <Row label="Code" value={node.meta.code} />
-            )}
-          </div>
-        </Section>
+          <Section title="Metadata">
+            <div className="divide-y divide-border/60 rounded-lg border border-border/60">
+              {knowledge && (
+                <Row
+                  label="Knowledge ID"
+                  value={
+                    <span
+                      className="max-w-[10rem] truncate"
+                      title={node.meta.refId ?? node.id}
+                    >
+                      {node.meta.refId ?? node.id}
+                    </span>
+                  }
+                />
+              )}
+              {knowledge && verify && (
+                <Row
+                  label="Verification"
+                  value={
+                    <span
+                      className="inline-flex items-center gap-1"
+                      style={{ color: rgbCss(verify.color) }}
+                    >
+                      <verify.Icon className="h-3.5 w-3.5" />
+                      {verify.label}
+                    </span>
+                  }
+                />
+              )}
+              {node.kind === "video" && node.status && (
+                <Row label="Status" value={node.status} />
+              )}
+              {knowledge && sources.length > 0 && (
+                <Row
+                  label="Sources"
+                  value={node.meta.sourceCount ?? sources.length}
+                />
+              )}
+              {(node.kind === "video" ||
+                node.kind === "competency" ||
+                node.kind === "contributor") && (
+                <Row label="Related Videos" value={relatedVideoCount} />
+              )}
+              {node.kind === "contributor" && node.meta.email && (
+                <Row label="Contributor" value={node.meta.email} />
+              )}
+              {node.meta.updatedAt && (
+                <Row
+                  label="Last Updated"
+                  value={timeAgo(node.meta.updatedAt)}
+                />
+              )}
+              {node.kind === "competency" && node.meta.code && (
+                <Row label="Code" value={node.meta.code} />
+              )}
+            </div>
+          </Section>
         )}
 
         {knowledge && isAdmin && (
@@ -2714,10 +2813,30 @@ export function NodeDetailBody({
             <div className="flex gap-1.5">
               {(
                 [
-                  { status: "verified", label: "Verify", Icon: ShieldCheck, color: [99, 214, 142] as RGB },
-                  { status: "rejected", label: "Reject", Icon: ShieldAlert, color: [239, 90, 90] as RGB },
-                  { status: "unverified", label: "Reset", Icon: ShieldQuestion, color: [245, 197, 66] as RGB },
-                ] satisfies { status: VerificationUpdateStatus; label: string; Icon: typeof ShieldCheck; color: RGB }[]
+                  {
+                    status: "verified",
+                    label: "Verify",
+                    Icon: ShieldCheck,
+                    color: [99, 214, 142] as RGB,
+                  },
+                  {
+                    status: "rejected",
+                    label: "Reject",
+                    Icon: ShieldAlert,
+                    color: [239, 90, 90] as RGB,
+                  },
+                  {
+                    status: "unverified",
+                    label: "Reset",
+                    Icon: ShieldQuestion,
+                    color: [245, 197, 66] as RGB,
+                  },
+                ] satisfies {
+                  status: VerificationUpdateStatus;
+                  label: string;
+                  Icon: typeof ShieldCheck;
+                  color: RGB;
+                }[]
               ).map(({ status, label, Icon, color }) => {
                 const active = verifyKey === status;
                 return (
@@ -2762,7 +2881,9 @@ function relatedCompetencyList(
 
   let list = trade
     ? competencies.filter((c) => c.trade === trade)
-    : [...competencies].sort((a, b) => (b.videoCount ?? 0) - (a.videoCount ?? 0));
+    : [...competencies].sort(
+        (a, b) => (b.videoCount ?? 0) - (a.videoCount ?? 0),
+      );
 
   // Surface the ones this node actually maps to first.
   list = [...list].sort(
@@ -2785,7 +2906,9 @@ function RelatedCompetencies({
   void node;
   if (list.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">No competencies linked yet.</p>
+      <p className="text-xs text-muted-foreground">
+        No competencies linked yet.
+      </p>
     );
   }
   return (

@@ -1,9 +1,9 @@
-const CACHE_NAME = "jack-shell-v1";
+const CACHE_NAME = "jack-shell-v3";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL, "/favicon.svg"]))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL, "/favicon-32.png?v=3", "/favicon-512.png?v=3"]))
   );
   self.skipWaiting();
 });

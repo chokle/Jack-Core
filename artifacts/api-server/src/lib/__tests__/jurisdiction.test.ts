@@ -22,6 +22,11 @@ import {
 } from "../jurisdiction.js";
 import { buildInterviewSystemPrompt } from "../interview.js";
 import { buildDistillationSystemPrompt } from "../distillation.js";
+import {
+  JACK_CORE_SYSTEM_MAP_BRIEF,
+  JACK_CORE_SYSTEM_MAP_PROMPT,
+  JACK_CORE_SYSTEMS,
+} from "../system-map.js";
 
 /**
  * QA checks for the "default jurisdiction = Canada" policy. These are
@@ -127,6 +132,9 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toContain("SOURCE PRIORITY ORDER");
       expect(withCtx).toContain("Torch Knowledge Repository");
       expect(withCtx).toContain("SEG-CONTEXT");
+      expect(withCtx).toContain("FAST-SCAN FORMATTING");
+      expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
+      expect(withCtx).toMatch(/not whole paragraphs/i);
 
       const noCtx = buildChatSystemPrompt({ usedInternalKnowledge: false, contextText: "" });
       expect(noCtx).toContain("SOURCE PRIORITY ORDER");
@@ -134,15 +142,39 @@ describe("Canadian jurisdiction policy", () => {
       expect(noCtx).toMatch(/say so rather than guessing/i);
     });
 
+    it("gives Ask Jack one authoritative map of Jack Core", () => {
+      const prompt = buildChatSystemPrompt({
+        usedInternalKnowledge: false,
+        contextText: "",
+      });
+
+      for (const system of JACK_CORE_SYSTEMS) {
+        expect(prompt).toContain(system.name);
+        expect(prompt).toContain(system.role);
+      }
+      expect(prompt).toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
+      expect(prompt).toMatch(/not an isolated generic chatbot/i);
+      expect(prompt).toMatch(/supersedes any contradictory assistant statement in conversation history/i);
+      expect(prompt).toMatch(/correct that statement directly/i);
+      expect(prompt).toMatch(/cannot store information[^\n]*false descriptions/i);
+      expect(prompt).toContain(
+        "I do not have that record in my current retrieval context yet.",
+      );
+      expect(prompt).toMatch(/contribution is captured and being evaluated for Living Memory/i);
+      expect(prompt).toMatch(/Only the interview's contributor may resume or answer/i);
+    });
+
     it("interview prompt assumes Canada and forbids US defaults", () => {
       const s = buildInterviewSystemPrompt({ name: "Welder", remaining: ["safety"], machineHint: undefined });
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
+      expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
       expect(s).toMatch(/never assume OSHA, AWS, NEC/);
     });
 
     it("distillation prompt records Canadian standards, not US equivalents", () => {
       const s = buildDistillationSystemPrompt("(none)");
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
+      expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
       expect(s).toMatch(/do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/);
       expect(s).toMatch(/CSA, CWB, Red Seal/);
     });

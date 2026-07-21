@@ -22,9 +22,32 @@
 import { createProxyMiddleware } from "http-proxy-middleware";
 import type { RequestHandler } from "express";
 import type { IncomingHttpHeaders } from "http";
+import { parsePublishableKey } from "@clerk/shared/keys";
+import { logger } from "../lib/logger";
 
-const CLERK_FAPI = "https://frontend-api.clerk.dev";
+const CLERK_PROXY_FAPI = "https://frontend-api.clerk.dev";
 export const CLERK_PROXY_PATH = "/api/__clerk";
+
+export function getClerkProxyTarget(
+  publishableKey = process.env.CLERK_PUBLISHABLE_KEY,
+  configuredTarget = process.env.JACK_CLERK_PROXY_TARGET,
+): string {
+  if (configuredTarget) {
+    try {
+      const target = new URL(configuredTarget);
+      const allowedHost =
+        target.hostname === "frontend-api.clerk.dev" ||
+        target.hostname.endsWith(".clerk.accounts.dev");
+      if (target.protocol === "https:" && allowedHost) return target.origin;
+    } catch {
+      // Fall through to the publishable-key-derived target.
+    }
+  }
+  const parsedKey = parsePublishableKey(publishableKey);
+  return parsedKey?.instanceType === "development"
+    ? `https://${parsedKey.frontendApi}`
+    : CLERK_PROXY_FAPI;
+}
 
 /**
  * Returns the first effective public hostname for the given request,
@@ -58,13 +81,27 @@ export function clerkProxyMiddleware(): RequestHandler {
     return (_req, _res, next) => next();
   }
 
-  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
+    logger.error(
+      "Clerk Frontend API proxying does not support development instances. " +
+        "Configure matching pk_live_/sk_live_ keys before enabling the production proxy.",
+    );
+  }
+
+  const pinnedSecretKey = process.env.JACK_CLERK_PROXY_SECRET;
+  const secretKey = pinnedSecretKey || process.env.CLERK_SECRET_KEY;
   if (!secretKey) {
     return (_req, _res, next) => next();
   }
 
+  const target = getClerkProxyTarget();
+  logger.info(
+    { target, secretSource: pinnedSecretKey ? "pinned" : "clerk" },
+    "Clerk proxy configured",
+  );
+
   return createProxyMiddleware({
-    target: CLERK_FAPI,
+    target,
     changeOrigin: true,
     // Take over the response so it can be re-sent with a Content-Length (see
     // proxyRes); the deployment edge rejects chunked proxied responses.

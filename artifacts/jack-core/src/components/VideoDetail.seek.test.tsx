@@ -103,6 +103,12 @@ function makeVideo(overrides: Partial<VideoDetailData> = {}): VideoDetailData {
 const noop = () => {};
 
 describe("VideoDetail — timestamp seek", () => {
+  it("shows the unavailable state while a selected video has no response instead of crashing", () => {
+    render(<VideoDetail videoId="missing" onBack={noop} onOpenChat={noop} />);
+
+    expect(screen.getByText("This video couldn't be opened")).toBeTruthy();
+  });
+
   it("seeks the player to the cited second when a seek is requested and media is ready", () => {
     videoState.data = makeVideo();
 

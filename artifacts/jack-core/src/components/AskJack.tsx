@@ -1,5 +1,14 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, X, Loader2, Sparkles, Bookmark, RotateCcw } from "lucide-react";
+import {
+  Send,
+  Bot,
+  User,
+  X,
+  Loader2,
+  Sparkles,
+  Bookmark,
+  RotateCcw,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +29,7 @@ import {
   useClearChatHistory,
   getGetChatHistoryQueryKey,
   ChatMessage,
+  type Citation,
   type ParkedThought,
 } from "@workspace/api-client-react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -40,6 +50,7 @@ interface AskJackProps {
   onClose: () => void;
   initialContext?: string;
   onCitationClick: (videoId: string, startTime: number) => void;
+  onFieldNoteClick: (citation: Citation) => void;
   /** Set when the drawer was opened via "Resume" on a parked thought. */
   resumedThought?: ParkedThought;
 }
@@ -49,6 +60,7 @@ export function AskJack({
   onClose,
   initialContext,
   onCitationClick,
+  onFieldNoteClick,
   resumedThought,
 }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
@@ -103,9 +115,10 @@ export function AskJack({
   }, [isOpen]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const viewport = scrollRef.current?.querySelector<HTMLElement>(
+      "[data-radix-scroll-area-viewport]",
+    );
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -116,10 +129,10 @@ export function AskJack({
       id: Date.now().toString(),
       role: "user",
       content: input,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
 
     // sessionId is omitted — the server binds the request to the caller's
@@ -134,11 +147,11 @@ export function AskJack({
             content: data.answer,
             citations: data.citations,
             usedInternalKnowledge: data.usedInternalKnowledge,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
           };
-          setMessages(prev => [...prev, assistantMessage]);
-        }
-      }
+          setMessages((prev) => [...prev, assistantMessage]);
+        },
+      },
     );
   };
 
@@ -162,8 +175,12 @@ export function AskJack({
                 <Bot className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="font-semibold tracking-tight text-sidebar-foreground">Ask Jack</h2>
-                <p className="text-[10px] font-mono text-sidebar-foreground/60 uppercase">Intelligence Engine</p>
+                <h2 className="font-semibold tracking-tight text-sidebar-foreground">
+                  Ask Jack
+                </h2>
+                <p className="text-[10px] font-mono text-sidebar-foreground/60 uppercase">
+                  Intelligence Engine
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -178,7 +195,12 @@ export function AskJack({
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               )}
-              <Button variant="ghost" size="icon" onClick={onClose}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                aria-label="Close Ask Jack"
+              >
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -189,7 +211,8 @@ export function AskJack({
               <div className="flex items-start gap-2">
                 <Bookmark className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
                 <p className="text-xs leading-relaxed text-amber-200/90">
-                  Picking up where you left off — parked {timeAgo(resumedThought.createdAt)}
+                  Picking up where you left off — parked{" "}
+                  {timeAgo(resumedThought.createdAt)}
                   {resumedThought.reason ? `: "${resumedThought.reason}"` : "."}
                 </p>
               </div>
@@ -209,25 +232,36 @@ export function AskJack({
                 <div className="flex flex-col items-center justify-center h-[50vh] text-center space-y-4 opacity-50">
                   <Sparkles className="h-12 w-12 text-primary" />
                   <p className="text-sm font-mono max-w-[250px]">
-                    I have indexed the entire trade knowledge base. Ask me anything.
+                    I have indexed the entire trade knowledge base. Ask me
+                    anything.
                   </p>
                 </div>
               ) : (
                 messages.map((msg) => (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    key={msg.id} 
+                    key={msg.id}
                     className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
                   >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "user" ? "bg-secondary" : "bg-primary text-primary-foreground"}`}>
-                      {msg.role === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "user" ? "bg-secondary" : "bg-primary text-primary-foreground"}`}
+                    >
+                      {msg.role === "user" ? (
+                        <User className="h-4 w-4" />
+                      ) : (
+                        <Bot className="h-4 w-4" />
+                      )}
                     </div>
-                    
-                    <div className={`flex flex-col gap-2 ${msg.role === "user" ? "max-w-[80%] items-end" : "min-w-0 flex-1 items-start"}`}>
+
+                    <div
+                      className={`flex flex-col gap-2 ${msg.role === "user" ? "max-w-[80%] items-end" : "min-w-0 flex-1 items-start"}`}
+                    >
                       {msg.role === "user" ? (
                         <div className="p-3 rounded-xl text-sm bg-secondary text-secondary-foreground">
-                          <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                          <div className="whitespace-pre-wrap break-words">
+                            {msg.content}
+                          </div>
                         </div>
                       ) : (
                         <StructuredAnswer
@@ -235,6 +269,7 @@ export function AskJack({
                           citations={msg.citations}
                           usedInternalKnowledge={msg.usedInternalKnowledge}
                           onCitationClick={onCitationClick}
+                          onFieldNoteClick={onFieldNoteClick}
                         />
                       )}
                     </div>
@@ -248,7 +283,9 @@ export function AskJack({
                   </div>
                   <div className="p-3 rounded-xl bg-card border border-card-border flex items-center">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span className="ml-2 text-xs font-mono">Analyzing library...</span>
+                    <span className="ml-2 text-xs font-mono">
+                      Analyzing library...
+                    </span>
                   </div>
                 </div>
               )}
@@ -274,13 +311,15 @@ export function AskJack({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask about red seal standards..."
+                aria-label="Ask Jack a question"
                 className="h-11 pr-12 bg-card border-card-border focus-visible:ring-primary text-base md:h-9 md:text-sm"
                 disabled={askJack?.isPending}
               />
-              <Button 
-                type="submit" 
-                size="icon" 
+              <Button
+                type="submit"
+                size="icon"
                 data-testid="send-button"
+                aria-label="Send question"
                 className="absolute right-1 top-1 h-9 w-9 bg-primary hover:bg-primary/90 text-primary-foreground md:h-8 md:w-8"
                 disabled={!input.trim() || askJack?.isPending}
               >
@@ -301,12 +340,15 @@ export function AskJack({
           <AlertDialogHeader>
             <AlertDialogTitle>Start a new conversation?</AlertDialogTitle>
             <AlertDialogDescription>
-              This clears your saved Ask Jack chat history. It can't be undone, but the knowledge
-              library itself is untouched — you can always ask again.
+              This clears your saved Ask Jack chat history. It can't be undone,
+              but the knowledge library itself is untouched — you can always ask
+              again.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={clearHistory.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={clearHistory.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={clearHistory.isPending}
               onClick={(e) => {
