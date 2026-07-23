@@ -329,7 +329,7 @@ export function ParkedThoughtsList({
                   </span>
                 )}
               </div>
-              <div className="mt-2 flex justify-end gap-1.5">
+              {thought.canManage && <div className="mt-2 flex justify-end gap-1.5">
                 <Button
                   type="button"
                   variant="ghost"
@@ -349,7 +349,7 @@ export function ParkedThoughtsList({
                 >
                   <PlayCircle className="h-3 w-3" /> Resume
                 </Button>
-              </div>
+              </div>}
             </li>
           ))}
         </ul>

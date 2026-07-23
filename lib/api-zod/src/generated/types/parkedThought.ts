@@ -35,4 +35,6 @@ export interface ParkedThought {
   createdAt: string;
   /** @nullable */
   updatedAt?: string | null;
+  /** True only when the current caller may resume or archive this thought. */
+  canManage: boolean;
 }

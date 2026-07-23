@@ -2298,7 +2298,7 @@ components:
 
     ParkedThought:
       type: object
-      required: [id, source, title, summary, status, createdAt]
+      required: [id, source, title, summary, status, createdAt, canManage]
       properties:
         id:
           type: string
@@ -2336,6 +2336,9 @@ components:
           type: string
         updatedAt:
           type: ["string", "null"]
+        canManage:
+          type: boolean
+          description: True only when the current caller may resume or archive this thought.
 
     ParkedThoughtList:
       type: object

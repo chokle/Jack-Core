@@ -20,7 +20,8 @@ vi.mock("../../lib/openai.js", () => ({
 }));
 
 vi.mock("../../lib/interview.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/interview.js")>();
+  const actual =
+    await importOriginal<typeof import("../../lib/interview.js")>();
   return {
     ...actual,
     generateNextQuestion: vi.fn(async () => ({
@@ -33,7 +34,8 @@ vi.mock("../../lib/interview.js", async (importOriginal) => {
 });
 
 vi.mock("../../lib/rate-limit.js", () => ({
-  aiInterviewLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  aiInterviewLimiter: (_req: unknown, _res: unknown, next: () => void) =>
+    next(),
 }));
 
 import interviewRouter from "../interview.js";
@@ -114,7 +116,7 @@ describe("account-bound interview profile", () => {
     expect(response.body.profile.name).not.toBe("Another Contributor");
   });
 
-  it("never restores one presentation guest's profile for another guest", async () => {
+  it("rejects the shared presentation identity at the interview boundary", async () => {
     fake.tables["mentor_profiles"].push({
       id: "presentation-profile",
       contributor_user_id: "presentation-demo",
@@ -128,8 +130,10 @@ describe("account-bound interview profile", () => {
       .get("/api/interview/profile")
       .set("x-test-user", "presentation-demo");
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({});
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({
+      error: "Unauthorized — sign in required.",
+    });
   });
 
   it("updates and reuses the account profile instead of creating a duplicate", async () => {
@@ -149,7 +153,9 @@ describe("account-bound interview profile", () => {
     expect(response.status).toBe(201);
     expect(response.body.mentorProfileId).toBe("profile-a");
     expect(fake.tables["mentor_profiles"]).toHaveLength(2);
-    expect(fake.tables["mentor_profiles"].find((row) => row["id"] === "profile-a")).toMatchObject({
+    expect(
+      fake.tables["mentor_profiles"].find((row) => row["id"] === "profile-a"),
+    ).toMatchObject({
       years_experience: 19,
       specialties: ["TIG", "Combo Disc"],
       background: "Industrial repair welding.",
@@ -165,7 +171,7 @@ describe("account-bound interview profile", () => {
     );
   });
 
-  it("creates an isolated profile for each presentation interview", async () => {
+  it("does not let the shared presentation identity create an owned interview", async () => {
     fake.tables["mentor_profiles"].push({
       id: "presentation-profile",
       contributor_user_id: "presentation-demo",
@@ -180,10 +186,81 @@ describe("account-bound interview profile", () => {
       .set("x-test-user", "presentation-demo")
       .send({ name: "Current Guest", trade: "Electrical" });
 
-    expect(response.status).toBe(201);
-    expect(response.body.mentorProfileId).not.toBe("presentation-profile");
-    expect(fake.tables["mentor_profiles"]).toHaveLength(4);
-    expect(fake.tables["mentor_profiles"].find((row) => row["id"] === "presentation-profile"))
-      .toMatchObject({ name: "Previous Guest", trade: "Welder" });
+    expect(response.status).toBe(401);
+    expect(fake.tables["mentor_profiles"]).toHaveLength(3);
+    expect(
+      fake.tables["mentor_profiles"].find(
+        (row) => row["id"] === "presentation-profile",
+      ),
+    ).toMatchObject({ name: "Previous Guest", trade: "Welder" });
+  });
+
+  it("lets only the Clerk owner load a resumable interview session", async () => {
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    fake.tables["interview_sessions"].push({
+      id: sessionId,
+      mentor_profile_id: "profile-a",
+      contributor_user_id: USER_A,
+      trade: "Welder",
+      status: "active",
+      current_question: "How do you prepare the joint?",
+      question_count: 1,
+      created_at: "2026-07-22T00:00:00.000Z",
+    });
+    fake.tables["interview_answers"] = [];
+
+    const owner = await request(app)
+      .get(`/api/interview/sessions/${sessionId}`)
+      .set("x-test-user", USER_A);
+    const other = await request(app)
+      .get(`/api/interview/sessions/${sessionId}`)
+      .set("x-test-user", USER_B);
+    const presentation = await request(app)
+      .get(`/api/interview/sessions/${sessionId}`)
+      .set("x-test-user", "presentation-demo");
+
+    expect(owner.status).toBe(200);
+    expect(owner.body.session.id).toBe(sessionId);
+    expect(other.status).toBe(404);
+    expect(presentation.status).toBe(404);
+  });
+
+  it("exposes active-session discovery only to the interview owner", async () => {
+    const profileId = "22222222-2222-4222-8222-222222222222";
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    fake.tables["mentor_profiles"].push({
+      id: profileId,
+      contributor_user_id: USER_A,
+      name: "Tracy",
+      trade: "Electrician",
+      trade_input: "Electrical",
+      created_at: "2026-07-22T00:00:00.000Z",
+    });
+    fake.tables["interview_sessions"].push({
+      id: sessionId,
+      mentor_profile_id: profileId,
+      contributor_user_id: USER_A,
+      trade: "Electrician",
+      status: "active",
+      current_question: "How do you test amperage safely?",
+      question_count: 1,
+      created_at: "2026-07-22T00:00:00.000Z",
+    });
+
+    const owner = await request(app)
+      .get(`/api/interview/mentors/${profileId}/active-session`)
+      .set("x-test-user", USER_A);
+    const other = await request(app)
+      .get(`/api/interview/mentors/${profileId}/active-session`)
+      .set("x-test-user", USER_B);
+    const presentation = await request(app)
+      .get(`/api/interview/mentors/${profileId}/active-session`)
+      .set("x-test-user", "presentation-demo");
+
+    expect(owner.status).toBe(200);
+    expect(owner.body.session.id).toBe(sessionId);
+    expect(other.status).toBe(200);
+    expect(other.body).toEqual({});
+    expect(presentation.status).toBe(401);
   });
 });

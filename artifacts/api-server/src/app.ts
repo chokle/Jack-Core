@@ -11,6 +11,7 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
+import { resolveApiIdentity } from "./middlewares/resolveApiIdentity";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -71,12 +72,9 @@ app.get("/api/auth/reset-session", (_req, res) => {
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
-// Explicitly authorized public presentation mode. Scope all non-admin demo
-// activity to one stable identity; requireAdmin still protects admin writes.
-app.use("/api", (req, _res, next) => {
-  req.userId = "presentation-demo";
-  next();
-});
+// Preserve a verified Clerk subject for ownership checks. Public presentation
+// traffic keeps a synthetic identity for non-owned demo behavior.
+app.use("/api", resolveApiIdentity);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
