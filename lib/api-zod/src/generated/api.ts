@@ -1154,7 +1154,8 @@ export const ParkThoughtResponse = zod.object({
 })).optional(),
   "status": zod.enum(['parked', 'resumed', 'resolved']),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
+  "updatedAt": zod.string().nullish(),
+  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
 })
 
 
@@ -1192,7 +1193,8 @@ export const ListParkedThoughtsResponse = zod.object({
 })).optional(),
   "status": zod.enum(['parked', 'resumed', 'resolved']),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
+  "updatedAt": zod.string().nullish(),
+  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
 }))
 })
 
@@ -1228,7 +1230,8 @@ export const ResumeParkedThoughtResponse = zod.object({
 })).optional(),
   "status": zod.enum(['parked', 'resumed', 'resolved']),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
+  "updatedAt": zod.string().nullish(),
+  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
 })
 
 
@@ -1263,7 +1266,8 @@ export const ArchiveParkedThoughtResponse = zod.object({
 })).optional(),
   "status": zod.enum(['parked', 'resumed', 'resolved']),
   "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
+  "updatedAt": zod.string().nullish(),
+  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
 })
 
 

@@ -40,6 +40,7 @@ import {
 } from "../lib/interview.js";
 import { runMentorAnswerDistillation, type MentorDistilledItem } from "../lib/distillation.js";
 import { transcribeAudioBuffer } from "../lib/transcription.js";
+import { PRESENTATION_USER_ID } from "../middlewares/resolveApiIdentity.js";
 
 const router = Router();
 
@@ -106,6 +107,10 @@ const audioUpload = multer({
 }).single("audio");
 
 type Row = Record<string, unknown>;
+
+function isAuthenticatedInterviewOwner(userId: string | undefined): userId is string {
+  return Boolean(userId && userId !== PRESENTATION_USER_ID);
+}
 
 /** Shape a session row (+ mentor name) into the API InterviewSession response. */
 function serializeSession(session: Row, mentorName: string): Record<string, unknown> {
@@ -210,7 +215,7 @@ async function loadSession(
   ownerUserId: string | undefined,
 ): Promise<{ session: Row; mentor: Row } | null> {
   const id = String(rawId ?? "");
-  if (!UUID_RE.test(id) || !ownerUserId) return null;
+  if (!UUID_RE.test(id) || !isAuthenticatedInterviewOwner(ownerUserId)) return null;
   const { data: session, error } = await supabase
     .from("interview_sessions")
     .select("*")
@@ -238,10 +243,7 @@ async function loadSession(
 router.get("/interview/profile", async (req, res) => {
   try {
     const ownerUserId = req.userId;
-    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
-    // Presentation mode deliberately has no personal account. Never expose a
-    // previous guest's intake details to the next person using the shared demo.
-    if (ownerUserId === "presentation-demo") return res.json({});
+    if (!isAuthenticatedInterviewOwner(ownerUserId)) return res.status(401).json({ error: "Unauthorized — sign in required." });
 
     const { data: mentor, error } = await supabase
       .from("mentor_profiles")
@@ -263,7 +265,7 @@ router.get("/interview/profile", async (req, res) => {
 router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
   try {
     const ownerUserId = req.userId;
-    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+    if (!isAuthenticatedInterviewOwner(ownerUserId)) return res.status(401).json({ error: "Unauthorized — sign in required." });
 
     const parsed = StartInterviewBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -286,19 +288,16 @@ router.post("/interview/sessions", aiInterviewLimiter, async (req, res) => {
     // One reusable identity per account. Historical profiles remain attached to
     // their old sessions, but every new interview updates/reuses the latest
     // account profile instead of asking Jack to learn the same person again.
-    const isPresentationGuest = ownerUserId === "presentation-demo";
     let existing: Row | null = null;
-    if (!isPresentationGuest) {
-      const { data, error: existingErr } = await supabase
-        .from("mentor_profiles")
-        .select("id")
-        .eq("contributor_user_id", ownerUserId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (existingErr) throw existingErr;
-      existing = (data as Row | null) ?? null;
-    }
+    const { data, error: existingErr } = await supabase
+      .from("mentor_profiles")
+      .select("id")
+      .eq("contributor_user_id", ownerUserId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+    existing = (data as Row | null) ?? null;
 
     const mentorQuery = existing
       ? supabase
@@ -376,7 +375,7 @@ router.get("/interview/sessions/:id", async (req, res) => {
 router.get("/interview/mentors/:id/active-session", async (req, res) => {
   try {
     const ownerUserId = req.userId;
-    if (!ownerUserId) return res.status(401).json({ error: "Unauthorized — sign in required." });
+    if (!isAuthenticatedInterviewOwner(ownerUserId)) return res.status(401).json({ error: "Unauthorized — sign in required." });
 
     const id = String(req.params.id ?? "");
     if (!UUID_RE.test(id)) return res.json({});

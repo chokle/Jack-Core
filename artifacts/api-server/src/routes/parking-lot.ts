@@ -22,6 +22,7 @@ import { supabase } from "../lib/supabase.js";
 import { ParkThoughtBody } from "@workspace/api-zod";
 import { readSession, resolveSession } from "../lib/session.js";
 import { parkingLotLimiter } from "../lib/rate-limit.js";
+import { PRESENTATION_USER_ID } from "../middlewares/resolveApiIdentity.js";
 
 const router = Router();
 
@@ -80,6 +81,7 @@ function serialize(row: Row): Record<string, unknown> {
     status: row["status"],
     createdAt: row["created_at"],
     updatedAt: row["updated_at"] ?? null,
+    canManage: true,
   };
 }
 
@@ -91,7 +93,12 @@ function serialize(row: Row): Record<string, unknown> {
 async function canAccessInterviewThought(req: Request, row: Row): Promise<boolean> {
   const sessionId = row["interview_session_id"];
   if (row["source"] !== "interview") return true;
-  if (typeof sessionId !== "string" || !UUID_RE.test(sessionId) || !req.userId) return false;
+  if (
+    typeof sessionId !== "string" ||
+    !UUID_RE.test(sessionId) ||
+    !req.userId ||
+    req.userId === PRESENTATION_USER_ID
+  ) return false;
 
   const { data, error } = await supabase
     .from("interview_sessions")
@@ -154,6 +161,9 @@ router.post("/parking-lot", parkingLotLimiter, async (req, res) => {
     let topic: string | null = null;
 
     if (body.source === "interview") {
+      if (!req.userId || req.userId === PRESENTATION_USER_ID) {
+        return res.status(401).json({ error: "Sign in is required to park an interview." });
+      }
       const sid = body.interviewSessionId;
       if (typeof sid !== "string" || !UUID_RE.test(sid)) {
         return res.status(400).json({
@@ -249,9 +259,14 @@ router.get("/parking-lot", async (req, res) => {
     // being inlined — an unvalidated cookie could inject extra `,`-separated
     // disjuncts and disclose other sessions' chat-sourced parked thoughts.
     const safeSession = session && UUID_RE.test(session) ? session : null;
-    query = safeSession
-      ? query.or(`source.eq.interview,chat_session_id.eq.${safeSession}`)
-      : query.eq("source", "interview");
+    const canOwnInterview = Boolean(req.userId && req.userId !== PRESENTATION_USER_ID);
+    query = canOwnInterview
+      ? safeSession
+        ? query.or(`source.eq.interview,chat_session_id.eq.${safeSession}`)
+        : query.eq("source", "interview")
+      : safeSession
+        ? query.eq("chat_session_id", safeSession)
+        : query.eq("source", "chat").is("id", null);
     if (req.userId) {
       // Supabase/PostgREST cannot filter parked_thoughts by the joined
       // interview session owner here, so we still verify each row below. This
