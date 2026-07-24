@@ -51,3 +51,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+# Temporary validation artifacts
+_prod_*
+_smoke_*
+
+# Local handoff notes
+DAZ-HANDOFF-*.md
+PR*-review-summary-for-daz.md
