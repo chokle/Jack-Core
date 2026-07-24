@@ -185,6 +185,17 @@ export function JackShell({
             }}
             testId="account-settings"
           />
+          {onSignOut && (
+            <NavItem
+              icon={<LogOut className="h-4 w-4" />}
+              label="Logout"
+              onClick={() => {
+                onSignOut();
+                setIsPanelOpen(false);
+              }}
+              testId="sign-out"
+            />
+          )}
         </nav>
 
         {/* Graph stats */}
@@ -252,17 +263,6 @@ export function JackShell({
                 Start User Test
               </button>
             </div>
-          )}
-          {onSignOut && (
-            <button
-              type="button"
-              onClick={onSignOut}
-              data-testid="sign-out"
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/50 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-            >
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </button>
           )}
         </div>
       </aside>

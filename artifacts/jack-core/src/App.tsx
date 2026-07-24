@@ -184,7 +184,7 @@ const clerkAppearance = {
   },
 };
 
-function JackApp() {
+function JackApp({ onSignOut }: { onSignOut?: () => void }) {
   const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
   const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
   const fieldNoteHandoffToken = useRef(0);
@@ -362,6 +362,7 @@ function JackApp() {
           // the isolated Clerk flow rather than leaving a dead settings item.
           window.location.assign(`${basePath}/sign-in`);
         }}
+        onSignOut={isSignedIn ? onSignOut : undefined}
         onStartUserTest={undefined}
         userTestingRequired={false}
       >
@@ -457,13 +458,23 @@ function JackApp() {
 
 // The authenticated app surface. Only mounted for signed-in users, so its
 // data-fetching hooks (useMemoryGraphData, useGetMe, …) never fire for anon.
-function AppSurface() {
+function AppSurface({ onSignOut }: { onSignOut?: () => void }) {
   return (
     <TooltipProvider>
-      <JackApp />
+      <JackApp onSignOut={onSignOut} />
       <Toaster />
     </TooltipProvider>
   );
+}
+
+function AuthenticatedAppSurface() {
+  const { signOut } = useClerk();
+
+  const handleSignOut = () => {
+    void signOut({ redirectUrl: `${basePath}/sign-in` });
+  };
+
+  return <AppSurface onSignOut={handleSignOut} />;
 }
 
 function StartupReady() {
@@ -521,7 +532,7 @@ function ProtectedApp() {
   return (
     <>
       <Show when="signed-in">
-        <AppSurface />
+        <AuthenticatedAppSurface />
       </Show>
       <Show when="signed-out">
         <Redirect to="/" />
