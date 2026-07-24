@@ -246,9 +246,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  const isPresentationDemo = me?.userId === "presentation-demo";
   const isSignedIn = Boolean(me?.userId);
-  const hasAuthenticatedSession = isSignedIn && !isPresentationDemo;
   const userLabel = me?.name ?? me?.email ?? "Account";
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
 
@@ -389,19 +387,17 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
-        onOpenSettings={
-          hasAuthenticatedSession
-            ? () => {
-                setAccountSettingsOpen(true);
-                return;
-              }
-            : undefined
-        }
-        onSignOut={
-          hasAuthenticatedSession && onSignOut ? handleSignOut : undefined
-        }
-        onStartUserTest={!isPresentationDemo && me?.isAdmin === false ? handleStartUserTest : undefined}
-        userTestingRequired={!isPresentationDemo && me?.isAdmin === false && testingGate.restricted}
+        onOpenSettings={() => {
+          if (isSignedIn) {
+            setAccountSettingsOpen(true);
+            return;
+          }
+          // Defensive fallback while identity is loading.
+          window.location.assign(`${basePath}/sign-in`);
+        }}
+        onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
+        onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
+        userTestingRequired={me?.isAdmin === false && testingGate.restricted}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -460,7 +456,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       <UserTestFeedback
         ref={feedbackRef}
         consented={testingGate.accepted}
-        userId={isSignedIn && !isPresentationDemo ? me?.userId : null}
+        userId={isSignedIn ? me?.userId : null}
       />
 
       <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
@@ -515,7 +511,7 @@ function AppSurface({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   );
 }
 
-export function AuthenticatedAppSurface() {
+function AuthenticatedAppSurface() {
   const { signOut } = useClerk();
   return <AppSurface onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })} />;
 }
