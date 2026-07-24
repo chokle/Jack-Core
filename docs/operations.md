@@ -27,6 +27,8 @@ The script is idempotent, so it is safe to re-run. If `SUPABASE_DB_URL` is not s
 
 ## Gotchas
 
+- Pilot feedback alerts require `RESEND_API_KEY`, `FEEDBACK_FROM_EMAIL`, `FEEDBACK_NOTIFICATION_RECIPIENTS` (currently `derek@torchlabs.ca`), and `PUBLIC_SITE_URL` in Railway. Missing or rejected provider configuration marks the alert `failed`/`retrying` without failing feedback submission or logout; inspect structured `[feedback-notification]` logs and the Review detail view.
+- Re-run `setup:supabase` before enabling feedback collection so the `test_feedback` workflow/status/notification columns and RLS policies exist. Do not expose Supabase credentials to the browser; all feedback and admin reads go through authenticated API routes.
 - Apply the Supabase schema before the app will work — run `pnpm --filter @workspace/scripts run setup:supabase` (with `SUPABASE_DB_URL` set) or paste the SQL manually; tables don't exist until you do
 - The Supabase JS/REST client cannot run DDL — schema setup needs a direct Postgres connection (`SUPABASE_DB_URL`). `DATABASE_URL`/`PG*` point at Replit's built-in Postgres, not Supabase
 - Replit is IPv4-only but Supabase's **direct** host (`db.<ref>.supabase.co`) is IPv6-only, so it fails with a cryptic `ENOTFOUND`/`EAFNOSUPPORT`. Always use the **Session pooler** URL (`postgresql://postgres.<ref>:<password>@aws-<N>-<region>.pooler.supabase.com:5432/postgres`), not the direct host or the *transaction* pooler. `setup:supabase` detects this and prints the fix

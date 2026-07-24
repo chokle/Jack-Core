@@ -70,6 +70,8 @@ router.delete("/account", async (req, res) => {
     }
     const { error: recordingDeleteError } = await supabase.from("test_recordings").delete().eq("tester_user_id", userId);
     if (recordingDeleteError) throw recordingDeleteError;
+    const { error: feedbackDeleteError } = await supabase.from("test_feedback").delete().eq("tester_user_id", userId);
+    if (feedbackDeleteError) throw feedbackDeleteError;
 
     await clerkClient.users.deleteUser(userId);
     return res.status(204).send();

@@ -22,7 +22,7 @@ import { supabase } from "../lib/supabase.js";
 import { ParkThoughtBody } from "@workspace/api-zod";
 import { readSession, resolveSession } from "../lib/session.js";
 import { parkingLotLimiter } from "../lib/rate-limit.js";
-import { PRESENTATION_USER_ID } from "../middlewares/resolveApiIdentity.js";
+import { PRESENTATION_USER_ID } from "../lib/identity.js";
 
 const router = Router();
 

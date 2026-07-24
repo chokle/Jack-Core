@@ -62,5 +62,8 @@ File-by-file map of the API server and frontend. Contract source of truth is `li
 - `artifacts/jack-core/src/components/MentorWithdrawal.tsx` — admin-only mentor roster on the Review screen with a confirm-guarded destructive Withdraw action; surfaces the retained/archived/deleted/scrubbed summary after withdrawal
 - `artifacts/jack-core/src/components/KnowledgeReview.tsx` — Knowledge Review UI (admin-gated candidate curation: Accept / Merge into… / Reject with reason)
 - `artifacts/jack-core/src/components/GraphHealth.tsx` — admin-only Graph Health dashboard on the Review screen; summary counts, retry queue, recent-write log with per-check pills, and a one-click Retry distillation on failed mentor answers
+- `artifacts/jack-core/src/components/UserTestFeedbackReview.tsx` — admin-only feedback inbox/detail UI with unread count, filters, workflow status, notes, and notification delivery state
+- `artifacts/api-server/src/routes/testing.ts` — consented feedback submission plus server-admin-only list/detail/update endpoints; identity and trade are resolved on the server
+- `artifacts/api-server/src/lib/feedback-notifications.ts` — immediate Resend alert worker with durable status, retry/backoff, safe logging, and provider idempotency
 - `artifacts/jack-core/src/components/PendingKnowledgePanel.tsx` — read-only "Awaiting Knowledge Review" panel in the Living Memory right rail (public: title, category, mentor, near-matches; no resolution controls)
 - `artifacts/jack-core/src/lib/memory-graph.ts` — client graph model (`buildGraphModelFromServer` + client-derived fallback)

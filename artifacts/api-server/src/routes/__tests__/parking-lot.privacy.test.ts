@@ -13,7 +13,7 @@ vi.mock("../../lib/rate-limit.js", () => ({
 
 import parkingLotRouter from "../parking-lot.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
-import { PRESENTATION_USER_ID } from "../../middlewares/resolveApiIdentity.js";
+import { PRESENTATION_USER_ID } from "../../lib/identity.js";
 
 const OWNER = "user_owner";
 const OTHER = "user_other";

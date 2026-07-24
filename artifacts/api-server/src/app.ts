@@ -11,7 +11,6 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
-import { resolveApiIdentity } from "./middlewares/resolveApiIdentity";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -72,9 +71,9 @@ app.get("/api/auth/reset-session", (_req, res) => {
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
-// Preserve a verified Clerk subject for ownership checks. Public presentation
-// traffic keeps a synthetic identity for non-owned demo behavior.
-app.use("/api", resolveApiIdentity);
+// Preserve a verified Clerk subject for ownership checks. This is the actual
+// security boundary: the frontend sign-in wall is convenience only.
+app.use("/api", requireAuth);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,

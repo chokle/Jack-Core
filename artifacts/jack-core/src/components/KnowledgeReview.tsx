@@ -35,6 +35,7 @@ import { PendingKnowledgePanel } from "./PendingKnowledgePanel";
 import { MentorContributions } from "./MentorContributions";
 import { MentorWithdrawal } from "./MentorWithdrawal";
 import { GraphHealth } from "./GraphHealth";
+import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
 import { useToast } from "@/hooks/use-toast";
 
 /** Scaffold kinds that can never be a merge target. */
@@ -257,6 +258,8 @@ export function KnowledgeReview() {
           restore it to bring it back as unverified knowledge, or re-archive a
           restore from the Restored tab if it was a mistake.
         </p>
+
+        <UserTestFeedbackReview />
 
         {/* Status tabs */}
         <div className="mb-6 flex flex-wrap gap-1.5">

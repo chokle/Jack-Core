@@ -200,9 +200,11 @@ interface Turn {
 export function InterviewMode({
   preload,
   fieldNote,
+  onComplete,
 }: {
   preload?: TorchInterviewPreload;
   fieldNote?: FieldNoteInterviewPreload;
+  onComplete?: () => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -210,6 +212,7 @@ export function InterviewMode({
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [transcript, setTranscript] = useState<Turn[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const completionReported = useRef(false);
   // True while we attempt to resume a stored session on mount, so the intake
   // form doesn't flash before we know whether an interview is still in progress.
   const [resuming, setResuming] = useState(() => !preload && !fieldNote && readActiveSessionId() !== null);
@@ -238,6 +241,12 @@ export function InterviewMode({
 
   // Current answer being typed.
   const [answer, setAnswer] = useState("");
+
+  useEffect(() => {
+    if (stage !== "complete" || !session || completionReported.current) return;
+    completionReported.current = true;
+    onComplete?.();
+  }, [onComplete, session, stage]);
 
   const startInterview = useStartInterview();
   const interviewProfile = useGetInterviewProfile();
@@ -281,6 +290,7 @@ export function InterviewMode({
   }, [interviewProfile.data, interviewProfile.isLoading, preloadedTrade]);
 
   const resetAll = () => {
+    completionReported.current = false;
     clearActiveSessionId();
     setStage("intake");
     setSession(null);
