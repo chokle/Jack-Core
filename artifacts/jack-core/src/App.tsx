@@ -362,7 +362,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
           // the isolated Clerk flow rather than leaving a dead settings item.
           window.location.assign(`${basePath}/sign-in`);
         }}
-        onSignOut={isSignedIn ? onSignOut : undefined}
+        onSignOut={onSignOut}
         onStartUserTest={undefined}
         userTestingRequired={false}
       >
@@ -459,9 +459,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
 // The authenticated app surface. Only mounted for signed-in users, so its
 // data-fetching hooks (useMemoryGraphData, useGetMe, …) never fire for anon.
 function AppSurface({ onSignOut }: { onSignOut?: () => void }) {
+  const handleSignOut =
+    onSignOut ??
+    (() => {
+      window.location.assign("/api/auth/reset-session");
+    });
+
   return (
     <TooltipProvider>
-      <JackApp onSignOut={onSignOut} />
+      <JackApp onSignOut={handleSignOut} />
       <Toaster />
     </TooltipProvider>
   );
