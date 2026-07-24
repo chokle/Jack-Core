@@ -30,7 +30,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  if (PUBLIC_API_PATHS.has(req.path)) {
+  const isClerkProxyRequest = req.path.startsWith("/__clerk");
+
+  if (PUBLIC_API_PATHS.has(req.path) || isClerkProxyRequest) {
     next();
     return;
   }

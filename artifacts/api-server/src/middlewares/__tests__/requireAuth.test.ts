@@ -56,6 +56,16 @@ describe("requireAuth — public paths (no auth required)", () => {
       expect(getAuth).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    "/api/__clerk",
+    "/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js",
+  ])("allows anonymous access to Clerk proxy paths %s", async (path) => {
+    const res = await request(app).get(path);
+
+    expect(res.status).toBe(200);
+    expect(getAuth).not.toHaveBeenCalled();
+  });
 });
 
 describe("requireAuth — protected paths", () => {

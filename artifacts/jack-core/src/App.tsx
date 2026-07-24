@@ -55,6 +55,11 @@ const isLocalClerkHost =
   window.location.hostname === "[::1]";
 const isRailwayPreviewHost = window.location.hostname.endsWith(".up.railway.app");
 const useDirectClerkAssets = isLocalClerkHost || isRailwayPreviewHost;
+const clerkProxyEnabled =
+  import.meta.env.VITE_ENABLE_CLERK_PROXY === "true" &&
+  import.meta.env.VITE_DISABLE_CLERK_PROXY !== "true";
+const useClerkAssetsFromProxy =
+  clerkProxyEnabled && !useDirectClerkAssets;
 
 // Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
 // publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
@@ -66,16 +71,20 @@ const clerkPubKey = configuredClerkPubKey;
 const clerkProxyUrl =
   isLocalClerkHost
     ? `${window.location.origin}/api/__clerk`
-    : import.meta.env.VITE_ENABLE_CLERK_PROXY === "true"
+    : clerkProxyEnabled
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
 const localClerkJsUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
-  : `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`;
+  : useClerkAssetsFromProxy
+  ? `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`
+  : "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
 const localClerkUiUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`;
+  : useClerkAssetsFromProxy
+  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`
+  : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";

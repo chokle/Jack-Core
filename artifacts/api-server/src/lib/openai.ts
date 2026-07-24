@@ -2,10 +2,26 @@ import OpenAI from "openai";
 import { createHash } from "crypto";
 import { trackInference } from "./vitality.js";
 
-const apiKey = process.env["OPENAI_API_KEY"];
-if (!apiKey) throw new Error("OPENAI_API_KEY is required");
+let cachedOpenAI: OpenAI | null = null;
 
-export const openai = new OpenAI({ apiKey });
+function getOpenAI(): OpenAI {
+  if (!cachedOpenAI) {
+    const apiKey = process.env["OPENAI_API_KEY"];
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY is required for AI-backed routes");
+    }
+    cachedOpenAI = new OpenAI({ apiKey });
+  }
+
+  return cachedOpenAI;
+}
+
+export const openai = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    const client = getOpenAI();
+    return Reflect.get(client, prop, client);
+  },
+});
 
 /**
  * Chat-completion wrapper that reports "reasoning" activity to the Vitality
