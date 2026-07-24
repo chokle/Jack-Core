@@ -38,6 +38,10 @@ import {
   type TestingOverlayHandle,
 } from "./components/testing/TestingOverlay";
 import { UserTestingGate } from "./components/testing/UserTestingGate";
+import {
+  UserTestFeedback,
+  type UserTestFeedbackHandle,
+} from "./components/testing/UserTestFeedback";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
@@ -184,11 +188,15 @@ const clerkAppearance = {
   },
 };
 
-function JackApp({ onSignOut }: { onSignOut?: () => void }) {
+function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
   const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
   const fieldNoteHandoffToken = useRef(0);
-  const [view, setView] = useState<JackView>(() => interviewPreload ? "interview" : "graph");
+  const [view, setView] = useState<JackView>(() => {
+    if (interviewPreload) return "interview";
+    const requested = new URLSearchParams(window.location.search).get("view");
+    return requested === "review" ? "review" : "graph";
+  });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
@@ -226,6 +234,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
   // the consent modal via this imperative handle; TestingOverlay also opens
   // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
+  const feedbackRef = useRef<UserTestFeedbackHandle>(null);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
     restricted: boolean;
@@ -237,11 +246,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
-  // Jack also runs in public presentation mode, outside ClerkProvider. The
-  // current-user response is only populated for an authenticated session.
-  const isSignedIn = Boolean(me);
-  const userLabel = me?.name ?? "Presentation Mode";
-  const userSubLabel = "Demo access";
+  const isSignedIn = Boolean(me?.userId);
+  const userLabel = me?.name ?? me?.email ?? "Account";
+  const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
 
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
@@ -260,11 +267,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
   };
 
   const handleSelectVideo = (videoId: string) => {
+    feedbackRef.current?.markFeature("video_detail");
     setSeek(undefined);
     setSelectedVideoId(videoId);
   };
 
   const handleNavigate = (next: JackView) => {
+    const feature = {
+      graph: "memory_graph",
+      library: "library",
+      interview: "interview_mode",
+      review: "knowledge_review",
+    } as const;
+    feedbackRef.current?.markFeature(feature[next]);
     setSelectedVideoId(null);
     setFieldNotePreload(undefined);
     setView(next);
@@ -318,6 +333,25 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
     }
   };
 
+  const handleSignOut = () => {
+    if (!onSignOut) return;
+    if (feedbackRef.current) {
+      feedbackRef.current.request("logout", onSignOut);
+      return;
+    }
+    void onSignOut();
+  };
+
+  const handleInterviewComplete = () => {
+    feedbackRef.current?.markFeature("interview_mode");
+    feedbackRef.current?.request("interview_complete");
+  };
+
+  const handleAskJackComplete = () => {
+    feedbackRef.current?.markFeature("ask_jack");
+    feedbackRef.current?.request("ask_jack_complete");
+  };
+
   // Resume an interrupted interview from a mentor node in the Living Memory
   // graph. We stash the session id under the SAME localStorage key Interview
   // Mode reads on mount ("jack.interview.activeSessionId") and switch to that
@@ -358,13 +392,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
             setAccountSettingsOpen(true);
             return;
           }
-          // The public demo deliberately has no identity. Send contributors to
-          // the isolated Clerk flow rather than leaving a dead settings item.
+          // Defensive fallback while identity is loading.
           window.location.assign(`${basePath}/sign-in`);
         }}
-        onSignOut={onSignOut}
-        onStartUserTest={undefined}
-        userTestingRequired={false}
+        onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
+        onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
+        userTestingRequired={me?.isAdmin === false && testingGate.restricted}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -387,6 +420,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
             key={fieldNotePreload ? `field-note-${fieldNoteHandoffToken.current}` : "interview"}
             preload={interviewPreload}
             fieldNote={fieldNotePreload}
+            onComplete={handleInterviewComplete}
           />
         ) : view === "review" ? (
           <KnowledgeReview />
@@ -396,7 +430,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
       </JackShell>
 
       <UserTestingGate
-        open={false}
+        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
         onStart={handleStartUserTest}
       />
 
@@ -411,9 +445,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
         initialContext={chatContext}
         onCitationClick={handleCitationClick}
         onFieldNoteClick={handleFieldNoteClick}
+        onMeaningfulSessionComplete={handleAskJackComplete}
       />
 
-      <TestingOverlay ref={testingOverlayRef} autoPrompt={false} onEvent={handleTestingEvent} />
+      <TestingOverlay
+        ref={testingOverlayRef}
+        autoPrompt={me?.isAdmin === false}
+        onEvent={handleTestingEvent}
+      />
+      <UserTestFeedback
+        ref={feedbackRef}
+        consented={testingGate.accepted}
+        userId={isSignedIn ? me?.userId : null}
+      />
 
       <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
         <AlertDialogContent>
@@ -458,16 +502,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void }) {
 
 // The authenticated app surface. Only mounted for signed-in users, so its
 // data-fetching hooks (useMemoryGraphData, useGetMe, …) never fire for anon.
-function AppSurface({ onSignOut }: { onSignOut?: () => void }) {
-  const handleSignOut =
-    onSignOut ??
-    (() => {
-      window.location.assign("/api/auth/reset-session");
-    });
-
+function AppSurface({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   return (
     <TooltipProvider>
-      <JackApp onSignOut={handleSignOut} />
+      <JackApp onSignOut={onSignOut} />
       <Toaster />
     </TooltipProvider>
   );
@@ -475,12 +513,7 @@ function AppSurface({ onSignOut }: { onSignOut?: () => void }) {
 
 function AuthenticatedAppSurface() {
   const { signOut } = useClerk();
-
-  const handleSignOut = () => {
-    void signOut({ redirectUrl: `${basePath}/sign-in` });
-  };
-
-  return <AppSurface onSignOut={handleSignOut} />;
+  return <AppSurface onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })} />;
 }
 
 function StartupReady() {
@@ -659,9 +692,9 @@ function AuthUnavailableScreen() {
         <img className="mx-auto h-14 w-14" src={`${basePath}/logo.svg`} alt="" />
         <h1 className="mt-5 text-2xl font-semibold text-foreground">Sign-in is temporarily unavailable</h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Jack is still available in presentation mode while the secure session service reconnects.
+          Jack stays locked until the secure session service reconnects.
         </p>
-        <Button className="mt-6" onClick={() => window.location.assign(basePath || "/")}>Open Jack</Button>
+        <Button className="mt-6" onClick={() => window.location.reload()}>Try again</Button>
       </div>
     </div>
   );
@@ -670,9 +703,6 @@ function AuthUnavailableScreen() {
 function ManagedAppEntry() {
   const [authReady, setAuthReady] = useState(false);
   const [authTimedOut, setAuthTimedOut] = useState(false);
-  const isProtectedAppPath =
-    window.location.pathname === `${basePath}/app` ||
-    window.location.pathname.startsWith(`${basePath}/app/`);
 
   useEffect(() => {
     if (authReady) return;
@@ -681,13 +711,6 @@ function ManagedAppEntry() {
   }, [authReady]);
 
   if (authTimedOut && !authReady) {
-    if (isProtectedAppPath) {
-      return (
-        <QueryClientProvider client={queryClient}>
-          <AppSurface />
-        </QueryClientProvider>
-      );
-    }
     return <AuthUnavailableScreen />;
   }
 
@@ -700,22 +723,7 @@ function ManagedAppEntry() {
 }
 
 function App() {
-  // Keep the root presentation surface free of an auth dependency, while
-  // retaining the existing protected management path for contributors and
-  // administrators. This is critical for owner-only video removal and review.
-  const managementPath = ["/app", "/sign-in", "/sign-up"].some(
-    (path) => window.location.pathname === `${basePath}${path}` || window.location.pathname.startsWith(`${basePath}${path}/`),
-  );
-
-  if (managementPath && clerkPubKey) {
-    return <ManagedAppEntry />;
-  }
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AppSurface />
-    </QueryClientProvider>
-  );
+  return <ManagedAppEntry />;
 }
 
 export default App;

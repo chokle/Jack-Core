@@ -53,6 +53,7 @@ interface AskJackProps {
   onFieldNoteClick: (citation: Citation) => void;
   /** Set when the drawer was opened via "Resume" on a parked thought. */
   resumedThought?: ParkedThought;
+  onMeaningfulSessionComplete?: () => void;
 }
 
 export function AskJack({
@@ -62,6 +63,7 @@ export function AskJack({
   onCitationClick,
   onFieldNoteClick,
   resumedThought,
+  onMeaningfulSessionComplete,
 }: AskJackProps) {
   const [input, setInput] = useState(initialContext || "");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,13 @@ export function AskJack({
   const [confirmingClear, setConfirmingClear] = useState(false);
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [successfulTurns, setSuccessfulTurns] = useState(0);
+
+  const close = () => {
+    if (successfulTurns > 0) onMeaningfulSessionComplete?.();
+    setSuccessfulTurns(0);
+    onClose();
+  };
 
   const handleClearConversation = () => {
     clearHistory.mutate(undefined, {
@@ -150,6 +159,7 @@ export function AskJack({
             createdAt: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
+          setSuccessfulTurns((count) => count + 1);
         },
       },
     );
@@ -198,7 +208,7 @@ export function AskJack({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={onClose}
+                onClick={close}
                 aria-label="Close Ask Jack"
               >
                 <X className="h-4 w-4" />

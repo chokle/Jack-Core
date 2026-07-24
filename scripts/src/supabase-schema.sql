@@ -689,6 +689,76 @@ CREATE TABLE IF NOT EXISTS test_recordings (
 CREATE INDEX IF NOT EXISTS idx_test_recordings_created_at ON test_recordings(created_at);
 CREATE INDEX IF NOT EXISTS idx_test_recordings_tester_user_id ON test_recordings(tester_user_id);
 
+-- Short, structured exit feedback from explicitly consenting user testers.
+-- This belongs to the same private operational testing subsystem as recordings,
+-- but remains a separate row because useful feedback does not require a screen
+-- recording. Identity/profile/trade are resolved server-side. `features_used`
+-- contains allowlisted feature names only, never prompts, interview answers, or
+-- browsing content.
+CREATE TABLE IF NOT EXISTS test_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tester_user_id TEXT NOT NULL,
+  tester_email TEXT,
+  tester_name TEXT,
+  tester_profile_id UUID REFERENCES mentor_profiles(id) ON DELETE SET NULL,
+  tester_trade TEXT,
+  session_id TEXT NOT NULL,
+  features_used JSONB NOT NULL DEFAULT '[]',
+  device_category TEXT NOT NULL CHECK (device_category IN ('desktop','tablet','mobile')),
+  trigger TEXT NOT NULL CHECK (trigger IN ('logout','interview_complete','ask_jack_complete','desktop_exit')),
+  goal TEXT NOT NULL,
+  useful TEXT NOT NULL CHECK (useful IN ('yes','partly','no')),
+  shortfall TEXT NOT NULL,
+  adoption_need TEXT NOT NULL,
+  additional TEXT,
+  app_version TEXT,
+  status TEXT NOT NULL DEFAULT 'new'
+    CHECK (status IN ('new','reviewed','actioned','archived')),
+  admin_notes TEXT,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  notification_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (notification_status IN ('pending','sent','failed','retrying')),
+  notification_attempts INTEGER NOT NULL DEFAULT 0,
+  notification_last_error TEXT,
+  notification_last_attempt_at TIMESTAMPTZ,
+  notification_next_attempt_at TIMESTAMPTZ,
+  notification_sent_at TIMESTAMPTZ,
+  notification_provider_message_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Idempotent upgrade path for a database where the first feedback pilot table
+-- was applied before admin review and delivery observability were added.
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS tester_name TEXT;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS admin_notes TEXT;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_last_error TEXT;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_last_attempt_at TIMESTAMPTZ;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_next_attempt_at TIMESTAMPTZ;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMPTZ;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS notification_provider_message_id TEXT;
+ALTER TABLE test_feedback ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS idx_test_feedback_created_at ON test_feedback(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_test_feedback_tester_user_id ON test_feedback(tester_user_id);
+CREATE INDEX IF NOT EXISTS idx_test_feedback_session_id ON test_feedback(session_id);
+CREATE INDEX IF NOT EXISTS idx_test_feedback_review_status ON test_feedback(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_test_feedback_notification
+  ON test_feedback(notification_status, notification_next_attempt_at);
+
+-- Operational user-testing data is server-only. The API uses the service-role
+-- key; browsers must never query recordings or feedback through PostgREST.
+ALTER TABLE test_recordings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE test_feedback ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE test_recordings FROM anon, authenticated;
+REVOKE ALL ON TABLE test_feedback FROM anon, authenticated;
+GRANT ALL ON TABLE test_recordings TO service_role;
+GRANT ALL ON TABLE test_feedback TO service_role;
+
 -- Create the PRIVATE storage bucket for beta user-testing recordings. Unlike
 -- jack-videos (public), these can contain arbitrary captured screen content
 -- and must never be publicly listable/downloadable — only signed URLs (admin,

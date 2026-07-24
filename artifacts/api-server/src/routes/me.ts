@@ -83,14 +83,7 @@ function authenticatedUserId(req: { userId?: string }): string | null {
 router.get("/me", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) {
-    return res.json(
-      GetMeResponse.parse({
-        userId: req.userId ?? "presentation-demo",
-        email: null,
-        name: "Presentation Mode",
-        isAdmin: false,
-      }),
-    );
+    return res.status(401).json({ error: "Unauthorized — sign in required." });
   }
   return res.json(
     GetMeResponse.parse({

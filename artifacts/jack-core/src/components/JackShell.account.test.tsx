@@ -50,7 +50,6 @@ describe("JackShell account management", () => {
         <div />
       </JackShell>,
     );
-
     const settings = screen.getByTestId("account-settings");
     const logout = screen.getByTestId("sign-out");
     expect(settings.nextElementSibling).toBe(logout);

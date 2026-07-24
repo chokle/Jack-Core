@@ -40,7 +40,7 @@ import {
 } from "../lib/interview.js";
 import { runMentorAnswerDistillation, type MentorDistilledItem } from "../lib/distillation.js";
 import { transcribeAudioBuffer } from "../lib/transcription.js";
-import { PRESENTATION_USER_ID } from "../middlewares/resolveApiIdentity.js";
+import { PRESENTATION_USER_ID } from "../lib/identity.js";
 
 const router = Router();
 

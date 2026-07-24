@@ -26,6 +26,7 @@ type Filter =
   | { kind: "in"; col: string; vals: unknown[] }
   | { kind: "is"; col: string; val: unknown }
   | { kind: "not-is"; col: string; val: unknown }
+  | { kind: "gte"; col: string; val: unknown }
   | { kind: "lt"; col: string; val: unknown };
 
 interface Result<T> {
@@ -277,6 +278,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this;
   }
 
+  gte(col: string, val: unknown): this {
+    this.filters.push({ kind: "gte", col, val });
+    return this;
+  }
+
   order(col: string, opts: { ascending?: boolean } = {}): this {
     this.orderBy = { col, ascending: opts.ascending ?? true };
     return this;
@@ -305,6 +311,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       if (f.kind === "neq") return row[f.col] !== f.val;
       if (f.kind === "is") return (row[f.col] ?? null) === f.val;
       if (f.kind === "not-is") return (row[f.col] ?? null) !== f.val;
+      if (f.kind === "gte") return (row[f.col] as never) >= (f.val as never);
       if (f.kind === "lt") return (row[f.col] as never) < (f.val as never);
       return f.vals.includes(row[f.col]);
     });
