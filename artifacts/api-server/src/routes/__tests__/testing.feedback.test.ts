@@ -171,6 +171,24 @@ describe("POST /api/testing/feedback", () => {
     expect(from).not.toHaveBeenCalled();
   });
 
+  it("rejects presentation-demo with 403, without writing feedback or queueing notification", async () => {
+    resolveIdentity.mockResolvedValue({
+      userId: "presentation-demo",
+      email: "presentation-demo@test.local",
+      name: "Presentation Demo",
+      isAdmin: false,
+    });
+
+    const response = await request(app()).post("/api/testing/feedback").send(validBody);
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      error: "User-testing feedback is unavailable in presentation mode.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(queueFeedbackNotification).not.toHaveBeenCalled();
+  });
+
   it.each([
     { ...validBody, featuresUsed: [] },
     { ...validBody, featuresUsed: ["private_prompt"] },

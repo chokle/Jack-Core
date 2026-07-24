@@ -139,6 +139,11 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     if (!identity?.userId || !identity.email) {
       return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
+    if (identity.userId === "presentation-demo") {
+      return res
+        .status(403)
+        .json({ error: "User-testing feedback is unavailable in presentation mode." });
+    }
     const body = req.body as Record<string, unknown>;
     const feedbackId = jsonString(body, "feedbackId", 36);
     const goal = jsonString(body, "goal", 500);
