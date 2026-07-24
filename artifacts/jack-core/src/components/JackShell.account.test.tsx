@@ -33,4 +33,48 @@ describe("JackShell account management", () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(screen.queryByText("Coming Soon")).toBeNull();
   });
+
+  it("places Logout immediately after Account Settings and invokes Clerk sign-out", () => {
+    const onSignOut = vi.fn();
+    render(
+      <JackShell
+        active="graph"
+        onNavigate={vi.fn()}
+        onOpenChat={vi.fn()}
+        model={model}
+        readyCount={0}
+        lastUpdatedLabel="now"
+        onOpenSettings={vi.fn()}
+        onSignOut={onSignOut}
+      >
+        <div />
+      </JackShell>,
+    );
+
+    const settings = screen.getByTestId("account-settings");
+    const logout = screen.getByTestId("sign-out");
+    expect(settings.nextElementSibling).toBe(logout);
+    expect(logout.textContent).toContain("Logout");
+
+    fireEvent.click(logout);
+    expect(onSignOut).toHaveBeenCalledOnce();
+  });
+
+  it("omits Logout when no authenticated sign-out handler is provided", () => {
+    render(
+      <JackShell
+        active="graph"
+        onNavigate={vi.fn()}
+        onOpenChat={vi.fn()}
+        model={model}
+        readyCount={0}
+        lastUpdatedLabel="now"
+        onOpenSettings={vi.fn()}
+      >
+        <div />
+      </JackShell>,
+    );
+
+    expect(screen.queryByTestId("sign-out")).toBeNull();
+  });
 });
