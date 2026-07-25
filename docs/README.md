@@ -7,6 +7,7 @@ Read order for a new agent: **`../VISION.md` (why + priorities) → `../JACK_CON
 ## Contents
 
 - [architecture.md](./architecture.md) — stack and core architecture decisions (single-page model, persistence, video job pipeline lifecycle, strict knowledge-write verification, RAG-first answering, competency mapping).
+- [continuous-learning-design.md](./continuous-learning-design.md) — foundational philosophy and design proposal for evolving Interview Mode and Living Memory from finite knowledge capture into reviewed, curiosity-led continuous understanding (design only).
 - [knowledge-graph.md](./knowledge-graph.md) — Living Memory graph model, video/mentor ingestion bands, Knowledge Review resolution + drift resilience, Mentor Withdrawal, graph persistence & self-heal.
 - [codebase-map.md](./codebase-map.md) — "where things live": file-by-file map of the API server and frontend.
 - [product-features.md](./product-features.md) — product feature reference (Video Library, Ask Jack, Interview Mode, Knowledge Review, Graph Health, Parking Lot, etc.).
