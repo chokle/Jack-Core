@@ -1185,6 +1185,44 @@ export interface MaybeServerGraph {
 }
 
 /**
+ * Return the newest persisted content timestamp represented in Living Memory.
+ *
+ * Graph nodes are authoritative for interviews, mentor contributions, reviews,
+ * and distilled knowledge. Videos remain as a fallback for deployments where
+ * the persisted graph is unavailable. Deliberately ignore `generatedAt`: it is
+ * the snapshot read time, not a content change, and would make idle polling look
+ * like new knowledge was continuously arriving.
+ */
+export function latestMemoryUpdatedAt(
+  graph: MaybeServerGraph | null | undefined,
+  videos: RawVideo[],
+): string | undefined {
+  let latestTime = Number.NEGATIVE_INFINITY;
+  let latestIso: string | undefined;
+
+  const consider = (iso: string | null | undefined) => {
+    if (!iso) return;
+    const time = Date.parse(iso);
+    if (!Number.isNaN(time) && time > latestTime) {
+      latestTime = time;
+      latestIso = iso;
+    }
+  };
+
+  for (const node of graph?.nodes ?? []) {
+    consider(node.updatedAt);
+    consider(metaStr(node.meta, "updatedAt"));
+    consider(metaStr(node.meta, "updated_at"));
+    consider(node.createdAt);
+    consider(metaStr(node.meta, "createdAt"));
+    consider(metaStr(node.meta, "created_at"));
+  }
+  for (const video of videos) consider(readUpdatedAt(video));
+
+  return latestIso;
+}
+
+/**
  * Choose the Living Memory model for the current data. The persisted server
  * graph wins when it actually carries nodes; otherwise we derive the graph
  * client-side from videos + competencies so the view is never blank.
