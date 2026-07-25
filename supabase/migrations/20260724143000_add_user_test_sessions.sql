@@ -53,6 +53,8 @@ create index if not exists pilot_memberships_user_active_idx
   on public.pilot_memberships (user_id, active);
 create index if not exists pilot_memberships_scope_active_idx
   on public.pilot_memberships (organization_id, pilot_id, active);
+create index if not exists pilot_memberships_pilot_idx
+  on public.pilot_memberships (pilot_id);
 create unique index if not exists pilot_memberships_organization_admin_unique
   on public.pilot_memberships (organization_id, user_id, role)
   where role = 'organization_admin' and pilot_id is null;
@@ -86,6 +88,10 @@ create table if not exists public.telemetry_consents (
 
 create index if not exists telemetry_consents_actor_scope_idx
   on public.telemetry_consents (actor_user_id, pilot_id, scope, occurred_at desc);
+create index if not exists telemetry_consents_organization_idx
+  on public.telemetry_consents (organization_id);
+create index if not exists telemetry_consents_pilot_idx
+  on public.telemetry_consents (pilot_id);
 create index if not exists telemetry_consents_retention_idx
   on public.telemetry_consents (retained_until);
 
@@ -135,6 +141,14 @@ create unique index if not exists test_sessions_one_active_per_tester_pilot
   on public.test_sessions (actor_user_id, pilot_id) where status = 'active';
 create index if not exists test_sessions_scope_activity_idx
   on public.test_sessions (organization_id, pilot_id, last_activity_at desc);
+create index if not exists test_sessions_pilot_idx
+  on public.test_sessions (pilot_id);
+create index if not exists test_sessions_telemetry_consent_idx
+  on public.test_sessions (telemetry_consent_id);
+create index if not exists test_sessions_screen_consent_idx
+  on public.test_sessions (screen_consent_id);
+create index if not exists test_sessions_microphone_consent_idx
+  on public.test_sessions (microphone_consent_id);
 create index if not exists test_sessions_deletion_due_idx
   on public.test_sessions (deletion_due_at) where deletion_due_at is not null;
 create index if not exists test_sessions_retention_idx
@@ -179,6 +193,10 @@ create unique index if not exists test_events_session_dedupe
   on public.test_events (test_session_id, dedupe_key) where dedupe_key is not null;
 create index if not exists test_events_timeline_idx
   on public.test_events (organization_id, pilot_id, actor_user_id, occurred_at);
+create index if not exists test_events_pilot_idx
+  on public.test_events (pilot_id);
+create index if not exists test_events_consent_idx
+  on public.test_events (consent_id);
 create index if not exists test_events_retention_idx
   on public.test_events (retained_until);
 create index if not exists test_events_deletion_due_idx
@@ -199,6 +217,10 @@ create table if not exists public.activity_ingest_failures (
 
 create index if not exists activity_ingest_failures_scope_idx
   on public.activity_ingest_failures (organization_id, pilot_id, created_at desc);
+create index if not exists activity_ingest_failures_pilot_idx
+  on public.activity_ingest_failures (pilot_id);
+create index if not exists activity_ingest_failures_session_idx
+  on public.activity_ingest_failures (test_session_id);
 create index if not exists activity_ingest_failures_retention_idx
   on public.activity_ingest_failures (retained_until);
 
@@ -221,6 +243,8 @@ create table if not exists public.activity_report_runs (
 
 create index if not exists activity_report_runs_scope_idx
   on public.activity_report_runs (organization_id, pilot_id, generated_at desc);
+create index if not exists activity_report_runs_pilot_idx
+  on public.activity_report_runs (pilot_id);
 create index if not exists activity_report_runs_retention_idx
   on public.activity_report_runs (retained_until);
 
@@ -240,6 +264,10 @@ create table if not exists public.admin_access_audit (
 
 create index if not exists admin_access_audit_actor_idx
   on public.admin_access_audit (actor_user_id, created_at desc);
+create index if not exists admin_access_audit_organization_idx
+  on public.admin_access_audit (organization_id);
+create index if not exists admin_access_audit_pilot_idx
+  on public.admin_access_audit (pilot_id);
 create index if not exists admin_access_audit_retention_idx
   on public.admin_access_audit (retained_until);
 
@@ -254,6 +282,16 @@ alter table public.test_recordings
 
 create index if not exists test_recordings_retention_idx
   on public.test_recordings (retained_until);
+create index if not exists test_recordings_organization_idx
+  on public.test_recordings (organization_id);
+create index if not exists test_recordings_pilot_idx
+  on public.test_recordings (pilot_id);
+create index if not exists test_recordings_test_session_idx
+  on public.test_recordings (test_session_id);
+create index if not exists test_recordings_screen_consent_idx
+  on public.test_recordings (screen_consent_id);
+create index if not exists test_recordings_microphone_consent_idx
+  on public.test_recordings (microphone_consent_id);
 create index if not exists test_recordings_deletion_due_idx
   on public.test_recordings (deletion_due_at) where deletion_due_at is not null;
 
@@ -267,6 +305,12 @@ alter table public.test_feedback
 
 create index if not exists test_feedback_scope_idx
   on public.test_feedback (organization_id, pilot_id, created_at desc);
+create index if not exists test_feedback_pilot_idx
+  on public.test_feedback (pilot_id);
+create index if not exists test_feedback_test_session_idx
+  on public.test_feedback (test_session_id);
+create index if not exists test_feedback_tester_profile_idx
+  on public.test_feedback (tester_profile_id);
 create index if not exists test_feedback_retention_idx
   on public.test_feedback (retained_until) where retained_until is not null;
 
