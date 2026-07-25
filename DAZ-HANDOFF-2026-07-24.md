@@ -4,6 +4,7 @@
 - Branch: `codex/graph-live-stats`
 - Base commit: `47ea454820cd06d85bfdb8384fe369b7c142ef6a`
 - Implementation commit: `b721ddeac9c7734219684dbd633139df20c61abf`
+- Merge-readiness fix: `4c438441dcb77790a593510f29020e21892a7a96`
 - Draft PR: `https://github.com/chokle/Jack-Core/pull/16`
 - Status: implemented and verified for draft PR publication; not merged or deployed
 
@@ -30,12 +31,13 @@ timestamp because that value changes on every poll and is not a content update.
   files; applying `--write` was intentionally avoided because it expands the
   patch with unrelated formatting changes
 - `git diff --check`: passed
-- Targeted Memory Graph tests: 14 passed
+- Targeted Memory Graph tests: 15 passed
 - Jack frontend typecheck: passed
 - Jack production build: passed
-- CodeRabbit CLI review: unavailable because the official installer rejects
-  this Windows host as `mingw64_nt-10.0-26200`; independent diff review found
-  and fixed one timestamp-fallback edge case before final verification
+- CodeRabbit's GitHub review was skipped because the PR is a draft. The local
+  CLI remains unavailable because the official installer rejects this Windows
+  host as `mingw64_nt-10.0-26200`. Independent diff review found and fixed
+  invalid node and video timestamp-fallback edge cases before final verification.
 
 Existing build warnings remain:
 
