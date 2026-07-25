@@ -11,7 +11,7 @@ import {
 import {
   computeGraphDelta,
   computeVitality,
-  readUpdatedAt,
+  latestMemoryUpdatedAt,
   selectMemoryGraphModel,
   EMPTY_DELTA,
   type GraphDelta,
@@ -139,20 +139,10 @@ export function useMemoryGraphData(): MemoryGraphData {
 
   const readyCount = videos.filter((v) => v.status === "completed").length;
 
-  const lastUpdated = useMemo(() => {
-    let best = 0;
-    let iso: string | undefined;
-    for (const v of videos) {
-      const u = readUpdatedAt(v);
-      if (!u) continue;
-      const t = new Date(u).getTime();
-      if (!Number.isNaN(t) && t > best) {
-        best = t;
-        iso = u;
-      }
-    }
-    return iso;
-  }, [videos]);
+  const lastUpdated = useMemo(
+    () => latestMemoryUpdatedAt(graph, videos),
+    [graph, videos],
+  );
 
   return {
     model,
