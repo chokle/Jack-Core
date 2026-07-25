@@ -3,6 +3,8 @@
 - Repository: `D:\Code\worktrees\Jack-graph-live-stats-current`
 - Branch: `codex/graph-live-stats`
 - Base commit: `47ea454820cd06d85bfdb8384fe369b7c142ef6a`
+- Implementation commit: `b721ddeac9c7734219684dbd633139df20c61abf`
+- Draft PR: `https://github.com/chokle/Jack-Core/pull/16`
 - Status: implemented and verified for draft PR publication; not merged or deployed
 
 ## Outcome
