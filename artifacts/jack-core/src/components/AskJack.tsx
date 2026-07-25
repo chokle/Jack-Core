@@ -36,6 +36,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { StructuredAnswer } from "@/components/StructuredAnswer";
 import { ParkThisThoughtButton } from "@/components/ParkedThoughts";
 import { timeAgo } from "@/lib/memory-graph";
+import { getCachedTestSession } from "@/lib/user-testing/test-session-service";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
@@ -73,7 +74,16 @@ export function AskJack({
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
-  const askJack = useAskJack();
+  const telemetrySession = getCachedTestSession();
+  const askJack = useAskJack(
+    telemetrySession
+      ? {
+          request: {
+            headers: { "X-Jack-Test-Session-Id": telemetrySession.id },
+          },
+        }
+      : undefined,
+  );
   const queryClient = useQueryClient();
   const clearHistory = useClearChatHistory();
   const [confirmingClear, setConfirmingClear] = useState(false);

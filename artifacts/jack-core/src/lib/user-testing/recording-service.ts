@@ -66,6 +66,7 @@ export class RecordingService {
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private mimeType = "";
+  private micRequested = false;
   private micDenied = false;
   private startedAt = 0;
   private pausedAt = 0;
@@ -86,7 +87,7 @@ export class RecordingService {
   }
 
   get micIncluded(): boolean {
-    return !this.micDenied && (this.stream?.getAudioTracks().length ?? 0) > 0;
+    return this.micRequested && !this.micDenied && (this.stream?.getAudioTracks().length ?? 0) > 0;
   }
 
   /** Elapsed recording time, excluding any paused duration. */
@@ -97,24 +98,22 @@ export class RecordingService {
   }
 
   /**
-   * Request screen capture, then — if the browser didn't already include
-   * system/tab audio — separately request mic permission and merge its track
-   * in. Mic denial is non-fatal: recording continues screen-only per spec.
+   * Request screen capture. Microphone permission is requested only when the
+   * caller passes includeMicrophone=true after separate explicit consent.
+   * Mic denial is non-fatal: recording continues screen-only.
    */
-  async start(): Promise<void> {
+  async start(includeMicrophone = false): Promise<void> {
     if (!isScreenRecordingSupported()) {
       throw new Error("Screen recording is not supported in this browser.");
     }
 
     const displayStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
-      audio: true,
+      audio: false,
     });
 
-    if (
-      displayStream.getAudioTracks().length === 0 &&
-      typeof navigator.mediaDevices.getUserMedia === "function"
-    ) {
+    this.micRequested = includeMicrophone;
+    if (includeMicrophone && typeof navigator.mediaDevices.getUserMedia === "function") {
       try {
         const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         for (const track of micStream.getAudioTracks()) {

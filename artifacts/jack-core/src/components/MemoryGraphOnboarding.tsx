@@ -15,6 +15,11 @@ import {
   useUpdateMemoryGraphOnboardingPreference,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  getCachedTestSession,
+  trackTestEvent,
+  type TestSession,
+} from "@/lib/user-testing/test-session-service";
 
 export const MEMORY_GRAPH_ONBOARDING_VERSION = 1 as const;
 export const MEMORY_GRAPH_ONBOARDING_STEP_COUNT = 3;
@@ -50,6 +55,7 @@ interface OnboardingSession {
 export interface MemoryGraphOnboardingController {
   session: OnboardingSession | null;
   reopen: () => void;
+  startAt: (step: number) => void;
   setStep: (step: number) => void;
   skip: () => void;
   finish: () => void;
@@ -117,9 +123,13 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   });
 
   const begin = useCallback(
-    (source: MemoryGraphOnboardingSource) => {
+    (source: MemoryGraphOnboardingSource, initialStep = 0) => {
       if (sessionRef.current) return;
-      const next = { id: nextSessionIdRef.current++, source, step: 0 };
+      const next = {
+        id: nextSessionIdRef.current++,
+        source,
+        step: Math.max(0, Math.min(MEMORY_GRAPH_ONBOARDING_STEP_COUNT - 1, initialStep)),
+      };
       setSession(next);
       sendAnalytics(
         source === "automatic"
@@ -127,6 +137,9 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
           : "memory_onboarding_reopened",
         source,
       );
+      if (getCachedTestSession()) {
+        void trackTestEvent("onboarding_started", {}, "onboarding_started");
+      }
     },
     [setSession],
   );
@@ -150,6 +163,21 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
     preferenceQuery.isSuccess,
   ]);
 
+  useEffect(() => {
+    const start = (event: Event) => {
+      const detail = (event as CustomEvent<TestSession>).detail;
+      if (detail?.onboardingStatus === "completed") {
+        window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
+        return;
+      }
+      begin("automatic", detail?.onboardingStep ?? getCachedTestSession()?.onboardingStep ?? 0);
+    };
+    window.addEventListener("jack:test-session-started", start);
+    const active = getCachedTestSession();
+    if (active && active.onboardingStatus !== "completed") begin("automatic", active.onboardingStep);
+    return () => window.removeEventListener("jack:test-session-started", start);
+  }, [begin]);
+
   const persistSeen = useCallback(
     (status: "completed" | "skipped") => {
       if (preferenceRef.current?.version === MEMORY_GRAPH_ONBOARDING_VERSION)
@@ -167,6 +195,13 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
     sendAnalytics("memory_onboarding_skipped", active.source, active.step + 1);
     setSession(null);
     persistSeen("skipped");
+    void trackTestEvent(
+      "onboarding_skipped",
+      { step: active.step + 1 },
+      "onboarding_skipped",
+      "cancelled",
+    );
+    window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
   }, [persistSeen, setSession]);
 
   const finish = useCallback(() => {
@@ -179,6 +214,8 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
     );
     setSession(null);
     persistSeen("completed");
+    void trackTestEvent("onboarding_completed", {}, "onboarding_completed");
+    window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
   }, [persistSeen, setSession]);
 
   const setStep = useCallback(
@@ -190,6 +227,13 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
         Math.min(MEMORY_GRAPH_ONBOARDING_STEP_COUNT - 1, step),
       );
       if (bounded === active.step) return;
+      if (bounded > active.step && getCachedTestSession()) {
+        void trackTestEvent(
+          "onboarding_step_completed",
+          { step: active.step + 1, next_step: bounded + 1 },
+          `onboarding_step:${active.step + 1}`,
+        );
+      }
       setSession({ ...active, step: bounded });
     },
     [setSession],
@@ -198,6 +242,7 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   return {
     session,
     reopen: () => begin("replay"),
+    startAt: (step) => begin("automatic", step),
     setStep,
     skip,
     finish,

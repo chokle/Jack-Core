@@ -13,4 +13,5 @@ export interface CurrentUser {
   /** @nullable */
   name: string | null;
   isAdmin: boolean;
+  canViewPilotReports: boolean;
 }

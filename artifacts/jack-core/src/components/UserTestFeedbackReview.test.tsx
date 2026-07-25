@@ -60,6 +60,12 @@ describe("UserTestFeedbackReview", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
+        if (url === "/api/testing/progress") {
+          return new Response(JSON.stringify({ testers: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         throw new Error(`Unexpected request ${url}`);
       }),
     );
@@ -71,7 +77,12 @@ describe("UserTestFeedbackReview", () => {
   });
 
   it("shows unread count, filters, detail, delivery failure, and saves review state", async () => {
-    render(<UserTestFeedbackReview />);
+    render(
+      <UserTestFeedbackReview
+        organizationId="11111111-1111-4111-8111-111111111111"
+        pilotId="22222222-2222-4222-8222-222222222222"
+      />,
+    );
 
     expect(await screen.findByText("Taylor Tester")).toBeTruthy();
     expect(screen.getByLabelText("1 new feedback records")).toBeTruthy();

@@ -17,7 +17,7 @@ import {
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 
-export type JackView = "graph" | "library" | "interview" | "review";
+export type JackView = "graph" | "library" | "interview" | "review" | "reports";
 
 interface JackShellProps {
   active: JackView;
@@ -33,8 +33,8 @@ interface JackShellProps {
   onSignOut?: () => void;
   /** Opens the beta user-testing consent modal. Omit to hide the control entirely. */
   onStartUserTest?: () => void;
-  /** Highlights the control when user-testing is restricting the app. */
-  userTestingRequired?: boolean;
+  userTestStarting?: boolean;
+  canViewPilotReports?: boolean;
   children: ReactNode;
 }
 
@@ -54,7 +54,8 @@ export function JackShell({
   onOpenSettings,
   onSignOut,
   onStartUserTest,
-  userTestingRequired,
+  userTestStarting,
+  canViewPilotReports,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -173,6 +174,14 @@ export function JackShell({
             active={active === "review"}
             onClick={() => go("review")}
           />
+          {canViewPilotReports && (
+            <NavItem
+              icon={<LayoutDashboard className="h-4 w-4" />}
+              label="Pilot Reports"
+              active={active === "reports"}
+              onClick={() => go("reports")}
+            />
+          )}
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
           <NavItem icon={<GraduationCap className="h-4 w-4" />} label="Competencies" soon />
           <NavItem icon={<Lightbulb className="h-4 w-4" />} label="Insights" soon />
@@ -244,23 +253,15 @@ export function JackShell({
           </div>
           {onStartUserTest && (
             <div className="relative">
-              {userTestingRequired && (
-                <div className="absolute -top-14 left-0 right-0 rounded-lg border border-primary/35 bg-primary/15 px-3 py-2 text-center text-[11px] font-semibold text-primary shadow-[0_0_22px_rgba(255,100,0,0.22)]">
-                  Click start for the full experience
-                </div>
-              )}
               <button
                 type="button"
                 onClick={onStartUserTest}
+                disabled={userTestStarting}
                 data-testid="start-user-test"
-                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                  userTestingRequired
-                    ? "animate-pulse border-primary bg-primary/20 text-primary shadow-[0_0_24px_rgba(255,100,0,0.35)] hover:bg-primary/25"
-                    : "border-sidebar-border bg-card/50 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                }`}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/50 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
               >
-                <Radio className="h-4 w-4" />
-                Start User Test
+                <Radio className={`h-4 w-4 ${userTestStarting ? "animate-pulse" : ""}`} />
+                {userTestStarting ? "Starting Test…" : "Start User Test"}
               </button>
             </div>
           )}

@@ -21,6 +21,8 @@ vi.mock("../../lib/rate-limit.js", () => ({
 
 import testingRouter from "../testing.js";
 
+const ORGANIZATION_ID = "44444444-4444-4444-8444-444444444444";
+const PILOT_ID = "55555555-5555-4555-8555-555555555555";
 const validBody = {
   feedbackId: "11111111-1111-4111-8111-111111111111",
   goal: "Find a safe procedure",
@@ -29,11 +31,51 @@ const validBody = {
   adoptionNeed: "More local examples",
   additional: null,
   featuresUsed: ["ask_jack"],
-  sessionId: "session-1",
+  sessionId: "33333333-3333-4333-8333-333333333333",
+  pilotId: PILOT_ID,
   deviceCategory: "desktop",
   trigger: "logout",
   appVersion: "abc123",
 };
+
+function scopeQuery(table: string): Record<string, unknown> | null {
+  if (table === "pilot_memberships") {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      limit: async () => ({
+        data: [{
+          organization_id: ORGANIZATION_ID,
+          pilot_id: PILOT_ID,
+          user_id: "user_1",
+          role: "tester",
+          active: true,
+          valid_from: "2026-01-01T00:00:00.000Z",
+          valid_until: null,
+        }],
+        error: null,
+      }),
+    };
+    return query;
+  }
+  if (table === "pilots") {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      maybeSingle: async () => ({
+        data: {
+          id: PILOT_ID,
+          organization_id: ORGANIZATION_ID,
+          status: "active",
+          name: "Pilot",
+        },
+        error: null,
+      }),
+    };
+    return query;
+  }
+  return null;
+}
 
 function app(): Express {
   const value = express();
@@ -60,7 +102,21 @@ beforeEach(() => {
     name: "Tester",
     isAdmin: false,
   });
+  const testSessionQuery = {
+    select: () => testSessionQuery,
+    eq: () => testSessionQuery,
+    maybeSingle: async () => ({
+      data: {
+        id: validBody.sessionId,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+      },
+      error: null,
+    }),
+  };
   from.mockImplementation((table: string) => {
+    const scoped = scopeQuery(table);
+    if (scoped) return scoped;
     if (table === "mentor_profiles") {
       return {
         select: () => ({
@@ -77,6 +133,7 @@ beforeEach(() => {
         }),
       };
     }
+    if (table === "test_sessions") return testSessionQuery;
     return {
       insert: (payload: unknown) => ({
         select: () => ({
@@ -111,9 +168,43 @@ describe("POST /api/testing/feedback", () => {
     expect(from).toHaveBeenCalledWith("test_feedback");
   });
 
+  it("accepts pilot feedback without a telemetry session when membership is active", async () => {
+    const defaultImplementation = from.getMockImplementation();
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({ data: null, error: null }),
+        };
+        return query;
+      }
+      return defaultImplementation!(table);
+    });
+
+    const response = await request(app()).post("/api/testing/feedback").send(validBody);
+
+    expect(response.status).toBe(201);
+    expect(queueFeedbackNotification).toHaveBeenCalledWith(validBody.feedbackId);
+  });
+
   it("treats a retried feedback id as the same authoritative record", async () => {
     let feedbackCalls = 0;
+    const testSessionQuery = {
+      select: () => testSessionQuery,
+      eq: () => testSessionQuery,
+      maybeSingle: async () => ({
+        data: {
+          id: validBody.sessionId,
+          organization_id: ORGANIZATION_ID,
+          pilot_id: PILOT_ID,
+        },
+        error: null,
+      }),
+    };
     from.mockImplementation((table: string) => {
+      const scoped = scopeQuery(table);
+      if (scoped) return scoped;
       if (table === "mentor_profiles") {
         return {
           select: () => ({
@@ -127,6 +218,7 @@ describe("POST /api/testing/feedback", () => {
           }),
         };
       }
+      if (table === "test_sessions") return testSessionQuery;
       feedbackCalls += 1;
       if (feedbackCalls === 1) {
         return {

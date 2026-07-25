@@ -7,6 +7,7 @@ import {
   TrackMemoryGraphOnboardingEventResponse,
 } from "@workspace/api-zod";
 import { resolveIdentity } from "../lib/admin-auth.js";
+import { hasAnyReportScope } from "../lib/activity-telemetry.js";
 
 const router = Router();
 
@@ -91,6 +92,9 @@ router.get("/me", async (req, res) => {
       email: identity.email,
       name: identity.name,
       isAdmin: identity.isAdmin,
+      canViewPilotReports:
+        identity.userId !== "presentation-demo" &&
+        (await hasAnyReportScope(identity.userId)),
     }),
   );
 });

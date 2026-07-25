@@ -35,6 +35,10 @@ vi.mock("@workspace/api-client-react", () => ({
   trackMemoryGraphOnboardingEvent: (...args: unknown[]) =>
     apiState.track(...args),
 }));
+vi.mock("@/lib/user-testing/test-session-service", () => ({
+  getCachedTestSession: () => null,
+  trackTestEvent: vi.fn(),
+}));
 
 class ResizeObserverStub {
   observe() {}

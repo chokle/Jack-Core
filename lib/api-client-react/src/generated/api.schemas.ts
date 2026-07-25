@@ -12,6 +12,7 @@ export interface CurrentUser {
   /** @nullable */
   name: string | null;
   isAdmin: boolean;
+  canViewPilotReports: boolean;
 }
 
 export type MemoryGraphOnboardingPreferenceVersion = typeof MemoryGraphOnboardingPreferenceVersion[keyof typeof MemoryGraphOnboardingPreferenceVersion];

@@ -73,6 +73,65 @@ router.delete("/account", async (req, res) => {
     const { error: feedbackDeleteError } = await supabase.from("test_feedback").delete().eq("tester_user_id", userId);
     if (feedbackDeleteError) throw feedbackDeleteError;
 
+    const { data: pilotSessions, error: pilotSessionReadError } = await supabase
+      .from("test_sessions")
+      .select("pilot_id")
+      .eq("actor_user_id", userId);
+    if (pilotSessionReadError) throw pilotSessionReadError;
+    const pilotIds = [
+      ...new Set(
+        (pilotSessions ?? [])
+          .map((row) => (row as Record<string, unknown>)["pilot_id"])
+          .filter((id): id is string => typeof id === "string"),
+      ),
+    ];
+    if (pilotIds.length > 0) {
+      // A stored pilot snapshot can be indirectly identifying in a small
+      // cohort. Remove the affected snapshots; a later authorized request can
+      // regenerate a genuinely de-identified aggregate from remaining rows.
+      const { error } = await supabase
+        .from("activity_report_runs")
+        .delete()
+        .in("pilot_id", pilotIds);
+      if (error) throw error;
+    }
+
+    // Pilot activity is first-party account data. Delete attributable raw
+    // events, failures, sessions, consent history, memberships, and report
+    // requests before removing the Clerk identity. Aggregate snapshots contain
+    // no participant identity and may remain only in genuinely de-identified form.
+    const attributableDeletes = [
+      supabase.from("activity_ingest_failures").delete().eq("actor_user_id", userId),
+      supabase.from("test_events").delete().eq("actor_user_id", userId),
+      supabase.from("activity_report_runs").delete().eq("requested_by_user_id", userId),
+      supabase.from("admin_access_audit").delete().eq("actor_user_id", userId),
+      supabase.from("admin_access_audit").delete().eq("target_user_id", userId),
+    ];
+    for (const pending of attributableDeletes) {
+      const { error } = await pending;
+      if (error) throw error;
+    }
+    const { error: sessionDeleteError } = await supabase
+      .from("test_sessions")
+      .delete()
+      .eq("actor_user_id", userId);
+    if (sessionDeleteError) throw sessionDeleteError;
+    const { error: consentDeleteError } = await supabase
+      .from("telemetry_consents")
+      .delete()
+      .eq("actor_user_id", userId);
+    if (consentDeleteError) throw consentDeleteError;
+    const { error: membershipDeleteError } = await supabase
+      .from("pilot_memberships")
+      .delete()
+      .eq("user_id", userId);
+    if (membershipDeleteError) throw membershipDeleteError;
+    const { error: platformRoleDeleteError } = await supabase
+      .from("platform_roles")
+      .delete()
+      .eq("user_id", userId);
+    if (platformRoleDeleteError) throw platformRoleDeleteError;
+
     await clerkClient.users.deleteUser(userId);
     return res.status(204).send();
   } catch (err) {

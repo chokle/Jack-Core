@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { startJobSystem } from "./lib/jobs";
 import { startVitalitySampler } from "./lib/vitality";
 import { startFeedbackNotificationWorker } from "./lib/feedback-notifications";
+import { startTelemetryRetentionWorker } from "./lib/telemetry-retention";
 
 const rawPort = process.env["PORT"];
 
@@ -22,6 +23,7 @@ if (Number.isNaN(port) || port <= 0) {
 // work, then keep a runtime watchdog sweeping for stale/hung jobs.
 startJobSystem();
 startFeedbackNotificationWorker();
+startTelemetryRetentionWorker();
 
 // Begin sampling CPU/RAM for the Systems Health heartbeat. Started here (not on
 // import) so importing the vitality module in tests never spins up a timer.

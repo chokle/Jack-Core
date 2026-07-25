@@ -52,9 +52,10 @@ describe("Knowledge Review feedback authorization", () => {
     expect(screen.getByTestId("public-review-queue")).toBeTruthy();
   });
 
-  it("renders user-test feedback for admins", () => {
+  it("keeps pilot feedback out of the unrelated global knowledge-review surface", () => {
     identity.isAdmin = true;
     renderReview();
-    expect(screen.getByTestId("admin-feedback-review")).toBeTruthy();
+    expect(screen.queryByTestId("admin-feedback-review")).toBeNull();
+    expect(screen.getByText("Knowledge Review")).toBeTruthy();
   });
 });

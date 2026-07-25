@@ -1,19 +1,28 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { supabase } from "../lib/supabase.js";
+import { supabase as rawSupabase } from "../lib/supabase.js";
 import {
   getAdminReviewer,
-  requireAdmin,
   resolveIdentity,
 } from "../lib/admin-auth.js";
 import { userTestingLimiter } from "../lib/rate-limit.js";
 import { queueFeedbackNotification } from "../lib/feedback-notifications.js";
+import {
+  activityDb,
+  auditReportAccess,
+  authorizeReportScope,
+  currentConsentGranted,
+  latestConsent,
+  requestIdentifier,
+  resolveActiveTesterScope,
+} from "../lib/activity-telemetry.js";
 
 const router = Router();
+const supabase = rawSupabase as any;
 
 const FEEDBACK_TRIGGERS = new Set([
   "logout",
@@ -40,12 +49,14 @@ const FEEDBACK_BODY_KEYS = new Set([
   "additional",
   "featuresUsed",
   "sessionId",
+  "pilotId",
   "deviceCategory",
   "trigger",
   "appVersion",
 ]);
 const FEEDBACK_STATUSES = new Set(["new", "reviewed", "actioned", "archived"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const db = activityDb;
 
 /**
  * Beta user-testing mode — consent-recorded tester screen (+ optional mic)
@@ -194,6 +205,34 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     if (!hasOnlyAllowedFeedbackKeys(body)) {
       return res.status(400).json({ error: "Invalid user-testing feedback." });
     }
+    if (!UUID_RE.test(sessionId)) {
+      return res.status(400).json({ error: "Invalid pilot session." });
+    }
+    const requestedPilotId =
+      typeof body["pilotId"] === "string" && UUID_RE.test(body["pilotId"])
+        ? body["pilotId"]
+        : null;
+    if (body["pilotId"] != null && !requestedPilotId) {
+      return res.status(400).json({ error: "Invalid pilot." });
+    }
+    const membership = await resolveActiveTesterScope(identity.userId, requestedPilotId);
+    if (!membership.scope) {
+      return res.status(membership.reason === "ambiguous_pilot" ? 409 : 403).json({
+        error:
+          membership.reason === "ambiguous_pilot"
+            ? "Choose one active pilot before submitting feedback."
+            : "No active pilot membership was found.",
+      });
+    }
+    const pilotSession = await db
+      .from("test_sessions")
+      .select("id,organization_id,pilot_id")
+      .eq("id", sessionId)
+      .eq("actor_user_id", identity.userId)
+      .eq("pilot_id", membership.scope.pilotId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (pilotSession.error) throw pilotSession.error;
 
     const { data: row, error } = await supabase
       .from("test_feedback")
@@ -205,6 +244,9 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         tester_profile_id: profile?.id ?? null,
         tester_trade: profile?.trade ?? null,
         session_id: sessionId,
+        test_session_id: pilotSession.data?.id ?? null,
+        organization_id: membership.scope.organizationId,
+        pilot_id: membership.scope.pilotId,
         features_used: [...new Set(features)],
         device_category: device,
         trigger,
@@ -287,7 +329,38 @@ function routeParam(value: string | string[] | undefined): string {
   return typeof value === "string" ? value : "";
 }
 
-router.get("/testing/feedback", requireAdmin, async (req, res) => {
+async function requireFeedbackScope(req: Request, res: Response, action: string) {
+  const identity = await resolveIdentity(req);
+  if (!identity) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+  if (identity.userId === "presentation-demo") {
+    res.status(403).json({ error: "Feedback review is unavailable in presentation mode." });
+    return null;
+  }
+  const organizationId = queryString(req.query["organizationId"]) ?? "";
+  const pilotId = queryString(req.query["pilotId"]) ?? "";
+  const authorization = await authorizeReportScope(identity.userId, organizationId, pilotId);
+  await auditReportAccess({
+    userId: identity.userId,
+    organizationId: UUID_RE.test(organizationId) ? organizationId : null,
+    pilotId: UUID_RE.test(pilotId) ? pilotId : null,
+    action,
+    decision: authorization.allowed ? "allowed" : "denied",
+    authority: authorization.authority,
+    requestId: requestIdentifier(req),
+  });
+  if (!authorization.allowed) {
+    res.status(403).json({ error: "No active feedback-review role exists for this scope." });
+    return null;
+  }
+  return { identity, organizationId, pilotId };
+}
+
+router.get("/testing/feedback", async (req, res) => {
+  const scope = await requireFeedbackScope(req, res, "pilot_feedback_list");
+  if (!scope) return;
   const trade = queryString(req.query["trade"]);
   const status = queryString(req.query["status"]);
   const usefulness = queryString(req.query["usefulness"]);
@@ -310,6 +383,8 @@ router.get("/testing/feedback", requireAdmin, async (req, res) => {
     let query = supabase
       .from("test_feedback")
       .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
       .order("created_at", { ascending: false })
       .limit(250);
     if (trade) query = query.eq("tester_trade", trade);
@@ -323,26 +398,38 @@ router.get("/testing/feedback", requireAdmin, async (req, res) => {
     }
     const [{ data, error }, { data: newRows, error: countError }] = await Promise.all([
       query,
-      supabase.from("test_feedback").select("id").eq("status", "new"),
+      supabase
+        .from("test_feedback")
+        .select("id")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .eq("status", "new"),
     ]);
     if (error) throw error;
     if (countError) throw countError;
-    const feedback = (data ?? []).map((row) => serializeFeedback(row as FeedbackRecord));
+    const feedbackRows = (data ?? []) as FeedbackRecord[];
+    const feedback = feedbackRows.map((row) => serializeFeedback(row));
     const trades = [
       ...new Set(
-        (data ?? [])
-          .map((row) => (row as FeedbackRecord)["tester_trade"])
+        feedbackRows
+          .map((row) => row["tester_trade"])
           .filter((value): value is string => typeof value === "string" && value.length > 0),
       ),
     ].sort();
-    return res.json({ feedback, unreadCount: newRows?.length ?? 0, trades });
+    return res.json({
+      feedback,
+      unreadCount: ((newRows ?? []) as Array<Record<string, unknown>>).length,
+      trades,
+    });
   } catch (err) {
     req.log.error({ err }, "listTestFeedback error");
     return res.status(500).json({ error: "Failed to load user-test feedback." });
   }
 });
 
-router.get("/testing/feedback/:id", requireAdmin, async (req, res) => {
+router.get("/testing/feedback/:id", async (req, res) => {
+  const scope = await requireFeedbackScope(req, res, "pilot_feedback_detail");
+  if (!scope) return;
   const feedbackId = routeParam(req.params["id"]);
   if (!UUID_RE.test(feedbackId)) {
     return res.status(400).json({ error: "Invalid feedback id." });
@@ -352,6 +439,8 @@ router.get("/testing/feedback/:id", requireAdmin, async (req, res) => {
       .from("test_feedback")
       .select("*")
       .eq("id", feedbackId)
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
       .maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ error: "Feedback not found." });
@@ -362,7 +451,9 @@ router.get("/testing/feedback/:id", requireAdmin, async (req, res) => {
   }
 });
 
-router.patch("/testing/feedback/:id", requireAdmin, async (req, res) => {
+router.patch("/testing/feedback/:id", async (req, res) => {
+  const scope = await requireFeedbackScope(req, res, "pilot_feedback_update");
+  if (!scope) return;
   const feedbackId = routeParam(req.params["id"]);
   if (!UUID_RE.test(feedbackId)) {
     return res.status(400).json({ error: "Invalid feedback id." });
@@ -382,6 +473,10 @@ router.patch("/testing/feedback/:id", requireAdmin, async (req, res) => {
 
   try {
     const now = new Date().toISOString();
+    const resolved = status === "actioned" || status === "archived";
+    const retainedUntil = resolved
+      ? new Date(new Date(now).setUTCMonth(new Date(now).getUTCMonth() + 12)).toISOString()
+      : null;
     const { data, error } = await supabase
       .from("test_feedback")
       .update({
@@ -389,9 +484,13 @@ router.patch("/testing/feedback/:id", requireAdmin, async (req, res) => {
         admin_notes: adminNotes,
         reviewed_by: status === "new" ? null : getAdminReviewer(req),
         reviewed_at: status === "new" ? null : now,
+        resolved_at: resolved ? now : null,
+        retained_until: retainedUntil,
         updated_at: now,
       })
       .eq("id", feedbackId)
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
       .select("*")
       .maybeSingle();
     if (error) throw error;
@@ -426,9 +525,44 @@ router.post(
       }
 
       const sessionId = stringField(req.body, "sessionId");
-      if (!sessionId) return res.status(400).json({ error: "sessionId is required." });
+      if (!sessionId || !UUID_RE.test(sessionId)) {
+        return res.status(400).json({ error: "A valid pilot session is required." });
+      }
 
       const identity = await resolveIdentity(req);
+      if (!identity || identity.userId === "presentation-demo") {
+        return res.status(403).json({ error: "Screen recording is unavailable for this account." });
+      }
+      const pilotSession = await db
+        .from("test_sessions")
+        .select("*")
+        .eq("id", sessionId)
+        .eq("actor_user_id", identity.userId)
+        .eq("status", "active")
+        .eq("telemetry_status", "granted")
+        .eq("screen_consent_state", "granted")
+        .maybeSingle();
+      if (pilotSession.error) throw pilotSession.error;
+      if (!pilotSession.data) {
+        return res.status(412).json({
+          error: "An active owned pilot session with screen consent is required.",
+        });
+      }
+      const screenConsent = await latestConsent(
+        identity.userId,
+        String(pilotSession.data.pilot_id),
+        "screen",
+      );
+      if (!currentConsentGranted(screenConsent)) {
+        return res.status(412).json({ error: "Screen consent is not active." });
+      }
+      const microphoneIncluded = stringField(req.body, "microphoneIncluded") === "true";
+      const microphoneConsent = microphoneIncluded
+        ? await latestConsent(identity.userId, String(pilotSession.data.pilot_id), "microphone")
+        : null;
+      if (microphoneIncluded && !currentConsentGranted(microphoneConsent)) {
+        return res.status(412).json({ error: "Microphone consent is not active." });
+      }
 
       const filename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
       const recordingId = crypto.randomUUID();
@@ -457,15 +591,20 @@ router.post(
         .from("test_recordings")
         .insert({
           id: recordingId,
-          tester_user_id: identity?.userId ?? req.userId ?? null,
-          tester_email: identity?.email ?? null,
+          tester_user_id: identity.userId,
+          tester_email: identity.email,
           session_id: sessionId,
+          test_session_id: pilotSession.data.id,
+          organization_id: pilotSession.data.organization_id,
+          pilot_id: pilotSession.data.pilot_id,
+          screen_consent_id: screenConsent.id,
+          microphone_consent_id: microphoneConsent?.id ?? null,
           storage_path: storagePath,
           mime_type: req.file.mimetype,
           duration_ms: intField(req.body, "durationMs") ?? null,
           size_bytes: req.file.size,
-          user_agent: stringField(req.body, "userAgent") ?? null,
-          screen_resolution: stringField(req.body, "screenResolution") ?? null,
+          user_agent: null,
+          screen_resolution: null,
           app_version: stringField(req.body, "appVersion") ?? null,
         })
         .select("id, created_at")

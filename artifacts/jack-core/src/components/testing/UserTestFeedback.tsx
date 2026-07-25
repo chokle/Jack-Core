@@ -34,6 +34,7 @@ import {
   type FeedbackFeature,
   type FeedbackTrigger,
 } from "@/lib/user-testing/feedback-service";
+import { trackTestEvent } from "@/lib/user-testing/test-session-service";
 
 const EMPTY_ANSWERS = (): FeedbackAnswers => ({
   feedbackId: crypto.randomUUID(),
@@ -57,6 +58,7 @@ export interface UserTestFeedbackHandle {
 interface UserTestFeedbackProps {
   consented: boolean;
   userId?: string | null;
+  pilotId?: string | null;
   now?: () => number;
   minimumSessionMs?: number;
   requestTimeoutMs?: number;
@@ -67,6 +69,7 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
     {
       consented,
       userId,
+      pilotId,
       now = Date.now,
       minimumSessionMs,
       requestTimeoutMs = 5_000,
@@ -174,6 +177,7 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
             additional: answers.additional.trim() || null,
             featuresUsed: activity.features,
             sessionId: activity.sessionId,
+            ...(pilotId ? { pilotId } : {}),
             deviceCategory: deviceCategory(),
             trigger: pending.trigger,
             appVersion:
@@ -183,6 +187,8 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
           }),
         });
         if (!response.ok) throw new Error(`Feedback submission failed (${response.status})`);
+        await trackTestEvent("feedback_submitted", {}, `feedback:${answers.feedbackId}`);
+        await trackTestEvent("test_completed", {}, `test_completed:${answers.feedbackId}`);
         toast({ title: "Feedback submitted", description: "Thanks for helping improve Jack." });
         await continueLeaving(true);
       } catch {

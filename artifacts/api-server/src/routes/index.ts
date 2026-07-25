@@ -11,6 +11,9 @@ import interviewRouter from "./interview.js";
 import parkingLotRouter from "./parking-lot.js";
 import systemHealthRouter from "./system-health.js";
 import testingRouter from "./testing.js";
+import testSessionsRouter from "./test-sessions.js";
+import telemetryConsentRouter from "./telemetry-consent.js";
+import telemetryReportsRouter from "./telemetry-reports.js";
 import accountRouter from "./account.js";
 
 const router: IRouter = Router();
@@ -27,6 +30,9 @@ router.use(interviewRouter);
 router.use(parkingLotRouter);
 router.use(systemHealthRouter);
 router.use(testingRouter);
+router.use(testSessionsRouter);
+router.use(telemetryConsentRouter);
+router.use(telemetryReportsRouter);
 router.use(accountRouter);
 
 export default router;
