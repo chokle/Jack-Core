@@ -1217,7 +1217,12 @@ export function latestMemoryUpdatedAt(
     consider(metaStr(node.meta, "createdAt"));
     consider(metaStr(node.meta, "created_at"));
   }
-  for (const video of videos) consider(readUpdatedAt(video));
+  for (const video of videos) {
+    consider(video.updatedAt);
+    consider(video.updated_at);
+    consider(video.createdAt);
+    consider(video.created_at);
+  }
 
   return latestIso;
 }

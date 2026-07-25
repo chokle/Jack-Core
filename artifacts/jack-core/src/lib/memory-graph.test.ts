@@ -144,6 +144,21 @@ describe("latestMemoryUpdatedAt", () => {
     ).toBe("2026-07-23T10:00:00.000Z");
   });
 
+  it("uses a video's creation time when its update time is invalid", () => {
+    expect(
+      latestMemoryUpdatedAt(
+        { nodes: [], edges: [] },
+        [
+          {
+            id: "video-1",
+            updated_at: "not-a-date",
+            created_at: "2026-07-22T10:00:00.000Z",
+          },
+        ],
+      ),
+    ).toBe("2026-07-22T10:00:00.000Z");
+  });
+
   it("returns undefined when no persisted content carries a timestamp", () => {
     expect(latestMemoryUpdatedAt({ nodes: [], edges: [] }, [])).toBeUndefined();
   });
