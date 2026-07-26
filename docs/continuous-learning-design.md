@@ -415,7 +415,7 @@ A correction creates a new review event and regenerates the affected reflection.
 ### 10.2 Two review responsibilities
 
 1. **Expert confirmation** answers: “Did Jack understand what this person meant?”
-   This is mandatory for interview-derived knowledge to leave the draft layer.
+   This is mandatory for Interview/Teach-derived knowledge to leave the draft layer.
 2. **Integration review** answers: “How should this confirmed interpretation affect shared Living Memory?”
    Ambiguous matches, novel high-impact claims, conflicts, safety-critical content, weak evidence, and policy-sensitive changes require curator review.
 
@@ -578,7 +578,7 @@ No implementation should start by editing generated clients or by destructively 
 ### Phase 2 — Reflection gate
 
 - add “What I think I learned” and expert correction;
-- stage all interview-derived knowledge until confirmation;
+- stage all Interview/Teach-derived knowledge until confirmation;
 - replace completion UX with reflection and pause;
 - ensure abandoned/unconfirmed sessions cannot publish;
 - preserve and recover unsent answer drafts.
