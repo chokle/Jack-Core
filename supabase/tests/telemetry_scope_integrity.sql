@@ -1,0 +1,219 @@
+-- Run after all migrations. Every fixture is rolled back.
+begin;
+
+do $test$
+declare
+  org_a constant uuid := '10000000-0000-4000-8000-000000000001';
+  org_b constant uuid := '10000000-0000-4000-8000-000000000002';
+  pilot_a constant uuid := '20000000-0000-4000-8000-000000000001';
+  pilot_b constant uuid := '20000000-0000-4000-8000-000000000002';
+  mismatch_blocked boolean := false;
+  scope_fk_count integer;
+  unindexed_fk_count integer;
+  browser_grant_count integer;
+  service_role_table_count integer;
+begin
+  select count(*)
+  into scope_fk_count
+  from pg_constraint
+  where contype = 'f'
+    and array_length(conkey, 1) = 2
+    and conrelid::regclass::text in (
+      'pilot_memberships',
+      'telemetry_consents',
+      'test_sessions',
+      'test_events',
+      'activity_ingest_failures',
+      'activity_report_runs',
+      'admin_access_audit',
+      'test_recordings',
+      'test_feedback'
+    );
+
+  if scope_fk_count <> 9 then
+    raise exception 'expected 9 organization/pilot foreign keys, found %', scope_fk_count;
+  end if;
+
+  select count(*)
+  into unindexed_fk_count
+  from pg_constraint constraint_row
+  where constraint_row.contype = 'f'
+    and constraint_row.connamespace = 'public'::regnamespace
+    and constraint_row.conrelid::regclass::text in (
+      'pilot_memberships',
+      'telemetry_consents',
+      'test_sessions',
+      'test_events',
+      'activity_ingest_failures',
+      'activity_report_runs',
+      'admin_access_audit',
+      'test_recordings',
+      'test_feedback'
+    )
+    and not exists (
+      select 1
+      from pg_index index_row
+      where index_row.indrelid = constraint_row.conrelid
+        and index_row.indisvalid
+        and (index_row.indkey::smallint[])[0:cardinality(constraint_row.conkey) - 1]
+          = constraint_row.conkey
+    );
+
+  if unindexed_fk_count <> 0 then
+    raise exception 'expected every telemetry foreign key to have a covering index, found % missing', unindexed_fk_count;
+  end if;
+
+  select count(*)
+  into browser_grant_count
+  from information_schema.role_table_grants
+  where grantee in ('anon', 'authenticated')
+    and table_schema = 'public'
+    and table_name in (
+      'organizations',
+      'pilots',
+      'pilot_memberships',
+      'platform_roles',
+      'telemetry_consents',
+      'test_sessions',
+      'test_events',
+      'activity_ingest_failures',
+      'activity_report_runs',
+      'admin_access_audit',
+      'test_recordings',
+      'test_feedback'
+    );
+
+  if browser_grant_count <> 0 then
+    raise exception 'expected no browser grants on private telemetry tables, found %', browser_grant_count;
+  end if;
+
+  select count(distinct table_name)
+  into service_role_table_count
+  from information_schema.role_table_grants
+  where grantee = 'service_role'
+    and table_schema = 'public'
+    and table_name in (
+      'organizations',
+      'pilots',
+      'pilot_memberships',
+      'platform_roles',
+      'telemetry_consents',
+      'test_sessions',
+      'test_events',
+      'activity_ingest_failures',
+      'activity_report_runs',
+      'admin_access_audit',
+      'test_recordings',
+      'test_feedback'
+    );
+
+  if service_role_table_count <> 12 then
+    raise exception 'expected service-role grants on 12 private telemetry tables, found %', service_role_table_count;
+  end if;
+
+  insert into public.organizations (id, slug, name)
+  values
+    (org_a, 'scope-test-a', 'Scope Test A'),
+    (org_b, 'scope-test-b', 'Scope Test B');
+
+  insert into public.pilots (id, organization_id, name, status)
+  values
+    (pilot_a, org_a, 'Pilot A', 'active'),
+    (pilot_b, org_b, 'Pilot B', 'active');
+
+  insert into public.pilot_memberships (
+    organization_id,
+    pilot_id,
+    user_id,
+    role
+  )
+  values (org_a, pilot_a, 'valid-tester', 'tester');
+
+  begin
+    insert into public.pilot_memberships (
+      organization_id,
+      pilot_id,
+      user_id,
+      role
+    )
+    values (org_a, pilot_b, 'cross-org-tester', 'tester');
+  exception
+    when foreign_key_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'cross-organization pilot membership was accepted';
+  end if;
+
+  mismatch_blocked := false;
+  begin
+    insert into public.telemetry_consents (
+      actor_user_id,
+      organization_id,
+      pilot_id,
+      scope,
+      state,
+      privacy_notice_version,
+      consent_version
+    )
+    values (
+      'cross-org-tester',
+      org_a,
+      pilot_b,
+      'telemetry',
+      'granted',
+      'scope-test',
+      'scope-test'
+    );
+  exception
+    when foreign_key_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'cross-organization telemetry consent was accepted';
+  end if;
+
+  mismatch_blocked := false;
+  begin
+    insert into public.activity_report_runs (
+      organization_id,
+      pilot_id,
+      requested_by_user_id,
+      report_type
+    )
+    values (org_a, pilot_b, 'cross-org-admin', 'pilot_summary');
+  exception
+    when foreign_key_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'cross-organization report scope was accepted';
+  end if;
+
+  insert into public.test_recordings (
+    tester_user_id,
+    session_id,
+    storage_path
+  )
+  values ('legacy-user', 'legacy-session', 'legacy/path.webm');
+
+  begin
+    insert into public.test_recordings (
+      tester_user_id,
+      session_id,
+      storage_path,
+      organization_id
+    )
+    values ('partial-user', 'partial-session', 'partial/path.webm', org_a);
+    raise exception 'partially scoped recording was accepted';
+  exception
+    when check_violation then
+      null;
+  end;
+end;
+$test$;
+
+rollback;

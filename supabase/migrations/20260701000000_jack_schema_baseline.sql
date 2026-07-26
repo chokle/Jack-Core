@@ -1,6 +1,7 @@
--- Jack — AI Trade Intelligence Engine — Supabase schema
--- Canonical source of truth. Applied automatically by scripts/src/setup-supabase.ts
--- (when SUPABASE_DB_URL is set) and also safe to paste manually into
+-- Jack — AI Trade Intelligence Engine — foundational Supabase schema.
+-- This migration is the canonical source of truth and is also applied by
+-- scripts/src/setup-supabase.ts (when SUPABASE_DB_URL is set) for
+-- legacy/manual bootstrap workflows. It is also safe to paste manually into
 -- Supabase Dashboard → SQL Editor → New query → Run.
 -- Every statement is idempotent, so re-running is safe.
 
@@ -60,6 +61,7 @@ ALTER TABLE videos DROP CONSTRAINT IF EXISTS videos_status_check;
 UPDATE videos SET status = 'queued'    WHERE status = 'pending';
 UPDATE videos SET status = 'completed' WHERE status = 'ready';
 UPDATE videos SET status = 'failed'    WHERE status = 'error';
+ALTER TABLE videos ALTER COLUMN status SET DEFAULT 'queued';
 ALTER TABLE videos ADD CONSTRAINT videos_status_check CHECK (status IN
   ('queued','uploading','uploaded','transcribing','analyzing','indexing','completed','failed','retrying'));
 

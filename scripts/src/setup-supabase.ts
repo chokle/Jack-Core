@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 /**
  * Jack — Supabase schema setup.
  *
- * Applies the canonical schema in `supabase-schema.sql` to the project's
- * Supabase Postgres database. The Supabase JS/REST client cannot run DDL, so
- * applying the schema requires a direct Postgres connection via SUPABASE_DB_URL.
+ * Applies the canonical foundational migration to the project's Supabase
+ * Postgres database. The Supabase JS/REST client cannot run DDL, so applying
+ * the schema requires a direct Postgres connection via SUPABASE_DB_URL.
  *
  * When SUPABASE_DB_URL is configured, the schema is applied automatically (and
  * the run is idempotent). When it is absent or the connection fails, the script
@@ -21,7 +21,10 @@ import { dirname, join } from "node:path";
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SQL_PATH = join(__dirname, "supabase-schema.sql");
+const SQL_PATH = join(
+  __dirname,
+  "../../supabase/migrations/20260701000000_jack_schema_baseline.sql",
+);
 const sql = readFileSync(SQL_PATH, "utf8");
 
 const dbUrl = process.env["SUPABASE_DB_URL"];

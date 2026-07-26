@@ -23,7 +23,8 @@ create table if not exists public.pilots (
   ends_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (ends_at is null or starts_at is null or ends_at >= starts_at)
+  check (ends_at is null or starts_at is null or ends_at >= starts_at),
+  unique (organization_id, id)
 );
 
 create index if not exists pilots_organization_status_idx
@@ -32,7 +33,7 @@ create index if not exists pilots_organization_status_idx
 create table if not exists public.pilot_memberships (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  pilot_id uuid references public.pilots(id) on delete cascade,
+  pilot_id uuid,
   user_id text not null,
   role text not null check (role in ('tester', 'pilot_admin', 'organization_admin')),
   active boolean not null default true,
@@ -46,7 +47,9 @@ create table if not exists public.pilot_memberships (
     or (role in ('tester', 'pilot_admin') and pilot_id is not null)
   ),
   check (valid_until is null or valid_until >= valid_from),
-  unique (organization_id, pilot_id, user_id, role)
+  unique (organization_id, pilot_id, user_id, role),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create index if not exists pilot_memberships_user_active_idx
@@ -74,7 +77,7 @@ create table if not exists public.telemetry_consents (
   id uuid primary key default gen_random_uuid(),
   actor_user_id text not null,
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  pilot_id uuid not null references public.pilots(id) on delete cascade,
+  pilot_id uuid not null,
   scope text not null check (scope in ('telemetry', 'screen', 'microphone')),
   state text not null check (state in ('granted', 'declined', 'withdrawn')),
   privacy_notice_version text not null,
@@ -83,7 +86,9 @@ create table if not exists public.telemetry_consents (
     check (source in ('pilot_consent_dialog', 'account_privacy', 'recording_dialog')),
   occurred_at timestamptz not null default now(),
   retained_until timestamptz not null default (now() + interval '24 months'),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create index if not exists telemetry_consents_actor_scope_idx
@@ -92,6 +97,8 @@ create index if not exists telemetry_consents_organization_idx
   on public.telemetry_consents (organization_id);
 create index if not exists telemetry_consents_pilot_idx
   on public.telemetry_consents (pilot_id);
+create index if not exists telemetry_consents_scope_idx
+  on public.telemetry_consents (organization_id, pilot_id);
 create index if not exists telemetry_consents_retention_idx
   on public.telemetry_consents (retained_until);
 
@@ -99,7 +106,7 @@ create table if not exists public.test_sessions (
   id uuid primary key default gen_random_uuid(),
   actor_user_id text not null,
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  pilot_id uuid not null references public.pilots(id) on delete cascade,
+  pilot_id uuid not null,
   app_session_id uuid not null,
   device_category text not null default 'desktop'
     check (device_category in ('desktop', 'tablet', 'mobile')),
@@ -134,7 +141,9 @@ create table if not exists public.test_sessions (
   retained_until timestamptz not null default (now() + interval '90 days'),
   deletion_due_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create unique index if not exists test_sessions_one_active_per_tester_pilot
@@ -158,7 +167,7 @@ create table if not exists public.test_events (
   event_id uuid primary key,
   actor_user_id text not null,
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  pilot_id uuid not null references public.pilots(id) on delete cascade,
+  pilot_id uuid not null,
   test_session_id uuid not null references public.test_sessions(id) on delete cascade,
   app_session_id uuid not null,
   event_type text not null,
@@ -186,7 +195,9 @@ create table if not exists public.test_events (
   retained_until timestamptz not null default (now() + interval '90 days'),
   deletion_due_at timestamptz,
   redacted_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create unique index if not exists test_events_session_dedupe
@@ -206,13 +217,19 @@ create table if not exists public.activity_ingest_failures (
   id uuid primary key default gen_random_uuid(),
   actor_user_id text,
   organization_id uuid references public.organizations(id) on delete cascade,
-  pilot_id uuid references public.pilots(id) on delete cascade,
+  pilot_id uuid,
   test_session_id uuid references public.test_sessions(id) on delete cascade,
   reason_code text not null check (reason_code ~ '^[a-z0-9_]{1,64}$'),
   outcome text not null check (outcome in ('rejected', 'dropped')),
   event_count integer not null default 1 check (event_count between 1 and 1000),
   retained_until timestamptz not null default (now() + interval '30 days'),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  check (
+    (organization_id is null and pilot_id is null and test_session_id is null)
+    or (organization_id is not null and pilot_id is not null)
+  ),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create index if not exists activity_ingest_failures_scope_idx
@@ -227,7 +244,7 @@ create index if not exists activity_ingest_failures_retention_idx
 create table if not exists public.activity_report_runs (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  pilot_id uuid not null references public.pilots(id) on delete cascade,
+  pilot_id uuid not null,
   requested_by_user_id text not null,
   report_type text not null check (report_type in ('pilot_summary', 'user_timeline_export')),
   status text not null default 'completed'
@@ -238,7 +255,9 @@ create table if not exists public.activity_report_runs (
     check (jsonb_typeof(aggregate_snapshot) = 'object'),
   generated_at timestamptz not null default now(),
   retained_until timestamptz not null default (now() + interval '12 months'),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete cascade
 );
 
 create index if not exists activity_report_runs_scope_idx
@@ -253,13 +272,16 @@ create table if not exists public.admin_access_audit (
   actor_user_id text not null,
   target_user_id text,
   organization_id uuid references public.organizations(id) on delete set null,
-  pilot_id uuid references public.pilots(id) on delete set null,
+  pilot_id uuid,
   action text not null check (action ~ '^[a-z0-9_]{1,80}$'),
   decision text not null check (decision in ('allowed', 'denied')),
   authority text check (authority in ('organization_admin', 'pilot_admin', 'platform_superadmin')),
   request_id text,
   retained_until timestamptz not null default (now() + interval '24 months'),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  check ((organization_id is null) = (pilot_id is null)),
+  foreign key (organization_id, pilot_id)
+    references public.pilots(organization_id, id) on delete set null
 );
 
 create index if not exists admin_access_audit_actor_idx
@@ -268,17 +290,46 @@ create index if not exists admin_access_audit_organization_idx
   on public.admin_access_audit (organization_id);
 create index if not exists admin_access_audit_pilot_idx
   on public.admin_access_audit (pilot_id);
+create index if not exists admin_access_audit_scope_idx
+  on public.admin_access_audit (organization_id, pilot_id);
 create index if not exists admin_access_audit_retention_idx
   on public.admin_access_audit (retained_until);
 
 alter table public.test_recordings
   add column if not exists organization_id uuid references public.organizations(id) on delete set null,
-  add column if not exists pilot_id uuid references public.pilots(id) on delete set null,
+  add column if not exists pilot_id uuid,
   add column if not exists test_session_id uuid references public.test_sessions(id) on delete set null,
   add column if not exists screen_consent_id uuid references public.telemetry_consents(id) on delete set null,
   add column if not exists microphone_consent_id uuid references public.telemetry_consents(id) on delete set null,
   add column if not exists retained_until timestamptz not null default (now() + interval '30 days'),
   add column if not exists deletion_due_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.test_recordings'::regclass
+      and conname = 'test_recordings_scope_pair_check'
+  ) then
+    alter table public.test_recordings
+      add constraint test_recordings_scope_pair_check
+        check ((organization_id is null) = (pilot_id is null));
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.test_recordings'::regclass
+      and conname = 'test_recordings_organization_pilot_fkey'
+  ) then
+    alter table public.test_recordings
+      add constraint test_recordings_organization_pilot_fkey
+        foreign key (organization_id, pilot_id)
+        references public.pilots(organization_id, id) on delete set null;
+  end if;
+end
+$$;
 
 create index if not exists test_recordings_retention_idx
   on public.test_recordings (retained_until);
@@ -286,6 +337,8 @@ create index if not exists test_recordings_organization_idx
   on public.test_recordings (organization_id);
 create index if not exists test_recordings_pilot_idx
   on public.test_recordings (pilot_id);
+create index if not exists test_recordings_scope_idx
+  on public.test_recordings (organization_id, pilot_id);
 create index if not exists test_recordings_test_session_idx
   on public.test_recordings (test_session_id);
 create index if not exists test_recordings_screen_consent_idx
@@ -297,11 +350,38 @@ create index if not exists test_recordings_deletion_due_idx
 
 alter table public.test_feedback
   add column if not exists organization_id uuid references public.organizations(id) on delete set null,
-  add column if not exists pilot_id uuid references public.pilots(id) on delete set null,
+  add column if not exists pilot_id uuid,
   add column if not exists test_session_id uuid references public.test_sessions(id) on delete set null,
   add column if not exists resolved_at timestamptz,
   add column if not exists retained_until timestamptz,
   add column if not exists deletion_due_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.test_feedback'::regclass
+      and conname = 'test_feedback_scope_pair_check'
+  ) then
+    alter table public.test_feedback
+      add constraint test_feedback_scope_pair_check
+        check ((organization_id is null) = (pilot_id is null));
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.test_feedback'::regclass
+      and conname = 'test_feedback_organization_pilot_fkey'
+  ) then
+    alter table public.test_feedback
+      add constraint test_feedback_organization_pilot_fkey
+        foreign key (organization_id, pilot_id)
+        references public.pilots(organization_id, id) on delete set null;
+  end if;
+end
+$$;
 
 create index if not exists test_feedback_scope_idx
   on public.test_feedback (organization_id, pilot_id, created_at desc);

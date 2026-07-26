@@ -56,7 +56,7 @@ const NOT_NULL_DEFAULT_COLUMNS: Record<string, string[]> = {
  * `.upsert()` since these tables are written via either.
  *
  * Mirrors the `REFERENCES ... ON DELETE CASCADE` constraints in
- * `scripts/src/supabase-schema.sql`:
+ * `supabase/migrations/20260701000000_jack_schema_baseline.sql`:
  *   - `knowledge_edges.source_id`/`.target_id` -> `knowledge_nodes(id)`
  *   - `transcript_segments.video_id` -> `videos(id)`
  *   - `interview_sessions.mentor_profile_id` -> `mentor_profiles(id)`
