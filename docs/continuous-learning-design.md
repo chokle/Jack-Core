@@ -37,7 +37,7 @@ This design uses “continuous learning” to mean governed improvement of Jack'
 
 The continuous-learning system extends the current product; it does not replace its trust foundations.
 
-1. **Raw experience is preserved before interpretation.** Verbatim answers and consented media are evidence. A failed analysis must never erase them.
+1. **Raw experience is preserved before interpretation.** Verbatim answers and consented media are evidence. A failed analysis must never erase them; only an explicit, authorized withdrawal or retention action may remove them.
 2. **Interpretation is not memory.** Claims extracted from Interview Mode or Teach Mode remain draft until the source expert reviews Jack's interpretation. The existing video-ingestion rule remains unchanged.
 3. **One identity, many evolving claims.** Canonical concepts remain stable, while claims about them can be refined, scoped, challenged, or superseded.
 4. **Provenance remains explicit.** Every claim and relationship must be traceable to evidence and review events.
@@ -79,15 +79,19 @@ Continuous learning requires three deliberately separate layers.
 
 ### 4.1 Evidence Ledger
 
-Immutable, access-controlled records of what was actually supplied:
+Append-only, access-controlled records of what was actually supplied, for as long as that evidence remains authorized and retained:
 
 - verbatim answers;
 - the question or teaching context that elicited them;
 - consented audio, video, photos, sketches, and timestamps;
 - source identity, scope, jurisdiction, and date;
-- later corrections, withdrawals, and review events.
+- later corrections and review events.
 
-Evidence can be retained even when Jack's interpretation fails or is rejected. Evidence must never be rewritten to match a later summary.
+Evidence can be retained even when Jack's interpretation fails or is rejected. Retained evidence must never be rewritten to match a later summary.
+
+Append-only is not a promise of indefinite retention and does not override withdrawal. Under the current [Mentor Withdrawal](./knowledge-graph.md#graph-decisions) contract, the mentor profile, sessions, verbatim answers, and pending candidates are deleted; mentor-identifying fields are scrubbed from resolved candidate audit rows; surviving graph knowledge is recomputed from remaining provenance; and mentor-only derived concepts leave live retrieval as attribution-free `archived` candidates.
+
+Those resolved and archived records are derived audit/community records, not retained raw-evidence tombstones. This proposal introduces no new retention period or inaccessible raw-content tombstone. Future media deletion, redaction, pseudonymization, and retention remain approval-gated and must be decided before schema or API work. Claims, relations, syntheses, confidence, curiosities, and authorization scopes are recomputed from surviving evidence; unsupported material leaves active Living Memory.
 
 ### 4.2 Working Understanding
 
@@ -403,7 +407,7 @@ Jack then asks:
 
 ### 10.1 Expert actions
 
-- **Yes, that's right** — confirms the selected interpretation;
+- **Yes, that's right** — confirms only the selected claim or claims, not the whole reflection or session;
 - **Correct something** — edits or comments on individual claims;
 - **Keep exploring** — returns to a targeted curiosity;
 - **I need to show you** — opens visual teaching;
@@ -414,12 +418,14 @@ A correction creates a new review event and regenerates the affected reflection.
 
 ### 10.2 Two review responsibilities
 
-1. **Expert confirmation** answers: “Did Jack understand what this person meant?”
+1. **Expert confirmation** answers, for each selected claim or revision: “Did Jack understand what this person meant in the evidence identified for this claim?”
    This is mandatory for Interview/Teach-derived knowledge to leave the draft layer.
 2. **Integration review** answers: “How should this confirmed interpretation affect shared Living Memory?”
    Ambiguous matches, novel high-impact claims, conflicts, safety-critical content, weak evidence, and policy-sensitive changes require curator review.
 
-A confirmed, low-risk, unambiguous reinforcement may pass integration policy automatically because the expert review is already a real review event. Everything else waits outside active memory.
+Confirmation is claim-scoped, never session-wide. Every confirmation event records the claim or revision, the exact evidence ids and scope the reviewer was authorized to see, the confirming reviewer and role, the decision, and its time. For an Interview/Teach-derived claim that combines multiple contributors, every applicable source expert must confirm the portion attributed to their evidence before the combined claim can be promoted. One person's “Yes” cannot confirm, reveal, or promote another contributor's private or unconfirmed material. Until all required confirmations exist, the contributions remain separate drafts or an explicitly disputed synthesis.
+
+A low-risk, unambiguous reinforcement with all required claim-scoped expert confirmations may pass integration policy automatically because those confirmations are real review events. Everything else waits outside active memory.
 
 If the expert leaves before confirmation, the evidence and draft remain recoverable but do not become active Living Memory. There is no timeout-based auto-promotion.
 
@@ -435,7 +441,7 @@ The current canonical concept graph remains the identity layer. It should gain a
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Concept                | Stable identity such as “Preheat” or “Track Tension.” Labels and aliases help resolve identity; they do not contain the whole understanding.                                           |
 | Claim                  | A reviewed proposition about a concept, including scope, rationale, applicability, exceptions, failure modes, and safety class.                                                        |
-| Evidence               | Immutable answer, video segment, document, image, demonstration, or review event supporting or challenging a claim.                                                                    |
+| Evidence               | Answer, video segment, document, image, demonstration, or review event supporting or challenging a claim; immutable while retained and subject to authorized withdrawal.               |
 | Relation               | A typed connection such as `causes`, `prevents`, `depends_on`, `precedes`, `applies_when`, `exception_to`, `alternative_to`, `supports`, `contradicts`, `example_of`, or `supersedes`. |
 | Revision               | An auditable change from one reviewed claim state to another, with reason and reviewer provenance.                                                                                     |
 | Synthesis              | The current reviewed summary derived from active claims and relations. It is reproducible and never the sole source of truth.                                                          |
@@ -486,7 +492,7 @@ The purpose is not to re-ask the same generic question. It is to test, refine, o
 
 Continuous learning increases the consequence of a boundary mistake. The following are hard requirements:
 
-- Evidence, drafts, reflections, curiosities, and derived claims inherit the strictest owner/company visibility of their inputs.
+- Evidence, drafts, reflections, curiosities, and derived claims use the authorization intersection defined below; no input can widen another input's audience.
 - A question may use only context the current user is authorized to know. It must not reveal another contributor's private answer, identity, disagreement, or media.
 - Identity and authorization remain server-derived; clients do not choose privileged owner, reviewer, company, or publication fields.
 - Interview text is untrusted input. It cannot override system policy, authorize publication, or change Jack's rules.
@@ -496,6 +502,23 @@ Continuous learning increases the consequence of a boundary mistake. The followi
 - Safety-critical content requires the Constitution's source hierarchy and applicable Canadian jurisdiction checks.
 - Visual evidence requires consent, access controls, retention rules, and withdrawal behavior.
 - No autonomous network research, model fine-tuning, or production mutation is implied by an open curiosity.
+
+### 12.1 Authorization inheritance
+
+Authorization is a server-derived set of allowed principals plus purpose, consent, and retention constraints—not a client-selected label. Baseline policy classes include:
+
+- `owner_only:<ownerId>` — the owner;
+- `company_scoped:<companyId>` — authorized members of that company;
+- `reviewer_scoped:<reviewPolicyId>` — explicitly authorized reviewers for the named purpose; and
+- `approved_publication:<audienceId>` — only the audience approved by the source's publication decision.
+
+Set inclusion defines the visibility lattice: more restrictive means a smaller allowed-principal set. Scopes for different companies are incomparable unless an explicit authorization grants a common audience; reviewer or publication scope never implies access to source evidence outside its named purpose.
+
+Service and processing principals are execution identities, not audience members. They may act only on behalf of an already-authorized human or audience grant, are excluded from intersection and non-empty-audience tests, and can never create a common audience between otherwise unrelated sources.
+
+A multi-source derived record receives the **intersection** of every source's human/audience principal set and the strictest combined purpose, consent, and retention constraints. A broader source never widens a narrower one. If the intersection is empty, Jack must not persist or retrieve a combined reflection, claim, synthesis, or curiosity; it keeps source-scoped drafts separate.
+
+Consent withdrawal, contributor withdrawal, company-membership change, or any source-permission change immediately denies reads to affected derived records. The system invalidates their caches, embeddings, search indexes, prompt context, retrieval, citation, and export projections, then recomputes content and authorization from surviving inputs. Access resumes only if the rebuilt record has a non-empty authorized audience and no withdrawn content.
 
 ## 13. Conceptual contract changes
 
@@ -509,20 +532,37 @@ Replace the next-question-only contract:
 question + category + topic + complete
 ```
 
-with a structured learning decision:
+with a server-owned persistence envelope and structured learning decision:
 
 ```text
-nextAction
-question
-intent
-learningThread
-targetClaimOrRelation
-curiositySignal
-expectedEvidence
-workingUnderstandingDelta
-reflectionRecommended
-pauseReason
+persistence
+  clientRequestId
+  operationId
+  sessionId
+  turnId
+  learningThreadId
+  targetClaimOrRelationId
+  evidenceIds
+  analysisRevisionId
+  reviewEventId
+  causedByEventId
+
+learningDecision
+  nextAction
+  question
+  intent
+  curiositySignal
+  expectedEvidence
+  workingUnderstandingDelta
+  reflectionRecommended
+  pauseReason
 ```
+
+All persisted object identifiers are stable and server-issued; `clientRequestId` is the caller-stable idempotency input, generated and retained before the first submission. The model may propose `learningDecision` content but never identity, ownership, reviewer, authorization, or transition authority. The server uniquely binds the authenticated owner, session, operation type, and `clientRequestId` to one `operationId`, payload digest, and set of issued evidence, analysis, and review-event ids.
+
+Repeating that transition with the same `clientRequestId` and payload resumes any incomplete stage and returns the same ids and final state, including when the first response was lost. Reusing the id with a different payload is rejected. The operation binding and stage outcome are recorded before advancing to the next side effect, so retries continue rather than restart the pipeline.
+
+An intentional correction is not a retry. It uses a fresh `clientRequestId` and receives new `operationId`, `analysisRevisionId`, and `reviewEventId` values, preserves the original evidence ids unless new evidence is supplied, and records `causedByEventId` against the event being corrected. Retrying that correction reuses its same client request id and server-issued ids. These uniqueness and causal-link rules apply at persistence and transition boundaries so a transport or worker retry cannot create a duplicate claim, revision, or audit event.
 
 The server, not the model, remains authoritative for persisted state and allowed transitions.
 
@@ -565,7 +605,7 @@ No implementation should start by editing generated clients or by destructively 
 - decide reviewer roles and promotion rules;
 - calibrate an initial understanding rubric;
 - define the minimum relation vocabulary;
-- define access inheritance for drafts and curiosities;
+- map the authorization-set intersection and invalidation rules above to concrete owner, company, reviewer, and publication roles;
 - write migration and rollback plans before data changes.
 
 ### Phase 1 — Shadow working understanding
@@ -636,6 +676,10 @@ An implementation is not faithful to this design unless it passes at least these
 14. **Withdrawal:** Removing a mentor removes their evidence contribution and recomputes claims, relations, syntheses, and confidence without corrupting surviving knowledge.
 15. **Replacement-safe correction:** Reanalyzing or correcting one answer removes or supersedes that answer's stale draft contributions before publishing the reviewed replacement.
 16. **Failure recovery:** A model or graph-write failure preserves evidence and leaves a retryable, non-published draft.
+17. **Claim-scoped confirmation:** One expert's confirmation cannot promote another contributor's private or unconfirmed evidence; multi-source claims wait for every applicable source expert.
+18. **Idempotent retry:** After a lost response or partial-stage failure, replaying the caller-stable request id resumes and returns the same operation, evidence, analysis, and review-event ids; an intentional correction creates new causally linked ids.
+19. **Withdrawal-safe evidence:** Withdrawal deletes raw verbatim evidence under the current contract, scrubs attribution from retained audit/community records, recomputes every dependent object, and keeps future media retention approval-gated.
+20. **Authorization intersection:** A multi-source derivation with no common authorized audience is not persisted or retrieved, and permission changes invalidate every projection before access can resume.
 
 ## 16. Success measures
 
