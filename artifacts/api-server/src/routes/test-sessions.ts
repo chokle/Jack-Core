@@ -309,7 +309,10 @@ router.get("/testing/sessions/current", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || isPresentationIdentity(identity)) {
+    if (isPresentationIdentity(identity)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (identity.isAdmin) {
       return res.json({ session: null });
     }
     const requestedPilotId =

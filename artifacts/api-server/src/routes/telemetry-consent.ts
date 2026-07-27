@@ -120,7 +120,10 @@ router.get("/testing/telemetry/context", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || isPresentationIdentity(identity)) {
+    if (isPresentationIdentity(identity)) {
+      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
+    }
+    if (identity.isAdmin) {
       return res.json({
         enrolled: false,
         requiresPilotSelection: false,
@@ -370,6 +373,9 @@ router.get("/testing/telemetry/export", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
+    if (isPresentationIdentity(identity)) {
+      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
+    }
     const [consents, sessions, events, failures, recordings, feedback] = await Promise.all([
       db.from("telemetry_consents").select("*").eq("actor_user_id", identity.userId),
       db.from("test_sessions").select("*").eq("actor_user_id", identity.userId),

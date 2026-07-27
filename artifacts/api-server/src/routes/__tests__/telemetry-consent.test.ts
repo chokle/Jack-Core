@@ -87,6 +87,21 @@ describe("telemetry consent", () => {
       .send({ pilotId: PILOT_ID, scopes: ["telemetry"] });
     expect(withdrawal.status).toBe(403);
     expect(fake.tables.telemetry_consents).toHaveLength(0);
+
+    const context = await request(app()).get(
+      `/api/testing/telemetry/context?pilotId=${PILOT_ID}`,
+    );
+    expect(context.status).toBe(403);
+
+    const exportResponse = await request(app()).get("/api/testing/telemetry/export");
+    expect(exportResponse.status).toBe(403);
+  });
+
+  it("continues to deny the legacy presentation-demo identity", async () => {
+    identity.userId = "presentation-demo";
+
+    expect((await request(app()).get("/api/testing/telemetry/context")).status).toBe(403);
+    expect((await request(app()).get("/api/testing/telemetry/export")).status).toBe(403);
   });
 
   it("persists an explicit decline without creating a pilot session", async () => {

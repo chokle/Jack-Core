@@ -273,5 +273,14 @@ describe("canonical user-test sessions", () => {
     expect(
       (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
     ).toBe(403);
+    expect(
+      (await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status,
+    ).toBe(403);
+
+    identity.userId = "presentation-demo";
+    identity.isPresentation = false;
+    expect(
+      (await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status,
+    ).toBe(403);
   });
 });
