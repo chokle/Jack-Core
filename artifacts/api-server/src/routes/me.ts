@@ -7,6 +7,7 @@ import {
   TrackMemoryGraphOnboardingEventResponse,
 } from "@workspace/api-zod";
 import { resolveIdentity } from "../lib/admin-auth.js";
+import { isPresentationIdentity } from "../lib/identity.js";
 import { hasAnyReportScope } from "../lib/activity-telemetry.js";
 
 const router = Router();
@@ -93,7 +94,7 @@ router.get("/me", async (req, res) => {
       name: identity.name,
       isAdmin: identity.isAdmin,
       canViewPilotReports:
-        identity.userId !== "presentation-demo" &&
+        !isPresentationIdentity(identity) &&
         (await hasAnyReportScope(identity.userId)),
     }),
   );
@@ -138,20 +139,9 @@ router.post("/me/analytics/memory-graph-onboarding", (req, res) => {
   const event = readEvent(req.body);
   if (!event) return res.status(400).json({ error: "Invalid onboarding event." });
 
-  try {
-    req.log?.info(
-      {
-        onboardingEvent: event.event,
-        onboardingSource: event.source,
-        onboardingVersion: event.version,
-        ...(event.step === undefined ? {} : { onboardingStep: event.step }),
-      },
-      "Memory Graph onboarding event",
-    );
-  } catch {
-    // Pilot analytics are best-effort and must never affect the user experience.
-  }
-
+  // Retained only as a compatibility no-op for older clients. Optional pilot
+  // activity is recorded exclusively through the consent-aware test-events
+  // pipeline so decline/withdrawal cannot leave a parallel analytics trail.
   return res.status(202).json(TrackMemoryGraphOnboardingEventResponse.parse({ accepted: true }));
 });
 

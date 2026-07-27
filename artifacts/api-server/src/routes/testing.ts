@@ -9,6 +9,7 @@ import {
   getAdminReviewer,
   resolveIdentity,
 } from "../lib/admin-auth.js";
+import { isPresentationIdentity } from "../lib/identity.js";
 import { userTestingLimiter } from "../lib/rate-limit.js";
 import { queueFeedbackNotification } from "../lib/feedback-notifications.js";
 import {
@@ -150,7 +151,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     if (!identity?.userId || !identity.email) {
       return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
-    if (identity.userId === "presentation-demo") {
+    if (isPresentationIdentity(identity)) {
       return res
         .status(403)
         .json({ error: "User-testing feedback is unavailable in presentation mode." });
@@ -335,7 +336,7 @@ async function requireFeedbackScope(req: Request, res: Response, action: string)
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  if (identity.userId === "presentation-demo") {
+  if (isPresentationIdentity(identity)) {
     res.status(403).json({ error: "Feedback review is unavailable in presentation mode." });
     return null;
   }
@@ -530,7 +531,7 @@ router.post(
       }
 
       const identity = await resolveIdentity(req);
-      if (!identity || identity.userId === "presentation-demo") {
+      if (!identity || isPresentationIdentity(identity)) {
         return res.status(403).json({ error: "Screen recording is unavailable for this account." });
       }
       const pilotSession = await db

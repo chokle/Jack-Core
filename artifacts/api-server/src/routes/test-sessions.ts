@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
+import { isPresentationIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   currentConsentGranted,
@@ -122,7 +123,7 @@ router.post("/testing/sessions/start", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || identity.userId === "presentation-demo") {
+    if (identity.isAdmin || isPresentationIdentity(identity)) {
       return res.status(403).json({ error: "Pilot sessions are unavailable for this account." });
     }
     if (!hasOnlyKeys(req.body ?? {}, START_KEYS)) {
@@ -308,7 +309,7 @@ router.get("/testing/sessions/current", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || identity.userId === "presentation-demo") {
+    if (identity.isAdmin || isPresentationIdentity(identity)) {
       return res.json({ session: null });
     }
     const requestedPilotId =
@@ -332,7 +333,7 @@ router.get("/testing/sessions/current", async (req, res) => {
 router.post("/testing/sessions/:id/events", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) return res.status(401).json({ error: "Unauthorized" });
-  if (identity.isAdmin || identity.userId === "presentation-demo") {
+  if (identity.isAdmin || isPresentationIdentity(identity)) {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
@@ -435,39 +436,40 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       return res.status(400).json({ error: "Activity event was rejected.", code: inserted.error });
     }
 
+    const canonicalEventType = String(inserted.row?.["event_type"] ?? event.eventType);
     const metadata = (inserted.row?.["metadata"] ?? {}) as Record<string, unknown>;
     const now = new Date().toISOString();
     const updates: Record<string, unknown> = {
-      app_session_id: event.appSessionId,
+      app_session_id: inserted.row?.["app_session_id"] ?? event.appSessionId,
       last_activity_at: now,
       updated_at: now,
     };
-    if (event.eventType === "onboarding_started") updates.onboarding_status = "in_progress";
-    if (event.eventType === "onboarding_step_completed") {
+    if (canonicalEventType === "onboarding_started") updates.onboarding_status = "in_progress";
+    if (canonicalEventType === "onboarding_step_completed") {
       updates.onboarding_status = "in_progress";
       updates.onboarding_step = metadata["next_step"] ?? session.data.onboarding_step;
     }
-    if (event.eventType === "onboarding_completed") {
+    if (canonicalEventType === "onboarding_completed") {
       updates.onboarding_status = "completed";
       updates.onboarding_step = 3;
     }
-    if (event.eventType === "onboarding_skipped") {
+    if (canonicalEventType === "onboarding_skipped") {
       updates.onboarding_status = "skipped";
     }
-    if (event.eventType === "recording_started") updates.recording_status = "recording";
-    if (event.eventType === "recording_stopped") updates.recording_status = "stopped";
-    if (event.eventType === "recording_upload_succeeded") updates.recording_status = "uploaded";
-    if (event.eventType === "recording_upload_failed") {
+    if (canonicalEventType === "recording_started") updates.recording_status = "recording";
+    if (canonicalEventType === "recording_stopped") updates.recording_status = "stopped";
+    if (canonicalEventType === "recording_upload_succeeded") updates.recording_status = "uploaded";
+    if (canonicalEventType === "recording_upload_failed") {
       updates.recording_status = "failed";
       updates.error_count = Number(session.data.error_count ?? 0) + (inserted.duplicate ? 0 : 1);
     }
-    if (event.eventType === "feedback_submitted") updates.feedback_status = "submitted";
-    if (event.eventType === "test_completed") {
+    if (canonicalEventType === "feedback_submitted") updates.feedback_status = "submitted";
+    if (canonicalEventType === "test_completed") {
       updates.status = "completed";
       updates.completed_at = now;
     }
-    if (event.eventType === "test_abandoned") updates.status = "abandoned";
-    if (event.eventType === "reliability_error") {
+    if (canonicalEventType === "test_abandoned") updates.status = "abandoned";
+    if (canonicalEventType === "reliability_error") {
       updates.error_count = Number(session.data.error_count ?? 0) + (inserted.duplicate ? 0 : 1);
     }
     const updated = await db
@@ -492,7 +494,7 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
 router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) return res.status(401).json({ error: "Unauthorized" });
-  if (identity.isAdmin || identity.userId === "presentation-demo") {
+  if (identity.isAdmin || isPresentationIdentity(identity)) {
     return res.status(403).json({ error: "Forbidden" });
   }
   if (

@@ -42,6 +42,7 @@ function clerkUser(
     firstName?: string | null;
     lastName?: string | null;
     publicMetadata?: Record<string, unknown>;
+    privateMetadata?: Record<string, unknown>;
     unsafeMetadata?: Record<string, unknown>;
   } = {},
 ) {
@@ -52,6 +53,7 @@ function clerkUser(
     primaryEmailAddress: email ? { emailAddress: email } : null,
     emailAddresses: email ? [{ emailAddress: email }] : [],
     publicMetadata: opts.publicMetadata ?? {},
+    privateMetadata: opts.privateMetadata ?? {},
     unsafeMetadata: opts.unsafeMetadata ?? {},
   };
 }
@@ -95,6 +97,7 @@ describe("resolveIdentity", () => {
       email: "admin@torchlabs.ca",
       name: "Dana Welder",
       isAdmin: true,
+      isPresentation: false,
     });
   });
 
@@ -107,6 +110,7 @@ describe("resolveIdentity", () => {
       email: "regular@example.com",
       name: null,
       isAdmin: false,
+      isPresentation: false,
     });
   });
 
@@ -132,6 +136,23 @@ describe("resolveIdentity", () => {
     expect(await resolveIdentity({} as Request)).toMatchObject({ isAdmin: false });
   });
 
+  it("recognizes presentation mode only from server-side Clerk private metadata", async () => {
+    getAuth.mockReturnValue({ userId: "u_presentation" });
+    getUser.mockResolvedValue(
+      clerkUser({
+        email: "presentation@example.com",
+        privateMetadata: { role: "PRESENTATION" },
+        unsafeMetadata: { role: "admin" },
+      }),
+    );
+
+    expect(await resolveIdentity({} as Request)).toMatchObject({
+      userId: "u_presentation",
+      isAdmin: false,
+      isPresentation: true,
+    });
+  });
+
   it("fails closed to non-admin when the Clerk user lookup throws", async () => {
     getAuth.mockReturnValue({ userId: "u_admin" });
     getUser.mockRejectedValue(new Error("clerk unavailable"));
@@ -142,6 +163,7 @@ describe("resolveIdentity", () => {
       email: null,
       name: null,
       isAdmin: false,
+      isPresentation: false,
     });
   });
 });

@@ -265,10 +265,11 @@ describe("POST /api/testing/feedback", () => {
 
   it("rejects presentation-demo with 403, without writing feedback or queueing notification", async () => {
     resolveIdentity.mockResolvedValue({
-      userId: "presentation-demo",
+      userId: "clerk-presentation-account",
       email: "presentation-demo@test.local",
       name: "Presentation Demo",
       isAdmin: false,
+      isPresentation: true,
     });
 
     const response = await request(app()).post("/api/testing/feedback").send(validBody);

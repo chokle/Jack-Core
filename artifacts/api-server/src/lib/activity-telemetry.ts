@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { Request } from "express";
 import { supabase } from "./supabase.js";
 
@@ -411,22 +412,39 @@ export async function insertCanonicalEvent(input: {
   if ("error" in validated) return { duplicate: false, error: validated.error };
   const event = validated.value;
 
+  const duplicateMatches = (row: Record<string, unknown>): boolean =>
+    row["actor_user_id"] === input.actorUserId &&
+    row["test_session_id"] === input.session.id &&
+    row["app_session_id"] === event.appSessionId &&
+    row["event_type"] === event.eventType &&
+    row["result"] === event.result &&
+    (row["dedupe_key"] ?? null) === (event.dedupeKey ?? null) &&
+    isDeepStrictEqual(row["metadata"] ?? {}, event.metadata);
+
   const existing = await db
     .from("test_events")
-    .select("event_id")
+    .select("*")
     .eq("event_id", event.eventId)
     .maybeSingle();
   if (existing.error) throw existing.error;
-  if (existing.data) return { duplicate: true };
+  if (existing.data) {
+    return duplicateMatches(existing.data)
+      ? { duplicate: true, row: existing.data }
+      : { duplicate: false, error: "idempotency_conflict" };
+  }
   if (event.dedupeKey) {
     const dedupe = await db
       .from("test_events")
-      .select("event_id")
+      .select("*")
       .eq("test_session_id", input.session.id)
       .eq("dedupe_key", event.dedupeKey)
       .maybeSingle();
     if (dedupe.error) throw dedupe.error;
-    if (dedupe.data) return { duplicate: true };
+    if (dedupe.data) {
+      return duplicateMatches(dedupe.data)
+        ? { duplicate: true, row: dedupe.data }
+        : { duplicate: false, error: "idempotency_conflict" };
+    }
   }
 
   const row = {
@@ -460,7 +478,26 @@ export async function insertCanonicalEvent(input: {
   };
   const inserted = await db.from("test_events").insert(row);
   if (inserted.error) {
-    if ((inserted.error as { code?: string }).code === "23505") return { duplicate: true };
+    if ((inserted.error as { code?: string }).code === "23505") {
+      let duplicate = await db
+        .from("test_events")
+        .select("*")
+        .eq("event_id", event.eventId)
+        .maybeSingle();
+      if (duplicate.error) throw duplicate.error;
+      if (!duplicate.data && event.dedupeKey) {
+        duplicate = await db
+          .from("test_events")
+          .select("*")
+          .eq("test_session_id", input.session.id)
+          .eq("dedupe_key", event.dedupeKey)
+          .maybeSingle();
+        if (duplicate.error) throw duplicate.error;
+      }
+      return duplicate.data && duplicateMatches(duplicate.data)
+        ? { duplicate: true, row: duplicate.data }
+        : { duplicate: false, error: "idempotency_conflict" };
+    }
     throw inserted.error;
   }
   return { duplicate: false, row };

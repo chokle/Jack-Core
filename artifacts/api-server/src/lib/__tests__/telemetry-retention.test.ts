@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const remove = vi.hoisted(() => vi.fn(async () => ({ error: null })));
+const remove = vi.hoisted(() =>
+  vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({ error: null })),
+);
 
 vi.mock("../../lib/supabase.js", async () => {
   const mocks = await import("./mocks.js");
@@ -18,6 +20,7 @@ import { runTelemetryRetentionSweep } from "../telemetry-retention.js";
 beforeEach(() => {
   resetMocks();
   remove.mockClear();
+  remove.mockResolvedValue({ error: null });
   fake.tables.pilots = [];
   for (const table of [
     "test_events",
@@ -63,5 +66,38 @@ describe("telemetry retention sweep", () => {
     expect(fake.tables.test_recordings).toEqual([
       expect.objectContaining({ id: "recording-future" }),
     ]);
+  });
+
+  it("keeps recording rows due after a storage failure and succeeds on retry", async () => {
+    fake.tables.test_recordings = [{
+      id: "recording-retry",
+      storage_path: "recordings/retry.webm",
+      retained_until: "2020-01-01T00:00:00.000Z",
+    }];
+    remove.mockResolvedValueOnce({ error: { name: "StorageError", message: "provider unavailable" } });
+
+    await expect(runTelemetryRetentionSweep()).rejects.toEqual(
+      expect.objectContaining({ name: "StorageError" }),
+    );
+    expect(fake.tables.test_recordings).toHaveLength(1);
+
+    const counts = await runTelemetryRetentionSweep();
+    expect(counts.recordings).toBe(1);
+    expect(fake.tables.test_recordings).toHaveLength(0);
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes large due cohorts in explicit storage-safe batches", async () => {
+    fake.tables.test_recordings = Array.from({ length: 1_001 }, (_, index) => ({
+      id: `recording-${index}`,
+      storage_path: `recordings/${index}.webm`,
+      retained_until: "2020-01-01T00:00:00.000Z",
+    }));
+
+    const counts = await runTelemetryRetentionSweep();
+
+    expect(counts.recordings).toBe(1_001);
+    expect(fake.tables.test_recordings).toHaveLength(0);
+    expect(remove.mock.calls.map(([paths]) => paths.length)).toEqual([500, 500, 1]);
   });
 });

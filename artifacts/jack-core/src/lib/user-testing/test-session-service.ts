@@ -191,6 +191,13 @@ export async function withdrawTelemetry(
   pilotId: string,
   scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
+  if (scopes.includes("telemetry")) {
+    cacheTestSession(null);
+    writeQueue([]);
+  }
+  window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
+    detail: { withdrawn: scopes, deletionDueAt: null },
+  }));
   const response = await fetch("/api/testing/telemetry/withdraw", {
     method: "POST",
     credentials: "include",
@@ -198,11 +205,6 @@ export async function withdrawTelemetry(
     body: JSON.stringify({ pilotId, scopes }),
   });
   const result = await readJson<{ withdrawn: string[]; deletionDueAt: string | null }>(response);
-  if (scopes.includes("telemetry")) {
-    cacheTestSession(null);
-    writeQueue([]);
-  }
-  window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", { detail: result }));
   return result;
 }
 

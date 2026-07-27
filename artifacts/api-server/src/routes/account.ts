@@ -6,6 +6,39 @@ import { withdrawMentor } from "../lib/memory-graph.js";
 import { removeVideoAssets } from "../lib/video-storage.js";
 
 const router = Router();
+const RECORDING_DELETE_BATCH_SIZE = 500;
+
+async function deleteAccountRecordings(userId: string): Promise<void> {
+  while (true) {
+    const { data: recordings, error: recordingReadError } = await supabase
+      .from("test_recordings")
+      .select("id,storage_path")
+      .eq("tester_user_id", userId)
+      .limit(RECORDING_DELETE_BATCH_SIZE);
+    if (recordingReadError) throw recordingReadError;
+    if (!recordings || recordings.length === 0) return;
+
+    const paths = recordings
+      .map((row) => (row as Record<string, unknown>)["storage_path"])
+      .filter((path): path is string => typeof path === "string" && path.length > 0);
+    if (paths.length > 0) {
+      const { error } = await supabase.storage.from("jack-test-recordings").remove(paths);
+      if (error) throw error;
+    }
+
+    const ids = recordings
+      .map((row) => (row as Record<string, unknown>)["id"])
+      .filter((id): id is string => typeof id === "string");
+    if (ids.length === 0) {
+      throw new Error("Recording rows are missing identifiers required for safe deletion.");
+    }
+    const { error: recordingDeleteError } = await supabase
+      .from("test_recordings")
+      .delete()
+      .in("id", ids);
+    if (recordingDeleteError) throw recordingDeleteError;
+  }
+}
 
 /**
  * Permanently removes the authenticated customer's account and personally
@@ -58,18 +91,7 @@ router.delete("/account", async (req, res) => {
     const { error: chatDeleteError } = await supabase.from("chat_messages").delete().eq("user_id", userId);
     if (chatDeleteError) throw chatDeleteError;
 
-    const { data: recordings, error: recordingReadError } = await supabase
-      .from("test_recordings")
-      .select("storage_path")
-      .eq("tester_user_id", userId);
-    if (recordingReadError) throw recordingReadError;
-    const paths = (recordings ?? []).map((row) => (row as Record<string, unknown>)["storage_path"]).filter((path): path is string => typeof path === "string");
-    if (paths.length > 0) {
-      const { error } = await supabase.storage.from("jack-test-recordings").remove(paths);
-      if (error) throw error;
-    }
-    const { error: recordingDeleteError } = await supabase.from("test_recordings").delete().eq("tester_user_id", userId);
-    if (recordingDeleteError) throw recordingDeleteError;
+    await deleteAccountRecordings(userId);
     const { error: feedbackDeleteError } = await supabase.from("test_feedback").delete().eq("tester_user_id", userId);
     if (feedbackDeleteError) throw feedbackDeleteError;
 

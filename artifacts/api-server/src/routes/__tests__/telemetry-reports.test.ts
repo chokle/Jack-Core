@@ -7,6 +7,7 @@ const identity = vi.hoisted(() => ({
   email: "admin@example.test",
   name: "Pilot Admin",
   isAdmin: false,
+  isPresentation: false,
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -42,7 +43,7 @@ function app(): Express {
 
 beforeEach(() => {
   resetMocks();
-  Object.assign(identity, { userId: "pilot-admin", isAdmin: false });
+  Object.assign(identity, { userId: "pilot-admin", isAdmin: false, isPresentation: false });
   fake.tables.organizations = [
     { id: ORGANIZATION_ID, name: "Allowed Org", status: "active" },
     { id: OTHER_ORGANIZATION_ID, name: "Other Org", status: "active" },
@@ -139,7 +140,8 @@ describe("pilot activity reports", () => {
     );
     expect(denied.status).toBe(403);
     expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({ decision: "denied" });
-    identity.userId = "presentation-demo";
+    identity.userId = "clerk-presentation-account";
+    identity.isPresentation = true;
     const presentation = await request(app()).get(`/api/testing/reports/summary?${query}`);
     expect(presentation.status).toBe(403);
     const scopes = await request(app()).get("/api/testing/reports/scopes");

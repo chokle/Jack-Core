@@ -34,6 +34,7 @@ export interface CallerIdentity {
   email: string | null;
   name: string | null;
   isAdmin: boolean;
+  isPresentation: boolean;
 }
 
 declare global {
@@ -59,6 +60,13 @@ function hasAdminRole(user: { publicMetadata?: unknown }): boolean {
   if (!metadata || typeof metadata !== "object") return false;
   const role = (metadata as Record<string, unknown>)["role"];
   return typeof role === "string" && role.trim().toLowerCase() === "admin";
+}
+
+function hasPresentationRole(user: { privateMetadata?: unknown }): boolean {
+  const metadata = user.privateMetadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const role = (metadata as Record<string, unknown>)["role"];
+  return typeof role === "string" && role.trim().toLowerCase() === "presentation";
 }
 
 function displayName(user: { firstName: string | null; lastName: string | null }): string | null {
@@ -90,11 +98,12 @@ export async function resolveIdentity(req: Request): Promise<CallerIdentity | nu
       email,
       name: displayName(user),
       isAdmin: isAdminEmail(email) || hasAdminRole(user),
+      isPresentation: hasPresentationRole(user),
     };
   } catch (err) {
     // Fail closed: if we cannot confirm the email, the caller is not an admin.
     req.log?.error({ err, userId }, "failed to resolve Clerk user");
-    return { userId, email: null, name: null, isAdmin: false };
+    return { userId, email: null, name: null, isAdmin: false, isPresentation: false };
   }
 }
 

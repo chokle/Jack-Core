@@ -10,7 +10,6 @@ import {
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import {
   getGetMemoryGraphOnboardingPreferenceQueryKey,
-  trackMemoryGraphOnboardingEvent,
   useGetMemoryGraphOnboardingPreference,
   useUpdateMemoryGraphOnboardingPreference,
 } from "@workspace/api-client-react";
@@ -62,27 +61,6 @@ export interface MemoryGraphOnboardingController {
   dismiss: () => void;
 }
 
-function sendAnalytics(
-  event:
-    | "memory_onboarding_started"
-    | "memory_onboarding_step_viewed"
-    | "memory_onboarding_skipped"
-    | "memory_onboarding_completed"
-    | "memory_onboarding_reopened",
-  source: MemoryGraphOnboardingSource,
-  step?: number,
-): void {
-  const body = {
-    event,
-    source,
-    version: MEMORY_GRAPH_ONBOARDING_VERSION,
-    ...(step === undefined ? {} : { step }),
-  } as const;
-  void trackMemoryGraphOnboardingEvent(body).catch(() => {
-    // Pilot analytics are deliberately best-effort.
-  });
-}
-
 export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   const queryClient = useQueryClient();
   const preferenceQuery = useGetMemoryGraphOnboardingPreference({
@@ -131,12 +109,6 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
         step: Math.max(0, Math.min(MEMORY_GRAPH_ONBOARDING_STEP_COUNT - 1, initialStep)),
       };
       setSession(next);
-      sendAnalytics(
-        source === "automatic"
-          ? "memory_onboarding_started"
-          : "memory_onboarding_reopened",
-        source,
-      );
       if (getCachedTestSession()) {
         void trackTestEvent("onboarding_started", {}, "onboarding_started");
       }
@@ -192,7 +164,6 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   const skip = useCallback(() => {
     const active = sessionRef.current;
     if (!active) return;
-    sendAnalytics("memory_onboarding_skipped", active.source, active.step + 1);
     setSession(null);
     persistSeen("skipped");
     void trackTestEvent(
@@ -207,11 +178,6 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   const finish = useCallback(() => {
     const active = sessionRef.current;
     if (!active) return;
-    sendAnalytics(
-      "memory_onboarding_completed",
-      active.source,
-      active.step + 1,
-    );
     setSession(null);
     persistSeen("completed");
     void trackTestEvent("onboarding_completed", {}, "onboarding_completed");
@@ -274,7 +240,6 @@ export function MemoryGraphOnboarding({
 }: MemoryGraphOnboardingProps) {
   const { session } = controller;
   const primaryActionRef = useRef<HTMLButtonElement>(null);
-  const viewedRef = useRef(new Set<string>());
   const [highlight, setHighlight] = useState<HighlightRect | null>(null);
   const step = session ? STEPS[session.step] : null;
 
@@ -282,18 +247,6 @@ export function MemoryGraphOnboarding({
     if (!session) return;
     primaryActionRef.current?.focus({ preventScroll: true });
   }, [session?.id, session?.step]);
-
-  useEffect(() => {
-    if (!session) return;
-    const key = `${session.id}:${session.step}`;
-    if (viewedRef.current.has(key)) return;
-    viewedRef.current.add(key);
-    sendAnalytics(
-      "memory_onboarding_step_viewed",
-      session.source,
-      session.step + 1,
-    );
-  }, [session]);
 
   useEffect(() => {
     if (!session) return;

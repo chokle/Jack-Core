@@ -7,6 +7,7 @@ const identity = vi.hoisted(() => ({
   email: "tester@example.test",
   name: "Taylor Tester",
   isAdmin: false,
+  isPresentation: false,
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -56,6 +57,7 @@ beforeEach(() => {
     email: "tester@example.test",
     name: "Taylor Tester",
     isAdmin: false,
+    isPresentation: false,
   });
   fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
   fake.tables.pilots = [{
@@ -184,6 +186,41 @@ describe("canonical user-test sessions", () => {
     expect(fake.tables.test_events.filter((row) => row.event_id === event.eventId)).toHaveLength(1);
   });
 
+  it("rejects a dedupe-key collision without applying the conflicting session outcome", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const base = {
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: {},
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+      dedupeKey: "workflow:terminal",
+    };
+    const first = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({
+        ...base,
+        eventId: "11111111-2222-4333-8444-555555555555",
+        eventType: "feature_viewed",
+        metadata: { feature: "library" },
+      });
+    const collision = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({
+        ...base,
+        eventId: "99999999-8888-4777-8666-555555555555",
+        eventType: "test_completed",
+      });
+
+    expect(first.status).toBe(201);
+    expect(collision.status).toBe(400);
+    expect(collision.body.code).toBe("idempotency_conflict");
+    expect(fake.tables.test_sessions[0]?.status).toBe("active");
+    expect(fake.tables.test_events).toHaveLength(2);
+    expect(fake.tables.test_events.some((row) => row.event_type === "test_completed")).toBe(false);
+  });
+
   it("records payload-free dropped counters only while consent remains active", async () => {
     const started = await request(app).post("/api/testing/sessions/start").send(startBody);
     const accepted = await request(app)
@@ -231,7 +268,8 @@ describe("canonical user-test sessions", () => {
       (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
     ).toBe(403);
     identity.isAdmin = false;
-    identity.userId = "presentation-demo";
+    identity.userId = "clerk-presentation-account";
+    identity.isPresentation = true;
     expect(
       (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
     ).toBe(403);

@@ -175,6 +175,209 @@ begin
     raise exception 'cross-organization telemetry consent was accepted';
   end if;
 
+  insert into public.telemetry_consents (
+    id,
+    actor_user_id,
+    organization_id,
+    pilot_id,
+    scope,
+    state,
+    privacy_notice_version,
+    consent_version
+  )
+  values
+    (
+      '30000000-0000-4000-8000-000000000001',
+      'valid-tester',
+      org_a,
+      pilot_a,
+      'telemetry',
+      'granted',
+      'scope-test',
+      'scope-test'
+    ),
+    (
+      '30000000-0000-4000-8000-000000000002',
+      'other-tester',
+      org_a,
+      pilot_a,
+      'telemetry',
+      'granted',
+      'scope-test',
+      'scope-test'
+    ),
+    (
+      '30000000-0000-4000-8000-000000000003',
+      'valid-tester',
+      org_a,
+      pilot_a,
+      'screen',
+      'granted',
+      'scope-test',
+      'scope-test'
+    ),
+    (
+      '30000000-0000-4000-8000-000000000004',
+      'other-tester',
+      org_a,
+      pilot_a,
+      'screen',
+      'granted',
+      'scope-test',
+      'scope-test'
+    );
+
+  mismatch_blocked := false;
+  begin
+    insert into public.test_sessions (
+      id,
+      actor_user_id,
+      organization_id,
+      pilot_id,
+      app_session_id,
+      telemetry_consent_id
+    )
+    values (
+      '40000000-0000-4000-8000-000000000001',
+      'valid-tester',
+      org_a,
+      pilot_a,
+      '50000000-0000-4000-8000-000000000001',
+      '30000000-0000-4000-8000-000000000002'
+    );
+  exception
+    when check_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'another actor consent was accepted by a test session';
+  end if;
+
+  mismatch_blocked := false;
+  begin
+    insert into public.test_sessions (
+      id,
+      actor_user_id,
+      organization_id,
+      pilot_id,
+      app_session_id,
+      telemetry_consent_id
+    )
+    values (
+      '40000000-0000-4000-8000-000000000002',
+      'valid-tester',
+      org_a,
+      pilot_a,
+      '50000000-0000-4000-8000-000000000002',
+      '30000000-0000-4000-8000-000000000003'
+    );
+  exception
+    when check_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'wrong-scope consent was accepted as telemetry consent';
+  end if;
+
+  insert into public.test_sessions (
+    id,
+    actor_user_id,
+    organization_id,
+    pilot_id,
+    app_session_id,
+    telemetry_consent_id
+  )
+  values (
+    '40000000-0000-4000-8000-000000000003',
+    'valid-tester',
+    org_a,
+    pilot_a,
+    '50000000-0000-4000-8000-000000000003',
+    '30000000-0000-4000-8000-000000000001'
+  );
+
+  mismatch_blocked := false;
+  begin
+    insert into public.test_events (
+      event_id,
+      actor_user_id,
+      organization_id,
+      pilot_id,
+      test_session_id,
+      app_session_id,
+      event_type,
+      occurred_at,
+      surface,
+      route,
+      schema_version,
+      consent_state,
+      consent_id,
+      privacy_notice_version,
+      consent_version,
+      device_category,
+      browser_family,
+      result
+    )
+    values (
+      '60000000-0000-4000-8000-000000000001',
+      'valid-tester',
+      org_a,
+      pilot_a,
+      '40000000-0000-4000-8000-000000000003',
+      '50000000-0000-4000-8000-000000000003',
+      'feature_viewed',
+      now(),
+      'library',
+      '/library',
+      1,
+      'granted',
+      '30000000-0000-4000-8000-000000000002',
+      'scope-test',
+      'scope-test',
+      'desktop',
+      'Other',
+      'success'
+    );
+  exception
+    when check_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'another actor consent was accepted by a telemetry event';
+  end if;
+
+  mismatch_blocked := false;
+  begin
+    insert into public.test_recordings (
+      tester_user_id,
+      session_id,
+      storage_path,
+      organization_id,
+      pilot_id,
+      test_session_id,
+      screen_consent_id
+    )
+    values (
+      'valid-tester',
+      'scoped-session',
+      'scoped/mismatch.webm',
+      org_a,
+      pilot_a,
+      '40000000-0000-4000-8000-000000000003',
+      '30000000-0000-4000-8000-000000000004'
+    );
+  exception
+    when check_violation then
+      mismatch_blocked := true;
+  end;
+
+  if not mismatch_blocked then
+    raise exception 'another actor screen consent was accepted by a recording';
+  end if;
+
   mismatch_blocked := false;
   begin
     insert into public.activity_report_runs (

@@ -133,4 +133,23 @@ describe("test session service", () => {
     expect(getCachedTestSession()).toBeNull();
     expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
   });
+
+  it("stops local telemetry immediately even when the withdrawal request fails", async () => {
+    cacheTestSession(session);
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([{ id: "queued-event" }]),
+    );
+    const stopped = vi.fn();
+    window.addEventListener("jack:telemetry-withdrawn", stopped);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("{}", { status: 503 }),
+    ));
+
+    await expect(withdrawTelemetry(session.pilotId)).rejects.toThrow();
+
+    expect(getCachedTestSession()).toBeNull();
+    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(stopped).toHaveBeenCalledTimes(1);
+  });
 });

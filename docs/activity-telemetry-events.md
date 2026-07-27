@@ -35,6 +35,10 @@ Never include names, emails, prompts, answers, recordings, auth/payment data,
 tokens, full user-agent strings, raw error bodies, clipboard/keystroke data,
 screen content, precise device fingerprints, or unlisted metadata.
 
+An event ID or session-scoped `dedupe_key` is an idempotent retry only when the
+stored actor, session, app session, event type, result, and permitted metadata
+match the retry. Conflicting reuse is rejected and cannot update session state.
+
 ## Events
 
 | Event | Authority and trigger | Surface | Permitted metadata | Result |
@@ -87,6 +91,14 @@ validator. Raw messages and exception text are prohibited.
 - Withdrawal stops ingestion immediately, cancels active capture, redacts
   optional event identifiers/metadata, and schedules attributable telemetry and
   recordings for deletion within 30 days.
+- Local telemetry and capture stop before the withdrawal network request is
+  attempted. Actor-owned retained consent history permits withdrawal after the
+  membership expires or the pilot ends.
+- Presentation mode is derived server-side from trusted Clerk private metadata.
+  Client-supplied identity or metadata cannot enable or disable it; the retired
+  synthetic identifier is supported only for legacy compatibility.
+- Individual withdrawal does not delete de-identified `pilot_summary` report
+  snapshots, which remain governed by the derived-report retention policy.
 
 ## Retention categories
 

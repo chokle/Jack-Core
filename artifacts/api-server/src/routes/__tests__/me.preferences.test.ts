@@ -168,14 +168,12 @@ describe("Memory Graph onboarding analytics", () => {
     { event: "memory_onboarding_reopened", source: "replay", version: 1 },
   ];
 
-  it.each(allowed)("accepts allowlisted event $event", async (body) => {
+  it.each(allowed)("accepts allowlisted legacy event $event without logging it", async (body) => {
     const res = await request(app).post(analyticsUrl).send(body);
 
     expect(res.status).toBe(202);
     expect(res.body).toEqual({ accepted: true });
-    const loggedPayload = logInfo.mock.calls.at(-1)?.[0];
-    expect(loggedPayload).not.toHaveProperty("userId");
-    expect(loggedPayload).not.toHaveProperty("email");
+    expect(logInfo).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -212,11 +210,7 @@ describe("Memory Graph onboarding analytics", () => {
     expect(logInfo).not.toHaveBeenCalled();
   });
 
-  it("returns accepted even when structured logging throws", async () => {
-    logInfo.mockImplementationOnce(() => {
-      throw new Error("logger unavailable");
-    });
-
+  it("returns accepted as a compatibility no-op", async () => {
     const res = await request(app).post(analyticsUrl).send({
       event: "memory_onboarding_started",
       source: "automatic",

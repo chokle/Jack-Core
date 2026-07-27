@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
+import { isPresentationIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   auditReportAccess,
@@ -30,7 +31,7 @@ async function requireReportScope(
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  if (identity.userId === "presentation-demo") {
+  if (isPresentationIdentity(identity)) {
     res.status(403).json({ error: "Reports are unavailable in presentation mode." });
     return null;
   }
@@ -172,7 +173,7 @@ router.get("/testing/reports/scopes", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.userId === "presentation-demo") {
+    if (isPresentationIdentity(identity)) {
       return res.status(403).json({ error: "Reports are unavailable in presentation mode." });
     }
     return res.json({ scopes: await listReportScopes(identity.userId) });

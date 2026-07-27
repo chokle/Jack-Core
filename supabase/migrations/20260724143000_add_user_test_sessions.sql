@@ -213,6 +213,141 @@ create index if not exists test_events_retention_idx
 create index if not exists test_events_deletion_due_idx
   on public.test_events (deletion_due_at) where deletion_due_at is not null;
 
+-- Consent references must belong to the same actor and pilot and must carry the
+-- expected scope. A UUID-only foreign key cannot enforce those cross-row
+-- privacy boundaries, so reject mismatched session/event links at the database
+-- boundary as defense in depth against service-layer mistakes.
+create or replace function public.validate_activity_consent_scope()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_table_name = 'test_sessions' then
+    if not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.telemetry_consent_id
+        and consent.actor_user_id = new.actor_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'telemetry'
+        and consent.state = 'granted'
+    ) then
+      raise exception 'telemetry consent does not match the session actor and pilot'
+        using errcode = '23514';
+    end if;
+
+    if new.screen_consent_id is not null and not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.screen_consent_id
+        and consent.actor_user_id = new.actor_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'screen'
+    ) then
+      raise exception 'screen consent does not match the session actor and pilot'
+        using errcode = '23514';
+    end if;
+
+    if new.microphone_consent_id is not null and not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.microphone_consent_id
+        and consent.actor_user_id = new.actor_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'microphone'
+    ) then
+      raise exception 'microphone consent does not match the session actor and pilot'
+        using errcode = '23514';
+    end if;
+  elsif tg_table_name = 'test_events' then
+    if not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.consent_id
+        and consent.actor_user_id = new.actor_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'telemetry'
+        and consent.state = 'granted'
+    ) then
+      raise exception 'event consent does not match the event actor and pilot'
+        using errcode = '23514';
+    end if;
+  elsif tg_table_name = 'test_recordings' and new.organization_id is not null then
+    if new.pilot_id is null or new.test_session_id is null or new.screen_consent_id is null then
+      raise exception 'scoped recordings require pilot, test session, and screen consent'
+        using errcode = '23514';
+    end if;
+
+    if not exists (
+      select 1
+      from public.test_sessions session
+      where session.id = new.test_session_id
+        and session.actor_user_id = new.tester_user_id
+        and session.organization_id = new.organization_id
+        and session.pilot_id = new.pilot_id
+    ) then
+      raise exception 'recording session does not match the recording actor and pilot'
+        using errcode = '23514';
+    end if;
+
+    if not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.screen_consent_id
+        and consent.actor_user_id = new.tester_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'screen'
+        and consent.state = 'granted'
+    ) then
+      raise exception 'screen consent does not match the recording actor and pilot'
+        using errcode = '23514';
+    end if;
+
+    if new.microphone_consent_id is not null and not exists (
+      select 1
+      from public.telemetry_consents consent
+      where consent.id = new.microphone_consent_id
+        and consent.actor_user_id = new.tester_user_id
+        and consent.organization_id = new.organization_id
+        and consent.pilot_id = new.pilot_id
+        and consent.scope = 'microphone'
+        and consent.state = 'granted'
+    ) then
+      raise exception 'microphone consent does not match the recording actor and pilot'
+        using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists validate_test_session_consent_scope on public.test_sessions;
+create trigger validate_test_session_consent_scope
+before insert or update of
+  actor_user_id,
+  organization_id,
+  pilot_id,
+  telemetry_consent_id,
+  screen_consent_id,
+  microphone_consent_id
+on public.test_sessions
+for each row execute function public.validate_activity_consent_scope();
+
+drop trigger if exists validate_test_event_consent_scope on public.test_events;
+create trigger validate_test_event_consent_scope
+before insert or update of actor_user_id, organization_id, pilot_id, consent_id
+on public.test_events
+for each row execute function public.validate_activity_consent_scope();
+
+revoke all on function public.validate_activity_consent_scope() from public, anon, authenticated;
+grant execute on function public.validate_activity_consent_scope() to service_role;
+
 create table if not exists public.activity_ingest_failures (
   id uuid primary key default gen_random_uuid(),
   actor_user_id text,
@@ -347,6 +482,18 @@ create index if not exists test_recordings_microphone_consent_idx
   on public.test_recordings (microphone_consent_id);
 create index if not exists test_recordings_deletion_due_idx
   on public.test_recordings (deletion_due_at) where deletion_due_at is not null;
+
+drop trigger if exists validate_test_recording_consent_scope on public.test_recordings;
+create trigger validate_test_recording_consent_scope
+before insert or update of
+  tester_user_id,
+  organization_id,
+  pilot_id,
+  test_session_id,
+  screen_consent_id,
+  microphone_consent_id
+on public.test_recordings
+for each row execute function public.validate_activity_consent_scope();
 
 alter table public.test_feedback
   add column if not exists organization_id uuid references public.organizations(id) on delete set null,
