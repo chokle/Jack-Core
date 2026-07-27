@@ -3,6 +3,9 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const deletedTables = vi.hoisted(() => [] as string[]);
+const deletions = vi.hoisted(
+  () => [] as Array<{ table: string; column: string; value: unknown }>,
+);
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
   () => [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
@@ -34,6 +37,7 @@ vi.mock("../../lib/supabase.js", () => ({
         },
         eq: (column: string, value: unknown) => {
           equals = { column, value };
+          if (operation === "delete") deletions.push({ table, column, value });
           return query;
         },
         in: (column: string, values: unknown[]) => {
@@ -85,6 +89,7 @@ function app(): Express {
 
 beforeEach(() => {
   deletedTables.length = 0;
+  deletions.length = 0;
   recordingRows.length = 0;
   deleteUser.mockClear();
   removeRecordingObjects.mockReset();
@@ -116,6 +121,15 @@ describe("account deletion telemetry coverage", () => {
         "platform_roles",
       ]),
     );
+    expect(
+      deletions.filter(({ table }) => table === "activity_report_runs"),
+    ).toEqual([
+      {
+        table: "activity_report_runs",
+        column: "requested_by_user_id",
+        value: "user-1",
+      },
+    ]);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 

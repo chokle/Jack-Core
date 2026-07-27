@@ -95,29 +95,6 @@ router.delete("/account", async (req, res) => {
     const { error: feedbackDeleteError } = await supabase.from("test_feedback").delete().eq("tester_user_id", userId);
     if (feedbackDeleteError) throw feedbackDeleteError;
 
-    const { data: pilotSessions, error: pilotSessionReadError } = await supabase
-      .from("test_sessions")
-      .select("pilot_id")
-      .eq("actor_user_id", userId);
-    if (pilotSessionReadError) throw pilotSessionReadError;
-    const pilotIds = [
-      ...new Set(
-        (pilotSessions ?? [])
-          .map((row) => (row as Record<string, unknown>)["pilot_id"])
-          .filter((id): id is string => typeof id === "string"),
-      ),
-    ];
-    if (pilotIds.length > 0) {
-      // A stored pilot snapshot can be indirectly identifying in a small
-      // cohort. Remove the affected snapshots; a later authorized request can
-      // regenerate a genuinely de-identified aggregate from remaining rows.
-      const { error } = await supabase
-        .from("activity_report_runs")
-        .delete()
-        .in("pilot_id", pilotIds);
-      if (error) throw error;
-    }
-
     // Pilot activity is first-party account data. Delete attributable raw
     // events, failures, sessions, consent history, memberships, and report
     // requests before removing the Clerk identity. Aggregate snapshots contain
