@@ -1,6 +1,105 @@
 -- Run after all migrations. Every fixture is rolled back.
 begin;
 
+do $security$
+declare
+  server_only_tables constant text[] := ARRAY[
+    'chat_messages',
+    'competencies',
+    'interview_answers',
+    'interview_sessions',
+    'knowledge_candidates',
+    'knowledge_edges',
+    'knowledge_entries',
+    'knowledge_nodes',
+    'knowledge_write_log',
+    'mentor_profiles',
+    'parked_thoughts',
+    'transcript_segments',
+    'videos'
+  ];
+  disabled_rls_count integer;
+  browser_grant_count integer;
+  browser_rpc_count integer;
+  mutable_rpc_count integer;
+begin
+  select count(*)
+  into disabled_rls_count
+  from pg_class relation
+  join pg_namespace namespace on namespace.oid = relation.relnamespace
+  where namespace.nspname = 'public'
+    and relation.relname = any(server_only_tables)
+    and not relation.relrowsecurity;
+
+  if disabled_rls_count <> 0 then
+    raise exception 'expected RLS on every server-only product table, found % disabled',
+      disabled_rls_count;
+  end if;
+
+  select count(*)
+  into browser_grant_count
+  from information_schema.role_table_grants
+  where grantee in ('anon', 'authenticated')
+    and table_schema = 'public'
+    and table_name = any(server_only_tables);
+
+  if browser_grant_count <> 0 then
+    raise exception 'expected no browser grants on server-only product tables, found %',
+      browser_grant_count;
+  end if;
+
+  select count(*)
+  into browser_rpc_count
+  from pg_proc function_row
+  join pg_namespace namespace on namespace.oid = function_row.pronamespace
+  where namespace.nspname = 'public'
+    and function_row.proname in (
+      'match_knowledge_entries',
+      'match_knowledge_nodes',
+      'match_transcript_segments',
+      'match_videos'
+    )
+    and (
+      has_function_privilege('anon', function_row.oid, 'EXECUTE')
+      or has_function_privilege('authenticated', function_row.oid, 'EXECUTE')
+    );
+
+  if browser_rpc_count <> 0 then
+    raise exception 'expected no browser execution on internal match RPCs, found %',
+      browser_rpc_count;
+  end if;
+
+  select count(*)
+  into mutable_rpc_count
+  from pg_proc function_row
+  join pg_namespace namespace on namespace.oid = function_row.pronamespace
+  where namespace.nspname = 'public'
+    and function_row.proname in (
+      'match_knowledge_entries',
+      'match_knowledge_nodes',
+      'match_transcript_segments',
+      'match_videos'
+    )
+    and not coalesce(function_row.proconfig, '{}'::text[])
+      @> ARRAY['search_path=public, extensions'];
+
+  if mutable_rpc_count <> 0 then
+    raise exception 'expected fixed search paths on internal match RPCs, found % mutable',
+      mutable_rpc_count;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'parked_thoughts'
+      and indexdef like '%(interview_session_id)%'
+  ) then
+    raise exception 'expected an index for parked_thoughts(interview_session_id)';
+  end if;
+end;
+$security$;
+
 do $test$
 declare
   org_a constant uuid := '10000000-0000-4000-8000-000000000001';
