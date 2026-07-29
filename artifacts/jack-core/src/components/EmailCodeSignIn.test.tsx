@@ -7,7 +7,6 @@ const h = vi.hoisted(() => ({
   create: vi.fn(),
   prepare: vi.fn(),
   attempt: vi.fn(),
-  google: vi.fn(),
   setActive: vi.fn(),
 }));
 
@@ -17,15 +16,8 @@ vi.mock("@clerk/react/legacy", () => ({
     signIn: {
       create: h.create,
       attemptFirstFactor: h.attempt,
-      authenticateWithRedirect: h.google,
     },
     setActive: h.setActive,
-  }),
-}));
-
-vi.mock("@clerk/react", () => ({
-  useClerk: () => ({
-    client: { signIn: { authenticateWithRedirect: h.google } },
   }),
 }));
 
@@ -70,16 +62,10 @@ describe("EmailCodeSignIn", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Couldn't find your account."));
   });
 
-  it("keeps Google as a working alternative", async () => {
-    h.google.mockResolvedValue(undefined);
+  it("does not offer disabled social providers", () => {
     render(<EmailCodeSignIn />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
-
-    await waitFor(() => expect(h.google).toHaveBeenCalledWith({
-      strategy: "oauth_google",
-      redirectUrl: `${window.location.origin}/sign-in/sso-callback`,
-      redirectUrlComplete: `${window.location.origin}/app`,
-    }));
+    expect(screen.queryByRole("button", { name: "Continue with Google" })).toBeNull();
+    expect(screen.queryByText("or use an email code")).toBeNull();
   });
 });
