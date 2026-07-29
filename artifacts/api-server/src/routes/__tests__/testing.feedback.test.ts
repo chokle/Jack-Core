@@ -101,6 +101,8 @@ beforeEach(() => {
     email: "tester@example.com",
     name: "Tester",
     isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
   });
   const testSessionQuery = {
     select: () => testSessionQuery,
@@ -270,6 +272,7 @@ describe("POST /api/testing/feedback", () => {
       name: "Presentation Demo",
       isAdmin: false,
       isPresentation: true,
+      classification: "restricted",
     });
 
     const response = await request(app()).post("/api/testing/feedback").send(validBody);
@@ -280,6 +283,31 @@ describe("POST /api/testing/feedback", () => {
     });
     expect(from).not.toHaveBeenCalled();
     expect(queueFeedbackNotification).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    resolveIdentity.mockResolvedValue({
+      userId: "user_1",
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    });
+
+    const feedback = await request(app()).post("/api/testing/feedback").send(validBody);
+    expect(feedback.status).toBe(503);
+    expect(from).not.toHaveBeenCalled();
+
+    const recording = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("test recording"), {
+        filename: "test.webm",
+        contentType: "video/webm",
+      });
+    expect(recording.status).toBe(503);
+    expect(from).not.toHaveBeenCalled();
   });
 
   it.each([

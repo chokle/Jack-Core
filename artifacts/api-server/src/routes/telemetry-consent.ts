@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
-import { isPresentationIdentity } from "../lib/identity.js";
+import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   CONSENT_VERSION,
@@ -120,9 +120,14 @@ router.get("/testing/telemetry/context", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (isPresentationIdentity(identity)) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
-    }
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Pilot telemetry is unavailable for this account.",
+        "Telemetry preferences are temporarily unavailable.",
+      )
+    ) return;
     if (identity.isAdmin) {
       return res.json({
         enrolled: false,
@@ -149,7 +154,15 @@ router.post("/testing/telemetry/consents", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || isPresentationIdentity(identity)) {
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Pilot telemetry is unavailable for this account.",
+        "Telemetry preferences are temporarily unavailable.",
+      )
+    ) return;
+    if (identity.isAdmin) {
       return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
     }
     if (!exactKeys(req.body, CONSENT_KEYS)) {
@@ -217,7 +230,15 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || isPresentationIdentity(identity)) {
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Pilot telemetry is unavailable for this account.",
+        "Telemetry preferences are temporarily unavailable.",
+      )
+    ) return;
+    if (identity.isAdmin) {
       return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
     }
     if (
@@ -373,7 +394,15 @@ router.get("/testing/telemetry/export", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (isPresentationIdentity(identity)) {
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Pilot telemetry is unavailable for this account.",
+        "Telemetry export is temporarily unavailable.",
+      )
+    ) return;
+    if (identity.isAdmin) {
       return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
     }
     const [consents, sessions, events, failures, recordings, feedback] = await Promise.all([

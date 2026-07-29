@@ -98,6 +98,7 @@ describe("resolveIdentity", () => {
       name: "Dana Welder",
       isAdmin: true,
       isPresentation: false,
+      classification: "resolved",
     });
   });
 
@@ -111,6 +112,7 @@ describe("resolveIdentity", () => {
       name: null,
       isAdmin: false,
       isPresentation: false,
+      classification: "resolved",
     });
   });
 
@@ -164,6 +166,7 @@ describe("resolveIdentity", () => {
       name: null,
       isAdmin: false,
       isPresentation: false,
+      classification: "unavailable",
     });
   });
 });

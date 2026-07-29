@@ -8,6 +8,7 @@ const identity = vi.hoisted(() => ({
   name: "Tester",
   isAdmin: false,
   isPresentation: false,
+  classification: "resolved",
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -40,7 +41,12 @@ function app(): Express {
 
 beforeEach(() => {
   resetMocks();
-  Object.assign(identity, { userId: "tester-1", isAdmin: false, isPresentation: false });
+  Object.assign(identity, {
+    userId: "tester-1",
+    isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
+  });
   fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
   fake.tables.pilots = [{
     id: PILOT_ID,
@@ -102,6 +108,35 @@ describe("telemetry consent", () => {
 
     expect((await request(app()).get("/api/testing/telemetry/context")).status).toBe(403);
     expect((await request(app()).get("/api/testing/telemetry/export")).status).toBe(403);
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    identity.classification = "unavailable";
+
+    expect((await request(app()).get("/api/testing/telemetry/context")).status).toBe(503);
+    expect(
+      (
+        await request(app())
+          .post("/api/testing/telemetry/consents")
+          .send({
+            pilotId: PILOT_ID,
+            telemetry: "granted",
+            screen: "declined",
+            microphone: "declined",
+            privacyNoticeVersion: "jack-pilot-privacy-2026-07-25",
+            consentVersion: "jack-pilot-consent-2026-07-25",
+          })
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await request(app())
+          .post("/api/testing/telemetry/withdraw")
+          .send({ pilotId: PILOT_ID, scopes: ["telemetry"] })
+      ).status,
+    ).toBe(503);
+    expect((await request(app()).get("/api/testing/telemetry/export")).status).toBe(503);
+    expect(fake.tables.telemetry_consents).toHaveLength(0);
   });
 
   it("persists an explicit decline without creating a pilot session", async () => {

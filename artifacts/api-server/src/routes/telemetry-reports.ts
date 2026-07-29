@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
-import { isPresentationIdentity } from "../lib/identity.js";
+import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   auditReportAccess,
@@ -31,10 +31,14 @@ async function requireReportScope(
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  if (isPresentationIdentity(identity)) {
-    res.status(403).json({ error: "Reports are unavailable in presentation mode." });
-    return null;
-  }
+  if (
+    denyRestrictedIdentity(
+      res,
+      identity,
+      "Reports are unavailable in presentation mode.",
+      "Reports are temporarily unavailable.",
+    )
+  ) return null;
   const organizationId =
     typeof req.query["organizationId"] === "string" ? req.query["organizationId"] : "";
   const pilotId = typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
@@ -173,9 +177,14 @@ router.get("/testing/reports/scopes", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (isPresentationIdentity(identity)) {
-      return res.status(403).json({ error: "Reports are unavailable in presentation mode." });
-    }
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Reports are unavailable in presentation mode.",
+        "Report scopes could not be loaded.",
+      )
+    ) return;
     return res.json({ scopes: await listReportScopes(identity.userId) });
   } catch (error) {
     req.log.error({ err: error }, "Could not list report scopes");

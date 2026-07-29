@@ -6,6 +6,9 @@ const deletedTables = vi.hoisted(() => [] as string[]);
 const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
+const updates = vi.hoisted(
+  () => [] as Array<{ table: string; values: Record<string, unknown>; column: string; value: unknown }>,
+);
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
   () => [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
@@ -25,6 +28,7 @@ vi.mock("../../lib/supabase.js", () => ({
   supabase: {
     from: (table: string) => {
       let operation: "select" | "delete" = "select";
+      let updateValues: Record<string, unknown> | null = null;
       let limit: number | undefined;
       let equals: { column: string; value: unknown } | undefined;
       let included: { column: string; values: unknown[] } | undefined;
@@ -35,8 +39,17 @@ vi.mock("../../lib/supabase.js", () => ({
           deletedTables.push(table);
           return query;
         },
+        update: (values: Record<string, unknown>) => {
+          operation = "delete";
+          updateValues = values;
+          return query;
+        },
         eq: (column: string, value: unknown) => {
           equals = { column, value };
+          if (updateValues) {
+            updates.push({ table, values: updateValues, column, value });
+            return query;
+          }
           if (operation === "delete") deletions.push({ table, column, value });
           return query;
         },
@@ -90,6 +103,7 @@ function app(): Express {
 beforeEach(() => {
   deletedTables.length = 0;
   deletions.length = 0;
+  updates.length = 0;
   recordingRows.length = 0;
   deleteUser.mockClear();
   removeRecordingObjects.mockReset();
@@ -113,7 +127,6 @@ describe("account deletion telemetry coverage", () => {
         "test_feedback",
         "activity_ingest_failures",
         "test_events",
-        "activity_report_runs",
         "admin_access_audit",
         "test_sessions",
         "telemetry_consents",
@@ -121,11 +134,13 @@ describe("account deletion telemetry coverage", () => {
         "platform_roles",
       ]),
     );
+    expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
     expect(
-      deletions.filter(({ table }) => table === "activity_report_runs"),
+      updates.filter(({ table }) => table === "activity_report_runs"),
     ).toEqual([
       {
         table: "activity_report_runs",
+        values: { requested_by_user_id: null },
         column: "requested_by_user_id",
         value: "user-1",
       },

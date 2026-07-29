@@ -26,6 +26,8 @@ vi.mock("../../lib/admin-auth.js", () => ({
       email: `${String(user)}@example.test`,
       name: String(user),
       isAdmin: user === "admin",
+      isPresentation: false,
+      classification: "resolved",
     };
   }),
   getAdminReviewer: () => "Admin Reviewer",
@@ -211,5 +213,23 @@ describe("admin user-test feedback review API", () => {
       .get(`/api/testing/feedback?${SCOPE}`)
       .set("x-test-user", "admin");
     expect(list.body.unreadCount).toBe(1);
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    const { resolveIdentity } = await import("../../lib/admin-auth.js");
+    vi.mocked(resolveIdentity).mockResolvedValueOnce({
+      userId: "admin",
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    });
+
+    const response = await request(app)
+      .get(`/api/testing/feedback?${SCOPE}`)
+      .set("x-test-user", "admin");
+
+    expect(response.status).toBe(503);
   });
 });

@@ -8,6 +8,7 @@ const identity = vi.hoisted(() => ({
   name: "Taylor Tester",
   isAdmin: false,
   isPresentation: false,
+  classification: "resolved",
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -58,6 +59,7 @@ beforeEach(() => {
     name: "Taylor Tester",
     isAdmin: false,
     isPresentation: false,
+    classification: "resolved",
   });
   fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
   fake.tables.pilots = [{
@@ -282,5 +284,35 @@ describe("canonical user-test sessions", () => {
     expect(
       (await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status,
     ).toBe(403);
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    identity.classification = "unavailable";
+
+    expect((await request(app).post("/api/testing/sessions/start").send(startBody)).status).toBe(503);
+    expect((await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status).toBe(503);
+    expect(
+      (
+        await request(app)
+          .post("/api/testing/sessions/99999999-9999-4999-8999-999999999999/events")
+          .send({
+            eventId: "88888888-8888-4888-8888-888888888888",
+            eventType: "feature_viewed",
+            occurredAt: new Date().toISOString(),
+            appSessionId: APP_SESSION_ID,
+            metadata: { feature: "library" },
+            result: "success",
+            deviceCategory: "desktop",
+            schemaVersion: 1,
+          })
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await request(app)
+          .post("/api/testing/sessions/99999999-9999-4999-8999-999999999999/ingest-failures")
+          .send({ reasonCode: "queue_overflow", eventCount: 1 })
+      ).status,
+    ).toBe(503);
   });
 });

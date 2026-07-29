@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
-import { isPresentationIdentity } from "../lib/identity.js";
+import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   currentConsentGranted,
@@ -123,7 +123,15 @@ router.post("/testing/sessions/start", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (identity.isAdmin || isPresentationIdentity(identity)) {
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Pilot sessions are unavailable for this account.",
+        "Pilot sessions are temporarily unavailable.",
+      )
+    ) return;
+    if (identity.isAdmin) {
       return res.status(403).json({ error: "Pilot sessions are unavailable for this account." });
     }
     if (!hasOnlyKeys(req.body ?? {}, START_KEYS)) {
@@ -309,9 +317,14 @@ router.get("/testing/sessions/current", async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
     if (!identity) return res.status(401).json({ error: "Unauthorized" });
-    if (isPresentationIdentity(identity)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "Forbidden",
+        "Pilot sessions are temporarily unavailable.",
+      )
+    ) return;
     if (identity.isAdmin) {
       return res.json({ session: null });
     }
@@ -336,7 +349,15 @@ router.get("/testing/sessions/current", async (req, res) => {
 router.post("/testing/sessions/:id/events", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) return res.status(401).json({ error: "Unauthorized" });
-  if (identity.isAdmin || isPresentationIdentity(identity)) {
+  if (
+    denyRestrictedIdentity(
+      res,
+      identity,
+      "Forbidden",
+      "Pilot session updates are temporarily unavailable.",
+    )
+  ) return;
+  if (identity.isAdmin) {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
@@ -497,7 +518,15 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
 router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
   const identity = await resolveIdentity(req);
   if (!identity) return res.status(401).json({ error: "Unauthorized" });
-  if (identity.isAdmin || isPresentationIdentity(identity)) {
+  if (
+    denyRestrictedIdentity(
+      res,
+      identity,
+      "Forbidden",
+      "Pilot session updates are temporarily unavailable.",
+    )
+  ) return;
+  if (identity.isAdmin) {
     return res.status(403).json({ error: "Forbidden" });
   }
   if (

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { Request } from "express";
+import type { CallerIdentity } from "./admin-auth.js";
+import { isPresentationIdentity, isUnavailableIdentity } from "./identity.js";
 import { supabase } from "./supabase.js";
 
 const db = supabase as unknown as { from: (table: string) => any };
@@ -681,17 +683,25 @@ export function requestIdentifier(req: Request): string {
 
 export async function recordServerAskJackEvent(input: {
   req: Request;
-  actorUserId: string;
+  actorIdentity: CallerIdentity | null;
   eventType: "ask_jack_completed" | "ask_jack_failed";
   correlationId: string;
   citationCount?: number;
 }): Promise<void> {
   try {
+    if (
+      !input.actorIdentity ||
+      isUnavailableIdentity(input.actorIdentity) ||
+      isPresentationIdentity(input.actorIdentity)
+    ) {
+      return;
+    }
+    const actorUserId = input.actorIdentity.userId;
     const requestedSessionId = input.req.headers["x-jack-test-session-id"];
     let sessionQuery = db
       .from("test_sessions")
       .select("*")
-      .eq("actor_user_id", input.actorUserId)
+      .eq("actor_user_id", actorUserId)
       .eq("status", "active")
       .eq("telemetry_status", "granted");
     if (typeof requestedSessionId === "string" && UUID_RE.test(requestedSessionId)) {
@@ -703,14 +713,14 @@ export async function recordServerAskJackEvent(input: {
     if (sessions.error || sessions.data?.length !== 1) return;
     const session = sessions.data[0] as Record<string, any>;
     const consent = await latestConsent(
-      input.actorUserId,
+      actorUserId,
       String(session.pilot_id),
       "telemetry",
     );
     if (!currentConsentGranted(consent)) return;
     const result = await insertCanonicalEvent({
       req: input.req,
-      actorUserId: input.actorUserId,
+      actorUserId,
       session,
       consent,
       clientEvent: false,
@@ -741,7 +751,7 @@ export async function recordServerAskJackEvent(input: {
           updated_at: new Date().toISOString(),
         })
         .eq("id", session.id)
-        .eq("actor_user_id", input.actorUserId);
+        .eq("actor_user_id", actorUserId);
     }
   } catch (error) {
     input.req.log?.warn({ err: error }, "server activity telemetry write failed");

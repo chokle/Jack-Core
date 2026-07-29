@@ -7,7 +7,7 @@ import {
   TrackMemoryGraphOnboardingEventResponse,
 } from "@workspace/api-zod";
 import { resolveIdentity } from "../lib/admin-auth.js";
-import { isPresentationIdentity } from "../lib/identity.js";
+import { isPresentationIdentity, isUnavailableIdentity } from "../lib/identity.js";
 import { hasAnyReportScope } from "../lib/activity-telemetry.js";
 
 const router = Router();
@@ -94,6 +94,7 @@ router.get("/me", async (req, res) => {
       name: identity.name,
       isAdmin: identity.isAdmin,
       canViewPilotReports:
+        !isUnavailableIdentity(identity) &&
         !isPresentationIdentity(identity) &&
         (await hasAnyReportScope(identity.userId)),
     }),

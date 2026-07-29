@@ -35,6 +35,7 @@ export interface CallerIdentity {
   name: string | null;
   isAdmin: boolean;
   isPresentation: boolean;
+  classification: "resolved" | "restricted" | "unavailable";
 }
 
 declare global {
@@ -99,11 +100,21 @@ export async function resolveIdentity(req: Request): Promise<CallerIdentity | nu
       name: displayName(user),
       isAdmin: isAdminEmail(email) || hasAdminRole(user),
       isPresentation: hasPresentationRole(user),
+      classification: hasPresentationRole(user) ? "restricted" : "resolved",
     };
   } catch (err) {
-    // Fail closed: if we cannot confirm the email, the caller is not an admin.
+    // Fail closed: if Clerk cannot resolve trusted metadata, preserve the
+    // authenticated subject but mark the identity unavailable so protected
+    // routes can deny before membership or report checks.
     req.log?.error({ err, userId }, "failed to resolve Clerk user");
-    return { userId, email: null, name: null, isAdmin: false, isPresentation: false };
+    return {
+      userId,
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    };
   }
 }
 

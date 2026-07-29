@@ -4,10 +4,20 @@ import request from "supertest";
 
 const getUser = vi.hoisted(() => vi.fn());
 const updateUserMetadata = vi.hoisted(() => vi.fn());
+const resolveIdentity = vi.hoisted(() => vi.fn());
+const hasAnyReportScope = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   getAuth: vi.fn(),
   clerkClient: { users: { getUser, updateUserMetadata } },
+}));
+
+vi.mock("../../lib/admin-auth.js", () => ({
+  resolveIdentity,
+}));
+
+vi.mock("../../lib/activity-telemetry.js", () => ({
+  hasAnyReportScope,
 }));
 
 import meRouter from "../me.js";
@@ -41,8 +51,41 @@ const analyticsUrl = "/api/me/analytics/memory-graph-onboarding";
 beforeEach(() => {
   getUser.mockReset();
   updateUserMetadata.mockReset();
+  resolveIdentity.mockReset();
+  hasAnyReportScope.mockReset();
   logInfo.mockReset();
   logError.mockReset();
+  resolveIdentity.mockResolvedValue({
+    userId: "user_123",
+    email: "user@example.com",
+    name: "User",
+    isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
+  });
+  hasAnyReportScope.mockResolvedValue(false);
+});
+
+describe("/me pilot-report capability", () => {
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    resolveIdentity.mockResolvedValueOnce({
+      userId: "user_123",
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    });
+    hasAnyReportScope.mockResolvedValueOnce(true);
+
+    const res = await request(app).get("/api/me");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      userId: "user_123",
+      canViewPilotReports: false,
+    });
+  });
 });
 
 describe("Memory Graph onboarding preference", () => {

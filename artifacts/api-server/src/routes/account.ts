@@ -102,7 +102,6 @@ router.delete("/account", async (req, res) => {
     const attributableDeletes = [
       supabase.from("activity_ingest_failures").delete().eq("actor_user_id", userId),
       supabase.from("test_events").delete().eq("actor_user_id", userId),
-      supabase.from("activity_report_runs").delete().eq("requested_by_user_id", userId),
       supabase.from("admin_access_audit").delete().eq("actor_user_id", userId),
       supabase.from("admin_access_audit").delete().eq("target_user_id", userId),
     ];
@@ -110,6 +109,11 @@ router.delete("/account", async (req, res) => {
       const { error } = await pending;
       if (error) throw error;
     }
+    const { error: reportAttributionError } = await supabase
+      .from("activity_report_runs")
+      .update({ requested_by_user_id: null })
+      .eq("requested_by_user_id", userId);
+    if (reportAttributionError) throw reportAttributionError;
     const { error: sessionDeleteError } = await supabase
       .from("test_sessions")
       .delete()

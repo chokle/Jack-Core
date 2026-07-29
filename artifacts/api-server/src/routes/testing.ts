@@ -9,7 +9,7 @@ import {
   getAdminReviewer,
   resolveIdentity,
 } from "../lib/admin-auth.js";
-import { isPresentationIdentity } from "../lib/identity.js";
+import { denyRestrictedIdentity } from "../lib/identity.js";
 import { userTestingLimiter } from "../lib/rate-limit.js";
 import { queueFeedbackNotification } from "../lib/feedback-notifications.js";
 import {
@@ -148,13 +148,19 @@ function queueFeedbackAlert(req: Request, feedbackId: string): void {
 router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
-    if (!identity?.userId || !identity.email) {
+    if (!identity?.userId) {
       return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
-    if (isPresentationIdentity(identity)) {
-      return res
-        .status(403)
-        .json({ error: "User-testing feedback is unavailable in presentation mode." });
+    if (
+      denyRestrictedIdentity(
+        res,
+        identity,
+        "User-testing feedback is unavailable in presentation mode.",
+        "User-testing feedback is temporarily unavailable.",
+      )
+    ) return;
+    if (!identity.email) {
+      return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
     const body = req.body as Record<string, unknown>;
     const feedbackId = jsonString(body, "feedbackId", 36);
@@ -336,10 +342,14 @@ async function requireFeedbackScope(req: Request, res: Response, action: string)
     res.status(401).json({ error: "Unauthorized" });
     return null;
   }
-  if (isPresentationIdentity(identity)) {
-    res.status(403).json({ error: "Feedback review is unavailable in presentation mode." });
-    return null;
-  }
+  if (
+    denyRestrictedIdentity(
+      res,
+      identity,
+      "Feedback review is unavailable in presentation mode.",
+      "Feedback review is temporarily unavailable.",
+    )
+  ) return null;
   const organizationId = queryString(req.query["organizationId"]) ?? "";
   const pilotId = queryString(req.query["pilotId"]) ?? "";
   const authorization = await authorizeReportScope(identity.userId, organizationId, pilotId);
@@ -531,9 +541,17 @@ router.post(
       }
 
       const identity = await resolveIdentity(req);
-      if (!identity || isPresentationIdentity(identity)) {
+      if (!identity) {
         return res.status(403).json({ error: "Screen recording is unavailable for this account." });
       }
+      if (
+        denyRestrictedIdentity(
+          res,
+          identity,
+          "Screen recording is unavailable for this account.",
+          "Screen recording is temporarily unavailable.",
+        )
+      ) return;
       const pilotSession = await db
         .from("test_sessions")
         .select("*")

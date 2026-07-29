@@ -4,6 +4,7 @@ import { chatCompletion, createEmbedding, MODELS } from "../lib/openai.js";
 import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
+import { resolveIdentity } from "../lib/admin-auth.js";
 import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import {
@@ -423,7 +424,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
     await recordServerAskJackEvent({
       req,
-      actorUserId: userId,
+      actorIdentity: await resolveIdentity(req),
       eventType: "ask_jack_completed",
       correlationId: chatMessageId,
       citationCount: citations.length,
@@ -435,7 +436,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     if (req.userId) {
       await recordServerAskJackEvent({
         req,
-        actorUserId: req.userId,
+        actorIdentity: await resolveIdentity(req),
         eventType: "ask_jack_failed",
         correlationId: requestIdentifier(req),
       });

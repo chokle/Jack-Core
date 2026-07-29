@@ -8,6 +8,7 @@ const identity = vi.hoisted(() => ({
   name: "Pilot Admin",
   isAdmin: false,
   isPresentation: false,
+  classification: "resolved",
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -43,7 +44,12 @@ function app(): Express {
 
 beforeEach(() => {
   resetMocks();
-  Object.assign(identity, { userId: "pilot-admin", isAdmin: false, isPresentation: false });
+  Object.assign(identity, {
+    userId: "pilot-admin",
+    isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
+  });
   fake.tables.organizations = [
     { id: ORGANIZATION_ID, name: "Allowed Org", status: "active" },
     { id: OTHER_ORGANIZATION_ID, name: "Other Org", status: "active" },
@@ -146,6 +152,25 @@ describe("pilot activity reports", () => {
     expect(presentation.status).toBe(403);
     const scopes = await request(app()).get("/api/testing/reports/scopes");
     expect(scopes.status).toBe(403);
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    identity.classification = "unavailable";
+
+    expect((await request(app()).get(`/api/testing/reports/summary?${query}`)).status).toBe(503);
+    expect((await request(app()).get("/api/testing/reports/scopes")).status).toBe(503);
+    expect(
+      (await request(app()).get(`/api/testing/reports/users/${USER_ID}/timeline?${query}`)).status,
+    ).toBe(503);
+    expect((await request(app()).get(`/api/testing/reports/export.csv?${query}`)).status).toBe(503);
+    expect(
+      (
+        await request(app())
+          .post(`/api/testing/reports/generate?${query}`)
+          .send({ reportType: "pilot_summary" })
+      ).status,
+    ).toBe(503);
+    expect(fake.tables.activity_report_runs).toHaveLength(0);
   });
 
   it("allows an active organization administrator only inside that organization", async () => {

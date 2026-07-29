@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CallerIdentity } from "../admin-auth.js";
 
 vi.mock("../supabase.js", async () => {
   const mocks = await import("./mocks.js");
@@ -28,6 +29,20 @@ function request(sessionId?: string): Request {
     },
     log: { warn: vi.fn() },
   } as unknown as Request;
+}
+
+function identity(
+  overrides: Partial<CallerIdentity> = {},
+): CallerIdentity {
+  return {
+    userId: "tester-1",
+    email: "tester@example.test",
+    name: "Tester",
+    isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -77,7 +92,7 @@ describe("server-authoritative Ask Jack telemetry", () => {
   it("does not guess when more than one active pilot session exists", async () => {
     await recordServerAskJackEvent({
       req: request(),
-      actorUserId: "tester-1",
+      actorIdentity: identity(),
       eventType: "ask_jack_completed",
       correlationId: "chat-message-1",
       citationCount: 2,
@@ -89,7 +104,7 @@ describe("server-authoritative Ask Jack telemetry", () => {
   it("uses an owned session hint and stores only allowlisted outcome metadata", async () => {
     await recordServerAskJackEvent({
       req: request(SESSION_ID),
-      actorUserId: "tester-1",
+      actorIdentity: identity(),
       eventType: "ask_jack_completed",
       correlationId: "chat-message-1",
       citationCount: 2,
@@ -106,5 +121,28 @@ describe("server-authoritative Ask Jack telemetry", () => {
     });
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("question");
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("answer");
+  });
+
+  it.each([
+    {
+      actorIdentity: identity({ isPresentation: true, classification: "restricted" }),
+      label: "presentation identity",
+    },
+    {
+      actorIdentity: identity({ classification: "unavailable" }),
+      label: "unavailable identity",
+    },
+  ])("skips Ask Jack telemetry writes for $label", async ({ actorIdentity }) => {
+    const originalQuestionCount = fake.tables.test_sessions[0]?.question_count;
+
+    await recordServerAskJackEvent({
+      req: request(SESSION_ID),
+      actorIdentity,
+      eventType: "ask_jack_failed",
+      correlationId: "chat-message-2",
+    });
+
+    expect(fake.tables.test_events).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]?.question_count).toBe(originalQuestionCount);
   });
 });
