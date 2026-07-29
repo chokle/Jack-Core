@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { useSignIn } from "@clerk/react/legacy";
-import { useClerk } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -18,7 +17,6 @@ function messageFrom(error: unknown): string {
 
 export function EmailCodeSignIn() {
   const { isLoaded, signIn, setActive } = useSignIn();
-  const clerk = useClerk();
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -73,25 +71,6 @@ export function EmailCodeSignIn() {
     }
   };
 
-  const signInWithGoogle = async () => {
-    if (!isLoaded || !signIn || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Use the loaded Clerk client directly for OAuth. The legacy sign-in hook
-      // remains appropriate for email-code factors, but its redirect wrapper
-      // can hold a stale attempt in embedded/mobile browser sessions.
-      await clerk.client.signIn.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: `${window.location.origin}/sign-in/sso-callback`,
-        redirectUrlComplete: `${window.location.origin}/app`,
-      });
-    } catch (caught) {
-      setError(messageFrom(caught));
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
       <div className="space-y-6 p-7 sm:p-9">
@@ -102,38 +81,22 @@ export function EmailCodeSignIn() {
         </div>
 
         {step === "email" ? (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={signInWithGoogle}
-              disabled={!isLoaded || busy}
-            >
-              Continue with Google
+          <form onSubmit={startEmailCode} className="space-y-4">
+            <label className="block space-y-2 text-sm font-medium text-foreground">
+              <span>Email address</span>
+              <Input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                autoFocus
+              />
+            </label>
+            <Button type="submit" className="w-full" disabled={!isLoaded || busy || !email.trim()}>
+              {busy ? "Sending code…" : "Continue"}
             </Button>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              <span>or use an email code</span>
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            <form onSubmit={startEmailCode} className="space-y-4">
-              <label className="block space-y-2 text-sm font-medium text-foreground">
-                <span>Email address</span>
-                <Input
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                  autoFocus
-                />
-              </label>
-              <Button type="submit" className="w-full" disabled={!isLoaded || busy || !email.trim()}>
-                {busy ? "Sending code…" : "Continue"}
-              </Button>
-            </form>
-          </>
+          </form>
         ) : (
           <form onSubmit={verifyCode} className="space-y-4">
             <div className="text-center">
