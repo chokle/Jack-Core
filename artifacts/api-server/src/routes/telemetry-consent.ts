@@ -402,9 +402,6 @@ router.get("/testing/telemetry/export", async (req, res) => {
         "Telemetry export is temporarily unavailable.",
       )
     ) return;
-    if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
-    }
     const [consents, sessions, events, failures, recordings, feedback] = await Promise.all([
       db.from("telemetry_consents").select("*").eq("actor_user_id", identity.userId),
       db.from("test_sessions").select("*").eq("actor_user_id", identity.userId),

@@ -139,6 +139,20 @@ describe("telemetry consent", () => {
     expect(fake.tables.telemetry_consents).toHaveLength(0);
   });
 
+  it("preserves an administrator's existing personal export access", async () => {
+    identity.isAdmin = true;
+
+    const response = await request(app()).get("/api/testing/telemetry/export");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      consents: [],
+      sessions: [],
+      events: [],
+      recordings: [],
+    });
+  });
+
   it("persists an explicit decline without creating a pilot session", async () => {
     const response = await request(app())
       .post("/api/testing/telemetry/consents")
