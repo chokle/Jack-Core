@@ -23,7 +23,7 @@ const IDENTITY_QUESTIONS = [
 ] as const;
 
 const CORRECTION_SIGNALS = [
-  /\bcorrection\b/i,
+  /^(?:a )?correction\s*[:,—-]\s*\S/i,
   /\bcorrect (?:that|this|your answer|the record)\b/i,
   /\bthat(?:'s| is) (?:wrong|incorrect|outdated)\b/i,
   /\b(?:treat|mark|use)\b.{0,50}\bcanonical\b/i,

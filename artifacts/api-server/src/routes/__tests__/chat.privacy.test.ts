@@ -269,6 +269,20 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     expect(chatCompletion).not.toHaveBeenCalled();
   });
 
+  it("answers a correction-factor trade question through normal retrieval", async () => {
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({
+        message: "What's the temperature correction factor for conductor ampacity?",
+      });
+
+    expect(res.status).toBe(200);
+    expect(chatCompletion).toHaveBeenCalledOnce();
+    expect(learnFromAskInteraction).toHaveBeenCalledOnce();
+  });
+
   it("admits when correction persistence fails", async () => {
     vi.mocked(learnFromAskInteraction).mockRejectedValueOnce(
       new Error("candidate write failed"),

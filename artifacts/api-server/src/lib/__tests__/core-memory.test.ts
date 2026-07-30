@@ -37,6 +37,14 @@ describe("Jack Core Memory", () => {
     expect(matchesCanonicalIdentity(message)).toBe(true);
   });
 
+  it.each([
+    "What's the temperature correction factor for conductor ampacity?",
+    "How do I apply a correction factor to voltage drop?",
+    "Explain the correction procedure for TIG welding.",
+  ])("does not misclassify a trade question as a correction: %s", (message) => {
+    expect(isExplicitCorrection(message)).toBe(false);
+  });
+
   it("reports persistence truthfully", () => {
     expect(
       correctionPersistenceReply({ stored: true, coreIdentity: false }),
