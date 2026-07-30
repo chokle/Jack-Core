@@ -44,6 +44,7 @@ import {
 } from "./components/testing/UserTestFeedback";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
+import { handoffInterviewResume } from "./lib/interview-resume";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
@@ -362,20 +363,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   // Resume an interrupted interview from a mentor node in the Living Memory
-  // graph. We stash the session id under the SAME localStorage key Interview
-  // Mode reads on mount ("jack.interview.activeSessionId") and switch to that
-  // view — Interview Mode's existing resume-on-mount logic then reconnects to
-  // exactly where the mentor left off. Kept as a literal (not imported from
-  // InterviewMode) so this path stays decoupled from that component's internals.
+  // graph. Browser storage is only the handoff; Interview Mode reconstructs the
+  // owner-scoped server session on mount. If the handoff cannot be stored, stay
+  // on the graph so the durable mentor action remains available.
   const handleResumeInterview = (sessionId: string) => {
-    try {
-      sessionStorage.setItem("jack.interview.activeSessionId", sessionId);
-      localStorage.removeItem("jack.interview.activeSessionId");
-    } catch {
-      // Storage unavailable (private mode) — Interview Mode will start fresh.
-    }
-    setSelectedVideoId(null);
-    setView("interview");
+    handoffInterviewResume(sessionId, () => {
+      setSelectedVideoId(null);
+      setView("interview");
+    });
   };
 
   const inGraph = view === "graph" && !selectedVideoId;

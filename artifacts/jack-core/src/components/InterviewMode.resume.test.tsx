@@ -140,6 +140,30 @@ describe("InterviewMode resume flow", () => {
     expect(h.getInterviewSession).toHaveBeenCalledWith("sess-1");
   });
 
+  it("reconstructs all eight ordered answers from the owner-scoped session endpoint", async () => {
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-8");
+    const answers = Array.from({ length: 8 }, (_, index) =>
+      makeAnswer({
+        id: `ans-${index + 1}`,
+        question: `Question ${index + 1}?`,
+        answerText: `Ordered answer ${index + 1}`,
+        createdAt: `2026-07-22T00:00:0${index}.000Z`,
+      }),
+    );
+    h.getInterviewSession.mockResolvedValue({
+      session: makeSession({ id: "sess-8", questionCount: 8 }),
+      answers,
+    } satisfies InterviewSessionDetail);
+
+    renderInterviewMode();
+
+    expect(await screen.findByText(CURRENT_QUESTION)).toBeTruthy();
+    for (const answer of answers) {
+      expect(screen.getByText(answer.answerText!)).toBeTruthy();
+    }
+    expect(h.getInterviewSession).toHaveBeenCalledWith("sess-8");
+  });
+
   it("does NOT apply a saved draft typed against a different (stale) question on resume", async () => {
     sessionStorage.setItem(ACTIVE_SESSION_KEY, "sess-1");
     // A draft was typed against question A, but the session has since advanced to

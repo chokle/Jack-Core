@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   buildGraphModelFromServer,
   isKnowledgeKind,
@@ -42,6 +43,11 @@ const videoState = vi.hoisted(() => ({
   data: undefined as VideoDetail | undefined,
   isLoading: false,
 }));
+const activeSessionState = vi.hoisted(() => ({
+  data: undefined as
+    | { session?: { id: string; complete: boolean; questionCount: number } }
+    | undefined,
+}));
 
 vi.mock("@workspace/api-client-react", async (importOriginal) => {
   const actual =
@@ -51,6 +57,7 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
     // Only the video fetch is stubbed; the real query-key helpers and every
     // other export stay intact, so nothing else in the module changes behavior.
     useGetVideo: () => ({ data: videoState.data, isLoading: videoState.isLoading }),
+    useGetMentorActiveSession: () => ({ data: activeSessionState.data }),
   };
 });
 
@@ -109,6 +116,7 @@ interface BodyCtx {
   isAdmin?: boolean;
   onJumpToTimestamp?: (videoId: string, startTime: number) => void;
   onSetVerification?: (id: string, status: VerificationUpdateStatus) => void;
+  onResumeInterview?: (sessionId: string) => void;
 }
 
 // NodeDetailBody has a large prop surface; only the fields under test matter,
@@ -116,29 +124,34 @@ interface BodyCtx {
 function renderBody(node: MemoryNode, ctx: BodyCtx) {
   const competencies = ctx.competencies ?? [];
   const compByCode = new Map(competencies.map((c) => [c.code, c.name]));
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <NodeDetailBody
-      node={node}
-      degree={1}
-      videoCount={0}
-      relatedVideoCount={0}
-      nodeById={ctx.nodeById}
-      adjacency={ctx.adjacency ?? new Map()}
-      knowledgeByVideoId={ctx.knowledgeByVideoId ?? new Map()}
-      compByCode={compByCode}
-      competencies={competencies}
-      onOpenVideo={() => {}}
-      onJumpToTimestamp={ctx.onJumpToTimestamp ?? (() => {})}
-      onSelectNode={() => {}}
-      onResumeInterview={() => {}}
-      onResumeChat={() => {}}
-      onStartInterview={() => {}}
-      isAdmin={ctx.isAdmin ?? false}
-      isUpdatingVerification={false}
-      onSetVerification={ctx.onSetVerification ?? (() => {})}
-      isRestoringEvidence={false}
-      onRestoreEvidence={() => {}}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <NodeDetailBody
+        node={node}
+        degree={1}
+        videoCount={0}
+        relatedVideoCount={0}
+        nodeById={ctx.nodeById}
+        adjacency={ctx.adjacency ?? new Map()}
+        knowledgeByVideoId={ctx.knowledgeByVideoId ?? new Map()}
+        compByCode={compByCode}
+        competencies={competencies}
+        onOpenVideo={() => {}}
+        onJumpToTimestamp={ctx.onJumpToTimestamp ?? (() => {})}
+        onSelectNode={() => {}}
+        onResumeInterview={ctx.onResumeInterview ?? (() => {})}
+        onResumeChat={() => {}}
+        onStartInterview={() => {}}
+        isAdmin={ctx.isAdmin ?? false}
+        isUpdatingVerification={false}
+        onSetVerification={ctx.onSetVerification ?? (() => {})}
+        isRestoringEvidence={false}
+        onRestoreEvidence={() => {}}
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -153,6 +166,42 @@ const CONCEPT_ROOT_PASS: ServerGraphNode = {
 beforeEach(() => {
   videoState.data = undefined;
   videoState.isLoading = false;
+  activeSessionState.data = undefined;
+});
+
+describe("mentor interview recovery", () => {
+  function mentorNode() {
+    const { nodeById } = buildGraph(
+      [{ id: "mentor:mentor-1", kind: "mentor", label: "Tracy Chow", trade: "Electrician" }],
+      [{ id: "e-mentor", source: "topic:Welder", target: "mentor:mentor-1", kind: "taught_by" }],
+    );
+    return { node: nodeById.get("mentor:mentor-1")!, nodeById };
+  }
+
+  it("shows an owned active session without a parked thought and resumes the exact server id", () => {
+    activeSessionState.data = {
+      session: { id: "session-from-server", complete: false, questionCount: 8 },
+    };
+    const onResumeInterview = vi.fn();
+    const { node, nodeById } = mentorNode();
+
+    renderBody(node, { nodeById, onResumeInterview });
+    fireEvent.click(screen.getByRole("button", { name: "Resume Interview" }));
+
+    expect(onResumeInterview).toHaveBeenCalledWith("session-from-server");
+    expect(screen.getByText(/8 questions in/)).toBeTruthy();
+  });
+
+  it("does not show a recovery action for a completed session", () => {
+    activeSessionState.data = {
+      session: { id: "completed-session", complete: true, questionCount: 8 },
+    };
+    const { node, nodeById } = mentorNode();
+
+    renderBody(node, { nodeById });
+
+    expect(screen.queryByRole("button", { name: "Resume Interview" })).toBeNull();
+  });
 });
 
 afterEach(() => {
