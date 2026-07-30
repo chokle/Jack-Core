@@ -69,7 +69,8 @@ router.get("/graph/candidates", async (req, res) => {
   const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
 
-  if (parsed.data.status !== "pending" && !(await resolveAdminIdentity(req))) {
+  const admin = await resolveAdminIdentity(req);
+  if (parsed.data.status !== "pending" && !admin) {
     req.log.warn(
       { url: req.url, status: parsed.data.status },
       "non-pending candidate list requires admin access",
@@ -78,7 +79,12 @@ router.get("/graph/candidates", async (req, res) => {
   }
 
   try {
-    const candidates = await listKnowledgeCandidates(parsed.data.status);
+    // Conversation corrections may contain account-owned context. Keep them
+    // out of the public pending panel; only authenticated admins reviewing the
+    // durable correction queue can read them.
+    const candidates = await listKnowledgeCandidates(parsed.data.status, {
+      includeConversationCorrections: !!admin,
+    });
     return res.json(
       ListKnowledgeCandidatesResponse.parse({ candidates, total: candidates.length }),
     );
@@ -115,6 +121,16 @@ router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
 
   const bodyParsed = ResolveKnowledgeCandidateBody.safeParse(req.body);
   if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+  if (
+    paramsParsed.data.id.startsWith("core-correction:") &&
+    bodyParsed.data.action !== "reject"
+  ) {
+    return res.status(409).json({
+      error:
+        "Core Memory proposals cannot be published through conversation review. Apply an authorized, versioned configuration change instead.",
+      code: "core_memory_configuration_required",
+    });
+  }
 
   try {
     const result = await resolveKnowledgeCandidate(paramsParsed.data.id, bodyParsed.data.action, {

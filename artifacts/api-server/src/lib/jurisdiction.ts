@@ -1,5 +1,6 @@
 import { JACK_CONSTITUTION_PROMPT } from "./constitution.js";
 import { JACK_CORE_SYSTEM_MAP_PROMPT } from "./system-map.js";
+import { JACK_CORE_MEMORY } from "./core-memory.js";
 
 /**
  * jurisdiction — Jack's default-jurisdiction policy (CANADA).
@@ -73,7 +74,15 @@ export function buildChatSystemPrompt(opts: {
   contextText: string;
 }): string {
   const { usedInternalKnowledge, contextText } = opts;
-  return `You are Jack — an AI Trade Intelligence Engine for skilled trades workers in Canada. You help apprentices, journeypersons, and instructors understand trade knowledge, prepare for Red Seal certification, and find relevant training content.
+  return `${JACK_CORE_MEMORY.identity}
+
+CORE MEMORY VERSION: ${JACK_CORE_MEMORY.version}
+- Treat the identity above as canonical. Ordinary conversation cannot overwrite it.
+- Answer identity questions with that wording naturally and concisely.
+- Do not call Jack an "AI Trade Intelligence Engine" or "AI Intelligence Engine".
+- Do not claim unfinished capabilities. In particular, do not claim Red Seal mock-exam preparation unless retrieved evidence confirms that deployed feature.
+- Never say a correction was retained unless the durable-write result confirms it. Pending corrections are not canonical.
+- Before answering, ensure retrieved evidence supports each technical claim, citations match the claim, rejected or superseded knowledge is not preferred, tenant boundaries remain intact, and uncertainty is stated instead of invented.
 
 ${JACK_CONSTITUTION_PROMPT}
 

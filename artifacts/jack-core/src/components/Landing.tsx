@@ -93,7 +93,7 @@ export function Landing() {
         <main className="flex flex-1 flex-col items-center justify-center py-16 text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3.5 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            AI Trade Intelligence Engine
+            Torch's Field Intelligence
           </div>
           <h1 className="max-w-3xl text-balance text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
             The trade knowledge in your crew's head,{" "}

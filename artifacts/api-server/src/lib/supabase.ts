@@ -13,15 +13,22 @@ function ensureSupabaseConfig(): readonly [string, string] {
   return [supabaseUrl, supabaseServiceKey];
 }
 
-type SupabaseClient = ReturnType<typeof createClient>;
-let cachedSupabase: SupabaseClient | null = null;
+function createSystemClient(url: string, serviceKey: string) {
+  // Explicit `any` preserves the intentionally untyped legacy database client.
+  // `ReturnType<typeof createClient>` on the generic factory collapses table
+  // operations to `never` under TypeScript 5.9.
+  return createClient<any>(url, serviceKey, {
+    auth: { persistSession: false },
+  });
+}
 
-const getSupabase = (): SupabaseClient => {
+type SystemSupabaseClient = ReturnType<typeof createSystemClient>;
+let cachedSupabase: SystemSupabaseClient | null = null;
+
+const getSupabase = (): SystemSupabaseClient => {
   if (!cachedSupabase) {
     const [url, serviceKey] = ensureSupabaseConfig();
-    cachedSupabase = createClient(url, serviceKey, {
-      auth: { persistSession: false },
-    });
+    cachedSupabase = createSystemClient(url, serviceKey);
   }
 
   return cachedSupabase;
@@ -32,4 +39,4 @@ export const supabase = new Proxy({}, {
     const client = getSupabase();
     return Reflect.get(client as object, prop, receiver);
   },
-}) as ReturnType<typeof createClient>;
+}) as SystemSupabaseClient;

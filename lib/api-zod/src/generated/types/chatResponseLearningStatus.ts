@@ -11,6 +11,7 @@ export type ChatResponseLearningStatus = typeof ChatResponseLearningStatus[keyof
 
 export const ChatResponseLearningStatus = {
   verified: 'verified',
+  pending: 'pending',
   discarded: 'discarded',
   failed: 'failed',
 } as const;

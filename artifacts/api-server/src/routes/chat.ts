@@ -19,6 +19,14 @@ import {
   type AskLearningResult,
 } from "../lib/ask-learning.js";
 import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
+import {
+  JACK_CORE_MEMORY,
+  correctionPersistenceReply,
+  isCoreIdentityQuestion,
+  isExplicitCorrection,
+  matchesCanonicalIdentity,
+  targetsCoreIdentity,
+} from "../lib/core-memory.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -57,6 +65,109 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+
+    // Core identity is versioned server configuration, not a retrieval result.
+    // Answer it deterministically so empty context, old chat history, or stale
+    // graph content cannot reintroduce a superseded product description.
+    if (isCoreIdentityQuestion(message)) {
+      const { error: userMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "user",
+          content: message,
+          citations: [],
+        });
+      if (userMessageError) throw userMessageError;
+      const { error: assistantMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "assistant",
+          content: JACK_CORE_MEMORY.identity,
+          citations: [],
+        });
+      if (assistantMessageError) throw assistantMessageError;
+      return res.json({
+        answer: JACK_CORE_MEMORY.identity,
+        citations: [],
+        usedInternalKnowledge: false,
+        learning: {
+          status: "verified",
+          extractedCount: 0,
+          summary: `Core Memory version ${JACK_CORE_MEMORY.version}.`,
+        },
+      });
+    }
+
+    // Handle explicit corrections before RAG/generation. This makes the
+    // persistence result authoritative: the response can never claim "got it"
+    // when the durable candidate write failed.
+    if (isExplicitCorrection(message)) {
+      const { data: userMessage, error: userMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "user",
+          content: message,
+          citations: [],
+        })
+        .select("id")
+        .single();
+      if (userMessageError) throw userMessageError;
+      const chatMessageId =
+        userMessage &&
+        typeof (userMessage as Record<string, unknown>)["id"] === "string"
+          ? String((userMessage as Record<string, unknown>)["id"])
+          : session;
+
+      const isCanonicalCoreCorrection =
+        targetsCoreIdentity(message) && matchesCanonicalIdentity(message);
+      let learning: AskLearningResult;
+      let answer: string;
+      if (isCanonicalCoreCorrection) {
+        learning = {
+          status: "verified",
+          extractedCount: 0,
+          summary: `Already canonical in Core Memory version ${JACK_CORE_MEMORY.version}.`,
+        };
+        answer = `That wording already matches Jack's version ${JACK_CORE_MEMORY.version} Core Memory identity. It is durable and will be used in future conversations.`;
+      } else {
+        learning = await learnFromAskInteraction({
+          userId,
+          chatMessageId,
+          sessionId: session,
+          message,
+        }).catch((err) => {
+          req.log.error({ err, chatMessageId }, "Ask Jack correction persistence failed");
+          return { status: "failed", extractedCount: 0 };
+        });
+        answer = correctionPersistenceReply({
+          stored: learning.status === "pending",
+          coreIdentity: targetsCoreIdentity(message),
+        });
+      }
+
+      const { error: assistantMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "assistant",
+          content: answer,
+          citations: [],
+        });
+      if (assistantMessageError) throw assistantMessageError;
+      return res.json({
+        answer,
+        citations: [],
+        usedInternalKnowledge: false,
+        learning,
+      });
+    }
 
     const embedding = await createEmbedding(message);
 
@@ -554,6 +665,9 @@ async function findGraphMemoryMatches(
   return ids
     .map((id) => byId.get(id))
     .filter((row): row is Record<string, unknown> => !!row)
+    // A rejected claim is not answer evidence. Keeping it out here prevents a
+    // superseded correction target from being preferred by semantic similarity.
+    .filter((row) => row["verification_status"] !== "rejected")
     .map((row) => {
       const meta = row["meta"] as Record<string, unknown> | null | undefined;
       const sourceCount =
