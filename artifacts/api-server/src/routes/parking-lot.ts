@@ -299,16 +299,24 @@ router.post("/parking-lot/:id/resume", async (req, res) => {
     if (!UUID_RE.test(id)) return res.status(404).json({ error: "Parked thought not found" });
     const row = await findAccessibleRow(req, id);
     if (!row) return res.status(404).json({ error: "Parked thought not found" });
+    if (row["status"] !== "parked") return res.json(serialize(row));
 
     const { data, error } = await supabase
       .from("parked_thoughts")
       .update({ status: "resumed", updated_at: new Date().toISOString() })
       .eq("id", id)
+      .eq("status", "parked")
       .select("*")
-      .single();
+      .maybeSingle();
     if (error) throw error;
 
-    return res.json(serialize(data as Row));
+    if (data) return res.json(serialize(data as Row));
+
+    // A concurrent resume won the conditional update. Re-read through the same
+    // owner-scoped boundary and return the stable result without another write.
+    const current = await findAccessibleRow(req, id);
+    if (!current) return res.status(404).json({ error: "Parked thought not found" });
+    return res.json(serialize(current));
   } catch (err) {
     req.log.error({ err }, "resumeParkedThought error");
     return res.status(500).json({ error: "Failed to resume parked thought" });

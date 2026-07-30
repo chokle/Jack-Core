@@ -18,6 +18,7 @@ import {
   ExternalLink,
   Activity,
   Play,
+  PlayCircle,
   Pin,
   PinOff,
   ShieldCheck,
@@ -35,6 +36,7 @@ import {
   useSetNodeVerification,
   useRestoreWithdrawnEvidence,
   useGetVideo,
+  useGetMentorActiveSession,
   useGetMe,
   useGetKnowledgeStats,
   getGetKnowledgeStatsQueryKey,
@@ -42,6 +44,7 @@ import {
   getGetConceptAnswerContributionsQueryKey,
   getGetVideoQueryKey,
   getGetGraphQueryKey,
+  getGetMentorActiveSessionQueryKey,
 } from "@workspace/api-client-react";
 import type {
   VerificationUpdateStatus,
@@ -2293,6 +2296,47 @@ function TranscriptContent({
 }
 
 /**
+ * Owner-scoped recovery affordance for an active interview. The server remains
+ * the source of truth; this lookup is independent of parked-thought state.
+ */
+function MentorResumeAction({
+  mentorId,
+  mentorName,
+  onResumeInterview,
+}: {
+  mentorId: string;
+  mentorName: string;
+  onResumeInterview: (sessionId: string) => void;
+}) {
+  const { data } = useGetMentorActiveSession(mentorId, {
+    request: { credentials: "include", cache: "no-store" },
+    query: {
+      enabled: mentorId.length > 0,
+      queryKey: getGetMentorActiveSessionQueryKey(mentorId),
+    },
+  });
+  const session = data?.session;
+  if (!session || session.complete) return null;
+  const firstName = mentorName.trim().split(/\s+/)[0] || mentorName;
+  const asked = session.questionCount;
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => onResumeInterview(session.id)}
+        className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500/15 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/25"
+      >
+        <PlayCircle className="h-3.5 w-3.5" /> Resume Interview
+      </button>
+      <p className="mt-1 text-center text-[11px] text-muted-foreground">
+        Interview in progress — pick up where {firstName} left off
+        {asked > 0 ? ` (${asked} question${asked === 1 ? "" : "s"} in)` : ""}
+      </p>
+    </div>
+  );
+}
+
+/**
  * Admin-only: how much each mentor answer contributed to this concept's
  * confidence — the per-answer confidence recorded on the mentor→concept edge,
  * paired with the answer's question and a verbatim excerpt. Fetched lazily: it
@@ -2532,6 +2576,11 @@ export function NodeDetailBody({
           the home for future per-node actions, so it always reserves its slot. */}
       {node.kind === "mentor" && (
         <>
+          <MentorResumeAction
+            mentorId={node.id.replace("mentor:", "")}
+            mentorName={node.label}
+            onResumeInterview={onResumeInterview}
+          />
           <div className="mb-3 border-b border-border/60 pb-3">
             <ParkedThoughtsList
               mentorProfileId={node.id.replace("mentor:", "")}

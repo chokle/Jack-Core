@@ -207,7 +207,18 @@ describe("account-bound interview profile", () => {
       question_count: 1,
       created_at: "2026-07-22T00:00:00.000Z",
     });
-    fake.tables["interview_answers"] = [];
+    fake.tables["interview_answers"] = Array.from({ length: 8 }, (_, index) => ({
+      id: `answer-${index + 1}`,
+      session_id: sessionId,
+      mentor_profile_id: "profile-a",
+      question: `Question ${index + 1}?`,
+      category: "field_judgment",
+      topic: "joint preparation",
+      answer_text: `Ordered answer ${index + 1}`,
+      skipped: false,
+      distillation_status: "verified",
+      created_at: `2026-07-22T00:00:0${index}.000Z`,
+    }));
 
     const owner = await request(app)
       .get(`/api/interview/sessions/${sessionId}`)
@@ -221,6 +232,10 @@ describe("account-bound interview profile", () => {
 
     expect(owner.status).toBe(200);
     expect(owner.body.session.id).toBe(sessionId);
+    expect(owner.body.answers).toHaveLength(8);
+    expect(owner.body.answers.map((answer: { answerText: string }) => answer.answerText)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `Ordered answer ${index + 1}`),
+    );
     expect(other.status).toBe(404);
     expect(presentation.status).toBe(404);
   });
@@ -262,5 +277,34 @@ describe("account-bound interview profile", () => {
     expect(other.status).toBe(200);
     expect(other.body).toEqual({});
     expect(presentation.status).toBe(401);
+  });
+
+  it("does not expose completed sessions as active mentor recovery entries", async () => {
+    const profileId = "55555555-5555-4555-8555-555555555555";
+    fake.tables["mentor_profiles"].push({
+      id: profileId,
+      contributor_user_id: USER_A,
+      name: "Tracy",
+      trade: "Electrician",
+      trade_input: "Electrical",
+      created_at: "2026-07-22T00:00:00.000Z",
+    });
+    fake.tables["interview_sessions"].push({
+      id: "66666666-6666-4666-8666-666666666666",
+      mentor_profile_id: profileId,
+      contributor_user_id: USER_A,
+      trade: "Electrician",
+      status: "completed",
+      complete: true,
+      question_count: 8,
+      created_at: "2026-07-22T00:00:00.000Z",
+    });
+
+    const response = await request(app)
+      .get(`/api/interview/mentors/${profileId}/active-session`)
+      .set("x-test-user", USER_A);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
   });
 });
