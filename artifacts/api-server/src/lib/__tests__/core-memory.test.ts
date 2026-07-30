@@ -37,6 +37,14 @@ describe("Jack Core Memory", () => {
     expect(matchesCanonicalIdentity(message)).toBe(true);
   });
 
+  it("does not mistake a quoted old identity for the proposed replacement", () => {
+    expect(
+      matchesCanonicalIdentity(
+        `Correction: replace "${JACK_CORE_MEMORY.identity}" with "Jack is something else."`,
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     "What's the temperature correction factor for conductor ampacity?",
     "How do I apply a correction factor to voltage drop?",

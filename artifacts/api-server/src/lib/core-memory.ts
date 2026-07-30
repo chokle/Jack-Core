@@ -58,9 +58,19 @@ export function targetsCoreIdentity(message: string): boolean {
 }
 
 export function matchesCanonicalIdentity(message: string): boolean {
-  return normalized(message)
-    .toLowerCase()
-    .includes(normalized(JACK_CORE_MEMORY.identity).toLowerCase());
+  const value = normalized(message).toLowerCase();
+  const identity = normalized(JACK_CORE_MEMORY.identity).toLowerCase();
+  const identityIndex = value.lastIndexOf(identity);
+  if (identityIndex < 0) return false;
+
+  // Quoting the current identity as the claim being replaced must not turn a
+  // different proposed replacement into an already-canonical update.
+  const before = value.slice(0, identityIndex);
+  const after = value.slice(identityIndex + identity.length);
+  if (/\breplace\b/.test(before) && /\bwith\b/.test(after)) return false;
+  if (/\b(?:do not|don't|stop)\b.{0,40}$/.test(before)) return false;
+
+  return after.replace(/[\s"'`.,;:!?()[\]{}—-]/g, "").length === 0;
 }
 
 export function correctionPersistenceReply(input: {

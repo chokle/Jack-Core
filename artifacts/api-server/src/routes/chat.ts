@@ -623,7 +623,9 @@ async function findGraphMemoryMatches(
         query_embedding: embedding,
         filter_category: kind,
         match_threshold: 0.5,
-        match_count: MAX_GRAPH_MEMORY_MATCHES,
+        // Request a small buffer because rejected nodes are filtered after the
+        // persisted row lookup and must not consume the final evidence slots.
+        match_count: MAX_GRAPH_MEMORY_MATCHES * 2,
         exclude_ids: [],
       });
       if (error) {
@@ -644,7 +646,7 @@ async function findGraphMemoryMatches(
         .map((m) => m["id"])
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
-  ).slice(0, MAX_GRAPH_MEMORY_MATCHES);
+  );
   if (ids.length === 0) return [];
 
   const { data: rows, error: rowError } = await supabase
@@ -668,6 +670,7 @@ async function findGraphMemoryMatches(
     // A rejected claim is not answer evidence. Keeping it out here prevents a
     // superseded correction target from being preferred by semantic similarity.
     .filter((row) => row["verification_status"] !== "rejected")
+    .slice(0, MAX_GRAPH_MEMORY_MATCHES)
     .map((row) => {
       const meta = row["meta"] as Record<string, unknown> | null | undefined;
       const sourceCount =

@@ -43,7 +43,7 @@ vi.mock("../../lib/ask-learning.js", () => ({
 }));
 
 import chatRouter from "../chat.js";
-import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+import { embedRegistry, fake, resetMocks } from "../../lib/__tests__/mocks.js";
 import { chatCompletion } from "../../lib/openai.js";
 import { learnFromAskInteraction } from "../../lib/ask-learning.js";
 import { JACK_CORE_MEMORY } from "../../lib/core-memory.js";
@@ -472,6 +472,7 @@ describe("POST /api/chat — writes carry the owner and load account history", (
   });
 
   it("does not retrieve a rejected or superseded Living Memory claim", async () => {
+    embedRegistry.set("Explain Jack's product identity in detail.", [1, 0, 0]);
     fake.tables["knowledge_nodes"] = [
       {
         id: "k:concept:stale-jack-identity",
@@ -482,6 +483,15 @@ describe("POST /api/chat — writes carry the owner and load account history", (
         meta: { sourceCount: 1 },
         embedding: JSON.stringify([1, 0, 0]),
       },
+      ...["one", "two", "three", "four"].map((suffix) => ({
+        id: `k:concept:valid-${suffix}`,
+        kind: "concept",
+        label: `Valid claim ${suffix}`,
+        description: `Eligible evidence ${suffix}`,
+        verification_status: "verified",
+        meta: { sourceCount: 1 },
+        embedding: JSON.stringify([1, 0, 0]),
+      })),
     ];
 
     const res = await request(app)
@@ -499,6 +509,7 @@ describe("POST /api/chat — writes carry the owner and load account history", (
         (item) => item.role === "system",
       )?.content ?? "";
     expect(system).not.toContain("[Living Memory: Stale Jack identity");
+    expect(system).toContain("[Living Memory: Valid claim four");
   });
 });
 
