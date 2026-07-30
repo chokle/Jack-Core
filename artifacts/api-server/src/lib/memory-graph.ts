@@ -2026,6 +2026,7 @@ function annotateCandidateMatches(
 /** List queued mentor-concept candidates by status (read-only; default pending). */
 export async function listKnowledgeCandidates(
   status: string = "pending",
+  opts: { includeConversationCorrections?: boolean } = {},
 ): Promise<KnowledgeCandidateRecord[]> {
   const { data, error } = await supabase
     .from("knowledge_candidates")
@@ -2033,7 +2034,14 @@ export async function listKnowledgeCandidates(
     .eq("status", status)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const records = (data ?? []).map((row: Record<string, unknown>) => mapCandidateRow(row));
+  const records = (data ?? [])
+    .map((row: Record<string, unknown>) => mapCandidateRow(row))
+    .filter(
+      (record) =>
+        opts.includeConversationCorrections === true ||
+        (!record.id.startsWith("correction:") &&
+          !record.id.startsWith("core-correction:")),
+    );
   if (records.some((r) => r.bestMatches.length > 0)) {
     annotateCandidateMatches(records, await loadLiveKnowledgeIndex());
   }

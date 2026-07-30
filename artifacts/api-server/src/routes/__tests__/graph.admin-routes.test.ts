@@ -108,6 +108,19 @@ beforeEach(() => {
 });
 
 describe("POST /graph/candidates/:id/resolve — authorization", () => {
+  it("requires versioned configuration for Core Memory proposals", async () => {
+    signInAs("admin");
+    const res = await request(app)
+      .post(
+        "/api/graph/candidates/core-correction:22222222-2222-2222-2222-222222222222/resolve",
+      )
+      .send({ action: "merge", targetNodeId: "k:concept:replacement" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("core_memory_configuration_required");
+    expect(resolveKnowledgeCandidate).not.toHaveBeenCalled();
+  });
+
   it("rejects an anonymous caller with 401 and never touches the graph", async () => {
     const res = await request(app)
       .post(`/api/graph/candidates/${CANDIDATE_ID}/resolve`)
@@ -308,7 +321,9 @@ describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
     const res = await request(app).get("/api/graph/candidates");
 
     expect(res.status).toBe(200);
-    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending");
+    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending", {
+      includeConversationCorrections: false,
+    });
   });
 
   it("allows an anonymous caller to explicitly request status=pending", async () => {
@@ -317,7 +332,9 @@ describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
     const res = await request(app).get("/api/graph/candidates").query({ status: "pending" });
 
     expect(res.status).toBe(200);
-    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending");
+    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending", {
+      includeConversationCorrections: false,
+    });
   });
 
   it("rejects an anonymous caller requesting a non-pending status with 403", async () => {
@@ -343,6 +360,8 @@ describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
     const res = await request(app).get("/api/graph/candidates").query({ status: "archived" });
 
     expect(res.status).toBe(200);
-    expect(listKnowledgeCandidates).toHaveBeenCalledWith("archived");
+    expect(listKnowledgeCandidates).toHaveBeenCalledWith("archived", {
+      includeConversationCorrections: true,
+    });
   });
 });

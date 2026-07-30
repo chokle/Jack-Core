@@ -27,6 +27,7 @@ import {
   JACK_CORE_SYSTEM_MAP_PROMPT,
   JACK_CORE_SYSTEMS,
 } from "../system-map.js";
+import { JACK_CORE_MEMORY } from "../core-memory.js";
 
 /**
  * QA checks for the "default jurisdiction = Canada" policy. These are
@@ -162,6 +163,20 @@ describe("Canadian jurisdiction policy", () => {
       );
       expect(prompt).toMatch(/contribution is captured and being evaluated for Living Memory/i);
       expect(prompt).toMatch(/Only the interview's contributor may resume or answer/i);
+    });
+
+    it("uses versioned Core Memory and removes stale capability claims", () => {
+      const prompt = buildChatSystemPrompt({
+        usedInternalKnowledge: false,
+        contextText: "",
+      });
+      expect(prompt).toContain(JACK_CORE_MEMORY.identity);
+      expect(prompt).toContain(`CORE MEMORY VERSION: ${JACK_CORE_MEMORY.version}`);
+      expect(prompt).not.toContain(
+        "You are Jack — an AI Trade Intelligence Engine",
+      );
+      expect(prompt).not.toContain("prepare for Red Seal certification");
+      expect(prompt).toMatch(/do not claim Red Seal mock-exam preparation/i);
     });
 
     it("interview prompt assumes Canada and forbids US defaults", () => {

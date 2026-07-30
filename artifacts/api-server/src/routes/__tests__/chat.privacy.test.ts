@@ -43,8 +43,10 @@ vi.mock("../../lib/ask-learning.js", () => ({
 }));
 
 import chatRouter from "../chat.js";
-import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+import { embedRegistry, fake, resetMocks } from "../../lib/__tests__/mocks.js";
 import { chatCompletion } from "../../lib/openai.js";
+import { learnFromAskInteraction } from "../../lib/ask-learning.js";
+import { JACK_CORE_MEMORY } from "../../lib/core-memory.js";
 
 const USER_A = "user_aaaaaaaaaaaaaaaaaaaaaa";
 const USER_B = "user_bbbbbbbbbbbbbbbbbbbbbb";
@@ -86,6 +88,11 @@ interface HistoryRow {
 
 beforeEach(() => {
   resetMocks();
+  vi.mocked(learnFromAskInteraction).mockReset();
+  vi.mocked(learnFromAskInteraction).mockResolvedValue({
+    status: "discarded",
+    extractedCount: 0,
+  });
 });
 
 describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
@@ -220,6 +227,92 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
 });
 
 describe("POST /api/chat — writes carry the owner and load account history", () => {
+  it.each([
+    "Who are you?",
+    "What are you?",
+    "Who are you and what do you do?",
+    "Explain Jack's identity in more detail.",
+  ])("answers %s from versioned Core Memory without model drift", async (message) => {
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toBe(JACK_CORE_MEMORY.identity);
+    expect(res.body.citations).toEqual([]);
+    expect(chatCompletion).not.toHaveBeenCalled();
+    expect(fake.tables["chat_messages"].map((row) => row["content"])).toEqual([
+      message,
+      JACK_CORE_MEMORY.identity,
+    ]);
+  });
+
+  it("reports a durable correction as pending, never already remembered", async () => {
+    vi.mocked(learnFromAskInteraction).mockResolvedValueOnce({
+      status: "pending",
+      extractedCount: 1,
+    });
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({
+        message:
+          "Correction: FCAW-S does not require shielding gas. Supersede the earlier claim.",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(/saved.*pending/i);
+    expect(res.body.answer).toMatch(/not canonical/i);
+    expect(chatCompletion).not.toHaveBeenCalled();
+  });
+
+  it("answers a correction-factor trade question through normal retrieval", async () => {
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({
+        message: "What's the temperature correction factor for conductor ampacity?",
+      });
+
+    expect(res.status).toBe(200);
+    expect(chatCompletion).toHaveBeenCalledOnce();
+    expect(learnFromAskInteraction).toHaveBeenCalledOnce();
+  });
+
+  it("admits when correction persistence fails", async () => {
+    vi.mocked(learnFromAskInteraction).mockRejectedValueOnce(
+      new Error("candidate write failed"),
+    );
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: "Correction: that procedure is outdated." });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(/couldn't store.*not treated it as retained/i);
+    expect(res.body.learning.status).toBe("failed");
+  });
+
+  it("recognizes the authorized canonical identity already stored in Core Memory", async () => {
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({
+        message: `Treat my correction as the canonical self-description and supersede the previous wording: "${JACK_CORE_MEMORY.identity}"`,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(/already matches.*Core Memory/i);
+    expect(res.body.learning.status).toBe("verified");
+    expect(learnFromAskInteraction).not.toHaveBeenCalled();
+  });
+
   it("stamps the user id on new rows and only threads the same user's prior turns", async () => {
     // A prior message from a DIFFERENT user on the same device must not leak into
     // this user's conversation context — and the new rows must be owned by USER_A.
@@ -376,6 +469,47 @@ describe("POST /api/chat — writes carry the owner and load account history", (
       call?.messages?.find((m) => m.role === "system")?.content ?? "";
     expect(system).toContain("[Living Memory: Split TIG torch ferrule check");
     expect(system).toContain("radial cracks before assembly");
+  });
+
+  it("does not retrieve a rejected or superseded Living Memory claim", async () => {
+    embedRegistry.set("Explain Jack's product identity in detail.", [1, 0, 0]);
+    fake.tables["knowledge_nodes"] = [
+      {
+        id: "k:concept:stale-jack-identity",
+        kind: "concept",
+        label: "Stale Jack identity",
+        description: "Jack is an AI Trade Intelligence Engine.",
+        verification_status: "rejected",
+        meta: { sourceCount: 1 },
+        embedding: JSON.stringify([1, 0, 0]),
+      },
+      ...["one", "two", "three", "four"].map((suffix) => ({
+        id: `k:concept:valid-${suffix}`,
+        kind: "concept",
+        label: `Valid claim ${suffix}`,
+        description: `Eligible evidence ${suffix}`,
+        verification_status: "verified",
+        meta: { sourceCount: 1 },
+        embedding: JSON.stringify([1, 0, 0]),
+      })),
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: "Explain Jack's product identity in detail." });
+
+    expect(res.status).toBe(200);
+    expect(res.body.citations).not.toContainEqual(
+      expect.objectContaining({ entryId: "k:concept:stale-jack-identity" }),
+    );
+    const system =
+      vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages.find(
+        (item) => item.role === "system",
+      )?.content ?? "";
+    expect(system).not.toContain("[Living Memory: Stale Jack identity");
+    expect(system).toContain("[Living Memory: Valid claim four");
   });
 });
 

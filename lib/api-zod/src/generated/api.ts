@@ -412,9 +412,10 @@ export const AskJackResponse = zod.object({
 })),
   "usedInternalKnowledge": zod.boolean().optional(),
   "learning": zod.object({
-  "status": zod.enum(['verified', 'discarded', 'failed']),
+  "status": zod.enum(['verified', 'pending', 'discarded', 'failed']),
   "extractedCount": zod.number().min(askJackResponseLearningExtractedCountMin),
-  "summary": zod.string().optional()
+  "summary": zod.string().optional(),
+  "candidateId": zod.string().optional()
 })
 })
 

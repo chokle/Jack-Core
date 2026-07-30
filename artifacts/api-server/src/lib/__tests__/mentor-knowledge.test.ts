@@ -355,6 +355,29 @@ describe("mentor ingestion — three-band decision", () => {
     expect(candidates()[0]!["status"]).toBe("accepted");
   });
 
+  it("keeps conversation corrections out of the public candidate list", async () => {
+    fake.tables["knowledge_candidates"] = [
+      {
+        id: `correction:${ANSWER_1}`,
+        status: "pending",
+        title: "Private correction",
+        description: "Account-owned correction context",
+        category: "concept",
+        best_matches: [],
+        aliases: [],
+        created_at: "2026-07-29T00:00:00Z",
+        updated_at: "2026-07-29T00:00:00Z",
+      },
+    ];
+
+    expect(await listKnowledgeCandidates("pending")).toEqual([]);
+    expect(
+      await listKnowledgeCandidates("pending", {
+        includeConversationCorrections: true,
+      }),
+    ).toHaveLength(1);
+  });
+
   it("a confidently novel concept creates a new node with mentor provenance", async () => {
     const v = "vid-1";
     await seedVideo(v);

@@ -22,7 +22,7 @@ function resolveSiteUrl(): string {
 function seoAssetsPlugin(): Plugin {
   const siteUrl = resolveSiteUrl();
 
-  const robotsTxt = `# Torch — Jack: AI Trade Intelligence Engine
+  const robotsTxt = `# Torch — Jack: Field Intelligence
 User-agent: *
 Allow: /
 

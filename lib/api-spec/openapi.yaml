@@ -1380,7 +1380,7 @@ components:
           properties:
             status:
               type: string
-              enum: [verified, discarded, failed]
+              enum: [verified, pending, discarded, failed]
             extractedCount:
               type: integer
               minimum: 0
