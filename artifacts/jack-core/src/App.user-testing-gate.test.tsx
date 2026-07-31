@@ -11,15 +11,16 @@ interface MeProfile {
 }
 
 const identity: MeProfile = {
-  userId: "user-test-mobile-profile",
+  userId: "user-test-gate-profile",
   isAdmin: false,
   name: "Authenticated User",
-  email: "mobile-test@torchlabs.ca",
+  email: "gate-test@torchlabs.ca",
 };
 
 const modalCloseAfterStart = { value: false };
 const recordingSupported = { value: false };
 const rejectStart = { value: false };
+const modalStartSpy = vi.fn();
 
 const toast = vi.fn();
 
@@ -86,6 +87,7 @@ vi.mock("./components/testing/UserTestingModal", () => ({
     return (
       <div>
         <button type="button" data-testid="user-testing-start" onClick={() => {
+          modalStartSpy();
           onStart();
           if (modalCloseAfterStart.value) {
             onCancel();
@@ -179,95 +181,86 @@ async function openTestingGate() {
   });
 }
 
-describe("mobile user-testing gate transition", () => {
+async function unlockViaRecordingGate() {
+  fireEvent.click(screen.getByTestId("user-testing-gate-start"));
+  const modalStartButton = await screen.findByTestId("user-testing-start");
+  fireEvent.click(modalStartButton);
+}
+
+function clickSidebarStart() {
+  fireEvent.click(screen.getByTestId("start-user-test"));
+}
+
+function clickAnyGateStart() {
+  const gateStart = screen.queryByTestId("user-testing-gate-start");
+  if (gateStart) {
+    fireEvent.click(gateStart);
+    return;
+  }
+  fireEvent.click(screen.getByTestId("start-user-test"));
+}
+
+describe("user-testing gate transition", () => {
   afterEach(() => {
     cleanup();
     sessionStorage.clear();
     vi.clearAllMocks();
+    modalStartSpy.mockClear();
     modalCloseAfterStart.value = false;
     recordingSupported.value = false;
     rejectStart.value = false;
   });
 
-  it("fails on unsupported recording when modal close behavior re-asserts declined", async () => {
-    window.innerWidth = 375;
+  it("does not relock when a late declined event follows unsupported recording start", async () => {
     recordingSupported.value = false;
     modalCloseAfterStart.value = true;
 
     await openTestingGate();
-
-    const gateStartButton = screen.getByTestId("user-testing-gate-start");
-    fireEvent.click(gateStartButton);
-
-    fireEvent.click(await screen.findByTestId("user-testing-start"));
+    await unlockViaRecordingGate();
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
   });
 
-  it("unavailable recording path unlocks app when modal close is ignored after successful start attempt", async () => {
-    window.innerWidth = 375;
+  it("unlocks when unsupported recording becomes unavailable and starts", async () => {
     recordingSupported.value = false;
     modalCloseAfterStart.value = false;
 
     await openTestingGate();
-
-    const gateStartButton = screen.getByTestId("user-testing-gate-start");
-    fireEvent.click(gateStartButton);
-
-    fireEvent.click(await screen.findByTestId("user-testing-start"));
+    await unlockViaRecordingGate();
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
   });
 
-  it("supported recording path still unlocks", async () => {
-    window.innerWidth = 375;
-    recordingSupported.value = true;
-    rejectStart.value = false;
-    modalCloseAfterStart.value = false;
-
-    await openTestingGate();
-
-    const gateStartButton = screen.getByTestId("user-testing-gate-start");
-    fireEvent.click(gateStartButton);
-    fireEvent.click(await screen.findByTestId("user-testing-start"));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    });
-  });
-
-  it("repeated Start Test taps remain idempotent", async () => {
-    window.innerWidth = 375;
-    recordingSupported.value = false;
-    modalCloseAfterStart.value = false;
-
-    await openTestingGate();
-
-    const gateStartButton = screen.getByTestId("user-testing-gate-start");
-    fireEvent.click(gateStartButton);
-
-    const startButton = await screen.findByTestId("user-testing-start");
-    fireEvent.click(startButton);
-    fireEvent.click(startButton);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    });
-  });
-
-  it("recording permission denied path does not trap the user", async () => {
-    window.innerWidth = 375;
+  it("unlocks supported recording flow after permission is denied", async () => {
     recordingSupported.value = true;
     rejectStart.value = true;
     modalCloseAfterStart.value = false;
 
     await openTestingGate();
+    await unlockViaRecordingGate();
 
-    fireEvent.click(screen.getByTestId("user-testing-gate-start"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    });
+  });
+
+  it("unlocks supported recording flow after explicit cancel", async () => {
+    recordingSupported.value = true;
+    rejectStart.value = false;
+
+    await openTestingGate();
+    clickAnyGateStart();
+    fireEvent.click(screen.getByTestId("user-testing-cancel"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).not.toBeNull();
+    });
+
+    clickAnyGateStart();
     fireEvent.click(await screen.findByTestId("user-testing-start"));
 
     await waitFor(() => {
@@ -275,31 +268,40 @@ describe("mobile user-testing gate transition", () => {
     });
   });
 
-  it("page start path unlocks unsupported flow on desktop", async () => {
-    window.innerWidth = 1280;
+  it("handles repeated Start presses idempotently", async () => {
     recordingSupported.value = false;
-    modalCloseAfterStart.value = false;
 
     await openTestingGate();
+    fireEvent.click(screen.getByTestId("user-testing-gate-start"));
+    fireEvent.click(await screen.findByTestId("user-testing-start"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    });
 
+    await openTestingGate();
     fireEvent.click(screen.getByTestId("user-testing-gate-start"));
     fireEvent.click(await screen.findByTestId("user-testing-start"));
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
+
+    expect(modalStartSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("sidebar start path unlocks unsupported flow on desktop", async () => {
-    window.innerWidth = 1280;
+  it("converges page and sidebar entry points to the same unlock path", async () => {
     recordingSupported.value = false;
-    modalCloseAfterStart.value = false;
 
     await openTestingGate();
-
-    fireEvent.click(screen.getByTestId("start-user-test"));
+    fireEvent.click(screen.getByTestId("user-testing-gate-start"));
     fireEvent.click(await screen.findByTestId("user-testing-start"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    });
 
+    await openTestingGate();
+    clickSidebarStart();
+    fireEvent.click(await screen.findByTestId("user-testing-start"));
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
