@@ -202,6 +202,39 @@ describe("Canadian jurisdiction policy", () => {
       expect(s).toMatch(/do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/);
       expect(s).toMatch(/CSA, CWB, Red Seal/);
     });
+
+    it("distinguishes identity questions from capability questions", () => {
+      const withCtx = buildChatSystemPrompt({
+        usedInternalKnowledge: false,
+        contextText: "",
+      });
+
+      expect(withCtx).toContain("Use the exact canonical introduction only when the user's primary intent is identity-only:");
+      expect(withCtx).toContain("- Who are you?");
+      expect(withCtx).toContain("- What are you?");
+      expect(withCtx).toContain("- Introduce yourself.");
+      expect(withCtx).toContain("- Who are you and what do you do?");
+      expect(withCtx).toContain(
+        "Capability, knowledge, suitability, and problem-solving questions are not identity questions.",
+      );
+      expect(withCtx).toContain(
+        "For those questions, answer the capability being asked about.",
+      );
+      expect(withCtx).toContain(
+        "When responding to an identity-only question, output exactly:",
+      );
+      expect(withCtx).toContain(
+        "with no preamble, no explanation, and no additional content.",
+      );
+      expect(withCtx).toContain("Do not merely repeat the canonical introduction.");
+      expect(withCtx).toContain("Useful examples include: what are you good at");
+      expect(withCtx).toContain(
+        "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
+      );
+      expect(withCtx).toContain(
+        "It must also not suppress a legitimate repeated identity-only question.",
+      );
+    });
   });
 
   describe("jurisdiction brief", () => {
