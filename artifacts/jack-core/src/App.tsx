@@ -334,7 +334,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const handleTestingEvent = (event: TestingOverlayEvent) => {
     if (event === "declined") {
-      setTestingGate({ accepted: false, restricted: true });
+      setTestingGate((prev) => {
+        if (prev.accepted) return prev;
+        return { accepted: false, restricted: true };
+      });
       return;
     }
     if (event === "started" || event === "unavailable" || event === "cancelled") {
