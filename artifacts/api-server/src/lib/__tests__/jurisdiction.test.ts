@@ -27,6 +27,11 @@ import {
   JACK_CORE_SYSTEM_MAP_PROMPT,
   JACK_CORE_SYSTEMS,
 } from "../system-map.js";
+import { JACK_CONSTITUTION_PROMPT } from "../constitution.js";
+import {
+  JACK_CANONICAL_IDENTITY_BLOCK,
+  JACK_CANONICAL_IDENTITY_INTRODUCTION,
+} from "../jack-identity.js";
 
 /**
  * QA checks for the "default jurisdiction = Canada" policy. These are
@@ -129,6 +134,19 @@ describe("Canadian jurisdiction policy", () => {
   describe("the policy reaches every generation prompt", () => {
     it("chat answer prompt embeds the full policy and stays Torch-first", () => {
       const withCtx = buildChatSystemPrompt({ usedInternalKnowledge: true, contextText: "SEG-CONTEXT" });
+      expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
+      expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
+      expect(withCtx).not.toContain(
+        "AI Trade Intelligence Engine designed to support skilled trades workers in Canada",
+      );
+      const idxCanonical = withCtx.indexOf(JACK_CANONICAL_IDENTITY_BLOCK);
+      const idxConstitution = withCtx.indexOf(JACK_CONSTITUTION_PROMPT);
+      const idxSystemMap = withCtx.indexOf(JACK_CORE_SYSTEM_MAP_PROMPT);
+      const idxJurisdiction = withCtx.indexOf(JURISDICTION_POLICY_PROMPT);
+      expect(idxConstitution).toBeGreaterThan(idxCanonical);
+      expect(idxSystemMap).toBeGreaterThan(idxCanonical);
+      expect(idxJurisdiction).toBeGreaterThan(idxCanonical);
+
       expect(withCtx).toContain("SOURCE PRIORITY ORDER");
       expect(withCtx).toContain("Torch Knowledge Repository");
       expect(withCtx).toContain("SEG-CONTEXT");
@@ -166,6 +184,9 @@ describe("Canadian jurisdiction policy", () => {
 
     it("interview prompt assumes Canada and forbids US defaults", () => {
       const s = buildInterviewSystemPrompt({ name: "Welder", remaining: ["safety"], machineHint: undefined });
+      expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
+      expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
+      expect(s).not.toContain("AI Trade Intelligence Engine designed to support skilled trades workers in Canada");
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
       expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
       expect(s).toMatch(/never assume OSHA, AWS, NEC/);
@@ -173,6 +194,9 @@ describe("Canadian jurisdiction policy", () => {
 
     it("distillation prompt records Canadian standards, not US equivalents", () => {
       const s = buildDistillationSystemPrompt("(none)");
+      expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
+      expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
+      expect(s).not.toContain("AI Trade Intelligence Engine for skilled trades training");
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
       expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
       expect(s).toMatch(/do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/);

@@ -1,3 +1,5 @@
+import { JACK_CANONICAL_IDENTITY_BLOCK } from "./jack-identity.js";
+
 export interface JackCoreSystem {
   name: string;
   role: string;
@@ -56,6 +58,8 @@ export const JACK_CORE_SYSTEMS: readonly JackCoreSystem[] = [
 ] as const;
 
 export const JACK_CORE_SYSTEM_MAP_PROMPT = `JACK CORE SYSTEM MAP — KNOW YOUR WORKING PARTS.
+${JACK_CANONICAL_IDENTITY_BLOCK}
+
 You are Jack Core, Torch's shared intelligence source. You are not an isolated generic chatbot. Ask Jack, Living Memory, Interview Mode, Library ingestion, Review, user memory, and the Torch Command Centre are coordinated parts of the same Torch system.
 
 ${JACK_CORE_SYSTEMS.map(

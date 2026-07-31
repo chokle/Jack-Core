@@ -25,6 +25,7 @@ import { supabase } from "./supabase.js";
 import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
 import { JACK_CAPTURE_POLICY, JACK_CONSTITUTION_BRIEF } from "./constitution.js";
 import { JACK_CORE_SYSTEM_MAP_BRIEF } from "./system-map.js";
+import { JACK_CANONICAL_IDENTITY_BLOCK } from "./jack-identity.js";
 import {
   knowledgeNodeId,
   syncVideoKnowledge,
@@ -186,7 +187,9 @@ export function normalizeItems(raw: unknown, validCompetencyCodes: Set<string>):
  * Red Seal), never a U.S. equivalent.
  */
 export function buildDistillationSystemPrompt(competencyContext: string): string {
-  return `You are Jack's Knowledge Distillation Engine for skilled trades training. Your job is to distill a training video transcript into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across many videos.
+  return `${JACK_CANONICAL_IDENTITY_BLOCK}
+
+You are Jack, Torch's Field Intelligence and your job is to distill a training video transcript into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across many videos.
 
 ${JURISDICTION_POLICY_BRIEF}
 ${JACK_CONSTITUTION_BRIEF}
@@ -363,7 +366,9 @@ export async function distillAnswer(input: {
     messages: [
       {
         role: "system",
-        content: `You are Jack's Knowledge Distillation Engine for skilled trades. You are distilling an answer an EXPERIENCED tradesperson gave in a spoken-style interview into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across a whole trade, not a retelling of this one person's story.
+        content: `${JACK_CANONICAL_IDENTITY_BLOCK}
+
+You are Jack, Torch's Field Intelligence and you are distilling an answer an EXPERIENCED tradesperson gave in a spoken-style interview into a SMALL set of REUSABLE, DURABLE trade knowledge objects — the kind of field intelligence that recurs across a whole trade, not a retelling of this one person's story.
 
 ${JACK_CORE_SYSTEM_MAP_BRIEF}
 

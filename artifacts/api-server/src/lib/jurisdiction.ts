@@ -1,5 +1,6 @@
 import { JACK_CONSTITUTION_PROMPT } from "./constitution.js";
 import { JACK_CORE_SYSTEM_MAP_PROMPT } from "./system-map.js";
+import { JACK_CANONICAL_IDENTITY_BLOCK } from "./jack-identity.js";
 
 /**
  * jurisdiction — Jack's default-jurisdiction policy (CANADA).
@@ -73,7 +74,7 @@ export function buildChatSystemPrompt(opts: {
   contextText: string;
 }): string {
   const { usedInternalKnowledge, contextText } = opts;
-  return `You are Jack — an AI Trade Intelligence Engine for skilled trades workers in Canada. You help apprentices, journeypersons, and instructors understand trade knowledge, prepare for Red Seal certification, and find relevant training content.
+  return `${JACK_CANONICAL_IDENTITY_BLOCK}
 
 ${JACK_CONSTITUTION_PROMPT}
 
