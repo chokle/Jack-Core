@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   selectMemoryGraphModel,
   buildGraphModel,
+  latestMemoryUpdatedAt,
   buildGraphModelFromServer,
   type RawVideo,
   type RawCompetency,
@@ -92,6 +93,74 @@ describe("selectMemoryGraphModel", () => {
     expect(model.nodes.some((n) => n.id === "video:v1")).toBe(false);
     expect(model.nodes.some((n) => n.id === "concept:root-pass")).toBe(true);
     expect(model.edges.length).toBe(serverEdges.length);
+  });
+});
+
+describe("latestMemoryUpdatedAt", () => {
+  it("uses the newest persisted graph-node timestamp rather than an older video", () => {
+    expect(
+      latestMemoryUpdatedAt(
+        {
+          nodes: [
+            {
+              id: "concept:new-field-knowledge",
+              kind: "concept",
+              label: "New field knowledge",
+              createdAt: "2026-07-23T08:00:00.000Z",
+              updatedAt: "2026-07-24T08:30:00.000Z",
+            },
+          ],
+          edges: [],
+        },
+        [
+          {
+            id: "video-1",
+            updated_at: "2026-07-17T08:30:00.000Z",
+          },
+        ],
+      ),
+    ).toBe("2026-07-24T08:30:00.000Z");
+  });
+
+  it("uses valid fallback fields when another node timestamp is invalid", () => {
+    expect(
+      latestMemoryUpdatedAt(
+        {
+          nodes: [
+            {
+              id: "concept:invalid",
+              kind: "concept",
+              label: "Invalid timestamp",
+              updatedAt: "not-a-date",
+              meta: {
+                updated_at: "2026-07-23T10:00:00.000Z",
+              },
+            },
+          ],
+          edges: [],
+        },
+        [{ id: "video-1", created_at: "2026-07-22T10:00:00.000Z" }],
+      ),
+    ).toBe("2026-07-23T10:00:00.000Z");
+  });
+
+  it("uses a video's creation time when its update time is invalid", () => {
+    expect(
+      latestMemoryUpdatedAt(
+        { nodes: [], edges: [] },
+        [
+          {
+            id: "video-1",
+            updated_at: "not-a-date",
+            created_at: "2026-07-22T10:00:00.000Z",
+          },
+        ],
+      ),
+    ).toBe("2026-07-22T10:00:00.000Z");
+  });
+
+  it("returns undefined when no persisted content carries a timestamp", () => {
+    expect(latestMemoryUpdatedAt({ nodes: [], edges: [] }, [])).toBeUndefined();
   });
 });
 

@@ -2,6 +2,8 @@
 
 This file holds the deep mechanics of how knowledge enters and stays consistent in Torch's persistent knowledge graph ("Living Memory"). It is authoritative for the *how*; [`../VISION.md`](../VISION.md) §4 (Living Memory) and §5 (Knowledge Principles) are authoritative for the *why*.
 
+The foundational philosophy and design-only proposal for evolving these mechanics into reviewed, curiosity-led continuous understanding are in [`./continuous-learning-design.md`](./continuous-learning-design.md). The proposal does not change the current behavior documented here.
+
 ## Graph decisions
 
 - Interview Mode reuses the video distillation + graph pipeline: mentor answers are distilled into the SAME canonical concept nodes (provenance is edge-owned via `mentor:<uuid>` → concept edges, deduped by answer id) with `verification_status="mentor_supplied"`, so mentor input corroborates rather than fragments the graph. Interview trade labels are normalized to the seeded Red Seal trades (e.g. "Welding" → "Welder") so mentor concepts hang off existing topic hubs

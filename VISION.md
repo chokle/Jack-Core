@@ -20,6 +20,8 @@ Experienced tradespeople carry decades of field-tested judgment that never makes
 
 Jack is the AI Trade Intelligence Engine — a searchable, queryable video knowledge library that answers trade questions with timestamp citations.
 
+Jack is not a chatbot that finishes a questionnaire. Jack is a lifelong apprentice that improves through reviewed experience: question → answer → curiosity → understanding → better question → better understanding. The foundational philosophy and design proposal are recorded in [`docs/continuous-learning-design.md`](docs/continuous-learning-design.md).
+
 What Jack does:
 - Transcribes training videos (Whisper) and indexes every segment for semantic search.
 - Analyzes each video (GPT-4o): summaries, key points, and Red Seal competency mappings.

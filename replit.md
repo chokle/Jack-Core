@@ -23,6 +23,8 @@ Jack is the AI Trade Intelligence Engine inside **Torch**: a single-page, search
 
 Deep detail: [`docs/architecture.md`](docs/architecture.md) · [`docs/knowledge-graph.md`](docs/knowledge-graph.md) · [`docs/codebase-map.md`](docs/codebase-map.md) · [`docs/product-features.md`](docs/product-features.md). Run commands + Supabase setup: [`docs/operations.md`](docs/operations.md).
 
+Jack's foundational continuous-learning philosophy and the design-only proposal for curiosity-led Interview Mode, reflection, review, and evolving Living Memory live in [`docs/continuous-learning-design.md`](docs/continuous-learning-design.md).
+
 ## Coding Standards
 
 - **Contract-first:** edit `lib/api-spec/openapi.yaml`, then run `pnpm --filter @workspace/api-spec run codegen`. Never hand-edit generated code (`lib/api-client-react/src/generated/`, `lib/api-zod/src/generated/`).
@@ -54,6 +56,7 @@ Protect the **core pipeline** above all new work: upload → transcribe → embe
 
 - [`docs/README.md`](docs/README.md) — documentation index
 - [`docs/architecture.md`](docs/architecture.md) — stack + core architecture decisions (pipeline, strict knowledge-write verification)
+- [`docs/continuous-learning-design.md`](docs/continuous-learning-design.md) — foundational continuous-learning philosophy + design proposal (no implementation authorized)
 - [`docs/knowledge-graph.md`](docs/knowledge-graph.md) — Living Memory graph, ingestion bands, Knowledge Review, Mentor Withdrawal
 - [`docs/codebase-map.md`](docs/codebase-map.md) — where things live (file-by-file)
 - [`docs/product-features.md`](docs/product-features.md) — product feature reference

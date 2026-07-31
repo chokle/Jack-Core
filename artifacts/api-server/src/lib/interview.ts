@@ -19,6 +19,7 @@ import { logger } from "./logger.js";
 import { JURISDICTION_POLICY_BRIEF } from "./jurisdiction.js";
 import { JACK_CONSTITUTION_BRIEF } from "./constitution.js";
 import { JACK_CORE_SYSTEM_MAP_BRIEF } from "./system-map.js";
+import { JACK_CANONICAL_IDENTITY_BLOCK } from "./jack-identity.js";
 
 /** The trades a mentor can be interviewed for (UI selection list). */
 export const INTERVIEW_TRADES = [
@@ -217,7 +218,9 @@ export function buildInterviewSystemPrompt(args: {
   machineHint: string | undefined;
 }): string {
   const { name, remaining, machineHint } = args;
-  return `You are Jack, interviewing a seasoned ${name} to capture their hard-won field knowledge for an apprentice-facing knowledge base. Interview like a sharp, curious human — not a form.
+  return `${JACK_CANONICAL_IDENTITY_BLOCK}
+
+You are Jack, interviewing a seasoned ${name} to capture their hard-won field knowledge for an apprentice-facing knowledge base. Interview like a sharp, curious human — not a form.
 
 ${JURISDICTION_POLICY_BRIEF}
 ${JACK_CONSTITUTION_BRIEF}

@@ -62,6 +62,7 @@ beforeEach(() => {
       status: "parked",
       context_snapshot: [],
       created_at: "2026-07-22T00:00:00.000Z",
+      updated_at: "2026-07-22T01:00:00.000Z",
     },
   ];
 });
@@ -129,6 +130,55 @@ describe("parked interview ownership", () => {
       status: "resumed",
       canManage: true,
     });
+  });
+
+  it("makes repeated resume idempotent without refreshing timestamps or unrelated rows", async () => {
+    const unrelated = {
+      ...fake.tables["parked_thoughts"][0],
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "unrelated",
+    };
+    fake.tables["parked_thoughts"].push(unrelated);
+
+    const first = await request(app)
+      .post(`/api/parking-lot/${THOUGHT_ID}/resume`)
+      .set("x-test-user", OWNER);
+    const firstUpdatedAt = fake.tables["parked_thoughts"][0]?.["updated_at"];
+    const unrelatedBefore = { ...fake.tables["parked_thoughts"][1] };
+
+    const second = await request(app)
+      .post(`/api/parking-lot/${THOUGHT_ID}/resume`)
+      .set("x-test-user", OWNER);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.body.status).toBe("resumed");
+    expect(fake.tables["parked_thoughts"][0]?.["updated_at"]).toBe(firstUpdatedAt);
+    expect(fake.tables["parked_thoughts"][1]).toEqual(unrelatedBefore);
+  });
+
+  it("keeps resumed and resolved items out of parked lists", async () => {
+    fake.tables["parked_thoughts"].push(
+      {
+        ...fake.tables["parked_thoughts"][0],
+        id: "33333333-3333-4333-8333-333333333333",
+        status: "resumed",
+      },
+      {
+        ...fake.tables["parked_thoughts"][0],
+        id: "44444444-4444-4444-8444-444444444444",
+        status: "resolved",
+      },
+    );
+
+    const response = await request(app)
+      .get("/api/parking-lot?status=parked")
+      .set("x-test-user", OWNER);
+
+    expect(response.status).toBe(200);
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      THOUGHT_ID,
+    ]);
   });
 
   it("does not let presentation mode create an owned interview bookmark", async () => {
