@@ -89,7 +89,39 @@ const localClerkUiUrl = useDirectClerkAssets
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
+const USER_TESTING_DECLINED_KEY = "jack.userTesting.declinedWithoutRecording.v1";
 const AUTH_STARTUP_TIMEOUT_MS = 6_000;
+
+function userTestingDeclinedKey(userId: string) {
+  return `${USER_TESTING_DECLINED_KEY}:${userId}`;
+}
+
+function readUserTestingDeclined(userId?: string | null): boolean {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(userTestingDeclinedKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistUserTestingDeclined(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(userTestingDeclinedKey(userId), "true");
+  } catch {
+    // Local storage may be unavailable; keep current session behavior.
+  }
+}
+
+function clearUserTestingDeclined(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(userTestingDeclinedKey(userId));
+  } catch {
+    // Storage can be unavailable; preserve current session state.
+  }
+}
 
 function captureTorchInterviewHandoff() {
   const params = new URLSearchParams(window.location.search);
@@ -222,6 +254,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // A monotonically-increasing token so clicking the *same* citation twice still
   // re-triggers a seek; `time` is the target position in seconds.
   const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
+  const testingAcceptanceInProgress = useRef(false);
 
   const graph = useMemoryGraphData();
 
@@ -252,6 +285,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     accepted: false,
     restricted: false,
   }));
+  useEffect(() => {
+    if (testingGate.accepted) {
+      testingAcceptanceInProgress.current = false;
+    }
+  }, [testingGate.accepted]);
 
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
@@ -259,6 +297,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const isSignedIn = Boolean(me?.userId);
   const userLabel = me?.name ?? me?.email ?? "Account";
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
+
+  useEffect(() => {
+    if (me?.isAdmin !== false) return;
+    if (!me.userId || !readUserTestingDeclined(me.userId)) return;
+    setTestingGate((prev) => {
+      if (prev.accepted) return prev;
+      return { ...prev, restricted: false };
+    });
+  }, [me?.userId, me?.isAdmin]);
 
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
@@ -336,13 +383,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (event === "declined") {
       // A late decline can arrive after "started" or "unavailable" in the same
       // batched transition; keep the unlocked state once the gate has opened.
+      const shouldPersistDeclinedOptOut = !testingGate.accepted && !testingAcceptanceInProgress.current;
+      if (shouldPersistDeclinedOptOut) {
+        persistUserTestingDeclined(me?.userId);
+      }
       setTestingGate((prev) => {
         if (prev.accepted) return prev;
-        return { accepted: false, restricted: true };
+        return { accepted: false, restricted: false };
       });
       return;
     }
     if (event === "started" || event === "unavailable" || event === "cancelled") {
+      clearUserTestingDeclined(me?.userId);
+      testingAcceptanceInProgress.current = true;
       setTestingGate({ accepted: true, restricted: false });
       return;
     }
