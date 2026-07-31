@@ -334,7 +334,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const handleTestingEvent = (event: TestingOverlayEvent) => {
     if (event === "declined") {
-      setTestingGate({ accepted: false, restricted: true });
+      // A late decline can arrive after "started" or "unavailable" in the same
+      // batched transition; keep the unlocked state once the gate has opened.
+      setTestingGate((prev) => {
+        if (prev.accepted) return prev;
+        return { accepted: false, restricted: true };
+      });
       return;
     }
     if (event === "started" || event === "unavailable" || event === "cancelled") {
