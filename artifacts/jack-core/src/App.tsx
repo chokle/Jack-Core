@@ -38,6 +38,7 @@ import {
   type TestingOverlayEvent,
   type TestingOverlayHandle,
 } from "./components/testing/TestingOverlay";
+import { UserTestingGate } from "./components/testing/UserTestingGate";
 import {
   TelemetryConsentModal,
   type TelemetryConsentChoices,
@@ -104,7 +105,71 @@ const localClerkUiUrl = useDirectClerkAssets
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
+const USER_TESTING_DECLINED_KEY = "jack.userTesting.declinedWithoutRecording.v1";
+const USER_TESTING_ACCEPTED_KEY = "jack.userTesting.acceptedWithoutRecording.v1";
 const AUTH_STARTUP_TIMEOUT_MS = 6_000;
+
+function userTestingDeclinedKey(userId: string) {
+  return `${USER_TESTING_DECLINED_KEY}:${userId}`;
+}
+
+function readUserTestingDeclined(userId?: string | null): boolean {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(userTestingDeclinedKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistUserTestingDeclined(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(userTestingDeclinedKey(userId), "true");
+  } catch {
+    // Local storage may be unavailable; keep current session behavior.
+  }
+}
+
+function clearUserTestingDeclined(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(userTestingDeclinedKey(userId));
+  } catch {
+    // Storage can be unavailable; preserve current session state.
+  }
+}
+
+function userTestingAcceptedKey(userId: string) {
+  return `${USER_TESTING_ACCEPTED_KEY}:${userId}`;
+}
+
+function readUserTestingAccepted(userId?: string | null): boolean {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(userTestingAcceptedKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistUserTestingAccepted(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(userTestingAcceptedKey(userId), "true");
+  } catch {
+    // Local storage may be unavailable; keep current session behavior.
+  }
+}
+
+function clearUserTestingAccepted(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(userTestingAcceptedKey(userId));
+  } catch {
+    // Storage can be unavailable; preserve current session state.
+  }
+}
 
 function captureTorchInterviewHandoff() {
   const params = new URLSearchParams(window.location.search);
@@ -237,6 +302,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // A monotonically-increasing token so clicking the *same* citation twice still
   // re-triggers a seek; `time` is the target position in seconds.
   const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
+  const testingAcceptanceInProgress = useRef(false);
 
   const graph = useMemoryGraphData();
 
@@ -258,12 +324,25 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
   // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
+  const shouldAutoPromptUserTesting = new URLSearchParams(window.location.search).get("test") === "true";
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
   const feedbackRef = useRef<UserTestFeedbackHandle>(null);
   const testStartPendingRef = useRef(false);
   const [testStartPending, setTestStartPending] = useState(false);
   const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
+  const [testingGate, setTestingGate] = useState<{
+    accepted: boolean;
+    restricted: boolean;
+  }>(() => ({
+    accepted: false,
+    restricted: true,
+  }));
+  useEffect(() => {
+    if (testingGate.accepted) {
+      testingAcceptanceInProgress.current = false;
+    }
+  }, [testingGate.accepted]);
 
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
@@ -271,6 +350,35 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const isSignedIn = Boolean(me?.userId);
   const userLabel = me?.name ?? me?.email ?? "Account";
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
+
+  useEffect(() => {
+    if (me?.isAdmin !== false) return;
+    setTestingGate((prev) => {
+      if (!me?.userId) return prev;
+      if (prev.accepted) return prev;
+      const accepted = readUserTestingAccepted(me.userId);
+      if (accepted) {
+        return { accepted: true, restricted: false };
+      }
+      return {
+        accepted: false,
+        restricted: !readUserTestingDeclined(me.userId),
+      };
+    });
+  }, [me?.userId, me?.isAdmin]);
+
+  useEffect(() => {
+    if (testingOverlayRef.current == null) return;
+    if (!shouldAutoPromptUserTesting) return;
+    if (me?.isAdmin !== false) return;
+    if (testingGate.accepted || testingGate.restricted === false) return;
+    const markerUser = me?.userId ? readUserTestingDeclined(me.userId) : false;
+    if (markerUser) return;
+    const timer = window.setTimeout(() => {
+      testingOverlayRef.current?.open();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [me?.userId, me?.isAdmin]);
 
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
@@ -350,6 +458,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     try {
       const session = await startTestSession(pilotId);
       setFeedbackSessionId(session.id);
+      setTestingGate({ accepted: true, restricted: false });
+      clearUserTestingDeclined(me?.userId);
       setTelemetryContext((current) =>
         current ? { ...current, session } : current,
       );
@@ -366,10 +476,20 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleStartUserTest = async () => {
-    const context = telemetryContext ?? (await loadTelemetryContext());
-    setTelemetryContext(context);
-    if (!context.enrolled || !context.scope) {
-      window.alert("No active pilot membership was found for this account.");
+    if (testStartPendingRef.current) return;
+    setTestingGate((prev) => ({ ...prev, restricted: false }));
+    let context = telemetryContext;
+    if (!context) {
+      try {
+        context = await loadTelemetryContext();
+      } catch {
+        testingOverlayRef.current?.open();
+        return;
+      }
+      setTelemetryContext(context);
+    }
+    if (!context || !context.enrolled || !context.scope) {
+      testingOverlayRef.current?.open();
       return;
     }
     if (
@@ -378,9 +498,41 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       context.consents.telemetry.consentVersion === context.consentVersion
     ) {
       await launchTestSession(context.scope.pilotId);
+      testingOverlayRef.current?.open();
       return;
     }
     setTelemetryConsentOpen(true);
+  };
+
+  const handleTestingEvent = (event: TestingOverlayEvent) => {
+    if (event === "declined") {
+      // A late decline can arrive after "started" or "unavailable" in the same
+      // batched transition; keep the unlocked state once the gate has opened.
+      if (testingGate.accepted || testingAcceptanceInProgress.current) return;
+      persistUserTestingDeclined(me?.userId);
+      clearUserTestingAccepted(me?.userId);
+      setTestingGate((prev) => {
+        if (prev.accepted) return prev;
+        return { accepted: false, restricted: false };
+      });
+      return;
+    }
+    if (event === "started") {
+      clearUserTestingDeclined(me?.userId);
+      persistUserTestingAccepted(me?.userId);
+      testingAcceptanceInProgress.current = true;
+      setTestingGate({ accepted: true, restricted: false });
+      return;
+    }
+    if (event === "unavailable" || event === "cancelled") {
+      if (testingGate.accepted || testingAcceptanceInProgress.current) return;
+      clearUserTestingDeclined(me?.userId);
+      setTestingGate((prev) => {
+        if (prev.accepted) return prev;
+        return { accepted: false, restricted: false };
+      });
+      return;
+    }
   };
 
   const handleTelemetryConsent = async (choices: TelemetryConsentChoices) => {
@@ -401,6 +553,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         setTestStartPending(false);
         await launchTestSession(context.scope?.pilotId);
       } else {
+        persistUserTestingDeclined(me?.userId);
+        clearUserTestingAccepted(me?.userId);
+        setTestingGate({ accepted: false, restricted: false });
         handleNavigate("graph");
       }
     } catch (error) {
@@ -448,8 +603,6 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     window.addEventListener("jack:test-onboarding-completed", continueTest);
     return () => window.removeEventListener("jack:test-onboarding-completed", continueTest);
   }, []);
-
-  const handleTestingEvent = (_event: TestingOverlayEvent) => {};
 
   const handleSignOut = () => {
     if (!onSignOut) return;
@@ -509,7 +662,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         }}
         onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
         onStartUserTest={
-          me?.isAdmin === false && telemetryContext?.enrolled
+          me?.isAdmin === false
             ? handleStartUserTest
             : undefined
         }
@@ -554,6 +707,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
+      <UserTestingGate
+        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
+        onStart={handleStartUserTest}
+      />
 
       {/* Chat Drawer overlay */}
       <AskJack
@@ -575,7 +732,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       />
       <UserTestFeedback
         ref={feedbackRef}
-        consented={telemetryContext?.enrolled === true}
+        consented={testingGate.accepted}
         userId={isSignedIn ? me?.userId : null}
         pilotId={telemetryContext?.scope?.pilotId}
       />

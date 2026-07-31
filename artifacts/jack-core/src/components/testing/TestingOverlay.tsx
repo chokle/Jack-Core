@@ -15,6 +15,7 @@ import {
 import { uploadTestRecording } from "@/lib/user-testing/upload-service";
 import {
   getCachedTestSession,
+  loadCurrentTestSession,
   trackTestEvent,
 } from "@/lib/user-testing/test-session-service";
 import { UserTestingModal } from "./UserTestingModal";
@@ -54,8 +55,6 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     const { toast } = useToast();
 
     const open = useCallback(() => {
-      const session = getCachedTestSession();
-      if (!session || session.screenConsentState !== "granted") return;
       setPhase((current) => {
         if (current !== "idle") return current;
         onEvent?.("consent_opened");
@@ -131,11 +130,6 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     );
 
     const handleStart = useCallback(async () => {
-      const session = getCachedTestSession();
-      if (!session || session.screenConsentState !== "granted") {
-        setPhase("idle");
-        return;
-      }
       if (!isScreenRecordingSupported()) {
         toast({
           title: "Screen recording isn't available",
@@ -146,7 +140,16 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
         return;
       }
 
-      const includeMicrophone = session.microphoneConsentState === "granted";
+      const session = getCachedTestSession();
+      const currentSession = session ?? (await loadCurrentTestSession().catch(() => null));
+
+      if (!currentSession || currentSession.status !== "active") {
+        onEvent?.("unavailable");
+        setPhase("idle");
+        return;
+      }
+
+      const includeMicrophone = currentSession.microphoneConsentState === "granted";
       const service = new RecordingService({
         onStop: (result) => void handleUpload(result),
         onError: () =>
