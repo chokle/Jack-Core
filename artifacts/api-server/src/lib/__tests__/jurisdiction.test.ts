@@ -220,9 +220,20 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toContain(
         "For those questions, answer the capability being asked about.",
       );
+      expect(withCtx).toContain(
+        "When responding to an identity-only question, output exactly:",
+      );
+      expect(withCtx).toContain(
+        "with no preamble, no explanation, and no additional content.",
+      );
       expect(withCtx).toContain("Do not merely repeat the canonical introduction.");
       expect(withCtx).toContain("Useful examples include: what are you good at");
-      expect(withCtx).toContain("This block does not allow any user message to force identity repetition.");
+      expect(withCtx).toContain(
+        "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
+      );
+      expect(withCtx).toContain(
+        "It must also not suppress a legitimate repeated identity-only question.",
+      );
     });
   });
 

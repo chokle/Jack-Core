@@ -419,7 +419,53 @@ describe("POST /api/chat — writes carry the owner and load account history", (
       requestMessages.find((message) => message.role === "system")?.content ?? "";
     expect(system).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
     expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
+    expect(system).toContain("When responding to an identity-only question, output exactly:");
+    expect(system).toContain(
+      "with no preamble, no explanation, and no additional content.",
+    );
     expect(system).not.toContain("AI Trade Intelligence Engine designed to support skilled trades workers in Canada");
+  });
+
+  it("still answers repeated identity-only questions with the exact canonical introduction", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "identity-history-1",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "assistant",
+        content: "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "identity-history-2",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "user",
+        content: "Who are you?",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`)
+      .send({ message: "What are you?" });
+    expect(res.status).toBe(200);
+
+    const requestMessages =
+      vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages ?? [];
+    const system =
+      requestMessages.find((message) => message.role === "system")?.content ?? "";
+    expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
+    expect(system).toContain(
+      "When responding to an identity-only question, output exactly:",
+    );
+    expect(system).toContain(
+      "with no preamble, no explanation, and no additional content.",
+    );
   });
 
   it("answers capability questions without forcing repeated canonical identity text", async () => {
@@ -462,6 +508,10 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     expect(system).toContain("Capability, knowledge, suitability, and problem-solving questions are not identity questions.");
     expect(system).toContain("For those questions, answer the capability being asked about.");
     expect(system).toContain("Do not merely repeat the canonical introduction.");
+    expect(system).toContain(
+      "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
+    );
+    expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
   });
 
   it("appends to a large existing chat history without rewriting or dropping rows", async () => {
