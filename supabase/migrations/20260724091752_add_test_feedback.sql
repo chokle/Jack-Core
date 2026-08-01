@@ -1,7 +1,7 @@
 -- Private, authoritative user-test feedback records.
 -- The Jack API writes with SUPABASE_SERVICE_ROLE_KEY; browser roles have no
 -- table privileges or RLS policies.
-create table public.test_feedback (
+create table if not exists public.test_feedback (
   id uuid primary key default gen_random_uuid(),
   tester_user_id text not null,
   tester_email text,
@@ -38,15 +38,15 @@ create table public.test_feedback (
   updated_at timestamptz not null default now()
 );
 
-create index idx_test_feedback_created_at
+create index if not exists idx_test_feedback_created_at
   on public.test_feedback (created_at desc);
-create index idx_test_feedback_tester_user_id
+create index if not exists idx_test_feedback_tester_user_id
   on public.test_feedback (tester_user_id);
-create index idx_test_feedback_session_id
+create index if not exists idx_test_feedback_session_id
   on public.test_feedback (session_id);
-create index idx_test_feedback_review_status
+create index if not exists idx_test_feedback_review_status
   on public.test_feedback (status, created_at desc);
-create index idx_test_feedback_notification
+create index if not exists idx_test_feedback_notification
   on public.test_feedback (notification_status, notification_next_attempt_at);
 
 alter table public.test_feedback enable row level security;

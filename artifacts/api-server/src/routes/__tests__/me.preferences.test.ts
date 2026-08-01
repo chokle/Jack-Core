@@ -4,10 +4,20 @@ import request from "supertest";
 
 const getUser = vi.hoisted(() => vi.fn());
 const updateUserMetadata = vi.hoisted(() => vi.fn());
+const resolveIdentity = vi.hoisted(() => vi.fn());
+const hasAnyReportScope = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   getAuth: vi.fn(),
   clerkClient: { users: { getUser, updateUserMetadata } },
+}));
+
+vi.mock("../../lib/admin-auth.js", () => ({
+  resolveIdentity,
+}));
+
+vi.mock("../../lib/activity-telemetry.js", () => ({
+  hasAnyReportScope,
 }));
 
 import meRouter from "../me.js";
@@ -41,8 +51,41 @@ const analyticsUrl = "/api/me/analytics/memory-graph-onboarding";
 beforeEach(() => {
   getUser.mockReset();
   updateUserMetadata.mockReset();
+  resolveIdentity.mockReset();
+  hasAnyReportScope.mockReset();
   logInfo.mockReset();
   logError.mockReset();
+  resolveIdentity.mockResolvedValue({
+    userId: "user_123",
+    email: "user@example.com",
+    name: "User",
+    isAdmin: false,
+    isPresentation: false,
+    classification: "resolved",
+  });
+  hasAnyReportScope.mockResolvedValue(false);
+});
+
+describe("/me pilot-report capability", () => {
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    resolveIdentity.mockResolvedValueOnce({
+      userId: "user_123",
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    });
+    hasAnyReportScope.mockResolvedValueOnce(true);
+
+    const res = await request(app).get("/api/me");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      userId: "user_123",
+      canViewPilotReports: false,
+    });
+  });
 });
 
 describe("Memory Graph onboarding preference", () => {
@@ -168,14 +211,12 @@ describe("Memory Graph onboarding analytics", () => {
     { event: "memory_onboarding_reopened", source: "replay", version: 1 },
   ];
 
-  it.each(allowed)("accepts allowlisted event $event", async (body) => {
+  it.each(allowed)("accepts allowlisted legacy event $event without logging it", async (body) => {
     const res = await request(app).post(analyticsUrl).send(body);
 
     expect(res.status).toBe(202);
     expect(res.body).toEqual({ accepted: true });
-    const loggedPayload = logInfo.mock.calls.at(-1)?.[0];
-    expect(loggedPayload).not.toHaveProperty("userId");
-    expect(loggedPayload).not.toHaveProperty("email");
+    expect(logInfo).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -212,11 +253,7 @@ describe("Memory Graph onboarding analytics", () => {
     expect(logInfo).not.toHaveBeenCalled();
   });
 
-  it("returns accepted even when structured logging throws", async () => {
-    logInfo.mockImplementationOnce(() => {
-      throw new Error("logger unavailable");
-    });
-
+  it("returns accepted as a compatibility no-op", async () => {
     const res = await request(app).post(analyticsUrl).send({
       event: "memory_onboarding_started",
       source: "automatic",

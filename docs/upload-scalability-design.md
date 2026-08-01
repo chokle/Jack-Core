@@ -52,7 +52,7 @@ Traced end-to-end from the code (July 2026). File references are the authoritati
 - Distillation's canonical-ID resolution calls `buildKnowledgeAliasIndex()`, which does a **full scan of every knowledge-kind node (`select id, kind, label, meta`) per sync**, building the label+alias map in process memory. This runs on every video distillation and every mentor answer.
 - Semantic dedup uses the `match_knowledge_nodes` RPC — a **sequential scan** over `knowledge_nodes.embedding` (no ANN index exists; see §1.7).
 
-### 1.7 Indexes (from `scripts/src/supabase-schema.sql`)
+### 1.7 Indexes (from `supabase/migrations/20260701000000_jack_schema_baseline.sql`)
 
 - B-tree indexes exist on `videos(status)`, `videos(trade)`, `transcript_segments(video_id)`, `chat_messages(session_id)`, the `knowledge_*` id/kind/source/target columns.
 - **There are no pgvector ANN indexes (no HNSW, no IVFFlat) on any embedding column.** `match_transcript_segments`, `match_videos`, and `match_knowledge_nodes` all do exact sequential scans with cosine distance. This is exact (perfect recall) and fine at small scale — and it is the clearest data-driven cliff in the system (see §2.4).

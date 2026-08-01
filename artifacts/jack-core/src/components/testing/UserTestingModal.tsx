@@ -31,22 +31,23 @@ export function UserTestingModal({
     <AlertDialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <AlertDialogContent data-testid="user-testing-modal">
         <AlertDialogHeader>
-          <AlertDialogTitle>Help Us Improve Torch</AlertDialogTitle>
+          <AlertDialogTitle>Optional screen recording</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-3 text-left">
-              <p>Thanks for helping test Torch.</p>
+              <p>Thanks for helping test Jack.</p>
               <p>
-                To better understand how people naturally use Torch, we'd like
+                To better understand how people naturally use Jack, we'd like
                 permission to record your screen during this session.
               </p>
               <p>
-                If you agree, we'll record your screen (and optionally your
-                microphone) until you finish testing.
+                If you continue, Jack will open the browser's screen-share
+                picker. Microphone permission is requested only when you
+                separately opted in.
               </p>
               <p>
                 You're not being tested.
                 <br />
-                Torch is.
+                Jack is.
               </p>
               <p>Please think out loud while using the app.</p>
               <p>There are no wrong answers.</p>
@@ -58,7 +59,7 @@ export function UserTestingModal({
             {cancelLabel}
           </AlertDialogCancel>
           <AlertDialogAction data-testid="user-testing-start" onClick={onStart}>
-            Start Test
+            Start recording
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

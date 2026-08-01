@@ -35,6 +35,10 @@ vi.mock("@workspace/api-client-react", () => ({
   trackMemoryGraphOnboardingEvent: (...args: unknown[]) =>
     apiState.track(...args),
 }));
+vi.mock("@/lib/user-testing/test-session-service", () => ({
+  getCachedTestSession: () => null,
+  trackTestEvent: vi.fn(),
+}));
 
 class ResizeObserverStub {
   observe() {}
@@ -76,10 +80,6 @@ function renderHarness() {
   );
 }
 
-function tracked(event: string) {
-  return apiState.track.mock.calls.filter(([body]) => body.event === event);
-}
-
 describe("MemoryGraphOnboarding", () => {
   beforeEach(() => {
     apiState.preference = null;
@@ -95,7 +95,7 @@ describe("MemoryGraphOnboarding", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens once for a first eligible visit without duplicate render analytics", async () => {
+  it("opens once for a first eligible visit without using the legacy analytics channel", async () => {
     const view = renderHarness();
 
     expect(await screen.findByRole("dialog")).toBeTruthy();
@@ -110,10 +110,7 @@ describe("MemoryGraphOnboarding", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => {
-      expect(tracked("memory_onboarding_started")).toHaveLength(1);
-      expect(tracked("memory_onboarding_step_viewed")).toHaveLength(1);
-    });
+    await waitFor(() => expect(apiState.track).not.toHaveBeenCalled());
   });
 
   it.each(["completed", "skipped"] as const)(
@@ -123,7 +120,7 @@ describe("MemoryGraphOnboarding", () => {
       renderHarness();
 
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      expect(tracked("memory_onboarding_started")).toHaveLength(0);
+      expect(apiState.track).not.toHaveBeenCalled();
     },
   );
 
@@ -137,7 +134,7 @@ describe("MemoryGraphOnboarding", () => {
     expect(apiState.mutate).toHaveBeenCalledWith({
       data: { version: 1, status: "skipped" },
     });
-    expect(tracked("memory_onboarding_skipped")).toHaveLength(1);
+    expect(apiState.track).not.toHaveBeenCalled();
   });
 
   it("completes all three steps and persists completion", async () => {
@@ -159,8 +156,7 @@ describe("MemoryGraphOnboarding", () => {
     expect(apiState.mutate).toHaveBeenCalledWith({
       data: { version: 1, status: "completed" },
     });
-    expect(tracked("memory_onboarding_step_viewed")).toHaveLength(3);
-    expect(tracked("memory_onboarding_completed")).toHaveLength(1);
+    expect(apiState.track).not.toHaveBeenCalled();
   });
 
   it("replays without overwriting an existing completed or skipped preference", async () => {
@@ -171,14 +167,13 @@ describe("MemoryGraphOnboarding", () => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
 
-    expect(tracked("memory_onboarding_reopened")).toHaveLength(1);
+    expect(apiState.track).not.toHaveBeenCalled();
     expect(apiState.mutate).not.toHaveBeenCalled();
   });
 
-  it("fails open on preference read, write, and analytics failures", async () => {
+  it("fails open on preference read and write failures", async () => {
     apiState.isSuccess = false;
     apiState.isError = true;
-    apiState.track.mockRejectedValue(new Error("logging unavailable"));
     apiState.mutate.mockImplementation(() => undefined);
     renderHarness();
 

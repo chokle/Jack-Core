@@ -1,37 +1,120 @@
 // @vitest-environment jsdom
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { TestingOverlay } from "./TestingOverlay";
+import { act, cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { TestingOverlay, type TestingOverlayHandle } from "./TestingOverlay";
 
-const identity = vi.hoisted(() => ({ isAdmin: false }));
-
-vi.mock("@workspace/api-client-react", () => ({
-  useGetMe: () => ({ data: { email: "owner@torchlabs.ca", isAdmin: identity.isAdmin } }),
+const state = vi.hoisted(() => ({
+  cachedSession: null as null | Record<string, unknown>,
+  currentSession: null as null | Record<string, unknown>,
 }));
 
+const recordingServiceCtorSpy = vi.fn();
+const recordingServiceStartSpy = vi.fn();
+
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/lib/user-testing/test-session-service", () => ({
+  getCachedTestSession: () => state.cachedSession,
+  loadCurrentTestSession: vi.fn(async () => state.currentSession),
+  trackTestEvent: vi.fn(),
+}));
+vi.mock("@/lib/user-testing/recording-service", () => ({
+  RecordingService: class {
+    onStop?: () => void;
+    constructor() {
+      recordingServiceCtorSpy();
+    }
+    async start() {
+      recordingServiceStartSpy();
+    }
+    stop() {
+      return Promise.resolve();
+    }
+    pause() {}
+    resume() {}
+  },
+  isScreenRecordingSupported: () => true,
+}));
+vi.mock("@/lib/user-testing/upload-service", () => ({ uploadTestRecording: vi.fn() }));
 vi.mock("./UserTestingModal", () => ({
-  UserTestingModal: ({ open }: { open: boolean }) => open ? <div data-testid="testing-consent" /> : null,
+  UserTestingModal: ({ open, onStart, onCancel }: {
+    open: boolean;
+    onStart: () => void;
+    onCancel: () => void;
+  }) =>
+    open ? (
+      <div>
+        <button type="button" data-testid="testing-overlay-start" onClick={onStart} />
+        <button type="button" data-testid="testing-overlay-cancel" onClick={onCancel} />
+      </div>
+    ) : null,
 }));
 vi.mock("./RecordingIndicator", () => ({ RecordingIndicator: () => null }));
 vi.mock("./ThinkAloudBanner", () => ({ ThinkAloudBanner: () => null }));
 
-describe("TestingOverlay admin bypass", () => {
-  afterEach(cleanup);
+describe("TestingOverlay consent boundary", () => {
   beforeEach(() => {
-    sessionStorage.clear();
+    state.cachedSession = null;
+    state.currentSession = null;
+    recordingServiceCtorSpy.mockClear();
+    recordingServiceStartSpy.mockClear();
     window.history.replaceState({}, "", "/app");
-    identity.isAdmin = false;
+    sessionStorage.clear();
   });
 
-  it("auto-prompts a regular authenticated user", async () => {
-    render(<TestingOverlay autoPrompt />);
-    expect(await screen.findByTestId("testing-consent")).toBeTruthy();
+  afterEach(() => {
+    cleanup();
   });
 
-  it("never auto-prompts a server-recognized administrator", async () => {
-    identity.isAdmin = true;
-    render(<TestingOverlay autoPrompt />);
-    await waitFor(() => expect(screen.queryByTestId("testing-consent")).toBeNull());
+  it("opens even without a cached session", () => {
+    const ref = createRef<TestingOverlayHandle>();
+    render(<TestingOverlay ref={ref} />);
+
+    act(() => ref.current?.open());
+
+    expect(screen.getByTestId("testing-overlay-start")).toBeTruthy();
+    expect(screen.getByTestId("testing-overlay-cancel")).toBeTruthy();
+  });
+
+  it("does not construct recording service without any active session", async () => {
+    const ref = createRef<TestingOverlayHandle>();
+    render(<TestingOverlay ref={ref} />);
+
+    act(() => ref.current?.open());
+    const start = screen.getByTestId("testing-overlay-start");
+    fireEvent.click(start);
+
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+  });
+
+  it("requires an active session to construct recording service", async () => {
+    state.cachedSession = {
+      id: "11111111-1111-4111-8111-111111111111",
+      organizationId: "org",
+      pilotId: "pilot",
+      appSessionId: "app",
+      status: "active",
+      telemetryStatus: "granted",
+      screenConsentState: "granted",
+      microphoneConsentState: "granted",
+      onboardingStatus: "not_started",
+      onboardingStep: 0,
+      recordingStatus: "not_started",
+      feedbackStatus: "not_started",
+      questionCount: 0,
+      startedAt: "2026-07-31T00:00:00Z",
+      lastActivityAt: "2026-07-31T00:00:00Z",
+      expiresAt: "2026-07-31T12:00:00Z",
+    };
+
+    const ref = createRef<TestingOverlayHandle>();
+    render(<TestingOverlay ref={ref} />);
+
+    act(() => ref.current?.open());
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+
+    expect(recordingServiceCtorSpy).toHaveBeenCalledTimes(1);
+    expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
   });
 });

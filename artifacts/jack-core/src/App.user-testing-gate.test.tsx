@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import * as testSessionService from "@/lib/user-testing/test-session-service";
 
 interface MeProfile {
   userId: string;
@@ -10,7 +11,9 @@ interface MeProfile {
   email: string;
 }
 
-const TEST_PREFIX_KEY = "jack.userTesting.declinedWithoutRecording.v1";
+const ACTIVE_SESSION_KEY = "jack.userTesting.activeSession.v2";
+const DECLINED_PREFIX_KEY = "jack.userTesting.declinedWithoutRecording.v1";
+const ACCEPTED_PREFIX_KEY = "jack.userTesting.acceptedWithoutRecording.v1";
 
 const identityBase: MeProfile = {
   userId: "user-test-gate-profile",
@@ -25,7 +28,11 @@ function setIdentity(next: MeProfile) {
 }
 
 function declinedStorageKey(userId: string) {
-  return `${TEST_PREFIX_KEY}:${userId}`;
+  return `${DECLINED_PREFIX_KEY}:${userId}`;
+}
+
+function acceptedStorageKey(userId: string) {
+  return `${ACCEPTED_PREFIX_KEY}:${userId}`;
 }
 
 const modalCloseAfterStart = { value: false };
@@ -36,6 +43,106 @@ const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
 const uploadRecordingSpy = vi.fn(async () => ({ status: "uploaded" as const, filename: "fallback.webm" }));
 let lastConsented: boolean | null = null;
+
+const testSessionServiceState = {
+  contextError: null as Error | null,
+  currentSession: null as unknown,
+  startedSession: {
+    id: "11111111-1111-4111-8111-111111111111",
+    organizationId: "org-test-1",
+    pilotId: "pilot-test-1",
+    appSessionId: "app-session-test-1",
+    status: "active" as const,
+    telemetryStatus: "granted" as const,
+    screenConsentState: "granted" as const,
+    microphoneConsentState: "granted" as const,
+    onboardingStatus: "not_started" as const,
+    onboardingStep: 0,
+    recordingStatus: "not_started",
+    feedbackStatus: "not_started",
+    questionCount: 0,
+    startedAt: "2026-07-31T00:00:00Z",
+    lastActivityAt: "2026-07-31T00:00:00Z",
+    expiresAt: "2026-07-31T12:00:00Z",
+  },
+  telemetryContext: {
+    enrolled: true,
+    requiresPilotSelection: false,
+    scope: {
+      organizationId: "org-test-1",
+      pilotId: "pilot-test-1",
+      organizationName: "Unit Org",
+      pilotName: "Unit Pilot",
+    },
+    consents: {
+      telemetry: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      screen: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      microphone: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+    },
+    session: null,
+    privacyNoticeVersion: "privacy-v1",
+    consentVersion: "consent-v1",
+  },
+  saveTelemetryResult: {
+    enrolled: true,
+    requiresPilotSelection: false,
+    scope: {
+      organizationId: "org-test-1",
+      pilotId: "pilot-test-1",
+      organizationName: "Unit Org",
+      pilotName: "Unit Pilot",
+    },
+    consents: {
+      telemetry: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      screen: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      microphone: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+    },
+    session: null,
+    privacyNoticeVersion: "privacy-v1",
+    consentVersion: "consent-v1",
+  },
+};
+
+function cloneTelemetryContext() {
+  return JSON.parse(JSON.stringify(testSessionServiceState.telemetryContext));
+}
+
+function cloneStartedSession() {
+  return JSON.parse(JSON.stringify(testSessionServiceState.startedSession));
+}
+
+function setCachedActiveSession(overrides: Partial<typeof testSessionServiceState.startedSession> = {}) {
+  const session = {
+    ...testSessionServiceState.startedSession,
+    ...overrides,
+  };
+  sessionStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(session));
+  return session;
+}
 
 // Ensure Clerk and app env are available in the test runtime.
 vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_jack_ci");
@@ -171,6 +278,10 @@ vi.mock("@/lib/user-testing/recording-service", () => {
       return true;
     }
 
+    elapsedMs() {
+      return 0;
+    }
+
     stop() {
       return Promise.resolve(null);
     }
@@ -189,10 +300,51 @@ vi.mock("@/lib/user-testing/upload-service", () => ({
   uploadTestRecording: async () => uploadRecordingSpy(),
 }));
 
+vi.mock("@/lib/user-testing/test-session-service", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/user-testing/test-session-service")>(
+    "@/lib/user-testing/test-session-service",
+  );
+  return {
+    ...actual,
+    initializeTelemetryRetry: vi.fn(() => vi.fn()),
+    loadTelemetryContext: vi.fn(async () => {
+      if (testSessionServiceState.contextError) {
+        throw testSessionServiceState.contextError;
+      }
+      return cloneTelemetryContext();
+    }),
+    saveTelemetryConsents: vi.fn(async () => {
+      return JSON.parse(JSON.stringify(testSessionServiceState.saveTelemetryResult));
+    }),
+    startTestSession: vi.fn(async () => {
+      const session = cloneStartedSession();
+      actual.cacheTestSession(session);
+      return session;
+    }),
+    loadCurrentTestSession: vi.fn(async () =>
+      testSessionServiceState.currentSession
+        ? (JSON.parse(JSON.stringify(testSessionServiceState.currentSession)) as unknown)
+        : null,
+    ),
+    trackTestEvent: vi.fn(),
+    withdrawTelemetry: vi.fn(async () => ({
+      withdrawn: ["telemetry"],
+      deletionDueAt: null,
+    })),
+    exportTelemetry: vi.fn(),
+  };
+});
+
 vi.mock("@/components/ui/toaster", () => ({ Toaster: () => null }));
 vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+const mockedLoadCurrentSession = vi.mocked(testSessionService.loadCurrentTestSession);
+const mockedLoadTelemetryContext = vi.mocked(testSessionService.loadTelemetryContext);
+const mockedSaveTelemetryConsents = vi.mocked(testSessionService.saveTelemetryConsents);
+const mockedStartTestSession = vi.mocked(testSessionService.startTestSession);
+const mockedTrackTestEvent = vi.mocked(testSessionService.trackTestEvent);
 
 async function renderAuthenticatedApp(path = "/app?test=true") {
   window.history.replaceState({}, "", path);
@@ -235,12 +387,22 @@ function storageWriteFailureForUserScope() {
     key: string,
     value: string,
   ) {
-    if (typeof key === "string" && key.startsWith(TEST_PREFIX_KEY)) {
+    if (typeof key === "string" && key.startsWith(DECLINED_PREFIX_KEY)) {
       throw new Error("storage blocked");
     }
     return originalSetItem.call(this, key, value);
   });
   return { setItemSpy };
+}
+
+function resetServiceState() {
+  testSessionServiceState.contextError = null;
+  testSessionServiceState.currentSession = null;
+  mockedLoadCurrentSession.mockClear();
+  mockedLoadTelemetryContext.mockClear();
+  mockedSaveTelemetryConsents.mockClear();
+  mockedStartTestSession.mockClear();
+  mockedTrackTestEvent.mockClear();
 }
 
 describe("user-testing gate transition", () => {
@@ -258,32 +420,22 @@ describe("user-testing gate transition", () => {
     modalCloseAfterStart.value = false;
     recordingSupported.value = false;
     rejectStart.value = false;
+    resetServiceState();
   });
 
-  it("initial decline unlocks the app immediately", async () => {
+  it("initial decline unlocks the app and stays rejected, with zero testing side effects", async () => {
     await declineWithoutRecording();
 
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-  });
-
-  it("accepted remains false after continue without recording", async () => {
-    await declineWithoutRecording();
-    await waitFor(() => {
-      expect(userConsented()).toBe("false");
-    });
-  });
-
-  it("decline triggers no recording or testing side effects", async () => {
-    await declineWithoutRecording();
-
+    expect(userConsented()).toBe("false");
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
     expect(uploadRecordingSpy).not.toHaveBeenCalled();
   });
 
-  it("opt-out is persisted for the authenticated user and survives remount", async () => {
+  it("decline persists user-scoped opt-out and remains true after remount", async () => {
     await declineWithoutRecording();
-
     const key = declinedStorageKey(identity.userId);
     expect(localStorage.getItem(key)).toBe("true");
 
@@ -291,22 +443,12 @@ describe("user-testing gate transition", () => {
     await renderAuthenticatedApp();
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    });
-    await waitFor(() => {
       expect(userConsented()).toBe("false");
+      expect(localStorage.getItem(key)).toBe("true");
     });
   });
 
-  it("explicit initial decline writes the opt-out marker", async () => {
-    const key = declinedStorageKey(identity.userId);
-
-    await declineWithoutRecording();
-
-    expect(localStorage.getItem(key)).toBe("true");
-    expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-  });
-
-  it("different users use user-scoped opt-out storage keys", async () => {
+  it("different users use user-scoped opt-out keys", async () => {
     await declineWithoutRecording();
     const firstUserKey = declinedStorageKey(identity.userId);
     expect(localStorage.getItem(firstUserKey)).toBe("true");
@@ -327,13 +469,14 @@ describe("user-testing gate transition", () => {
     fireEvent.click(cancel);
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+      expect(userConsented()).toBe("false");
     });
 
     expect(localStorage.getItem(otherUserKey)).toBe("true");
     expect(firstUserKey).not.toBe(otherUserKey);
   });
 
-  it("failed localStorage write does not block current-session unlock", async () => {
+  it("storage write failures do not block current-session unlock", async () => {
     const { setItemSpy } = storageWriteFailureForUserScope();
 
     await declineWithoutRecording();
@@ -343,24 +486,104 @@ describe("user-testing gate transition", () => {
     setItemSpy.mockRestore();
   });
 
-  it("user can still start testing voluntarily after decline", async () => {
+  it("start button still works without cached session by creating/discovering server session first", async () => {
     recordingSupported.value = true;
-    const key = declinedStorageKey(identity.userId);
-    await declineWithoutRecording();
-    expect(localStorage.getItem(key)).toBe("true");
 
-    openFromAnyEntry();
+    await renderAuthenticatedApp("/app");
+    fireEvent.click(screen.getByTestId("start-user-test"));
+
+    await waitFor(() => {
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByTestId("user-testing-cancel");
+
     await startFlowFromOpenOverlay({ expectRecording: true });
     await waitFor(() => {
       expect(userConsented()).toBe("true");
     });
-    expect(localStorage.getItem(key)).toBeNull();
   });
 
-  it("late declined after unsupported-start does not write opt-out marker", async () => {
+  it("start requires an active session before recording can start", async () => {
+    recordingSupported.value = true;
+    testSessionServiceState.currentSession = null;
+
+    await renderAndOpenInitialModal();
+    await startFlowFromOpenOverlay();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+      expect(userConsented()).toBe("false");
+    });
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+    expect(uploadRecordingSpy).not.toHaveBeenCalled();
+  });
+
+  it("start with explicit active session records user testing acceptance", async () => {
+    recordingSupported.value = true;
+    setCachedActiveSession({ microphoneConsentState: "granted" });
+
+    await renderAndOpenInitialModal();
+    openFromAnyEntry();
+    await startFlowFromOpenOverlay({ expectRecording: true });
+
+    await waitFor(() => {
+      expect(userConsented()).toBe("true");
+    });
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBe("true");
+    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+  });
+
+  it("missing telemetry context does not trap user", async () => {
+    testSessionServiceState.contextError = new Error("telemetry context failed");
+    await renderAuthenticatedApp("/app");
+
+    fireEvent.click(screen.getByTestId("start-user-test"));
+    const cancel = await screen.findByTestId("user-testing-cancel");
+    fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+      expect(userConsented()).toBe("false");
+    });
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+  });
+
+  it("permission denied cannot set UserTestFeedback consent", async () => {
+    recordingSupported.value = true;
+    rejectStart.value = true;
+    setCachedActiveSession();
+
+    await renderAndOpenInitialModal();
+    await startFlowFromOpenOverlay();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-modal")).toBeNull();
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+      expect(userConsented()).toBe("false");
+    });
+    expect(uploadRecordingSpy).not.toHaveBeenCalled();
+  });
+
+  it("unavailable recording unlocks safely without upload or consent acceptance", async () => {
     recordingSupported.value = false;
+    setCachedActiveSession();
+
+    await renderAndOpenInitialModal();
+    await startFlowFromOpenOverlay();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+      expect(userConsented()).toBe("false");
+    });
+    expect(uploadRecordingSpy).not.toHaveBeenCalled();
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+  });
+
+  it("late declined must not overwrite accepted recording consent", async () => {
+    recordingSupported.value = true;
     modalCloseAfterStart.value = true;
-    const key = declinedStorageKey(identity.userId);
+    setCachedActiveSession();
 
     await renderAndOpenInitialModal();
     openFromAnyEntry();
@@ -368,80 +591,46 @@ describe("user-testing gate transition", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(localStorage.getItem(key)).toBeNull();
-    });
-    await waitFor(() => {
       expect(userConsented()).toBe("true");
     });
+    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
   });
 
-  it("remount follows the latest user-testing choice", async () => {
-    recordingSupported.value = true;
-    const key = declinedStorageKey(identity.userId);
-
-    await declineWithoutRecording();
-    expect(localStorage.getItem(key)).toBe("true");
-
-    openFromAnyEntry();
-    await startFlowFromOpenOverlay({ expectRecording: true });
-    await waitFor(() => {
-      expect(userConsented()).toBe("true");
-      expect(localStorage.getItem(key)).toBeNull();
-    });
-
-    cleanup();
-    await renderAuthenticatedApp();
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(localStorage.getItem(key)).toBeNull();
-    });
-  });
-
-  it("repeated continue actions are idempotent", async () => {
+  it("repeated continue actions remain idempotent", async () => {
+    testSessionServiceState.contextError = new Error("telemetry context unavailable");
     await declineWithoutRecording();
 
-    openFromAnyEntry();
+    fireEvent.click(screen.getByTestId("start-user-test"));
     const cancel1 = await screen.findByTestId("user-testing-cancel");
     fireEvent.click(cancel1);
 
-    openFromAnyEntry();
+    fireEvent.click(screen.getByTestId("start-user-test"));
     const cancel2 = await screen.findByTestId("user-testing-cancel");
     fireEvent.click(cancel2);
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    });
-    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBe("true");
-  });
-
-  it("unlocks unsupported recording and converges to no-gate state", async () => {
-    recordingSupported.value = false;
-
-    await renderAndOpenInitialModal();
-    openFromAnyEntry();
-    await screen.findByTestId("user-testing-start");
-    fireEvent.click(screen.getByTestId("user-testing-start"));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(userConsented()).toBe("true");
+      expect(userConsented()).toBe("false");
+      expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBe("true");
     });
   });
 
-  it("unlocks after permission denied without trapping the user", async () => {
+  it("remount follows latest user-testing choice", async () => {
     recordingSupported.value = true;
-    rejectStart.value = true;
+    await declineWithoutRecording();
 
-    await renderAndOpenInitialModal();
     openFromAnyEntry();
-    await screen.findByTestId("user-testing-start");
-    fireEvent.click(screen.getByTestId("user-testing-start"));
+    setCachedActiveSession();
+    await startFlowFromOpenOverlay({ expectRecording: true });
+    await waitFor(() => expect(userConsented()).toBe("true"));
 
+    cleanup();
+    await renderAuthenticatedApp();
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(userConsented()).toBe("true");
     });
+    expect(screen.queryByTestId("user-test-feedback")).toBeTruthy();
+    expect(userConsented()).toBe("true");
   });
 });
 

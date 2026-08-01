@@ -1,7 +1,8 @@
 /**
  * Guards the fake Supabase's foreign-key modeling beyond `knowledge_edges` (see
  * edge-upsert-notnull.test.ts for that one). The real schema
- * (`scripts/src/supabase-schema.sql`) enforces several more FKs that, when a
+ * (`supabase/migrations/20260701000000_jack_schema_baseline.sql`) enforces
+ * several more FKs that, when a
  * child row is written before its parent, 500 in production the same invisible
  * way an orphan edge used to. These tests assert the fake rejects those orphans
  * — on BOTH the `.insert()` and `.upsert()` write paths — so any route/pipeline

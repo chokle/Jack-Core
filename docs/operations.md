@@ -14,7 +14,9 @@ Run/operate commands, the required Supabase schema setup, and operational gotcha
 
 ## Required Setup — Supabase Schema
 
-The schema (tables, pgvector functions, seed data, and the `jack-videos` storage bucket) lives in one canonical file: `scripts/src/supabase-schema.sql`.
+The foundational schema (tables, pgvector functions, seed data, and the
+`jack-videos` storage bucket) lives in one canonical file:
+`supabase/migrations/20260701000000_jack_schema_baseline.sql`.
 
 **Recommended — apply it automatically:**
 
@@ -23,7 +25,13 @@ The schema (tables, pgvector functions, seed data, and the `jack-videos` storage
 
 The script is idempotent, so it is safe to re-run. If `SUPABASE_DB_URL` is not set (or the connection fails), the script prints the SQL with instructions instead of crashing.
 
-**Manual fallback:** if you can't run the script, open `scripts/src/supabase-schema.sql` and paste its contents into Supabase Dashboard → SQL Editor. That file is the canonical schema — tables, pgvector functions, seed data, the knowledge-graph tables, and the public `jack-videos` storage bucket — and is kept in sync with the app. Do not keep a second copy of the SQL here; it only drifts.
+**Manual fallback:** if you can't run the script, open
+`supabase/migrations/20260701000000_jack_schema_baseline.sql` and paste its
+contents into Supabase Dashboard → SQL Editor. That file is the canonical
+foundational schema — tables, pgvector functions, seed data, the
+knowledge-graph tables, and the public `jack-videos` storage bucket — and is
+kept in sync with the app. Do not keep a second copy of the SQL here; it only
+drifts.
 
 ## Gotchas
 

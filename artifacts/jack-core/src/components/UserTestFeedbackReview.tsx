@@ -55,6 +55,22 @@ interface FeedbackListResponse {
   trades: string[];
 }
 
+interface TestProgress {
+  id: string;
+  testerEmail: string | null;
+  testerName: string | null;
+  status: string;
+  startedAt: string;
+  lastActivityAt: string;
+  onboardingStatus: string;
+  onboardingStep: number;
+  questionCount: number;
+  recordingStatus: string;
+  feedbackStatus: string;
+  completedAt: string | null;
+  errorCount: number;
+}
+
 const STATUS_OPTIONS: FeedbackStatus[] = ["new", "reviewed", "actioned", "archived"];
 const USEFULNESS_OPTIONS: Usefulness[] = ["yes", "partly", "no"];
 
@@ -83,7 +99,13 @@ function notificationClass(value: NotificationStatus): string {
   return "text-muted-foreground";
 }
 
-export function UserTestFeedbackReview() {
+export function UserTestFeedbackReview({
+  organizationId,
+  pilotId,
+}: {
+  organizationId: string;
+  pilotId: string;
+}) {
   const initialFeedbackId = useMemo(
     () => new URLSearchParams(window.location.search).get("feedback"),
     [],
@@ -104,12 +126,15 @@ export function UserTestFeedbackReview() {
   const [draftStatus, setDraftStatus] = useState<FeedbackStatus>("new");
   const [adminNotes, setAdminNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<TestProgress[]>([]);
   const { toast } = useToast();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
+    params.set("organizationId", organizationId);
+    params.set("pilotId", pilotId);
     if (trade) params.set("trade", trade);
     if (status) params.set("status", status);
     if (usefulness) params.set("usefulness", usefulness);
@@ -132,13 +157,30 @@ export function UserTestFeedbackReview() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [dateFrom, dateTo, status, trade, usefulness]);
+  }, [dateFrom, dateTo, organizationId, pilotId, status, trade, usefulness]);
 
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/testing/progress?organizationId=${encodeURIComponent(organizationId)}&pilotId=${encodeURIComponent(pilotId)}`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("progress unavailable");
+        const body = (await response.json()) as { testers: TestProgress[] };
+        setProgress(body.testers);
+      })
+      .catch((error) => {
+        if ((error as { name?: string }).name !== "AbortError") setProgress([]);
+      });
+    return () => controller.abort();
+  }, [organizationId, pilotId]);
 
   const openRecord = useCallback(async (id: string) => {
     const local = records.find((record) => record.id === id);
@@ -150,7 +192,7 @@ export function UserTestFeedbackReview() {
     }
     setDetailLoading(true);
     try {
-      const response = await fetch(`/api/testing/feedback/${encodeURIComponent(id)}`, {
+      const response = await fetch(`/api/testing/feedback/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}&pilotId=${encodeURIComponent(pilotId)}`, {
         credentials: "include",
       });
       if (!response.ok) throw new Error(`Feedback detail failed (${response.status})`);
@@ -167,7 +209,7 @@ export function UserTestFeedbackReview() {
     } finally {
       setDetailLoading(false);
     }
-  }, [records, toast]);
+  }, [organizationId, pilotId, records, toast]);
 
   useEffect(() => {
     if (!initialFeedbackId || openedInitialFeedback.current) return;
@@ -179,7 +221,7 @@ export function UserTestFeedbackReview() {
     if (!selected || saving) return;
     setSaving(true);
     try {
-      const response = await fetch(`/api/testing/feedback/${encodeURIComponent(selected.id)}`, {
+      const response = await fetch(`/api/testing/feedback/${encodeURIComponent(selected.id)}?organizationId=${encodeURIComponent(organizationId)}&pilotId=${encodeURIComponent(pilotId)}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -232,6 +274,34 @@ export function UserTestFeedbackReview() {
           Refresh
         </Button>
       </div>
+
+      {progress.length > 0 && (
+        <div className="mt-5">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Tester progress
+          </h3>
+          <div className="mt-2 grid gap-2 lg:grid-cols-2">
+            {progress.map((session) => (
+              <div key={session.id} className="rounded-xl border border-border bg-background/40 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <strong>{session.testerName || session.testerEmail || "Signed-in tester"}</strong>
+                  <span className="text-xs font-semibold">{titleCase(session.status)}</span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
+                  <span>Onboarding: {titleCase(session.onboardingStatus)} ({session.onboardingStep}/3)</span>
+                  <span>Questions: {session.questionCount}</span>
+                  <span>Recording: {titleCase(session.recordingStatus)}</span>
+                  <span>Feedback: {titleCase(session.feedbackStatus)}</span>
+                  <span>Started: {formatDate(session.startedAt)}</span>
+                  <span>Last active: {formatDate(session.lastActivityAt)}</span>
+                  <span>Errors: {session.errorCount}</span>
+                  <span>Completed: {formatDate(session.completedAt)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <label className="space-y-1 text-xs text-muted-foreground">

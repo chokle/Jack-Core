@@ -4,6 +4,7 @@ import { chatCompletion, createEmbedding, MODELS } from "../lib/openai.js";
 import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
+import { resolveIdentity } from "../lib/admin-auth.js";
 import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import {
@@ -19,6 +20,10 @@ import {
   type AskLearningResult,
 } from "../lib/ask-learning.js";
 import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
+import {
+  recordServerAskJackEvent,
+  requestIdentifier,
+} from "../lib/activity-telemetry.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -417,9 +422,25 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     if (assistantMessageError) throw assistantMessageError;
 
+    await recordServerAskJackEvent({
+      req,
+      actorIdentity: await resolveIdentity(req),
+      eventType: "ask_jack_completed",
+      correlationId: chatMessageId,
+      citationCount: citations.length,
+    });
+
     return res.json({ answer, citations, usedInternalKnowledge, learning });
   } catch (err) {
     req.log.error({ err }, "askJack error");
+    if (req.userId) {
+      await recordServerAskJackEvent({
+        req,
+        actorIdentity: await resolveIdentity(req),
+        eventType: "ask_jack_failed",
+        correlationId: requestIdentifier(req),
+      });
+    }
     return res.status(500).json({ error: "Jack encountered an error" });
   }
 });

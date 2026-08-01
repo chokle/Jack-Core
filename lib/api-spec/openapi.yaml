@@ -985,7 +985,7 @@ components:
   schemas:
     CurrentUser:
       type: object
-      required: [userId, email, name, isAdmin]
+      required: [userId, email, name, isAdmin, canViewPilotReports]
       properties:
         userId:
           type: string
@@ -994,6 +994,8 @@ components:
         name:
           type: ["string", "null"]
         isAdmin:
+          type: boolean
+        canViewPilotReports:
           type: boolean
 
     MemoryGraphOnboardingPreference:

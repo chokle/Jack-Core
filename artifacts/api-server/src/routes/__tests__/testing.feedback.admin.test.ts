@@ -18,21 +18,19 @@ vi.mock("../../lib/feedback-notifications.js", () => ({
   queueFeedbackNotification: vi.fn(),
 }));
 vi.mock("../../lib/admin-auth.js", () => ({
-  resolveIdentity: vi.fn(),
-  getAdminReviewer: () => "Admin Reviewer",
-  requireAdmin: (req: Request, res: express.Response, next: express.NextFunction) => {
+  resolveIdentity: vi.fn(async (req: Request) => {
     const user = req.headers["x-test-user"];
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    if (user !== "admin") {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
-    req.admin = { userId: "admin", email: "admin@example.test", name: "Admin Reviewer" };
-    next();
-  },
+    if (!user) return null;
+    return {
+      userId: String(user),
+      email: `${String(user)}@example.test`,
+      name: String(user),
+      isAdmin: user === "admin",
+      isPresentation: false,
+      classification: "resolved",
+    };
+  }),
+  getAdminReviewer: () => "Admin Reviewer",
 }));
 
 import testingRouter from "../testing.js";
@@ -41,6 +39,9 @@ import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
 const ONE = "11111111-1111-4111-8111-111111111111";
 const TWO = "22222222-2222-4222-8222-222222222222";
 const THREE = "33333333-3333-4333-8333-333333333333";
+const ORGANIZATION_ID = "44444444-4444-4444-8444-444444444444";
+const PILOT_ID = "55555555-5555-4555-8555-555555555555";
+const SCOPE = `organizationId=${ORGANIZATION_ID}&pilotId=${PILOT_ID}`;
 
 function makeApp(): Express {
   const app = express();
@@ -67,6 +68,8 @@ function row(
 ): Record<string, unknown> {
   return {
     id,
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
     tester_user_id: `user-${id.slice(0, 4)}`,
     tester_email: "tester@example.test",
     tester_name: "Taylor Tester",
@@ -100,6 +103,25 @@ function row(
 
 beforeEach(() => {
   resetMocks();
+  fake.tables["organizations"] = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
+  fake.tables["pilots"] = [{
+    id: PILOT_ID,
+    organization_id: ORGANIZATION_ID,
+    name: "Pilot",
+    status: "active",
+  }];
+  fake.tables["pilot_memberships"] = [{
+    id: "membership-admin",
+    user_id: "admin",
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
+    role: "pilot_admin",
+    active: true,
+    valid_from: "2026-01-01T00:00:00.000Z",
+    valid_until: null,
+  }];
+  fake.tables["platform_roles"] = [];
+  fake.tables["admin_access_audit"] = [];
   fake.tables["test_feedback"] = [
     row(ONE),
     row(TWO, {
@@ -120,15 +142,15 @@ beforeEach(() => {
 
 describe("admin user-test feedback review API", () => {
   it("rejects unauthenticated and non-admin list access server-side", async () => {
-    expect((await request(app).get("/api/testing/feedback")).status).toBe(401);
+    expect((await request(app).get(`/api/testing/feedback?${SCOPE}`)).status).toBe(401);
     expect(
-      (await request(app).get("/api/testing/feedback").set("x-test-user", "tester")).status,
+      (await request(app).get(`/api/testing/feedback?${SCOPE}`).set("x-test-user", "tester")).status,
     ).toBe(403);
   });
 
   it("lists feedback for admins with a total new-feedback count", async () => {
     const response = await request(app)
-      .get("/api/testing/feedback")
+      .get(`/api/testing/feedback?${SCOPE}`)
       .set("x-test-user", "admin");
 
     expect(response.status).toBe(200);
@@ -139,7 +161,7 @@ describe("admin user-test feedback review API", () => {
 
   it("filters by trade, status, response, and date", async () => {
     const response = await request(app)
-      .get("/api/testing/feedback")
+      .get(`/api/testing/feedback?${SCOPE}`)
       .query({
         trade: "Electrical",
         status: "new",
@@ -155,12 +177,12 @@ describe("admin user-test feedback review API", () => {
 
   it("returns an admin-only detail without unrelated session content", async () => {
     expect(
-      (await request(app).get(`/api/testing/feedback/${ONE}`).set("x-test-user", "tester"))
+      (await request(app).get(`/api/testing/feedback/${ONE}?${SCOPE}`).set("x-test-user", "tester"))
         .status,
     ).toBe(403);
 
     const response = await request(app)
-      .get(`/api/testing/feedback/${ONE}`)
+      .get(`/api/testing/feedback/${ONE}?${SCOPE}`)
       .set("x-test-user", "admin");
 
     expect(response.status).toBe(200);
@@ -176,7 +198,7 @@ describe("admin user-test feedback review API", () => {
 
   it("updates status and admin notes and reduces the new count", async () => {
     const updated = await request(app)
-      .patch(`/api/testing/feedback/${ONE}`)
+      .patch(`/api/testing/feedback/${ONE}?${SCOPE}`)
       .set("x-test-user", "admin")
       .send({ status: "actioned", adminNotes: "Added to the pilot backlog." });
 
@@ -188,8 +210,26 @@ describe("admin user-test feedback review API", () => {
     });
 
     const list = await request(app)
-      .get("/api/testing/feedback")
+      .get(`/api/testing/feedback?${SCOPE}`)
       .set("x-test-user", "admin");
     expect(list.body.unreadCount).toBe(1);
+  });
+
+  it("fails closed when trusted identity resolution is unavailable", async () => {
+    const { resolveIdentity } = await import("../../lib/admin-auth.js");
+    vi.mocked(resolveIdentity).mockResolvedValueOnce({
+      userId: "admin",
+      email: null,
+      name: null,
+      isAdmin: false,
+      isPresentation: false,
+      classification: "unavailable",
+    });
+
+    const response = await request(app)
+      .get(`/api/testing/feedback?${SCOPE}`)
+      .set("x-test-user", "admin");
+
+    expect(response.status).toBe(503);
   });
 });

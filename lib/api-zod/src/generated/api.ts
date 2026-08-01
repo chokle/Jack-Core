@@ -42,7 +42,8 @@ export const GetMeResponse = zod.object({
   "userId": zod.string(),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "isAdmin": zod.boolean()
+  "isAdmin": zod.boolean(),
+  "canViewPilotReports": zod.boolean()
 })
 
 

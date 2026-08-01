@@ -53,6 +53,13 @@ function writeJson(storage: Storage, key: string, value: unknown): void {
   }
 }
 
+export function setFeedbackSessionId(sessionId: string): void {
+  const current = getFeedbackActivity();
+  if (current.sessionId !== sessionId) {
+    writeJson(window.sessionStorage, SESSION_KEY, { ...current, sessionId });
+  }
+}
+
 export function getFeedbackActivity(now = Date.now()): ActivityState {
   const stored = readJson<ActivityState>(window.sessionStorage, SESSION_KEY);
   if (

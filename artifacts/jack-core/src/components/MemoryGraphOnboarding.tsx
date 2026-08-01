@@ -10,11 +10,15 @@ import {
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import {
   getGetMemoryGraphOnboardingPreferenceQueryKey,
-  trackMemoryGraphOnboardingEvent,
   useGetMemoryGraphOnboardingPreference,
   useUpdateMemoryGraphOnboardingPreference,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  getCachedTestSession,
+  trackTestEvent,
+  type TestSession,
+} from "@/lib/user-testing/test-session-service";
 
 export const MEMORY_GRAPH_ONBOARDING_VERSION = 1 as const;
 export const MEMORY_GRAPH_ONBOARDING_STEP_COUNT = 3;
@@ -50,31 +54,11 @@ interface OnboardingSession {
 export interface MemoryGraphOnboardingController {
   session: OnboardingSession | null;
   reopen: () => void;
+  startAt: (step: number) => void;
   setStep: (step: number) => void;
   skip: () => void;
   finish: () => void;
   dismiss: () => void;
-}
-
-function sendAnalytics(
-  event:
-    | "memory_onboarding_started"
-    | "memory_onboarding_step_viewed"
-    | "memory_onboarding_skipped"
-    | "memory_onboarding_completed"
-    | "memory_onboarding_reopened",
-  source: MemoryGraphOnboardingSource,
-  step?: number,
-): void {
-  const body = {
-    event,
-    source,
-    version: MEMORY_GRAPH_ONBOARDING_VERSION,
-    ...(step === undefined ? {} : { step }),
-  } as const;
-  void trackMemoryGraphOnboardingEvent(body).catch(() => {
-    // Pilot analytics are deliberately best-effort.
-  });
 }
 
 export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
@@ -117,16 +101,17 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   });
 
   const begin = useCallback(
-    (source: MemoryGraphOnboardingSource) => {
+    (source: MemoryGraphOnboardingSource, initialStep = 0) => {
       if (sessionRef.current) return;
-      const next = { id: nextSessionIdRef.current++, source, step: 0 };
-      setSession(next);
-      sendAnalytics(
-        source === "automatic"
-          ? "memory_onboarding_started"
-          : "memory_onboarding_reopened",
+      const next = {
+        id: nextSessionIdRef.current++,
         source,
-      );
+        step: Math.max(0, Math.min(MEMORY_GRAPH_ONBOARDING_STEP_COUNT - 1, initialStep)),
+      };
+      setSession(next);
+      if (getCachedTestSession()) {
+        void trackTestEvent("onboarding_started", {}, "onboarding_started");
+      }
     },
     [setSession],
   );
@@ -150,6 +135,21 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
     preferenceQuery.isSuccess,
   ]);
 
+  useEffect(() => {
+    const start = (event: Event) => {
+      const detail = (event as CustomEvent<TestSession>).detail;
+      if (detail?.onboardingStatus === "completed") {
+        window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
+        return;
+      }
+      begin("automatic", detail?.onboardingStep ?? getCachedTestSession()?.onboardingStep ?? 0);
+    };
+    window.addEventListener("jack:test-session-started", start);
+    const active = getCachedTestSession();
+    if (active && active.onboardingStatus !== "completed") begin("automatic", active.onboardingStep);
+    return () => window.removeEventListener("jack:test-session-started", start);
+  }, [begin]);
+
   const persistSeen = useCallback(
     (status: "completed" | "skipped") => {
       if (preferenceRef.current?.version === MEMORY_GRAPH_ONBOARDING_VERSION)
@@ -164,21 +164,24 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   const skip = useCallback(() => {
     const active = sessionRef.current;
     if (!active) return;
-    sendAnalytics("memory_onboarding_skipped", active.source, active.step + 1);
     setSession(null);
     persistSeen("skipped");
+    void trackTestEvent(
+      "onboarding_skipped",
+      { step: active.step + 1 },
+      "onboarding_skipped",
+      "cancelled",
+    );
+    window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
   }, [persistSeen, setSession]);
 
   const finish = useCallback(() => {
     const active = sessionRef.current;
     if (!active) return;
-    sendAnalytics(
-      "memory_onboarding_completed",
-      active.source,
-      active.step + 1,
-    );
     setSession(null);
     persistSeen("completed");
+    void trackTestEvent("onboarding_completed", {}, "onboarding_completed");
+    window.dispatchEvent(new CustomEvent("jack:test-onboarding-completed"));
   }, [persistSeen, setSession]);
 
   const setStep = useCallback(
@@ -190,6 +193,13 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
         Math.min(MEMORY_GRAPH_ONBOARDING_STEP_COUNT - 1, step),
       );
       if (bounded === active.step) return;
+      if (bounded > active.step && getCachedTestSession()) {
+        void trackTestEvent(
+          "onboarding_step_completed",
+          { step: active.step + 1, next_step: bounded + 1 },
+          `onboarding_step:${active.step + 1}`,
+        );
+      }
       setSession({ ...active, step: bounded });
     },
     [setSession],
@@ -198,6 +208,7 @@ export function useMemoryGraphOnboarding(): MemoryGraphOnboardingController {
   return {
     session,
     reopen: () => begin("replay"),
+    startAt: (step) => begin("automatic", step),
     setStep,
     skip,
     finish,
@@ -229,7 +240,6 @@ export function MemoryGraphOnboarding({
 }: MemoryGraphOnboardingProps) {
   const { session } = controller;
   const primaryActionRef = useRef<HTMLButtonElement>(null);
-  const viewedRef = useRef(new Set<string>());
   const [highlight, setHighlight] = useState<HighlightRect | null>(null);
   const step = session ? STEPS[session.step] : null;
 
@@ -237,18 +247,6 @@ export function MemoryGraphOnboarding({
     if (!session) return;
     primaryActionRef.current?.focus({ preventScroll: true });
   }, [session?.id, session?.step]);
-
-  useEffect(() => {
-    if (!session) return;
-    const key = `${session.id}:${session.step}`;
-    if (viewedRef.current.has(key)) return;
-    viewedRef.current.add(key);
-    sendAnalytics(
-      "memory_onboarding_step_viewed",
-      session.source,
-      session.step + 1,
-    );
-  }, [session]);
 
   useEffect(() => {
     if (!session) return;

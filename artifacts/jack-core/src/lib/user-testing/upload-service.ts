@@ -16,12 +16,10 @@
 export interface TestRecordingMetadata {
   sessionId: string;
   timestamp: string;
-  userAgent: string;
-  screenResolution: string;
   durationMs: number;
   mimeType: string;
+  microphoneIncluded: boolean;
   appVersion?: string;
-  testerId?: string;
 }
 
 export type UploadOutcome =
@@ -97,9 +95,8 @@ export async function uploadTestRecording(
     const form = new FormData();
     form.append("file", blob, filename);
     form.append("sessionId", metadata.sessionId);
-    form.append("userAgent", metadata.userAgent);
-    form.append("screenResolution", metadata.screenResolution);
     form.append("durationMs", String(metadata.durationMs));
+    form.append("microphoneIncluded", String(metadata.microphoneIncluded));
     if (metadata.appVersion) form.append("appVersion", metadata.appVersion);
 
     const res = await fetch(UPLOAD_ENDPOINT, { method: "POST", body: form });

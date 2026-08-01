@@ -30,6 +30,7 @@ import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
+import { PilotActivityReports } from "./components/PilotActivityReports";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Landing } from "./components/Landing";
 import {
@@ -39,11 +40,26 @@ import {
 } from "./components/testing/TestingOverlay";
 import { UserTestingGate } from "./components/testing/UserTestingGate";
 import {
+  TelemetryConsentModal,
+  type TelemetryConsentChoices,
+} from "./components/testing/TelemetryConsentModal";
+import {
   UserTestFeedback,
   type UserTestFeedbackHandle,
 } from "./components/testing/UserTestFeedback";
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
+import {
+  exportTelemetry,
+  initializeTelemetryRetry,
+  loadTelemetryContext,
+  saveTelemetryConsents,
+  startTestSession,
+  trackTestEvent,
+  withdrawTelemetry,
+  type TelemetryContext,
+} from "./lib/user-testing/test-session-service";
+import { setFeedbackSessionId } from "./lib/user-testing/feedback-service";
 import { handoffInterviewResume } from "./lib/interview-resume";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
@@ -90,6 +106,7 @@ const localClerkUiUrl = useDirectClerkAssets
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
 const USER_TESTING_DECLINED_KEY = "jack.userTesting.declinedWithoutRecording.v1";
+const USER_TESTING_ACCEPTED_KEY = "jack.userTesting.acceptedWithoutRecording.v1";
 const AUTH_STARTUP_TIMEOUT_MS = 6_000;
 
 function userTestingDeclinedKey(userId: string) {
@@ -118,6 +135,37 @@ function clearUserTestingDeclined(userId?: string | null) {
   if (!userId) return;
   try {
     localStorage.removeItem(userTestingDeclinedKey(userId));
+  } catch {
+    // Storage can be unavailable; preserve current session state.
+  }
+}
+
+function userTestingAcceptedKey(userId: string) {
+  return `${USER_TESTING_ACCEPTED_KEY}:${userId}`;
+}
+
+function readUserTestingAccepted(userId?: string | null): boolean {
+  if (!userId) return false;
+  try {
+    return localStorage.getItem(userTestingAcceptedKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistUserTestingAccepted(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(userTestingAcceptedKey(userId), "true");
+  } catch {
+    // Local storage may be unavailable; keep current session behavior.
+  }
+}
+
+function clearUserTestingAccepted(userId?: string | null) {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(userTestingAcceptedKey(userId));
   } catch {
     // Storage can be unavailable; preserve current session state.
   }
@@ -276,14 +324,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
   // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
+  const shouldAutoPromptUserTesting = new URLSearchParams(window.location.search).get("test") === "true";
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
   const feedbackRef = useRef<UserTestFeedbackHandle>(null);
+  const testStartPendingRef = useRef(false);
+  const [testStartPending, setTestStartPending] = useState(false);
+  const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
+  const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
     restricted: boolean;
   }>(() => ({
     accepted: false,
-    restricted: false,
+    restricted: true,
   }));
   useEffect(() => {
     if (testingGate.accepted) {
@@ -300,11 +353,31 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   useEffect(() => {
     if (me?.isAdmin !== false) return;
-    if (!me.userId || !readUserTestingDeclined(me.userId)) return;
     setTestingGate((prev) => {
+      if (!me?.userId) return prev;
       if (prev.accepted) return prev;
-      return { ...prev, restricted: false };
+      const accepted = readUserTestingAccepted(me.userId);
+      if (accepted) {
+        return { accepted: true, restricted: false };
+      }
+      return {
+        accepted: false,
+        restricted: !readUserTestingDeclined(me.userId),
+      };
     });
+  }, [me?.userId, me?.isAdmin]);
+
+  useEffect(() => {
+    if (testingOverlayRef.current == null) return;
+    if (!shouldAutoPromptUserTesting) return;
+    if (me?.isAdmin !== false) return;
+    if (testingGate.accepted || testingGate.restricted === false) return;
+    const markerUser = me?.userId ? readUserTestingDeclined(me.userId) : false;
+    if (markerUser) return;
+    const timer = window.setTimeout(() => {
+      testingOverlayRef.current?.open();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [me?.userId, me?.isAdmin]);
 
   const handleOpenChat = (context?: string) => {
@@ -335,8 +408,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       library: "library",
       interview: "interview_mode",
       review: "knowledge_review",
+      reports: null,
     } as const;
-    feedbackRef.current?.markFeature(feature[next]);
+    if (feature[next]) {
+      feedbackRef.current?.markFeature(feature[next]);
+      void trackTestEvent("feature_viewed", { feature: feature[next] });
+    }
     setSelectedVideoId(null);
     setFieldNotePreload(undefined);
     setView(next);
@@ -374,32 +451,158 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     setSeek({ time: startTime, token: Date.now() });
   };
 
-  const handleStartUserTest = () => {
+  const launchTestSession = async (pilotId?: string) => {
+    if (testStartPendingRef.current) return;
+    testStartPendingRef.current = true;
+    setTestStartPending(true);
+    try {
+      const session = await startTestSession(pilotId);
+      setFeedbackSessionId(session.id);
+      setTestingGate({ accepted: true, restricted: false });
+      clearUserTestingDeclined(me?.userId);
+      setTelemetryContext((current) =>
+        current ? { ...current, session } : current,
+      );
+      handleNavigate("graph");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
+      }, 0);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Test could not start. Please try again.");
+    } finally {
+      testStartPendingRef.current = false;
+      setTestStartPending(false);
+    }
+  };
+
+  const handleStartUserTest = async () => {
+    if (testStartPendingRef.current) return;
     setTestingGate((prev) => ({ ...prev, restricted: false }));
-    testingOverlayRef.current?.open();
+    let context = telemetryContext;
+    if (!context) {
+      try {
+        context = await loadTelemetryContext();
+      } catch {
+        testingOverlayRef.current?.open();
+        return;
+      }
+      setTelemetryContext(context);
+    }
+    if (!context || !context.enrolled || !context.scope) {
+      testingOverlayRef.current?.open();
+      return;
+    }
+    if (
+      context.consents.telemetry?.state === "granted" &&
+      context.consents.telemetry.privacyNoticeVersion === context.privacyNoticeVersion &&
+      context.consents.telemetry.consentVersion === context.consentVersion
+    ) {
+      await launchTestSession(context.scope.pilotId);
+      testingOverlayRef.current?.open();
+      return;
+    }
+    setTelemetryConsentOpen(true);
   };
 
   const handleTestingEvent = (event: TestingOverlayEvent) => {
     if (event === "declined") {
       // A late decline can arrive after "started" or "unavailable" in the same
       // batched transition; keep the unlocked state once the gate has opened.
-      const shouldPersistDeclinedOptOut = !testingGate.accepted && !testingAcceptanceInProgress.current;
-      if (shouldPersistDeclinedOptOut) {
-        persistUserTestingDeclined(me?.userId);
-      }
+      if (testingGate.accepted || testingAcceptanceInProgress.current) return;
+      persistUserTestingDeclined(me?.userId);
+      clearUserTestingAccepted(me?.userId);
       setTestingGate((prev) => {
         if (prev.accepted) return prev;
         return { accepted: false, restricted: false };
       });
       return;
     }
-    if (event === "started" || event === "unavailable" || event === "cancelled") {
+    if (event === "started") {
       clearUserTestingDeclined(me?.userId);
+      persistUserTestingAccepted(me?.userId);
       testingAcceptanceInProgress.current = true;
       setTestingGate({ accepted: true, restricted: false });
       return;
     }
+    if (event === "unavailable" || event === "cancelled") {
+      if (testingGate.accepted || testingAcceptanceInProgress.current) return;
+      clearUserTestingDeclined(me?.userId);
+      setTestingGate((prev) => {
+        if (prev.accepted) return prev;
+        return { accepted: false, restricted: false };
+      });
+      return;
+    }
   };
+
+  const handleTelemetryConsent = async (choices: TelemetryConsentChoices) => {
+    if (!telemetryContext?.scope || testStartPendingRef.current) return;
+    testStartPendingRef.current = true;
+    setTestStartPending(true);
+    try {
+      const context = await saveTelemetryConsents({
+        pilotId: telemetryContext.scope.pilotId,
+        ...choices,
+        privacyNoticeVersion: telemetryContext.privacyNoticeVersion,
+        consentVersion: telemetryContext.consentVersion,
+      });
+      setTelemetryContext(context);
+      setTelemetryConsentOpen(false);
+      if (choices.telemetry === "granted") {
+        testStartPendingRef.current = false;
+        setTestStartPending(false);
+        await launchTestSession(context.scope?.pilotId);
+      } else {
+        persistUserTestingDeclined(me?.userId);
+        clearUserTestingAccepted(me?.userId);
+        setTestingGate({ accepted: false, restricted: false });
+        handleNavigate("graph");
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
+    } finally {
+      testStartPendingRef.current = false;
+      setTestStartPending(false);
+    }
+  };
+
+  const handleTelemetryWithdrawal = async (
+    scopes: Array<"telemetry" | "screen" | "microphone">,
+  ) => {
+    const pilotId = telemetryContext?.scope?.pilotId;
+    if (!pilotId) return;
+    try {
+      await withdrawTelemetry(pilotId, scopes);
+      setTelemetryContext(await loadTelemetryContext(pilotId));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Consent could not be withdrawn.");
+    }
+  };
+
+  useEffect(() => {
+    if (me?.isAdmin !== false) return;
+    const stopRetry = initializeTelemetryRetry();
+    void loadTelemetryContext().then((context) => {
+      setTelemetryContext(context);
+      const session = context.session;
+      if (session) {
+        setFeedbackSessionId(session.id);
+      }
+      if (session && session.onboardingStatus !== "completed") {
+        handleNavigate("graph");
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
+        }, 0);
+      }
+    }).catch(() => setTelemetryContext(null));
+    return stopRetry;
+  }, [me?.isAdmin]);
+
+  useEffect(() => {
+    const continueTest = () => testingOverlayRef.current?.open();
+    window.addEventListener("jack:test-onboarding-completed", continueTest);
+    return () => window.removeEventListener("jack:test-onboarding-completed", continueTest);
+  }, []);
 
   const handleSignOut = () => {
     if (!onSignOut) return;
@@ -458,8 +661,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           window.location.assign(`${basePath}/sign-in`);
         }}
         onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
-        onStartUserTest={me?.isAdmin === false ? handleStartUserTest : undefined}
-        userTestingRequired={me?.isAdmin === false && testingGate.restricted}
+        onStartUserTest={
+          me?.isAdmin === false
+            ? handleStartUserTest
+            : undefined
+        }
+        userTestStarting={testStartPending}
+        canViewPilotReports={me?.canViewPilotReports === true}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -486,11 +694,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           />
         ) : view === "review" ? (
           <KnowledgeReview />
+        ) : view === "reports" ? (
+          <PilotActivityReports />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}
       </JackShell>
 
+      <TelemetryConsentModal
+        open={telemetryConsentOpen}
+        saving={testStartPending}
+        onSave={(choices) => void handleTelemetryConsent(choices)}
+        onClose={() => setTelemetryConsentOpen(false)}
+      />
       <UserTestingGate
         open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
         onStart={handleStartUserTest}
@@ -512,13 +728,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
       <TestingOverlay
         ref={testingOverlayRef}
-        autoPrompt={me?.isAdmin === false}
         onEvent={handleTestingEvent}
       />
       <UserTestFeedback
         ref={feedbackRef}
         consented={testingGate.accepted}
         userId={isSignedIn ? me?.userId : null}
+        pilotId={telemetryContext?.scope?.pilotId}
       />
 
       <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
@@ -526,12 +742,45 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Account & privacy</AlertDialogTitle>
             <AlertDialogDescription>
-              You control your participation. You can remove videos you uploaded from the Library, or permanently delete your account and its associated Jack data.
+              You control your participation. Ask Jack conversations are stored as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {telemetryContext?.scope && (
+            <div className="rounded-lg border border-border p-4">
+              <p className="font-semibold">Pilot telemetry</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Export your activity data or withdraw consent. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={exportTelemetry}>Export telemetry</Button>
+                {telemetryContext.consents.microphone?.state === "granted" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleTelemetryWithdrawal(["microphone"])}
+                  >
+                    Withdraw microphone
+                  </Button>
+                )}
+                {telemetryContext.consents.screen?.state === "granted" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleTelemetryWithdrawal(["screen"])}
+                  >
+                    Withdraw screen recording
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={() => void handleTelemetryWithdrawal(["telemetry"])}
+                >
+                  Withdraw telemetry
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-4">
             <p className="font-semibold text-destructive">Delete account</p>
-            <p className="mt-1 text-sm text-muted-foreground">This removes your sign-in, uploaded videos, interviews, chat history, parked thoughts, and test recordings. It cannot be undone.</p>
+            <p className="mt-1 text-sm text-muted-foreground">This removes your sign-in, uploaded videos, interviews, Ask Jack history, parked thoughts, feedback, pilot sessions, activity events, and test recordings. It cannot be undone.</p>
             <Button className="mt-3" variant="destructive" onClick={() => { setAccountDeleteError(null); setDeletePhrase(""); setAccountDeleteOpen(true); }}>
               Delete my account
             </Button>
