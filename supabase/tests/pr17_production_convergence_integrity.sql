@@ -14,10 +14,12 @@ declare
   cross_scope_blocked boolean := false;
   video_default text;
   ledger_count integer;
+  ledger_count_extra integer;
+  inserted_video_count integer;
 begin
   insert into public.knowledge_nodes (id, kind, label, trade)
   values
-    ('pr17:contributor', 'contributor', 'Synthetic contributor', 'Welder'),
+    ('pr17:contributor', 'mentor', 'Synthetic mentor', 'Welder'),
     ('pr17:concept', 'concept', 'Synthetic concept', 'Welder');
 
   insert into public.knowledge_edges (id, source_id, target_id, kind)
@@ -55,12 +57,52 @@ begin
     '{"participantCount":2}'::jsonb
   );
 
+  insert into public.videos (
+    id,
+    title,
+    trade,
+    status
+  )
+  values (video_id, 'PR17 synthetic retained video', 'Welder', 'completed')
+  on conflict (id) do update set
+    title = excluded.title,
+    trade = excluded.trade,
+    status = excluded.status;
+
+  GET DIAGNOSTICS inserted_video_count = ROW_COUNT;
+
+  insert into public.knowledge_nodes (id, kind, label, trade)
+  values
+    ('pr17:existing-source', 'mentor', 'Synthetic existing source', 'Welder'),
+    ('pr17:existing-target', 'concept', 'Synthetic existing target', 'Welder')
+  on conflict (id) do update set
+    kind = excluded.kind,
+    label = excluded.label,
+    trade = excluded.trade;
+
+  insert into public.knowledge_edges (id, source_id, target_id, kind)
+  values (
+    'pr17:existing-edge',
+    'pr17:existing-source',
+    'pr17:existing-target',
+    'knowledge'
+  )
+  on conflict (id) do update set
+    source_id = excluded.source_id,
+    target_id = excluded.target_id,
+    kind = excluded.kind;
+
+  if inserted_video_count = 0 then
+    raise exception 'synthetic retained video seed was not applied';
+  end if;
+
   if not exists (
     select 1
     from public.videos
     where id = video_id
       and title = 'PR17 synthetic retained video'
       and status = 'completed'
+      and trade = 'Welder'
   ) then
     raise exception 'existing video did not survive convergence';
   end if;
@@ -148,7 +190,6 @@ begin
     into ledger_count
   from supabase_migrations.schema_migrations
   where version in (
-    '20260701000000',
     '20260701010000',
     '20260708171400',
     '20260717054029',
@@ -156,11 +197,31 @@ begin
     '20260724091752',
     '20260724143000',
     '20260727042325',
-    '20260727123000'
+    '20260727123000',
+    '20260801002756'
   );
 
   if ledger_count <> 9 then
     raise exception 'expected nine PR17 migration ledger entries, found %', ledger_count;
+  end if;
+
+  select count(*)
+    into ledger_count_extra
+  from supabase_migrations.schema_migrations
+  where version not in (
+    '20260701010000',
+    '20260708171400',
+    '20260717054029',
+    '20260717054229',
+    '20260724091752',
+    '20260724143000',
+    '20260727042325',
+    '20260727123000',
+    '20260801002756'
+  );
+
+  if ledger_count_extra <> 0 then
+    raise exception 'unexpected migration versions exist in ledger';
   end if;
 end;
 $test$;
