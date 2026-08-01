@@ -77,18 +77,20 @@ async function deleteExpiredRecordings(): Promise<number> {
         true,
         RECORDING_DELETE_BATCH_SIZE,
       )
-    ).slice(0, RECORDING_DELETE_BATCH_SIZE);
+      ).slice(0, RECORDING_DELETE_BATCH_SIZE);
     if (rows.length === 0) return total;
-    const paths = rows
+    const validRows = rows.filter((row) => typeof row["id"] === "string");
+    const ids = validRows.map((row) => row["id"] as string);
+    if (ids.length === 0) {
+      throw new Error("Recording rows are missing identifiers required for safe deletion.");
+    }
+    const paths = validRows
       .map((row) => row["storage_path"])
       .filter((path): path is string => typeof path === "string" && path.length > 0);
     if (paths.length > 0) {
       const removedObjects = await db.storage.from("jack-test-recordings").remove(paths);
       if (removedObjects.error) throw removedObjects.error;
     }
-    const ids = rows
-      .map((row) => row["id"])
-      .filter((id): id is string => typeof id === "string");
     const removedRows = await db.from("test_recordings").delete().in("id", ids);
     if (removedRows.error) throw removedRows.error;
     total += ids.length;

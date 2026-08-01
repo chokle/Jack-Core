@@ -9,6 +9,7 @@ vi.mock("../supabase.js", async () => {
 
 import { fake, resetMocks } from "./mocks.js";
 import {
+  hasAnyReportScope,
   CONSENT_VERSION,
   PRIVACY_NOTICE_VERSION,
   recordServerAskJackEvent,
@@ -144,5 +145,31 @@ describe("server-authoritative Ask Jack telemetry", () => {
 
     expect(fake.tables.test_events).toHaveLength(0);
     expect(fake.tables.test_sessions[0]?.question_count).toBe(originalQuestionCount);
+  });
+
+  it("returns true when any membership in the valid scope window is report-authorized", async () => {
+    fake.tables.pilot_memberships = [
+      {
+        id: "membership-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        user_id: "tester-1",
+        role: "pilot_admin",
+        active: true,
+        valid_from: "2020-01-01T00:00:00.000Z",
+        valid_until: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "membership-2",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        user_id: "tester-1",
+        role: "pilot_admin",
+        active: true,
+        valid_from: "2026-01-01T00:00:00.000Z",
+        valid_until: null,
+      },
+    ];
+    expect(await hasAnyReportScope("tester-1")).toBe(true);
   });
 });

@@ -48,6 +48,50 @@ function hasOnlyKeys(value: unknown, allowed: ReadonlySet<string>): value is Rec
   );
 }
 
+function eventProjectionFromRow(
+  session: Record<string, any>,
+  event: Record<string, any>,
+  now: string,
+  duplicate: boolean,
+): Record<string, unknown> {
+  const canonicalEventType = String(event["event_type"] ?? "");
+  const metadata = (event["metadata"] ?? {}) as Record<string, unknown>;
+  const updates: Record<string, unknown> = {
+    app_session_id: event["app_session_id"] ?? session.app_session_id,
+    last_activity_at: now,
+    updated_at: now,
+  };
+  if (canonicalEventType === "onboarding_started") updates.onboarding_status = "in_progress";
+  if (canonicalEventType === "onboarding_step_completed") {
+    updates.onboarding_status = "in_progress";
+    updates.onboarding_step = metadata["next_step"] ?? session.onboarding_step;
+  }
+  if (canonicalEventType === "onboarding_completed") {
+    updates.onboarding_status = "completed";
+    updates.onboarding_step = 3;
+  }
+  if (canonicalEventType === "onboarding_skipped") {
+    updates.onboarding_status = "skipped";
+  }
+  if (canonicalEventType === "recording_started") updates.recording_status = "recording";
+  if (canonicalEventType === "recording_stopped") updates.recording_status = "stopped";
+  if (canonicalEventType === "recording_upload_succeeded") updates.recording_status = "uploaded";
+  if (canonicalEventType === "recording_upload_failed") {
+    updates.recording_status = "failed";
+    updates.error_count = Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
+  }
+  if (canonicalEventType === "feedback_submitted") updates.feedback_status = "submitted";
+  if (canonicalEventType === "test_completed") {
+    updates.status = "completed";
+    updates.completed_at = now;
+  }
+  if (canonicalEventType === "test_abandoned") updates.status = "abandoned";
+  if (canonicalEventType === "reliability_error") {
+    updates.error_count = Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
+  }
+  return updates;
+}
+
 function publicSession(row: Record<string, any>) {
   return {
     id: row.id,
@@ -403,10 +447,24 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           .maybeSingle();
         if (existingSession.error) throw existingSession.error;
         if (!existingSession.data) return res.status(404).json({ error: "Pilot session not found" });
+        const duplicateProjection = eventProjectionFromRow(
+          existingSession.data,
+          existingEvent.data,
+          new Date().toISOString(),
+          true,
+        );
+        const projected = await db
+          .from("test_sessions")
+          .update(duplicateProjection)
+          .eq("id", req.params.id)
+          .eq("actor_user_id", identity.userId)
+          .select("*")
+          .single();
+        if (projected.error) throw projected.error;
         return res.json({
           accepted: true,
           duplicate: true,
-          session: publicSession(existingSession.data),
+          session: publicSession(projected.data),
         });
       }
     }
@@ -460,42 +518,17 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       return res.status(400).json({ error: "Activity event was rejected.", code: inserted.error });
     }
 
-    const canonicalEventType = String(inserted.row?.["event_type"] ?? event.eventType);
-    const metadata = (inserted.row?.["metadata"] ?? {}) as Record<string, unknown>;
     const now = new Date().toISOString();
-    const updates: Record<string, unknown> = {
-      app_session_id: inserted.row?.["app_session_id"] ?? event.appSessionId,
-      last_activity_at: now,
-      updated_at: now,
-    };
-    if (canonicalEventType === "onboarding_started") updates.onboarding_status = "in_progress";
-    if (canonicalEventType === "onboarding_step_completed") {
-      updates.onboarding_status = "in_progress";
-      updates.onboarding_step = metadata["next_step"] ?? session.data.onboarding_step;
-    }
-    if (canonicalEventType === "onboarding_completed") {
-      updates.onboarding_status = "completed";
-      updates.onboarding_step = 3;
-    }
-    if (canonicalEventType === "onboarding_skipped") {
-      updates.onboarding_status = "skipped";
-    }
-    if (canonicalEventType === "recording_started") updates.recording_status = "recording";
-    if (canonicalEventType === "recording_stopped") updates.recording_status = "stopped";
-    if (canonicalEventType === "recording_upload_succeeded") updates.recording_status = "uploaded";
-    if (canonicalEventType === "recording_upload_failed") {
-      updates.recording_status = "failed";
-      updates.error_count = Number(session.data.error_count ?? 0) + (inserted.duplicate ? 0 : 1);
-    }
-    if (canonicalEventType === "feedback_submitted") updates.feedback_status = "submitted";
-    if (canonicalEventType === "test_completed") {
-      updates.status = "completed";
-      updates.completed_at = now;
-    }
-    if (canonicalEventType === "test_abandoned") updates.status = "abandoned";
-    if (canonicalEventType === "reliability_error") {
-      updates.error_count = Number(session.data.error_count ?? 0) + (inserted.duplicate ? 0 : 1);
-    }
+    const updates = eventProjectionFromRow(
+      session.data,
+      {
+        event_type: inserted.row?.["event_type"] ?? event.eventType,
+        metadata: (inserted.row?.["metadata"] ?? event.metadata) as Record<string, unknown>,
+        app_session_id: inserted.row?.["app_session_id"] ?? event.appSessionId,
+      },
+      now,
+      inserted.duplicate,
+    );
     const updated = await db
       .from("test_sessions")
       .update(updates)

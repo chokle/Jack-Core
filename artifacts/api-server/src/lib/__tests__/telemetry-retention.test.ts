@@ -15,7 +15,10 @@ vi.mock("../../lib/supabase.js", async () => {
 });
 
 import { fake, resetMocks } from "./mocks.js";
-import { runTelemetryRetentionSweep } from "../telemetry-retention.js";
+import {
+  runTelemetryRetentionSweep,
+  startTelemetryRetentionWorker,
+} from "../telemetry-retention.js";
 
 beforeEach(() => {
   resetMocks();
@@ -37,6 +40,60 @@ beforeEach(() => {
 });
 
 describe("telemetry retention sweep", () => {
+  it("returns zero recording deletions when no recordings are due", async () => {
+    const counts = await runTelemetryRetentionSweep();
+    expect(counts.recordings).toBe(0);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("deletes all valid recording rows in the batch and advances state", async () => {
+    const past = "2020-01-01T00:00:00.000Z";
+    fake.tables.test_recordings = [
+      { id: "recording-valid-1", storage_path: "recordings/one.webm", retained_until: past },
+      { id: "recording-valid-2", storage_path: "recordings/two.webm", deletion_due_at: past },
+    ];
+    const counts = await runTelemetryRetentionSweep();
+    expect(counts.recordings).toBe(2);
+    expect(fake.tables.test_recordings).toHaveLength(0);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(["recordings/one.webm", "recordings/two.webm"]);
+  });
+
+  it("fails fast when a batch has no usable recording IDs", async () => {
+    fake.tables.test_recordings = [
+      {
+        storage_path: "recordings/missing-id.webm",
+        retained_until: "2020-01-01T00:00:00.000Z",
+      },
+    ];
+
+    await expect(runTelemetryRetentionSweep()).rejects.toMatchObject({
+      message: "Recording rows are missing identifiers required for safe deletion.",
+    });
+    expect(fake.tables.test_recordings).toHaveLength(1);
+  });
+
+  it("deletes valid recording IDs from mixed-id batches before surfacing unusable-row failure", async () => {
+    fake.tables.test_recordings = [
+      { id: "recording-valid", storage_path: "recordings/valid.webm", retained_until: "2020-01-01T00:00:00.000Z" },
+      { storage_path: "recordings/invalid.webm", retained_until: "2020-01-01T00:00:00.000Z", id: null },
+      { id: 1, storage_path: "recordings/invalid-number.webm", retained_until: "2020-01-01T00:00:00.000Z" },
+    ];
+
+    await expect(runTelemetryRetentionSweep()).rejects.toMatchObject({
+      message: "Recording rows are missing identifiers required for safe deletion.",
+    });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(["recordings/valid.webm"]);
+    expect(fake.tables.test_recordings).toHaveLength(2);
+    expect(fake.tables.test_recordings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ storage_path: "recordings/invalid.webm", id: null }),
+        expect.objectContaining({ storage_path: "recordings/invalid-number.webm", id: 1 }),
+      ]),
+    );
+  });
+
   it("deletes expired categories and private recording objects but preserves future rows", async () => {
     const past = "2020-01-01T00:00:00.000Z";
     const future = "2099-01-01T00:00:00.000Z";
@@ -66,6 +123,19 @@ describe("telemetry retention sweep", () => {
     expect(fake.tables.test_recordings).toEqual([
       expect.objectContaining({ id: "recording-future" }),
     ]);
+  });
+
+  it("starts and returns no-op retention worker when disabled", () => {
+    const previous = process.env["TELEMETRY_RETENTION_ENABLED"];
+    process.env["TELEMETRY_RETENTION_ENABLED"] = "false";
+    const worker = startTelemetryRetentionWorker();
+    expect(worker.stop).toBeTypeOf("function");
+    expect(() => worker.stop()).not.toThrow();
+    if (previous === undefined) {
+      delete process.env["TELEMETRY_RETENTION_ENABLED"];
+    } else {
+      process.env["TELEMETRY_RETENTION_ENABLED"] = previous;
+    }
   });
 
   it("keeps recording rows due after a storage failure and succeeds on retry", async () => {

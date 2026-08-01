@@ -28,6 +28,8 @@ const OTHER_ORGANIZATION_ID = "33333333-3333-4333-8333-333333333333";
 const OTHER_PILOT_ID = "44444444-4444-4444-8444-444444444444";
 const USER_ID = "tester-1";
 const query = `organizationId=${ORGANIZATION_ID}&pilotId=${PILOT_ID}`;
+const SECOND_SESSION_ID = "66666666-6666-4666-8666-666666666666";
+const THIRD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 
 function app(): Express {
   const value = express();
@@ -104,6 +106,7 @@ beforeEach(() => {
     actor_user_id: USER_ID,
     organization_id: ORGANIZATION_ID,
     pilot_id: PILOT_ID,
+    test_session_id: "55555555-5555-4555-8555-555555555555",
     event_type: "ask_jack_completed",
     occurred_at: "2026-07-25T00:30:00.000Z",
     surface: "ask_jack",
@@ -220,5 +223,108 @@ describe("pilot activity reports", () => {
       pilot_id: PILOT_ID,
       status: "completed",
     });
+  });
+
+  it("exports CSV event_count for each session instead of duplicating actor totals", async () => {
+    fake.tables.test_sessions.push(
+      {
+        id: SECOND_SESSION_ID,
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        status: "active",
+        started_at: "2026-07-25T01:30:00.000Z",
+        last_activity_at: "2026-07-25T02:00:00.000Z",
+        onboarding_status: "not_started",
+        onboarding_step: 0,
+        question_count: 0,
+        screen_consent_state: "declined",
+        microphone_consent_state: "declined",
+        recording_status: "not_requested",
+        feedback_status: "not_requested",
+        completed_at: null,
+        error_count: 0,
+      },
+      {
+        id: THIRD_SESSION_ID,
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        status: "active",
+        started_at: "2026-07-25T02:30:00.000Z",
+        last_activity_at: "2026-07-25T03:00:00.000Z",
+        onboarding_status: "not_started",
+        onboarding_step: 0,
+        question_count: 0,
+        screen_consent_state: "declined",
+        microphone_consent_state: "declined",
+        recording_status: "not_requested",
+        feedback_status: "not_requested",
+        completed_at: null,
+        error_count: 0,
+      },
+    );
+    fake.tables.test_events.push(
+      {
+        event_id: "88888888-8888-4888-8888-888888888888",
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        test_session_id: SECOND_SESSION_ID,
+        event_type: "test_started",
+        occurred_at: "2026-07-25T01:45:00.000Z",
+        surface: "pilot",
+        result: "success",
+        metadata: {},
+        schema_version: 1,
+      },
+      {
+        event_id: "88888888-8888-4888-8888-888888888889",
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        test_session_id: THIRD_SESSION_ID,
+        event_type: "test_started",
+        occurred_at: "2026-07-25T02:45:00.000Z",
+        surface: "pilot",
+        result: "success",
+        metadata: {},
+        schema_version: 1,
+      },
+      {
+        event_id: "88888888-8888-4888-8888-888888888890",
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        test_session_id: THIRD_SESSION_ID,
+        event_type: "ask_jack_completed",
+        occurred_at: "2026-07-25T02:46:00.000Z",
+        surface: "ask_jack",
+        result: "success",
+        metadata: { citation_count: 1 },
+        schema_version: 1,
+      },
+    );
+
+    const csv = await request(app()).get(`/api/testing/reports/export.csv?${query}`);
+    expect(csv.status).toBe(200);
+    const lines = csv.text.trim().split(/\r?\n/);
+    const headers = lines[0]?.split(",").map((header) => header.replace(/^\"|\"$/g, "")) ?? [];
+    expect(headers).toContain("event_count");
+    const rows = lines
+      .slice(1)
+      .filter((line) => line.trim().length > 0)
+      .map((line) =>
+        Object.fromEntries(
+          (line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/) as string[]).map((value, index) => [
+            headers[index] ?? `column_${index}`,
+            value.replace(/^\"|\"$/g, ""),
+          ]),
+        ),
+      );
+    const countsBySessionStart = Object.fromEntries(rows.map((row) => [String(row.started_at), row.event_count]));
+    expect(countsBySessionStart["2026-07-25T00:00:00.000Z"]).toBe("1");
+    expect(countsBySessionStart["2026-07-25T01:30:00.000Z"]).toBe("1");
+    expect(countsBySessionStart["2026-07-25T02:30:00.000Z"]).toBe("2");
   });
 });

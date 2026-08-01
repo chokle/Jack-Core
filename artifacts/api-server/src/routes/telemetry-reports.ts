@@ -275,13 +275,13 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     const scope = await requireReportScope(req, res, "pilot_report_csv_export");
     if (!scope) return;
     const rows = await loadScopeRows(scope);
-    const countsByActor = new Map<string, Record<string, number>>();
+    const countsBySession = new Map<string, Record<string, number>>();
     for (const event of rows.events) {
-      const actor = String(event["actor_user_id"]);
+      const sessionId = String(event["test_session_id"]);
       const type = String(event["event_type"]);
-      const counts = countsByActor.get(actor) ?? {};
+      const counts = countsBySession.get(sessionId) ?? {};
       counts[type] = (counts[type] ?? 0) + 1;
-      countsByActor.set(actor, counts);
+      countsBySession.set(sessionId, counts);
     }
     const header = [
       "actor_user_id",
@@ -298,7 +298,10 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     const lines = [header.map(csvCell).join(",")];
     for (const session of rows.sessions) {
       const actor = String(session["actor_user_id"]);
-      const count = Object.values(countsByActor.get(actor) ?? {}).reduce((sum, value) => sum + value, 0);
+      const count = Object.values(countsBySession.get(String(session["id"])) ?? {}).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
       lines.push(
         [
           actor,

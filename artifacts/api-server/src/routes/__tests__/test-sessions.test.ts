@@ -188,6 +188,35 @@ describe("canonical user-test sessions", () => {
     expect(fake.tables.test_events.filter((row) => row.event_id === event.eventId)).toHaveLength(1);
   });
 
+  it("replays event projection on duplicate retry even if stored session state drifted", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const event = {
+      eventId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      eventType: "test_completed",
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: {},
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+    };
+    const first = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(event);
+    expect(first.status).toBe(201);
+    expect(first.body.session.status).toBe("completed");
+    fake.tables.test_sessions[0]!.status = "active";
+    fake.tables.test_sessions[0]!.completed_at = null;
+    const retry = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(event);
+
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ accepted: true, duplicate: true, session: { status: "completed" } });
+    expect(fake.tables.test_events.filter((row) => row.event_id === event.eventId)).toHaveLength(1);
+    expect(fake.tables.test_sessions[0]!.status).toBe("completed");
+  });
+
   it("rejects a dedupe-key collision without applying the conflicting session outcome", async () => {
     const started = await request(app).post("/api/testing/sessions/start").send(startBody);
     const base = {

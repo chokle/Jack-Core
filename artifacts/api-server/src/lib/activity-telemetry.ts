@@ -568,19 +568,17 @@ export async function authorizeReportScope(
 
 export async function hasAnyReportScope(userId: string): Promise<boolean> {
   if (await platformSuperadmin(userId)) return true;
-  for (const role of ["pilot_admin", "organization_admin"]) {
-    const membership = await db
-      .from("pilot_memberships")
-      .select("active,valid_from,valid_until")
-      .eq("user_id", userId)
-      .eq("role", role)
-      .eq("active", true)
-      .limit(1)
-      .maybeSingle();
-    if (membership.error) throw membership.error;
-    if (membership.data && isActiveWindow(membership.data)) return true;
-  }
-  return false;
+  const memberships = await db
+    .from("pilot_memberships")
+    .select("active,valid_from,valid_until,role")
+    .eq("user_id", userId)
+    .eq("active", true);
+  if (memberships.error) throw memberships.error;
+  return (memberships.data ?? []).some(
+    (membership: Record<string, unknown>) =>
+      (membership["role"] === "pilot_admin" || membership["role"] === "organization_admin") &&
+      isActiveWindow(membership),
+  );
 }
 
 export async function listReportScopes(userId: string): Promise<PilotScope[]> {

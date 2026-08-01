@@ -267,10 +267,18 @@ export function flushTestEvents(): Promise<TestSession | null> {
   if (flushRequest) return flushRequest;
   flushRequest = (async () => {
     let latest = getCachedTestSession();
-    while (true) {
-      const queue = readQueue();
+    let queue = readQueue();
+
+    const persistQueue = (updated: QueuedEvent[]): void => {
+      queue = updated;
+      writeQueue(updated);
+    };
+
+    const isRetryable = (status: number): boolean =>
+      status >= 500 || status === 408 || status === 429;
+
+    while (queue.length > 0) {
       const next = queue[0];
-      if (!next) return latest;
       try {
         const response = await fetch(
           `/api/testing/sessions/${encodeURIComponent(next.sessionId)}/events`,
@@ -295,19 +303,29 @@ export function flushTestEvents(): Promise<TestSession | null> {
             }),
           },
         );
+
         if (!response.ok) {
-          if (response.status >= 500 || response.status === 429) return latest;
-          writeQueue(queue.slice(1));
+          if (isRetryable(response.status)) {
+            persistQueue(queue);
+            return latest;
+          }
+
+          persistQueue(queue.slice(1));
           continue;
         }
+
         const body = (await response.json()) as { session: TestSession };
         latest = body.session;
         cacheTestSession(latest);
-        writeQueue(queue.slice(1));
+        persistQueue(queue.slice(1));
       } catch {
+        persistQueue(queue);
         return latest;
       }
     }
+
+    persistQueue([]);
+    return latest;
   })().finally(() => {
     flushRequest = null;
   });

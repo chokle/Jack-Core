@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -21,11 +22,49 @@ import { dirname, join } from "node:path";
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SQL_PATH = join(
-  __dirname,
-  "../../supabase/migrations/20260701000000_jack_schema_baseline.sql",
-);
-const sql = readFileSync(SQL_PATH, "utf8");
+const MIGRATION_DIR = join(__dirname, "../../supabase/migrations");
+const BASELINE_MIGRATION = "20260701000000_jack_schema_baseline.sql";
+
+export interface MigrationFile {
+  fileName: string;
+  path: string;
+  version: string;
+}
+
+export function getMigrationVersion(fileName: string): string | null {
+  const match = /^(\d+)_/.exec(fileName);
+  return match ? match[1] : null;
+}
+
+export function collectMigrationFiles(baseDir = MIGRATION_DIR): MigrationFile[] {
+  const files = readdirSync(baseDir)
+    .filter((fileName) => fileName.endsWith(".sql"))
+    .map((fileName) => ({ fileName, path: join(baseDir, fileName), version: getMigrationVersion(fileName) }))
+    .filter((entry): entry is MigrationFile => Boolean(entry.version));
+  files.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  return files;
+}
+
+export function buildMigrationPlan(args: {
+  migrations: MigrationFile[];
+  includeBaseline: boolean;
+  appliedVersions: Set<string>;
+}): MigrationFile[] {
+  return args.migrations
+    .filter((migration) => args.includeBaseline || migration.fileName !== BASELINE_MIGRATION)
+    .filter((migration) => !args.appliedVersions.has(migration.version))
+    .sort((a, b) => a.version.localeCompare(b.version));
+}
+
+function migrationBundleSql(migrations: MigrationFile[]): string {
+  return migrations
+    .map((migration) => `-- ${migration.fileName}\n${readFileSync(migration.path, "utf8")}`)
+    .join("\n\n");
+}
+
+function migrationChecksum(sql: string): string {
+  return createHash("sha256").update(sql).digest("hex");
+}
 
 const dbUrl = process.env["SUPABASE_DB_URL"];
 
@@ -96,12 +135,16 @@ function inspectConnectionString(raw: string): UrlInsights {
   return insights;
 }
 
-function printManualInstructions(reason: string): void {
+function printManualInstructions(reason: string, migrations: MigrationFile[]): void {
   console.log(`\n${reason}`);
   console.log("\nManual setup — copy the SQL below and run it in:");
   console.log("Supabase Dashboard → SQL Editor → New query → Run\n");
   console.log("----- BEGIN SQL -----");
-  console.log(sql);
+  if (migrations.length) {
+    console.log(migrationBundleSql(migrations));
+  } else {
+    console.log("-- No pending migrations found for this setup state.");
+  }
   console.log("----- END SQL -----\n");
   console.log("This SQL also creates the public 'jack-videos' storage bucket.");
 }
@@ -171,8 +214,54 @@ async function applyWithConnection(connectionString: string): Promise<void> {
 
   await client.connect();
   try {
-    console.log("Connected to Supabase Postgres. Applying schema...");
-    await client.query(sql);
+    console.log("Connected to Supabase Postgres. Resolving migration baseline state...");
+    const foundationResult = await client.query<{ hasFoundation: boolean }>(
+      `SELECT
+         (
+           to_regclass('public.organizations') IS NOT NULL
+           AND to_regclass('public.pilots') IS NOT NULL
+         ) AS "hasFoundation"`,
+    );
+    const hasFoundation = Boolean(foundationResult.rows[0]?.hasFoundation);
+    const includeBaseline = !hasFoundation;
+    const migrations = collectMigrationFiles();
+
+    await client.query(`
+      create schema if not exists supabase_migrations;
+      create table if not exists supabase_migrations.schema_migrations (
+        version text primary key,
+        name text not null,
+        checksum text,
+        executed_at timestamptz not null default now()
+      );
+    `);
+
+    const appliedRows = await client.query<{ version: string }>(
+      `select version from supabase_migrations.schema_migrations`,
+    );
+    const appliedVersions = new Set(appliedRows.rows.map((row) => row.version));
+    const plan = buildMigrationPlan({
+      migrations,
+      includeBaseline,
+      appliedVersions,
+    });
+
+    if (!plan.length) {
+      console.log("\n✅ Supabase schema is already at target migration state.");
+    }
+
+    for (const migration of plan) {
+      const sql = readFileSync(migration.path, "utf8");
+      console.log(`\nApplying migration ${migration.fileName}...`);
+      await client.query(sql);
+      await client.query(
+        `insert into supabase_migrations.schema_migrations (version, name, checksum)
+         values ($1, $2, $3)
+         on conflict (version) do update
+         set name = excluded.name, checksum = excluded.checksum, executed_at = now()`,
+        [migration.version, migration.fileName, migrationChecksum(sql)],
+      );
+    }
 
     // Force PostgREST to reload its schema cache immediately. Right after DDL,
     // PostgREST's cached schema is stale until it reloads on its own, so a write
@@ -204,6 +293,9 @@ async function applyWithConnection(connectionString: string): Promise<void> {
        WHERE proname IN ('match_transcript_segments','match_videos')
        ORDER BY proname;`,
     );
+    const migrationRows = await client.query<{ version: string; name: string; checksum: string | null }>(
+      `select version, name, checksum from supabase_migrations.schema_migrations order by version`,
+    );
     const bucket = await client.query(
       `SELECT id FROM storage.buckets WHERE id = 'jack-videos';`,
     );
@@ -214,6 +306,14 @@ async function applyWithConnection(connectionString: string): Promise<void> {
     );
     console.log(
       `  Functions:    ${functions.rows.map((r) => r.proname).join(", ") || "(none)"}`,
+    );
+    console.log(`  Migrations:   ${migrationRows.rows.map((row) => row.name).join(", ") || "(none)"}`);
+    console.log(
+      `  Migration checksums: ${
+        migrationRows.rows
+          .map((row) => `${row.version}=${row.checksum ?? "none"}`)
+          .join(", ") || "(none)"
+      }`,
     );
     console.log(`  Competencies: ${competencies.rows[0]?.n ?? 0} seeded`);
     console.log(
@@ -230,6 +330,7 @@ async function run(): Promise<void> {
   if (!dbUrl) {
     printManualInstructions(
       "SUPABASE_DB_URL is not set, so the schema cannot be applied automatically.",
+      collectMigrationFiles(),
     );
     return;
   }
@@ -251,7 +352,7 @@ async function run(): Promise<void> {
   try {
     await applyWithConnection(insights.sanitized);
   } catch (err) {
-    printManualInstructions(diagnoseConnectionError(err, insights));
+    printManualInstructions(diagnoseConnectionError(err, insights), collectMigrationFiles());
     process.exitCode = 1;
   }
 }
