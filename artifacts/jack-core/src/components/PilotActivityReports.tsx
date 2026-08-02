@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
 
 interface ReportScope {
@@ -72,7 +74,9 @@ interface TimelineEvent {
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "include", ...init });
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
   if (!response.ok) throw new Error(body.error || "Report request failed.");
   return body;
 }
@@ -85,10 +89,13 @@ export function PilotActivityReports() {
   const [scopes, setScopes] = useState<ReportScope[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [report, setReport] = useState<SummaryResponse | null>(null);
-  const [timeline, setTimeline] = useState<{ userId: string; events: TimelineEvent[] } | null>(
-    null,
-  );
-  const [closeoutState, setCloseoutState] = useState<"all" | "draft" | "submitted">("all");
+  const [timeline, setTimeline] = useState<{
+    userId: string;
+    events: TimelineEvent[];
+  } | null>(null);
+  const [closeoutState, setCloseoutState] = useState<
+    "all" | "draft" | "submitted"
+  >("all");
   const [workDateFrom, setWorkDateFrom] = useState("");
   const [workDateTo, setWorkDateTo] = useState("");
   const [closeoutLimit, setCloseoutLimit] = useState(25);
@@ -98,7 +105,10 @@ export function PilotActivityReports() {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const selected = useMemo(
-    () => scopes.find((scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey),
+    () =>
+      scopes.find(
+        (scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey,
+      ),
     [scopes, selectedKey],
   );
   const query = selected
@@ -112,7 +122,11 @@ export function PilotActivityReports() {
         const first = body.scopes[0];
         if (first) setSelectedKey(`${first.organizationId}:${first.pilotId}`);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, []);
 
   useEffect(() => {
@@ -121,7 +135,11 @@ export function PilotActivityReports() {
     setError(null);
     void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
       .then(setReport)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, [query]);
 
   useEffect(() => {
@@ -138,13 +156,19 @@ export function PilotActivityReports() {
     if (closeoutState !== "all") closeoutParams.set("state", closeoutState);
     if (workDateFrom) closeoutParams.set("workDateFrom", workDateFrom);
     if (workDateTo) closeoutParams.set("workDateTo", workDateTo);
-    void json<CloseoutResponse>(`/api/testing/reports/closeouts?${closeoutParams}`)
+    void json<CloseoutResponse>(
+      `/api/testing/reports/closeouts?${closeoutParams}`,
+    )
       .then((body) => {
         setCloseouts(body.closeouts);
         setCloseoutCount(body.count);
         setCloseoutTruncated(body.truncated);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Closeouts unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Closeouts unavailable.",
+        ),
+      );
     return () => {
       setCloseouts(null);
       setCloseoutCount(0);
@@ -159,7 +183,9 @@ export function PilotActivityReports() {
       );
       setTimeline({ userId: body.actorUserId, events: body.events });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Timeline unavailable.");
+      setError(
+        reason instanceof Error ? reason.message : "Timeline unavailable.",
+      );
     }
   };
 
@@ -172,7 +198,9 @@ export function PilotActivityReports() {
         body: JSON.stringify({ reportType: "pilot_summary" }),
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Report generation failed.");
+      setError(
+        reason instanceof Error ? reason.message : "Report generation failed.",
+      );
     } finally {
       setGenerating(false);
     }
@@ -183,24 +211,38 @@ export function PilotActivityReports() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-primary">Admin only</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-primary">
+              Admin only
+            </p>
             <h1 className="text-2xl font-bold">Pilot activity reports</h1>
             <p className="text-sm text-muted-foreground">
-              Organization-isolated, minimized telemetry. Ask Jack content is never shown here.
+              Organization-isolated, minimized telemetry. Ask Jack content is
+              never shown here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
-            <Button variant="outline" onClick={() => window.print()} disabled={!report}>
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              disabled={!report}
+            >
               Print
             </Button>
             <Button
               variant="outline"
               disabled={!query}
-              onClick={() => window.location.assign(`/api/testing/reports/export.csv?${query}`)}
+              onClick={() =>
+                window.location.assign(
+                  `/api/testing/reports/export.csv?${query}`,
+                )
+              }
             >
               Export CSV
             </Button>
-            <Button disabled={!query || generating} onClick={() => void generate()}>
+            <Button
+              disabled={!query || generating}
+              onClick={() => void generate()}
+            >
               {generating ? "Generating…" : "Generate report"}
             </Button>
           </div>
@@ -218,14 +260,21 @@ export function PilotActivityReports() {
                 key={`${scope.organizationId}:${scope.pilotId}`}
                 value={`${scope.organizationId}:${scope.pilotId}`}
               >
-                {scope.organizationName ?? "Organization"} — {scope.pilotName ?? "Pilot"}
+                {scope.organizationName ?? "Organization"} —{" "}
+                {scope.pilotName ?? "Pilot"}
               </option>
             ))}
           </select>
         </label>
 
-        {error && <p className="rounded-lg border border-destructive p-3 text-destructive">{error}</p>}
-        {scopes.length === 0 && !error && <p>No active report scope is assigned.</p>}
+        {error && (
+          <p className="rounded-lg border border-destructive p-3 text-destructive">
+            {error}
+          </p>
+        )}
+        {scopes.length === 0 && !error && (
+          <p>No active report scope is assigned.</p>
+        )}
 
         {report && (
           <>
@@ -234,13 +283,22 @@ export function PilotActivityReports() {
                 ["Participants", report.summary.participantCount],
                 ["Completed", report.summary.completedSessions],
                 ["Completion rate", percent(report.summary.completionRate)],
-                ["Onboarding complete", percent(report.summary.onboardingCompletionRate)],
-                ["Recording opt-in", percent(report.summary.recordingOptInRate)],
+                [
+                  "Onboarding complete",
+                  percent(report.summary.onboardingCompletionRate),
+                ],
+                [
+                  "Recording opt-in",
+                  percent(report.summary.recordingOptInRate),
+                ],
                 ["Feedback", report.summary.feedbackCount],
                 ["Dropped events", report.summary.droppedEventCount],
                 ["Rejected events", report.summary.rejectedEventCount],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-4">
+                <div
+                  key={label}
+                  className="rounded-lg border border-border bg-card p-4"
+                >
                   <p className="text-xs text-muted-foreground">{label}</p>
                   <p className="mt-1 text-2xl font-bold">{value}</p>
                 </div>
@@ -272,7 +330,9 @@ export function PilotActivityReports() {
                       <td className="p-3">{user.status}</td>
                       <td className="p-3">{user.onboardingStatus}</td>
                       <td className="p-3">{user.questionCount}</td>
-                      <td className="p-3">{new Date(user.lastActivityAt).toLocaleString()}</td>
+                      <td className="p-3">
+                        {new Date(user.lastActivityAt).toLocaleString()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -286,10 +346,14 @@ export function PilotActivityReports() {
             <h2 className="font-semibold">Timeline: {timeline.userId}</h2>
             <ol className="mt-3 space-y-2">
               {timeline.events.map((event) => (
-                <li key={event.eventId} className="rounded bg-muted/40 p-3 text-sm">
+                <li
+                  key={event.eventId}
+                  className="rounded bg-muted/40 p-3 text-sm"
+                >
                   <span className="font-semibold">{event.eventType}</span>
                   <span className="ml-2 text-muted-foreground">
-                    {new Date(event.occurredAt).toLocaleString()} · {event.result}
+                    {new Date(event.occurredAt).toLocaleString()} ·{" "}
+                    {event.result}
                   </span>
                   {Object.keys(event.metadata).length > 0 && (
                     <span className="ml-2 font-mono text-xs">
@@ -305,7 +369,9 @@ export function PilotActivityReports() {
           <header className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-semibold">End-of-Shift Closeouts</h2>
             <div className="text-sm text-muted-foreground">
-              {query ? `Showing ${closeouts?.length ?? 0} of ${closeoutCount}` : "Select a scope"}
+              {query
+                ? `Showing ${closeouts?.length ?? 0} of ${closeoutCount}`
+                : "Select a scope"}
             </div>
           </header>
           {query && (
@@ -316,7 +382,10 @@ export function PilotActivityReports() {
                   className="mt-1 w-full rounded-md border border-border bg-background p-2"
                   value={closeoutState}
                   onChange={(event) =>
-                    setCloseoutState(event.target.value as "all" | "draft" | "submitted")}
+                    setCloseoutState(
+                      event.target.value as "all" | "draft" | "submitted",
+                    )
+                  }
                 >
                   <option value="all">All</option>
                   <option value="draft">Draft</option>
@@ -330,7 +399,9 @@ export function PilotActivityReports() {
                   min={1}
                   max={100}
                   value={closeoutLimit}
-                  onChange={(event) => setCloseoutLimit(Number(event.target.value || 25))}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setCloseoutLimit(Number(event.target.value || 25))
+                  }
                 />
               </label>
               <label className="text-sm">
@@ -338,7 +409,9 @@ export function PilotActivityReports() {
                 <Input
                   type="date"
                   value={workDateFrom}
-                  onChange={(event) => setWorkDateFrom(event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setWorkDateFrom(event.target.value)
+                  }
                 />
               </label>
               <label className="text-sm">
@@ -346,7 +419,9 @@ export function PilotActivityReports() {
                 <Input
                   type="date"
                   value={workDateTo}
-                  onChange={(event) => setWorkDateTo(event.target.value)}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setWorkDateTo(event.target.value)
+                  }
                 />
               </label>
             </div>
@@ -375,19 +450,27 @@ export function PilotActivityReports() {
                   <tbody>
                     {closeouts.map((entry) => (
                       <tr key={entry.id} className="border-t border-border">
-                        <td className="p-3 font-mono text-xs">{entry.actorUserId}</td>
+                        <td className="p-3 font-mono text-xs">
+                          {entry.actorUserId}
+                        </td>
                         <td className="p-3">{entry.workDate}</td>
                         <td className="p-3">{entry.shift}</td>
                         <td className="p-3">{entry.trade ?? "—"}</td>
                         <td className="p-3">{entry.crew ?? "—"}</td>
                         <td className="p-3 capitalize">{entry.status}</td>
-                        <td className="p-3">{new Date(entry.updatedAt).toLocaleString()}</td>
+                        <td className="p-3">
+                          {new Date(entry.updatedAt).toLocaleString()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {closeoutTruncated && <p className="text-xs text-muted-foreground">Results were truncated to the selected limit.</p>}
+              {closeoutTruncated && (
+                <p className="text-xs text-muted-foreground">
+                  Results were truncated to the selected limit.
+                </p>
+              )}
             </>
           )}
         </section>

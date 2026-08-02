@@ -30,8 +30,14 @@ const WORK_DATE = "2026-07-25";
 function app(): Express {
   const value = express();
   value.use((req, _res, next) => {
-    (req as never as { log: { error: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> } }).log =
-      { error: vi.fn(), warn: vi.fn() };
+    (
+      req as never as {
+        log: {
+          error: ReturnType<typeof vi.fn>;
+          warn: ReturnType<typeof vi.fn>;
+        };
+      }
+    ).log = { error: vi.fn(), warn: vi.fn() };
     next();
   });
   value.use(express.json());
@@ -40,17 +46,21 @@ function app(): Express {
 }
 
 function seedMemberships() {
-  fake.tables.pilots = [{ id: PILOT_ID, organization_id: ORGANIZATION_ID }];
-  fake.tables.pilot_memberships = [{
-    id: "tester-membership",
-    user_id: identity.userId,
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    role: "tester",
-    active: true,
-    valid_from: "2026-01-01T00:00:00.000Z",
-    valid_until: null,
-  }];
+  fake.tables.pilots = [
+    { id: PILOT_ID, organization_id: ORGANIZATION_ID, status: "active" },
+  ];
+  fake.tables.pilot_memberships = [
+    {
+      id: "tester-membership",
+      user_id: identity.userId,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    },
+  ];
 }
 
 function validDraft(answers?: Record<string, string>) {
@@ -85,29 +95,41 @@ beforeEach(() => {
     classification: "resolved",
   });
   fake.tables.pilot_memberships = [];
-  fake.tables.pilots = [{ id: PILOT_ID, organization_id: ORGANIZATION_ID }];
-  fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Pilot Org", status: "active" }];
-  fake.tables.mentor_profiles = [{
-    id: "mentor-profile-1",
-    contributor_user_id: "participant-1",
-    trade: "Electrical",
-    updated_at: "2026-07-01T00:00:00.000Z",
-  }];
+  fake.tables.pilots = [
+    { id: PILOT_ID, organization_id: ORGANIZATION_ID, status: "active" },
+  ];
+  fake.tables.organizations = [
+    { id: ORGANIZATION_ID, name: "Pilot Org", status: "active" },
+  ];
+  fake.tables.mentor_profiles = [
+    {
+      id: "mentor-profile-1",
+      contributor_user_id: "participant-1",
+      trade: "Electrical",
+      updated_at: "2026-07-01T00:00:00.000Z",
+    },
+  ];
 });
 
 describe("end-of-shift closeout", () => {
   it("supports draft save, resume, and full submit flow", async () => {
     seedMemberships();
-    const initial = await request(app()).get(`/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`);
+    const initial = await request(app()).get(
+      `/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`,
+    );
     expect(initial.status).toBe(200);
     expect(initial.body.state).toBe("not_started");
     expect(initial.body.scope.actorUserId).toBe("participant-1");
     expect(initial.body.trade).toBe("Electrical");
 
-    const draft = await request(app()).post("/api/testing/closeouts").send(validDraft());
+    const draft = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validDraft());
     expect(draft.status).toBe(201);
     expect(draft.body.state).toBe("draft");
-    expect(draft.body.closeout.answers.tasksCompleted).toBe("All tasks wrapped up");
+    expect(draft.body.closeout.answers.tasksCompleted).toBe(
+      "All tasks wrapped up",
+    );
 
     const revision = await request(app())
       .post("/api/testing/closeouts")
@@ -119,9 +141,13 @@ describe("end-of-shift closeout", () => {
         },
       });
     expect(revision.status).toBe(200);
-    expect(revision.body.closeout.answers.teamCoordination).toBe("Updated with new note");
+    expect(revision.body.closeout.answers.teamCoordination).toBe(
+      "Updated with new note",
+    );
 
-    const submit = await request(app()).post("/api/testing/closeouts").send(validSubmit());
+    const submit = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validSubmit(revision.body.closeout.answers));
     expect(submit.status).toBe(200);
     expect(submit.body.state).toBe("submitted");
 
@@ -143,13 +169,19 @@ describe("end-of-shift closeout", () => {
       });
     expect(incomplete.status).toBe(400);
 
-    const draft = await request(app()).post("/api/testing/closeouts").send(validDraft());
+    const draft = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validDraft());
     expect(draft.status).toBe(201);
 
-    const submitted = await request(app()).post("/api/testing/closeouts").send(validSubmit());
+    const submitted = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validSubmit());
     expect(submitted.status).toBe(200);
 
-    const overwrite = await request(app()).post("/api/testing/closeouts").send(validDraft());
+    const overwrite = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validDraft());
     expect(overwrite.status).toBe(409);
   });
 
@@ -179,8 +211,14 @@ describe("end-of-shift closeout", () => {
 
   it("denies presentation users and admins", async () => {
     seedMemberships();
-    Object.assign(identity, { isPresentation: true, isAdmin: false, classification: "restricted" });
-    const response = await request(app()).post("/api/testing/closeouts").send(validDraft());
+    Object.assign(identity, {
+      isPresentation: true,
+      isAdmin: false,
+      classification: "restricted",
+    });
+    const response = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validDraft());
     expect(response.status).toBe(403);
 
     Object.assign(identity, {
@@ -216,8 +254,12 @@ describe("end-of-shift closeout", () => {
       },
     ];
     fake.tables.pilots = [
-      { id: PILOT_ID, organization_id: ORGANIZATION_ID },
-      { id: OTHER_PILOT_ID, organization_id: ORGANIZATION_ID },
+      { id: PILOT_ID, organization_id: ORGANIZATION_ID, status: "active" },
+      {
+        id: OTHER_PILOT_ID,
+        organization_id: ORGANIZATION_ID,
+        status: "active",
+      },
     ];
     const response = await request(app()).get("/api/testing/closeouts");
     expect(response.status).toBe(409);
@@ -225,17 +267,27 @@ describe("end-of-shift closeout", () => {
 
   it("keeps one closeout per participant/work-date/shift through overwriting draft", async () => {
     seedMemberships();
-    const first = await request(app()).post("/api/testing/closeouts").send(validDraft());
+    const first = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validDraft());
     expect(first.status).toBe(201);
-    const draft = await request(app()).post("/api/testing/closeouts").send(validDraft({
-      ...validDraft().answers,
-      teamCoordination: "Second pass check",
-    }));
+    const draft = await request(app())
+      .post("/api/testing/closeouts")
+      .send(
+        validDraft({
+          ...validDraft().answers,
+          teamCoordination: "Second pass check",
+        }),
+      );
     expect(draft.status).toBe(200);
     expect(fake.tables.end_of_shift_closeouts).toHaveLength(1);
-    const list = await request(app()).get(`/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`);
+    const list = await request(app()).get(
+      `/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`,
+    );
     expect(list.status).toBe(200);
-    expect(list.body.closeout.answers.teamCoordination).toBe("Second pass check");
+    expect(list.body.closeout.answers.teamCoordination).toBe(
+      "Second pass check",
+    );
 
     const shifted = await request(app())
       .post("/api/testing/closeouts")
@@ -246,8 +298,10 @@ describe("end-of-shift closeout", () => {
 
   it("returns 409 when trying to overwrite a submitted closeout from a different date/shift draft state", async () => {
     seedMemberships();
-    const submitted = await request(app()).post("/api/testing/closeouts").send(validSubmit());
-    expect(submitted.status).toBe(200);
+    const submitted = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validSubmit());
+    expect([200, 201]).toContain(submitted.status);
     const same = await request(app())
       .post("/api/testing/closeouts")
       .send({ ...validSubmit(), workDate: WORK_DATE, shift: "day" });

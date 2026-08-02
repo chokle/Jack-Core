@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { EndOfShiftCloseout } from "./EndOfShiftCloseout";
 
 const closeoutPayload = {
@@ -43,7 +49,8 @@ const draftResponse = () => ({
           trade: "Electrical",
           answers: storedAnswers,
           status: state === "submitted" ? "submitted" : "draft",
-          submittedAt: state === "submitted" ? "2026-07-25T12:00:00.000Z" : null,
+          submittedAt:
+            state === "submitted" ? "2026-07-25T12:00:00.000Z" : null,
           createdAt: "2026-07-25T10:00:00.000Z",
           updatedAt: "2026-07-25T10:05:00.000Z",
         },
@@ -98,7 +105,9 @@ describe("EndOfShiftCloseout", () => {
       />,
     );
 
-    expect(await screen.findByText("Closeout status: Not started")).toBeTruthy();
+    expect(
+      await screen.findByText("Closeout status: Not started"),
+    ).toBeTruthy();
     const complete = [
       ["What tasks were completed today?", "Task A completed"],
       ["Any safety concerns or incidents?", "No incidents"],
@@ -116,7 +125,9 @@ describe("EndOfShiftCloseout", () => {
     expect(state).toBe("draft");
 
     fireEvent.click(screen.getByRole("button", { name: "Submit closeout" }));
-    await waitFor(() => expect(screen.getByText("Closeout submitted.")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("Closeout submitted.")).toBeTruthy(),
+    );
     expect(state).toBe("submitted");
     expect(screen.getByText(/Closeout status: Submitted/)).toBeTruthy();
   });
@@ -141,10 +152,18 @@ describe("EndOfShiftCloseout", () => {
     );
 
     expect(await screen.findByText("Closeout status: Draft")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("What tasks were completed today?"), {
-      target: { value: "edited answer" },
-    });
+    fireEvent.change(
+      screen.getByLabelText("What tasks were completed today?"),
+      {
+        target: { value: "edited answer" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
-    expect(screen.getByDisplayValue("Baseline notes")).toBeTruthy();
+    await waitFor(() => {
+      const taskField = screen.getByLabelText(
+        "What tasks were completed today?",
+      ) as HTMLTextAreaElement;
+      expect(taskField.value).toBe("Baseline notes");
+    });
   });
 });
