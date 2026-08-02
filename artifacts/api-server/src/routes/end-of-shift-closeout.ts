@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
-import { activityDb, resolveActiveTesterScope } from "../lib/activity-telemetry.js";
+import {
+  activityDb,
+  resolveActiveTesterScope,
+} from "../lib/activity-telemetry.js";
 
 const router = Router();
 
@@ -115,7 +118,11 @@ function sanitizeAnswer(raw: unknown): string | null {
 function payloadAnswers(raw: unknown): Record<string, string> | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const input = raw as Record<string, unknown>;
-  if (!Object.keys(input).every((key) => CLOSEOUT_QUESTIONS.includes(key as CloseoutQuestion))) {
+  if (
+    !Object.keys(input).every((key) =>
+      CLOSEOUT_QUESTIONS.includes(key as CloseoutQuestion),
+    )
+  ) {
     return null;
   }
   const normalized: Record<string, string> = {};
@@ -135,9 +142,10 @@ function parsePayload(body: unknown): CloseoutPayload | null {
 
   const workDate = parseWorkDate(raw["workDate"]);
   const shift = asShift(raw["shift"]);
-  const status = isText(raw["status"]) && CLOSEOUT_STATES.has(raw["status"].trim()) ?
-    (raw["status"].trim() as CloseoutStatus)
-    : "";
+  const status =
+    isText(raw["status"]) && CLOSEOUT_STATES.has(raw["status"].trim())
+      ? (raw["status"].trim() as CloseoutStatus)
+      : "";
   const answers = payloadAnswers(raw["answers"]);
   if (!shift || !status || !answers) return null;
 
@@ -149,7 +157,10 @@ function parsePayload(body: unknown): CloseoutPayload | null {
   };
 }
 
-function answersMatch(a: Record<string, string>, b: Record<string, string>): boolean {
+function answersMatch(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
     if (a[key] !== b[key]) return false;
@@ -183,7 +194,9 @@ function closeoutState(row: CloseoutRow | null): ClientCloseoutState {
   return row ? row.status : "not_started";
 }
 
-async function loadTradeFromMentorProfile(actorUserId: string): Promise<string | null> {
+async function loadTradeFromMentorProfile(
+  actorUserId: string,
+): Promise<string | null> {
   const profile = await activityDb
     .from("mentor_profiles")
     .select("trade")
@@ -193,10 +206,16 @@ async function loadTradeFromMentorProfile(actorUserId: string): Promise<string |
     .maybeSingle();
   if (profile.error) return null;
   const trade = profile.data?.trade;
-  return typeof trade === "string" && trade.trim().length > 0 ? trade.trim() : null;
+  return typeof trade === "string" && trade.trim().length > 0
+    ? trade.trim()
+    : null;
 }
 
-async function loadCloseout(scope: ParticipantScope, workDate: string, shift: CloseoutShift) {
+async function loadCloseout(
+  scope: ParticipantScope,
+  workDate: string,
+  shift: CloseoutShift,
+) {
   const row = await activityDb
     .from("end_of_shift_closeouts")
     .select("*")
@@ -212,7 +231,10 @@ async function loadCloseout(scope: ParticipantScope, workDate: string, shift: Cl
   return row.data ? (row.data as unknown as CloseoutRow) : null;
 }
 
-async function requireParticipantScope(req: Request, res: Response): Promise<ParticipantScope | null> {
+async function requireParticipantScope(
+  req: Request,
+  res: Response,
+): Promise<ParticipantScope | null> {
   const identity = await resolveIdentity(req);
   if (!identity) {
     res.status(401).json({ error: "Unauthorized" });
@@ -225,17 +247,21 @@ async function requireParticipantScope(req: Request, res: Response): Promise<Par
       "Closeout reporting is unavailable for this account.",
       "Closeout reporting is temporarily unavailable.",
     )
-  ) return null;
+  )
+    return null;
   if (identity.isAdmin) {
-    res.status(403).json({ error: "Closeout reporting is not available for administrators." });
+    res.status(403).json({
+      error: "Closeout reporting is not available for administrators.",
+    });
     return null;
   }
 
   const membership = await resolveActiveTesterScope(identity.userId);
   if (!membership.scope) {
-    return res
-      .status(membership.reason === "ambiguous_pilot" ? 409 : 403)
-      .json({ error: "No active tester membership was found." }) as null;
+    res.status(membership.reason === "ambiguous_pilot" ? 409 : 403).json({
+      error: "No active tester membership was found.",
+    });
+    return null;
   }
   return {
     actorUserId: identity.userId,
@@ -254,13 +280,25 @@ async function saveCloseout(scope: ParticipantScope, payload: CloseoutPayload) {
       payload.status === "submitted" &&
       answersMatch(existing.answers, payload.answers)
     ) {
-      return { status: 200, row: existing, state: "submitted" as ClientCloseoutState };
+      return {
+        status: 200,
+        row: existing,
+        state: "submitted" as ClientCloseoutState,
+      };
     }
-    return { status: 409, row: existing, state: "submitted" as ClientCloseoutState };
+    return {
+      status: 409,
+      row: existing,
+      state: "submitted" as ClientCloseoutState,
+    };
   }
 
   if (payload.status === "submitted" && !isDraftComplete(payload.answers)) {
-    return { status: 400, row: existing, state: "not_started" as ClientCloseoutState };
+    return {
+      status: 400,
+      row: existing,
+      state: "not_started" as ClientCloseoutState,
+    };
   }
 
   const rowData = {
@@ -294,7 +332,11 @@ async function saveCloseout(scope: ParticipantScope, payload: CloseoutPayload) {
       .maybeSingle();
     if (updated.error) throw updated.error;
     if (updated.data) {
-      return { status: 200, row: updated.data as unknown as CloseoutRow, state: payload.status };
+      return {
+        status: 200,
+        row: updated.data as unknown as CloseoutRow,
+        state: payload.status,
+      };
     }
     const current = await loadCloseout(scope, payload.workDate, payload.shift);
     if (current) {
@@ -310,7 +352,11 @@ async function saveCloseout(scope: ParticipantScope, payload: CloseoutPayload) {
     .maybeSingle();
   if (inserted.error) {
     if (inserted.error.code === "23505") {
-      const duplicate = await loadCloseout(scope, payload.workDate, payload.shift);
+      const duplicate = await loadCloseout(
+        scope,
+        payload.workDate,
+        payload.shift,
+      );
       if (!duplicate) throw inserted.error;
       if (
         duplicate.status === "submitted" &&
@@ -337,7 +383,8 @@ router.get("/testing/closeouts", async (req, res) => {
     const workDate = parseWorkDate(req.query["workDate"]);
     const shift = asShift(req.query["shift"]) || "day";
     const closeout = await loadCloseout(scope, workDate, shift);
-    const trade = closeout?.trade ?? (await loadTradeFromMentorProfile(scope.actorUserId));
+    const trade =
+      closeout?.trade ?? (await loadTradeFromMentorProfile(scope.actorUserId));
     return res.json({
       scope,
       workDate,
@@ -359,20 +406,24 @@ router.post("/testing/closeouts", async (req, res) => {
     const scope = await requireParticipantScope(req, res);
     if (!scope) return;
     const payload = parsePayload(req.body);
-    if (!payload) return res.status(400).json({ error: "Invalid closeout payload." });
+    if (!payload)
+      return res.status(400).json({ error: "Invalid closeout payload." });
 
     const result = await saveCloseout(scope, payload);
     if (result.status === 400) {
-      return res
-        .status(400)
-        .json({ error: "Submitted closeout requires all questions to be answered." });
+      return res.status(400).json({
+        error: "Submitted closeout requires all questions to be answered.",
+      });
     }
     if (result.status === 409) {
       return result.row?.status === "submitted"
         ? res.status(409).json({
-            error: "This closeout has already been submitted and cannot be replaced.",
+            error:
+              "This closeout has already been submitted and cannot be replaced.",
           })
-        : res.status(409).json({ error: "Closeout state changed; reload and try again." });
+        : res
+            .status(409)
+            .json({ error: "Closeout state changed; reload and try again." });
     }
     if (!result.row) {
       return res.status(503).json({ error: "Could not save closeout." });

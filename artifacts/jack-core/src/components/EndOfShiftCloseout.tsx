@@ -74,17 +74,28 @@ export function EndOfShiftCloseout({
   }, [answers, questions]);
 
   const complete = useMemo(
-    () => questions.every((question) => String(sortedAnswers[question]).trim().length > 0),
+    () =>
+      questions.every(
+        (question) => String(sortedAnswers[question]).trim().length > 0,
+      ),
     [questions, sortedAnswers],
   );
   const readOnly = state === "submitted";
   const canResumeDraft = closeout?.status === "draft" && closeoutLoaded;
 
-  const label = state === "not_started" ? "Not started" : state === "draft" ? "Draft" : "Submitted";
+  const label =
+    state === "not_started"
+      ? "Not started"
+      : state === "draft"
+        ? "Draft"
+        : "Submitted";
 
-  function normalizeAnswers(data: Record<string, string>) {
+  function normalizeAnswers(
+    data: Record<string, string>,
+    sourceQuestions: string[],
+  ) {
     const next = {} as Record<string, string>;
-    for (const question of questions) {
+    for (const question of sourceQuestions) {
       next[question] = data[question] ?? "";
     }
     return next;
@@ -92,8 +103,9 @@ export function EndOfShiftCloseout({
 
   const hydrate = (body: GetCloseoutResponse) => {
     setState(body.state);
-    setQuestions(body.availableQuestions ?? []);
-    const next = normalizeAnswers(body.closeout?.answers ?? {});
+    const nextQuestions = body.availableQuestions ?? [];
+    setQuestions(nextQuestions);
+    const next = normalizeAnswers(body.closeout?.answers ?? {}, nextQuestions);
     setAnswers(next);
     setSavedAnswers(next);
     setTrade(body.trade ?? null);
@@ -110,7 +122,9 @@ export function EndOfShiftCloseout({
     try {
       hydrate(await loadCloseout({ workDate, shift }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load closeout.");
+      setError(
+        cause instanceof Error ? cause.message : "Could not load closeout.",
+      );
     } finally {
       setLoading(false);
     }
@@ -136,10 +150,14 @@ export function EndOfShiftCloseout({
       setCloseout(result.closeout);
       setSavedAnswers(result.closeout.answers);
       setAnswers(result.closeout.answers);
-      setMessage(nextState === "submitted" ? "Closeout submitted." : "Draft saved.");
+      setMessage(
+        nextState === "submitted" ? "Closeout submitted." : "Draft saved.",
+      );
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "Closeout could not be saved. Please try again.",
+        cause instanceof Error
+          ? cause.message
+          : "Closeout could not be saved. Please try again.",
       );
     } finally {
       setSaving(false);
@@ -154,25 +172,34 @@ export function EndOfShiftCloseout({
     <main className="h-full overflow-y-auto p-4 sm:p-6 print:bg-white print:text-black">
       <div className="mx-auto grid max-w-3xl gap-4">
         <header className="space-y-1">
-          <p className="text-xs uppercase tracking-[0.18em] text-primary">Pilot participant</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-primary">
+            Pilot participant
+          </p>
           <h1 className="text-xl font-bold">End-of-Shift Closeout</h1>
           <p className="text-sm text-muted-foreground">
-            Structured mobile-ready workflow: save a draft, resume it later, then submit once complete.
+            Structured mobile-ready workflow: save a draft, resume it later,
+            then submit once complete.
           </p>
         </header>
 
         <section className="rounded-xl border border-border bg-card p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-muted-foreground">Participant</span>
+              <span className="font-medium text-muted-foreground">
+                Participant
+              </span>
               <Input value={participantName || participantId} readOnly />
             </label>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-muted-foreground">Participant ID</span>
+              <span className="font-medium text-muted-foreground">
+                Participant ID
+              </span>
               <Input value={participantId} readOnly />
             </label>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-muted-foreground">Work date</span>
+              <span className="font-medium text-muted-foreground">
+                Work date
+              </span>
               <Input
                 type="date"
                 value={workDate}
@@ -184,7 +211,9 @@ export function EndOfShiftCloseout({
               <select
                 className="h-10 w-full rounded-md border border-border bg-background p-2 text-sm"
                 value={shift}
-                onChange={(event) => setShift(event.target.value as CloseoutShift)}
+                onChange={(event) =>
+                  setShift(event.target.value as CloseoutShift)
+                }
               >
                 {SHIFT_OPTIONS.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -194,12 +223,25 @@ export function EndOfShiftCloseout({
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="font-medium text-muted-foreground">Organization</span>
-              <Input value={organizationName || scope?.organizationId || organizationId || ""} readOnly />
+              <span className="font-medium text-muted-foreground">
+                Organization
+              </span>
+              <Input
+                value={
+                  organizationName ||
+                  scope?.organizationId ||
+                  organizationId ||
+                  ""
+                }
+                readOnly
+              />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium text-muted-foreground">Pilot</span>
-              <Input value={pilotName || scope?.pilotId || pilotId || ""} readOnly />
+              <Input
+                value={pilotName || scope?.pilotId || pilotId || ""}
+                readOnly
+              />
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium text-muted-foreground">Trade</span>
@@ -228,7 +270,11 @@ export function EndOfShiftCloseout({
             {message}
           </p>
         )}
-        {error && <p className="rounded-lg border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {error && (
+          <p className="rounded-lg border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
 
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading closeout…</p>
@@ -236,7 +282,11 @@ export function EndOfShiftCloseout({
           <section className="space-y-4">
             <div className="flex flex-wrap gap-2">
               {canResumeDraft && (
-                <Button variant="outline" onClick={() => void resume()} type="button">
+                <Button
+                  variant="outline"
+                  onClick={() => void resume()}
+                  type="button"
+                >
                   Resume draft
                 </Button>
               )}
@@ -259,15 +309,21 @@ export function EndOfShiftCloseout({
             <div className="space-y-3">
               {questions.map((question) => (
                 <label key={question} className="block space-y-1 text-sm">
-                  <span className="font-semibold">{QUESTION_LABELS[question] ?? question}</span>
+                  <span className="font-semibold">
+                    {QUESTION_LABELS[question] ?? question}
+                  </span>
                   <Textarea
+                    aria-label={QUESTION_LABELS[question] ?? question}
                     rows={3}
                     maxLength={1000}
                     value={sortedAnswers[question] ?? ""}
                     readOnly={readOnly}
                     onChange={(event) => {
                       const next = event.target.value.slice(0, 1000);
-                      setAnswers((current) => ({ ...current, [question]: next }));
+                      setAnswers((current) => ({
+                        ...current,
+                        [question]: next,
+                      }));
                     }}
                     placeholder="Answer briefly"
                     className="min-h-20"
