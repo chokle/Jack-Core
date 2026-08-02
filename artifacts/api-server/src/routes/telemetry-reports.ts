@@ -15,6 +15,37 @@ const router = Router();
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+const CLOSEOUT_STATUS_VALUES = new Set(["draft", "submitted"]);
+const CLOSEOUT_LIST_LIMIT_MAX = 100;
+const WINDOW_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+interface CloseoutRow {
+  id: string;
+  actor_user_id: string;
+  organization_id: string;
+  pilot_id: string;
+  work_date: string;
+  shift: string;
+  crew: string | null;
+  trade: string | null;
+  answers: Record<string, unknown>;
+  status: string;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function clampLimit(raw: unknown): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) return 25;
+  return Math.min(Math.max(value, 1), CLOSEOUT_LIST_LIMIT_MAX);
+}
+
+function parseWindowDate(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim();
+  return WINDOW_DATE_RE.test(value) ? value : null;
+}
 
 interface AuthorizedScope extends PilotScope {
   authority: "pilot_admin" | "organization_admin" | "platform_superadmin";
@@ -168,6 +199,21 @@ function serializeSession(row: Record<string, unknown>) {
   };
 }
 
+function serializeCloseout(row: CloseoutRow) {
+  return {
+    id: row.id,
+    actorUserId: row.actor_user_id,
+    workDate: row.work_date,
+    shift: row.shift,
+    crew: row.crew,
+    trade: row.trade,
+    status: row.status,
+    submittedAt: row.submitted_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function csvCell(value: unknown): string {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
@@ -225,6 +271,64 @@ router.get("/testing/progress", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error }, "Could not load scoped test progress");
     return res.status(503).json({ error: "Test progress could not be loaded." });
+  }
+});
+
+router.get("/testing/reports/closeouts", async (req, res) => {
+  try {
+    const scope = await requireReportScope(req, res, "pilot_closeout_list");
+    if (!scope) return;
+    const limit = clampLimit(req.query["limit"]);
+    const state = typeof req.query["state"] === "string" ? req.query["state"].trim() : "";
+    const workDateFrom = parseWindowDate(req.query["workDateFrom"]);
+    const workDateTo = parseWindowDate(req.query["workDateTo"]);
+    if (state && !CLOSEOUT_STATUS_VALUES.has(state)) {
+      return res.status(400).json({ error: "Invalid closeout status." });
+    }
+    if ((req.query["workDateFrom"] && !workDateFrom) || (req.query["workDateTo"] && !workDateTo)) {
+      return res.status(400).json({ error: "Invalid closeout work-date filter." });
+    }
+    let query = db
+      .from("end_of_shift_closeouts")
+      .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .order("work_date", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    if (state) query = query.eq("status", state);
+    if (workDateFrom) query = query.gte("work_date", workDateFrom);
+    if (workDateTo) query = query.lte("work_date", workDateTo);
+
+    let countQuery = db
+      .from("end_of_shift_closeouts")
+      .select("id")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId);
+    if (state) {
+      countQuery = countQuery.eq("status", state);
+    }
+    if (workDateFrom) countQuery = countQuery.gte("work_date", workDateFrom);
+    if (workDateTo) countQuery = countQuery.lte("work_date", workDateTo);
+
+    const [closeoutRows, totalRows] = await Promise.all([query, countQuery]);
+    if (closeoutRows.error) throw closeoutRows.error;
+    if (totalRows.error) throw totalRows.error;
+
+    const closeouts = (closeoutRows.data ?? []) as CloseoutRow[];
+    const rows = (totalRows.data ?? []) as Array<Record<string, unknown>>;
+    const total = rows.length;
+    return res.json({
+      scope: { organizationId: scope.organizationId, pilotId: scope.pilotId },
+      closeouts: closeouts.map(serializeCloseout),
+      limit,
+      count: total,
+      truncated: total > limit,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "could not load pilot closeouts");
+    return res.status(503).json({ error: "Pilot closeouts could not be loaded." });
   }
 });
 

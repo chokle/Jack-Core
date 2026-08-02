@@ -31,6 +31,7 @@ import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
 import { PilotActivityReports } from "./components/PilotActivityReports";
+import { EndOfShiftCloseout } from "./components/EndOfShiftCloseout";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Landing } from "./components/Landing";
 import {
@@ -219,7 +220,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [view, setView] = useState<JackView>(() => {
     if (interviewPreload) return "interview";
     const requested = new URLSearchParams(window.location.search).get("view");
-    return requested === "review" ? "review" : "graph";
+    if (requested === "review") return "review";
+    if (requested === "closeout") return "closeout";
+    return "graph";
   });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -300,6 +303,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       interview: "interview_mode",
       review: "knowledge_review",
       reports: null,
+      closeout: null,
     } as const;
     if (feature[next]) {
       feedbackRef.current?.markFeature(feature[next]);
@@ -488,6 +492,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const inGraph = view === "graph" && !selectedVideoId;
   const activeNav: JackView = selectedVideoId ? "library" : view;
+  const canViewCloseout = me?.isAdmin === false && !!(telemetryContext?.scope?.pilotId);
 
   return (
     <>
@@ -520,6 +525,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         }
         userTestStarting={testStartPending}
         canViewPilotReports={me?.canViewPilotReports === true}
+        canUseParticipantCloseout={canViewCloseout}
       >
         {selectedVideoId ? (
           <VideoDetail
@@ -548,6 +554,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <KnowledgeReview />
         ) : view === "reports" ? (
           <PilotActivityReports />
+        ) : view === "closeout" ? (
+          <EndOfShiftCloseout
+            participantId={me?.userId ?? "participant"}
+            participantName={me?.name || me?.email}
+            organizationName={telemetryContext?.scope?.organizationName}
+            pilotName={telemetryContext?.scope?.pilotName}
+            organizationId={telemetryContext?.scope?.organizationId}
+            pilotId={telemetryContext?.scope?.pilotId}
+          />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}
