@@ -40,6 +40,27 @@ interface SummaryResponse {
   generatedAt: string;
 }
 
+interface CloseoutRow {
+  id: string;
+  actorUserId: string;
+  workDate: string;
+  shift: string;
+  crew: string | null;
+  trade: string | null;
+  status: string;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CloseoutResponse {
+  scope: { organizationId: string; pilotId: string };
+  closeouts: CloseoutRow[];
+  limit: number;
+  count: number;
+  truncated: boolean;
+}
+
 interface TimelineEvent {
   eventId: string;
   eventType: string;
@@ -67,6 +88,13 @@ export function PilotActivityReports() {
   const [timeline, setTimeline] = useState<{ userId: string; events: TimelineEvent[] } | null>(
     null,
   );
+  const [closeoutState, setCloseoutState] = useState<"all" | "draft" | "submitted">("all");
+  const [workDateFrom, setWorkDateFrom] = useState("");
+  const [workDateTo, setWorkDateTo] = useState("");
+  const [closeoutLimit, setCloseoutLimit] = useState(25);
+  const [closeouts, setCloseouts] = useState<CloseoutRow[] | null>(null);
+  const [closeoutCount, setCloseoutCount] = useState(0);
+  const [closeoutTruncated, setCloseoutTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const selected = useMemo(
@@ -95,6 +123,34 @@ export function PilotActivityReports() {
       .then(setReport)
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
   }, [query]);
+
+  useEffect(() => {
+    if (selected) return;
+    setCloseouts(null);
+    setCloseoutCount(0);
+    setCloseoutTruncated(false);
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const closeoutParams = new URLSearchParams(query);
+    closeoutParams.set("limit", String(closeoutLimit));
+    if (closeoutState !== "all") closeoutParams.set("state", closeoutState);
+    if (workDateFrom) closeoutParams.set("workDateFrom", workDateFrom);
+    if (workDateTo) closeoutParams.set("workDateTo", workDateTo);
+    void json<CloseoutResponse>(`/api/testing/reports/closeouts?${closeoutParams}`)
+      .then((body) => {
+        setCloseouts(body.closeouts);
+        setCloseoutCount(body.count);
+        setCloseoutTruncated(body.truncated);
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Closeouts unavailable."));
+    return () => {
+      setCloseouts(null);
+      setCloseoutCount(0);
+      setCloseoutTruncated(false);
+    };
+  }, [closeoutLimit, closeoutState, query, selected, workDateFrom, workDateTo]);
 
   const loadTimeline = async (userId: string) => {
     try {
@@ -245,6 +301,97 @@ export function PilotActivityReports() {
             </ol>
           </section>
         )}
+        <section className="space-y-3 rounded-lg border border-border p-4">
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-semibold">End-of-Shift Closeouts</h2>
+            <div className="text-sm text-muted-foreground">
+              {query ? `Showing ${closeouts?.length ?? 0} of ${closeoutCount}` : "Select a scope"}
+            </div>
+          </header>
+          {query && (
+            <div className="grid gap-3 md:grid-cols-4">
+              <label className="text-sm">
+                State
+                <select
+                  className="mt-1 w-full rounded-md border border-border bg-background p-2"
+                  value={closeoutState}
+                  onChange={(event) =>
+                    setCloseoutState(event.target.value as "all" | "draft" | "submitted")}
+                >
+                  <option value="all">All</option>
+                  <option value="draft">Draft</option>
+                  <option value="submitted">Submitted</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Limit
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={closeoutLimit}
+                  onChange={(event) => setCloseoutLimit(Number(event.target.value || 25))}
+                />
+              </label>
+              <label className="text-sm">
+                Work date from
+                <Input
+                  type="date"
+                  value={workDateFrom}
+                  onChange={(event) => setWorkDateFrom(event.target.value)}
+                />
+              </label>
+              <label className="text-sm">
+                Work date to
+                <Input
+                  type="date"
+                  value={workDateTo}
+                  onChange={(event) => setWorkDateTo(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+          {!query ? (
+            <p>No scope selected.</p>
+          ) : closeouts === null ? (
+            <p className="text-sm text-muted-foreground">Loading closeouts…</p>
+          ) : closeouts.length === 0 ? (
+            <p>No closeout submissions.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="p-3">Participant</th>
+                      <th className="p-3">Date</th>
+                      <th className="p-3">Shift</th>
+                      <th className="p-3">Trade</th>
+                      <th className="p-3">Crew</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closeouts.map((entry) => (
+                      <tr key={entry.id} className="border-t border-border">
+                        <td className="p-3 font-mono text-xs">{entry.actorUserId}</td>
+                        <td className="p-3">{entry.workDate}</td>
+                        <td className="p-3">{entry.shift}</td>
+                        <td className="p-3">{entry.trade ?? "—"}</td>
+                        <td className="p-3">{entry.crew ?? "—"}</td>
+                        <td className="p-3 capitalize">{entry.status}</td>
+                        <td className="p-3">{new Date(entry.updatedAt).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {closeoutTruncated && <p className="text-xs text-muted-foreground">Results were truncated to the selected limit.</p>}
+            </>
+          )}
+        </section>
+
         {selected && (
           <UserTestFeedbackReview
             organizationId={selected.organizationId}

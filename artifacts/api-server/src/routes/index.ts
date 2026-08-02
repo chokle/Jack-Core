@@ -15,6 +15,7 @@ import testSessionsRouter from "./test-sessions.js";
 import telemetryConsentRouter from "./telemetry-consent.js";
 import telemetryReportsRouter from "./telemetry-reports.js";
 import accountRouter from "./account.js";
+import endOfShiftCloseoutRouter from "./end-of-shift-closeout.js";
 
 const router: IRouter = Router();
 
@@ -33,6 +34,7 @@ router.use(testingRouter);
 router.use(testSessionsRouter);
 router.use(telemetryConsentRouter);
 router.use(telemetryReportsRouter);
+router.use(endOfShiftCloseoutRouter);
 router.use(accountRouter);
 
 export default router;

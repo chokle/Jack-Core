@@ -327,4 +327,73 @@ describe("pilot activity reports", () => {
     expect(countsBySessionStart["2026-07-25T01:30:00.000Z"]).toBe("1");
     expect(countsBySessionStart["2026-07-25T02:30:00.000Z"]).toBe("2");
   });
+
+  it("filters and bounds scoped closeout submissions", async () => {
+    fake.tables.end_of_shift_closeouts = [
+      {
+        id: "closeout-1",
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        work_date: "2026-07-25",
+        shift: "day",
+        crew: "Crew A",
+        trade: "Electrical",
+        answers: {},
+        status: "draft",
+        submitted_at: null,
+        created_at: "2026-07-25T00:00:00.000Z",
+        updated_at: "2026-07-25T00:00:00.000Z",
+      },
+      {
+        id: "closeout-2",
+        actor_user_id: "another-user",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        work_date: "2026-07-24",
+        shift: "night",
+        crew: "Crew B",
+        trade: "Pipefitter",
+        answers: {},
+        status: "submitted",
+        submitted_at: "2026-07-25T01:00:00.000Z",
+        created_at: "2026-07-24T00:00:00.000Z",
+        updated_at: "2026-07-25T01:00:00.000Z",
+      },
+      {
+        id: "closeout-3",
+        actor_user_id: "other-user",
+        organization_id: OTHER_ORGANIZATION_ID,
+        pilot_id: OTHER_PILOT_ID,
+        work_date: "2026-07-25",
+        shift: "day",
+        crew: "Crew C",
+        trade: "Rigger",
+        answers: {},
+        status: "submitted",
+        submitted_at: "2026-07-25T02:00:00.000Z",
+        created_at: "2026-07-25T00:00:00.000Z",
+        updated_at: "2026-07-25T02:00:00.000Z",
+      },
+    ];
+
+    const closeouts = await request(app()).get(`/api/testing/reports/closeouts?${query}&limit=1`);
+    expect(closeouts.status).toBe(200);
+    expect(closeouts.body.limit).toBe(1);
+    expect(closeouts.body.count).toBe(2);
+    expect(closeouts.body.truncated).toBe(true);
+    expect(closeouts.body.closeouts).toHaveLength(1);
+
+    const submitted = await request(app())
+      .get(`/api/testing/reports/closeouts?${query}&state=submitted`);
+    expect(submitted.status).toBe(200);
+    expect(submitted.body.count).toBe(1);
+    expect(submitted.body.closeouts).toHaveLength(1);
+    expect(submitted.body.closeouts[0].status).toBe("submitted");
+    expect(submitted.body.closeouts[0].actorUserId).toBe("another-user");
+
+    const invalid = await request(app()).get(`/api/testing/reports/closeouts?${query}&state=invalid`);
+    expect(invalid.status).toBe(400);
+  });
+});
 });
