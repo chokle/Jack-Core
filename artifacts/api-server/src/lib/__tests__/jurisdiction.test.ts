@@ -181,6 +181,12 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toContain("FAST-SCAN FORMATTING");
       expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
       expect(withCtx).toMatch(/not whole paragraphs/i);
+      expect(withCtx).toContain("DIAGNOSTIC CONFIDENCE GATE.");
+      expect(withCtx).toContain(
+        "When essential diagnostic context is missing, briefly acknowledge the issue",
+      );
+      expect(withCtx).toContain("BEHAVIOR TO AVOID.");
+      expect(withCtx).toContain("LEADERSHIP PRINCIPLE.");
 
       const noCtx = buildChatSystemPrompt({
         usedInternalKnowledge: false,
@@ -189,6 +195,20 @@ describe("Canadian jurisdiction policy", () => {
       expect(noCtx).toContain("SOURCE PRIORITY ORDER");
       expect(noCtx).toMatch(/No internal library content matched/);
       expect(noCtx).toMatch(/say so rather than guessing/i);
+    });
+
+    it("keeps authority centralized in the constitution block", () => {
+      const prompt = buildChatSystemPrompt({
+        usedInternalKnowledge: false,
+        contextText: "",
+      });
+
+      expect(prompt).toContain("PERSONA & COMMUNICATION.");
+      expect(prompt).toContain("When essential diagnostic context is missing,");
+      expect(prompt).toContain("Slow is fast. Clear is safe.");
+      expect(prompt).toContain("I’m designed to...");
+      expect(prompt).toContain('Do not say "How may I assist you?"');
+      expect(prompt).toContain("Avoid shotgun lists such as");
     });
 
     it("gives Ask Jack one authoritative map of Jack Core", () => {
@@ -269,27 +289,15 @@ describe("Canadian jurisdiction policy", () => {
         "Capability, knowledge, suitability, and problem-solving questions are not identity questions.",
       );
       expect(withCtx).toContain(
-        "For those questions, answer the capability being asked about.",
-      );
-      expect(withCtx).toContain(
         "When responding to an identity-only question, output exactly:",
       );
       expect(withCtx).toContain(
         "with no preamble, no explanation, and no additional content.",
       );
       expect(withCtx).toContain(
-        "Do not merely repeat the canonical introduction.",
+        "Identity-only inputs are limited to these prompts:",
       );
-      expect(withCtx).toContain(
-        "Useful examples include: what are you good at",
-      );
-      expect(withCtx).toContain(
-        "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
-      );
-      expect(withCtx).toContain(
-        "It must also not suppress a legitimate repeated identity-only question.",
-      );
-      expect(withCtx).toMatch(/jobsite/i);
+      expect(withCtx).toMatch(/PERSONA & COMMUNICATION/i);
       expect(withCtx).toContain("Slow is fast. Clear is safe.");
     });
   });
