@@ -16,6 +16,26 @@ vi.mock("../../lib/supabase.js", async () => {
 
 const completionHistory: ChatCompletionMessageParam[][] = [];
 
+const jobsiteFriendlyPatterns = [
+  /alright\b/i,
+  /what(?:’|')s crackin/i,
+  /pretty deadly/i,
+  /yoooo\b/i,
+  /fair enough/i,
+  /let’s sort it out/i,
+  /walk me through/i,
+  /let me know how/i,
+];
+
+const bannedCorporatePhrases = [
+  /i appreciate your inquiry/i,
+  /how may i assist you/i,
+  /i'm here to provide assistance/i,
+  /please let me know/i,
+  /i'm designed to/i,
+  /what do you need assistance with today/i,
+];
+
 function systemInstructionAllowsIdentity(
   steps: ChatCompletionMessageParam[],
 ): boolean {
@@ -46,14 +66,30 @@ function generateDeterministicReply(
   }
 
   if (
-    /you good\?|good morning|thanks|thank you|fuck you|you're useless|you are useless|fuck|you’re useless|you are jack/.test(
+    /you good\?|good morning|thanks|thank you|hey jack|how are you|how you doing|what(?:'|’)s going|you’re useful|youre useless|you are useless|fuck you|you're useless|you’re useless|you are jack|helpful|dog shit/.test(
       lower,
     )
   ) {
-    return "I'm doing well, and I can help you with that.";
+    return "Pretty deadly. I’m here and ready.";
   }
 
-  return "Got it — let's keep moving forward.";
+  return "Yoooo. Walk me through it.";
+}
+
+function assertNoCorporateOrIdentityFallback(
+  answer: string,
+  isIdentityExpected = false,
+) {
+  if (!isIdentityExpected) {
+    expect(answer).not.toMatch(/i['’]m jack|torch's ai field intelligence/i);
+    expect(answer).not.toMatch(/i['’]m jack, torch's/i);
+    for (const phrase of bannedCorporatePhrases) {
+      expect(answer).not.toMatch(phrase);
+    }
+    expect(
+      jobsiteFriendlyPatterns.some((pattern) => pattern.test(answer)),
+    ).toBe(true);
+  }
 }
 
 vi.mock("../../lib/openai.js", async () => {
@@ -113,6 +149,8 @@ const GREETING_CASES = [
   "Thanks man",
   "Fuck you Jack",
   "You’re useless",
+  "Today's been dog shit",
+  "I'm already in my own head",
 ] as const;
 
 beforeEach(() => {
@@ -132,10 +170,7 @@ describe("POST /api/chat — conversational policy regression", () => {
     async (message) => {
       const res = await request(app).post("/api/chat").send({ message });
       expect(res.status).toBe(200);
-      expect(res.body.answer).toContain("I'm doing well");
-      expect(res.body.answer).not.toMatch(
-        /i['’]m jack|torch's ai field intelligence/i,
-      );
+      assertNoCorporateOrIdentityFallback(res.body.answer);
     },
   );
 
@@ -147,6 +182,19 @@ describe("POST /api/chat — conversational policy regression", () => {
       expect(res.body.answer).toMatch(
         /I'm Jack|Torch's AI Field Intelligence/i,
       );
+      assertNoCorporateOrIdentityFallback(res.body.answer, true);
+    },
+  );
+
+  it.each(["What does Jack do?"])(
+    "allows identity intro for the third approved identity question: %s",
+    async (message) => {
+      const res = await request(app).post("/api/chat").send({ message });
+      expect(res.status).toBe(200);
+      expect(res.body.answer).toMatch(
+        /I'm Jack|Torch's AI Field Intelligence/i,
+      );
+      assertNoCorporateOrIdentityFallback(res.body.answer, true);
     },
   );
 
@@ -158,6 +206,7 @@ describe("POST /api/chat — conversational policy regression", () => {
     expect(first.body.answer).not.toMatch(
       /i['’]m jack|torch's ai field intelligence/i,
     );
+    assertNoCorporateOrIdentityFallback(first.body.answer);
 
     const second = await request(app).post("/api/chat").send({
       message: "Yes I know. I asked how you are doing?",
@@ -166,6 +215,7 @@ describe("POST /api/chat — conversational policy regression", () => {
     expect(second.body.answer).not.toMatch(
       /i['’]m jack|torch's ai field intelligence/i,
     );
+    assertNoCorporateOrIdentityFallback(second.body.answer);
 
     const third = await request(app).post("/api/chat").send({
       message: "Is that all you know how to say?",
@@ -174,6 +224,7 @@ describe("POST /api/chat — conversational policy regression", () => {
     expect(third.body.answer).not.toMatch(
       /i['’]m jack|torch's ai field intelligence/i,
     );
+    assertNoCorporateOrIdentityFallback(third.body.answer);
 
     expect(completionHistory).toHaveLength(3);
     expect(

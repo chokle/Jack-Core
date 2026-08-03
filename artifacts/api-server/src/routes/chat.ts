@@ -31,6 +31,12 @@ const MAX_VIDEO_CONTEXT_SEGMENTS = 6;
 const MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS = 1800;
 const MAX_GRAPH_MEMORY_MATCHES = 4;
 const PRESENTATION_USER_ID = "presentation-demo";
+const TOPIC_BIAS_WEIGHT = 0.12;
+
+const WELDING_QUERY_KEYWORDS =
+  /\b(weld|welding|smaw|fcaw|gmaw|gtaw|tack|root pass|bead|arc|shielding)\b/i;
+const CUTTING_QUERY_KEYWORDS =
+  /\b(oxy[-\s]*fuel|oxyfuel|gas cutting|flame cut|flame|cutting|torch cut|acetylene|plasma|kerf)\b/i;
 
 const router = Router();
 
@@ -121,6 +127,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     }> = [];
 
     let contextText = "";
+    const topicBias = inferPromptTopic(message);
 
     // Steer the retrieved transcript context by reviewer decisions: verified
     // concepts' segments are boosted, rejected concepts' segments are suppressed.
@@ -165,7 +172,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
             coverage,
           );
 
-    for (const { item: seg, verification, sourceCount } of rankedSegments) {
+    const rebalancedSegments = rebalanceSegmentsForTopic(
+      rankedSegments,
+      topicBias,
+    );
+    for (const { item: seg, verification, sourceCount } of rebalancedSegments) {
       const trustTag = describeTrust(verification, sourceCount);
       contextText += `[${seg["video_title"] ?? "Video"} @ ${formatTime(seg["start_time"] as number)}${trustTag}]\n${seg["text"]}\n\n`;
       citations.push({
@@ -215,7 +226,8 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       }
     }
 
-    for (const e of rawEntries) {
+    const rebalancedEntries = rebalanceEntriesForTopic(rawEntries, topicBias);
+    for (const e of rebalancedEntries) {
       const title = (e["title"] as string) ?? "Knowledge Entry";
       const description = (e["description"] as string) ?? "";
       const body = (e["body"] as string) ?? "";
@@ -594,6 +606,90 @@ async function findGraphMemoryMatches(
         sourceCount,
       };
     });
+}
+
+function inferPromptTopic(message: string): "welding" | "cutting" | "neutral" {
+  const hasWelding = WELDING_QUERY_KEYWORDS.test(message);
+  const hasCutting = CUTTING_QUERY_KEYWORDS.test(message);
+
+  if (hasWelding && !hasCutting) return "welding";
+  if (hasCutting && !hasWelding) return "cutting";
+  return "neutral";
+}
+
+function topicTextScore(text: string, topic: "welding" | "cutting"): number {
+  const haystack = text.toLowerCase();
+  if (topic === "welding") {
+    let score = 0;
+    if (/\bweld(ing)?\b/.test(haystack)) score += 0.9;
+    if (
+      /\b(smaw|fcaw|gmaw|gtaw|arc|bead|porosity|root pass|travel speed)\b/.test(
+        haystack,
+      )
+    )
+      score += 0.3;
+    if (/\bshielding|heat input|position|groove|cup|pool|defect/.test(haystack))
+      score += 0.1;
+    return score;
+  }
+
+  let score = 0;
+  if (
+    /\b(oxy[-\s]*fuel|oxyfuel|cutting|acetylene|flame|torch|kerf|plasma)/.test(
+      haystack,
+    )
+  )
+    score += 0.9;
+  if (/\bpreheat|drip|oxy-acetylene|gas|sheet metal|wedge/.test(haystack))
+    score += 0.2;
+  return score;
+}
+
+function rebalanceSegmentsForTopic(
+  rankedSegments: Array<{
+    item: Record<string, unknown>;
+    verification: "verified" | "rejected" | "neutral";
+    confidence: number;
+    sourceCount: number;
+  }>,
+  topic: "welding" | "cutting" | "neutral",
+): Array<{
+  item: Record<string, unknown>;
+  verification: "verified" | "rejected" | "neutral";
+  confidence: number;
+  sourceCount: number;
+}> {
+  if (topic === "neutral") return rankedSegments;
+
+  return [...rankedSegments]
+    .map((segment) => {
+      const haystack = `${segment.item["video_title"] ?? ""} ${segment.item["text"] ?? ""}`;
+      const targetScore = topicTextScore(haystack, topic);
+      const opposingTopic = topic === "welding" ? "cutting" : "welding";
+      const opposingScore = topicTextScore(haystack, opposingTopic);
+      return {
+        ...segment,
+        confidence:
+          segment.confidence +
+          targetScore * TOPIC_BIAS_WEIGHT -
+          opposingScore * 0.03,
+      };
+    })
+    .sort((a, b) => b.confidence - a.confidence);
+}
+
+function rebalanceEntriesForTopic(
+  entries: Array<Record<string, unknown>>,
+  topic: "welding" | "cutting" | "neutral",
+): Array<Record<string, unknown>> {
+  if (topic === "neutral") return entries;
+  return [...entries].sort((a, b) => {
+    const aText = `${a["title"] ?? ""} ${a["description"] ?? ""} ${a["body"] ?? ""}`;
+    const bText = `${b["title"] ?? ""} ${b["description"] ?? ""} ${b["body"] ?? ""}`;
+    const aScore = topicTextScore(aText, topic);
+    const bScore = topicTextScore(bText, topic);
+    return bScore - aScore;
+  });
 }
 
 async function findReferencedVideos(
