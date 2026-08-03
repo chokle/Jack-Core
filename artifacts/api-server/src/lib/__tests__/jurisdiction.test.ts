@@ -6,7 +6,12 @@ import { describe, it, expect, vi } from "vitest";
 // mock setup used by the other lib tests (see distillation.test.ts).
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
-  return { chatCompletion: vi.fn(), createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
+  return {
+    chatCompletion: vi.fn(),
+    createEmbedding: m.createEmbedding,
+    MODELS: m.MODELS,
+    openai: m.openai,
+  };
 });
 vi.mock("../supabase.js", async () => {
   const m = await import("./mocks.js");
@@ -58,7 +63,9 @@ describe("Canadian jurisdiction policy", () => {
     });
 
     it("keeps international sources dead last", () => {
-      expect(CANADIAN_SOURCE_PRIORITY[CANADIAN_SOURCE_PRIORITY.length - 1]).toBe("International sources");
+      expect(
+        CANADIAN_SOURCE_PRIORITY[CANADIAN_SOURCE_PRIORITY.length - 1],
+      ).toBe("International sources");
     });
 
     it("lists the priority order, numbered in order, in the answer policy", () => {
@@ -71,11 +78,15 @@ describe("Canadian jurisdiction policy", () => {
       expect(p).toContain("6. Trusted Canadian government");
       expect(p).toContain("7. International sources");
       // International is conditional, never a default.
-      expect(p).toMatch(/International sources[^\n]*ONLY when Canadian guidance is unavailable/);
+      expect(p).toMatch(
+        /International sources[^\n]*ONLY when Canadian guidance is unavailable/,
+      );
     });
 
     it("searches Canadian sources first for any external knowledge", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/search Canadian sources first/i);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /search Canadian sources first/i,
+      );
     });
   });
 
@@ -85,27 +96,37 @@ describe("Canadian jurisdiction policy", () => {
     });
 
     it("names each US standard only to forbid defaulting to it", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/Do NOT default to OSHA, AWS welding codes, NEC/);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /Do NOT default to OSHA, AWS welding codes, NEC/,
+      );
       for (const std of US_DEFAULT_STANDARDS) {
         expect(JURISDICTION_POLICY_PROMPT).toContain(std);
       }
     });
 
     it("assumes Canada unless the user states otherwise", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/default jurisdiction is Canada/i);
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/unless the user explicitly states another jurisdiction/i);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /default jurisdiction is Canada/i,
+      );
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /unless the user explicitly states another jurisdiction/i,
+      );
     });
   });
 
   describe("QA #3 — CWB and CSA prioritized for welding and safety", () => {
     it("names CWB and CSA for welding/safety topics", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/welding and safety[^\n]*prioritize CWB and CSA/i);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /welding and safety[^\n]*prioritize CWB and CSA/i,
+      );
     });
   });
 
   describe("QA #4 — Red Seal prioritized for apprenticeship and certification", () => {
     it("names Red Seal for apprenticeship/certification topics", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/apprenticeship and certification[^\n]*Red Seal/i);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /apprenticeship and certification[^\n]*Red Seal/i,
+      );
     });
   });
 
@@ -122,18 +143,25 @@ describe("Canadian jurisdiction policy", () => {
 
   describe("conflict + unverifiable handling", () => {
     it("names the governing Canadian standard first on a conflict", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/identify the governing Canadian standard FIRST/);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /identify the governing Canadian standard FIRST/,
+      );
     });
 
     it("says so instead of guessing when it cannot verify a Canadian standard", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/cannot verify the applicable Canadian standard, say so/i);
+      expect(JURISDICTION_POLICY_PROMPT).toMatch(
+        /cannot verify the applicable Canadian standard, say so/i,
+      );
       expect(JURISDICTION_POLICY_PROMPT).toMatch(/instead of guessing/i);
     });
   });
 
   describe("the policy reaches every generation prompt", () => {
     it("chat answer prompt embeds the full policy and stays Torch-first", () => {
-      const withCtx = buildChatSystemPrompt({ usedInternalKnowledge: true, contextText: "SEG-CONTEXT" });
+      const withCtx = buildChatSystemPrompt({
+        usedInternalKnowledge: true,
+        contextText: "SEG-CONTEXT",
+      });
       expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
       expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
       expect(withCtx).not.toContain(
@@ -154,7 +182,10 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
       expect(withCtx).toMatch(/not whole paragraphs/i);
 
-      const noCtx = buildChatSystemPrompt({ usedInternalKnowledge: false, contextText: "" });
+      const noCtx = buildChatSystemPrompt({
+        usedInternalKnowledge: false,
+        contextText: "",
+      });
       expect(noCtx).toContain("SOURCE PRIORITY ORDER");
       expect(noCtx).toMatch(/No internal library content matched/);
       expect(noCtx).toMatch(/say so rather than guessing/i);
@@ -172,21 +203,35 @@ describe("Canadian jurisdiction policy", () => {
       }
       expect(prompt).toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
       expect(prompt).toMatch(/not an isolated generic chatbot/i);
-      expect(prompt).toMatch(/supersedes any contradictory assistant statement in conversation history/i);
+      expect(prompt).toMatch(
+        /supersedes any contradictory assistant statement in conversation history/i,
+      );
       expect(prompt).toMatch(/correct that statement directly/i);
-      expect(prompt).toMatch(/cannot store information[^\n]*false descriptions/i);
+      expect(prompt).toMatch(
+        /cannot store information[^\n]*false descriptions/i,
+      );
       expect(prompt).toContain(
         "I do not have that record in my current retrieval context yet.",
       );
-      expect(prompt).toMatch(/contribution is captured and being evaluated for Living Memory/i);
-      expect(prompt).toMatch(/Only the interview's contributor may resume or answer/i);
+      expect(prompt).toMatch(
+        /contribution is captured and being evaluated for Living Memory/i,
+      );
+      expect(prompt).toMatch(
+        /Only the interview's contributor may resume or answer/i,
+      );
     });
 
     it("interview prompt assumes Canada and forbids US defaults", () => {
-      const s = buildInterviewSystemPrompt({ name: "Welder", remaining: ["safety"], machineHint: undefined });
+      const s = buildInterviewSystemPrompt({
+        name: "Welder",
+        remaining: ["safety"],
+        machineHint: undefined,
+      });
       expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
       expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-      expect(s).not.toContain("AI Trade Intelligence Engine designed to support skilled trades workers in Canada");
+      expect(s).not.toContain(
+        "AI Trade Intelligence Engine designed to support skilled trades workers in Canada",
+      );
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
       expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
       expect(s).toMatch(/never assume OSHA, AWS, NEC/);
@@ -196,10 +241,14 @@ describe("Canadian jurisdiction policy", () => {
       const s = buildDistillationSystemPrompt("(none)");
       expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
       expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-      expect(s).not.toContain("AI Trade Intelligence Engine for skilled trades training");
+      expect(s).not.toContain(
+        "AI Trade Intelligence Engine for skilled trades training",
+      );
       expect(s).toContain(JURISDICTION_POLICY_BRIEF);
       expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
-      expect(s).toMatch(/do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/);
+      expect(s).toMatch(
+        /do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/,
+      );
       expect(s).toMatch(/CSA, CWB, Red Seal/);
     });
 
@@ -209,7 +258,9 @@ describe("Canadian jurisdiction policy", () => {
         contextText: "",
       });
 
-      expect(withCtx).toContain("Use the exact canonical introduction only when the user's primary intent is identity-only:");
+      expect(withCtx).toContain(
+        "Use the exact canonical introduction only when the user's primary intent is identity-only:",
+      );
       expect(withCtx).toContain("- Who are you?");
       expect(withCtx).toContain("- What are you?");
       expect(withCtx).toContain("- Introduce yourself.");
@@ -226,14 +277,20 @@ describe("Canadian jurisdiction policy", () => {
       expect(withCtx).toContain(
         "with no preamble, no explanation, and no additional content.",
       );
-      expect(withCtx).toContain("Do not merely repeat the canonical introduction.");
-      expect(withCtx).toContain("Useful examples include: what are you good at");
+      expect(withCtx).toContain(
+        "Do not merely repeat the canonical introduction.",
+      );
+      expect(withCtx).toContain(
+        "Useful examples include: what are you good at",
+      );
       expect(withCtx).toContain(
         "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
       );
       expect(withCtx).toContain(
         "It must also not suppress a legitimate repeated identity-only question.",
       );
+      expect(withCtx).toMatch(/jobsite/i);
+      expect(withCtx).toContain("Slow is fast. Clear is safe.");
     });
   });
 
@@ -241,7 +298,8 @@ describe("Canadian jurisdiction policy", () => {
     it("is Canada-first, names Canadian bodies, and forbids US defaults", () => {
       const b = JURISDICTION_POLICY_BRIEF;
       expect(b).toMatch(/Default to Canada/i);
-      for (const body of ["Red Seal", "CSA", "CWB", "WorkSafeBC"]) expect(b).toContain(body);
+      for (const body of ["Red Seal", "CSA", "CWB", "WorkSafeBC"])
+        expect(b).toContain(body);
       for (const std of US_DEFAULT_STANDARDS) expect(b).toContain(std);
     });
   });

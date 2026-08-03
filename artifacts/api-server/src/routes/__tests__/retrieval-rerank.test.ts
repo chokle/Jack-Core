@@ -63,6 +63,8 @@ import { fake, embedRegistry, resetMocks } from "../../lib/__tests__/mocks.js";
 
 // A query whose embedding we pin so segment similarity is fully deterministic.
 const QUERY = "how do I prevent weld porosity";
+const WELDING_QUERY = "Teach me about welding";
+const CUTTING_QUERY = "What PPE do I need for oxy-fuel cutting";
 
 // Three source videos, one segment each. Raw similarity (cosine vs the pinned
 // query vector [1,0]) is chosen so the NEUTRAL segment out-scores the VERIFIED
@@ -70,6 +72,10 @@ const QUERY = "how do I prevent weld porosity";
 const V_VERIFIED = "11111111-1111-1111-1111-111111111111";
 const V_NEUTRAL = "22222222-2222-2222-2222-222222222222";
 const V_REJECTED = "33333333-3333-3333-3333-333333333333";
+const V_CUTTING_EXPLICIT = "44444444-4444-4444-4444-444444444444";
+const V_CUTTING_ALT = "55555555-5555-5555-5555-555555555555";
+const WELDING_ENTRY_ID = "entry-welding";
+const CUTTING_ENTRY_ID = "entry-cutting";
 
 /** A 2-D unit vector whose cosine with the query vector [1,0] is exactly `c`. */
 function unit(c: number): string {
@@ -178,6 +184,104 @@ function seed(): void {
   ];
 }
 
+function seedTopicRelevanceScenario(topic: "welding" | "cutting"): void {
+  resetMocks();
+  embedRegistry.set(
+    topic === "welding" ? WELDING_QUERY : CUTTING_QUERY,
+    [1, 0],
+  );
+  fake.tables["videos"] = [
+    {
+      id: V_VERIFIED,
+      title: "Welding Fundamentals",
+      thumbnail_url: "welding.jpg",
+      trade: "Welder",
+    },
+    {
+      id: V_NEUTRAL,
+      title: "Oxy-fuel Cutting Basics",
+      thumbnail_url: "cutting.jpg",
+      trade: "Welder",
+    },
+    {
+      id: V_CUTTING_EXPLICIT,
+      title: "Cutting Fundamentals",
+      thumbnail_url: "cutting2.jpg",
+      trade: "Welder",
+    },
+    {
+      id: V_CUTTING_ALT,
+      title: "Welding vs Cutting Reference",
+      thumbnail_url: "mix.jpg",
+      trade: "Welder",
+    },
+  ];
+
+  fake.tables["transcript_segments"] = [
+    {
+      id: "s-weld",
+      video_id: V_VERIFIED,
+      start_time: 12,
+      end_time: 18,
+      text: "For welding, keep your bead control tight and protect your puddle with proper shielding.",
+      similarity: 0.62,
+      video_title: "Welding Fundamentals",
+      thumbnail_url: "welding.jpg",
+    },
+    {
+      id: "s-cut-1",
+      video_id: V_NEUTRAL,
+      start_time: 10,
+      end_time: 20,
+      text: "Oxy-fuel cutting starts by heating the steel to the burn-through temp.",
+      similarity: 0.9,
+      video_title: "Oxy-fuel Cutting Basics",
+      thumbnail_url: "cutting.jpg",
+    },
+    {
+      id: "s-cut-2",
+      video_id: V_CUTTING_EXPLICIT,
+      start_time: 5,
+      end_time: 11,
+      text: "When cutting, keep the torch at the correct preheat and edge distance.",
+      similarity: 0.88,
+      video_title: "Cutting Fundamentals",
+      thumbnail_url: "cutting2.jpg",
+    },
+    {
+      id: "s-mixed",
+      video_id: V_CUTTING_ALT,
+      start_time: 7,
+      end_time: 17,
+      text: "This compares welding and oxy-fuel cutting for edge prep.",
+      similarity: 0.86,
+      video_title: "Welding vs Cutting Reference",
+      thumbnail_url: "mix.jpg",
+    },
+  ];
+
+  fake.tables["knowledge_edges"] = [];
+  fake.tables["knowledge_nodes"] = [];
+  fake.tables["knowledge_entries"] = [
+    {
+      id: WELDING_ENTRY_ID,
+      title: "Welding Setup",
+      description: "Joint prep and travel speed",
+      body: "How to prepare joints and control heat input for stable weld beads.",
+      images: [],
+      metadata: {},
+    },
+    {
+      id: CUTTING_ENTRY_ID,
+      title: "Oxy-Fuel Cutting Safety",
+      description: "Use shielding and PPE around the flame.",
+      body: "Use PPE and keep your work area clear while cutting.",
+      images: [],
+      metadata: {},
+    },
+  ];
+}
+
 function makeApp(): Express {
   const app = express();
   app.use(cookieParser());
@@ -268,5 +372,35 @@ describe("POST /chat — Ask Jack never cites rejected content", () => {
 
     // The verified segment is boosted above the higher-raw-score neutral one.
     expect(ids.indexOf(V_VERIFIED)).toBeLessThan(ids.indexOf(V_NEUTRAL));
+  });
+});
+
+describe("POST /chat — retrieval bias keeps broad topic intent aligned", () => {
+  it("prioritizes welding material for a broad welding request", async () => {
+    seedTopicRelevanceScenario("welding");
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: WELDING_QUERY });
+    expect(res.status).toBe(200);
+    expect(res.body.usedInternalKnowledge).toBe(true);
+
+    const videoCites = (
+      res.body.citations as Array<{ sourceType: string; videoId: string }>
+    ).filter((c) => c.sourceType === "video");
+    expect(videoCites[0]?.videoId).toBe(V_VERIFIED);
+  });
+
+  it("keeps explicit cutting requests on cutting material", async () => {
+    seedTopicRelevanceScenario("cutting");
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: CUTTING_QUERY });
+    expect(res.status).toBe(200);
+    expect(res.body.usedInternalKnowledge).toBe(true);
+
+    const videoCites = (
+      res.body.citations as Array<{ sourceType: string; videoId: string }>
+    ).filter((c) => c.sourceType === "video");
+    expect(videoCites[0]?.videoId).not.toBe(V_VERIFIED);
   });
 });

@@ -87,6 +87,9 @@ export function AskJack({
   const queryClient = useQueryClient();
   const clearHistory = useClearChatHistory();
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shouldReturnFocusToInput, setShouldReturnFocusToInput] =
+    useState(false);
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
@@ -129,7 +132,16 @@ export function AskJack({
     if (!isOpen) return undefined;
     // Focus as soon as the drawer opens so automation (and keyboard users)
     // don't have to wait for/race the entrance animation.
-    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+    const id = window.setTimeout(() => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement == null ||
+        activeElement === document.body ||
+        activeElement === document.documentElement
+      ) {
+        inputRef.current?.focus();
+      }
+    }, 0);
     return () => window.clearTimeout(id);
   }, [isOpen]);
 
@@ -144,6 +156,9 @@ export function AskJack({
     e.preventDefault();
     if (!input.trim() || askJack.isPending) return;
 
+    const userTypedFromInput = document.activeElement === inputRef.current;
+    setShouldReturnFocusToInput(userTypedFromInput);
+    setErrorMessage(null);
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
@@ -170,10 +185,50 @@ export function AskJack({
           };
           setMessages((prev) => [...prev, assistantMessage]);
           setSuccessfulTurns((count) => count + 1);
+          if (shouldReturnFocusToInput) {
+            inputRef.current?.focus();
+          }
+          setShouldReturnFocusToInput(false);
+          setErrorMessage(null);
+        },
+        onError: (error: unknown) => {
+          setInput(userMessage.content);
+          setMessages((prev) => prev.slice(0, -1));
+          setErrorMessage(formatAskJackError(error));
+          if (shouldReturnFocusToInput) {
+            inputRef.current?.focus();
+          }
+          setShouldReturnFocusToInput(false);
         },
       },
     );
   };
+
+  function formatAskJackError(error: unknown): string {
+    if (error == null) {
+      return "I couldn’t send that right now. Please try again.";
+    }
+    const err = error as {
+      status?: number;
+      message?: string;
+      response?: { status?: number; data?: { error?: string } };
+    };
+    const status = err.response?.status ?? err.status;
+    const serverMessage = err.response?.data?.error;
+    if (typeof serverMessage === "string" && serverMessage.trim()) {
+      return serverMessage;
+    }
+    if (typeof status === "number" && status >= 400) {
+      if (status === 401 || status === 403) {
+        return "Your session is no longer active. Please sign in and try again.";
+      }
+      return "Ask Jack is temporarily unavailable. Please try again in a moment.";
+    }
+    if (typeof err.message === "string" && err.message.trim()) {
+      return err.message;
+    }
+    return "I couldn’t send that right now. Please try again.";
+  }
 
   return (
     <AnimatePresence>
@@ -313,6 +368,16 @@ export function AskJack({
           </ScrollArea>
 
           <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-sidebar-primary/5 border-t border-sidebar-border space-y-2 shrink-0">
+            {errorMessage && (
+              <div
+                role="alert"
+                aria-live="polite"
+                data-testid="ask-jack-error"
+                className="text-sm text-destructive rounded-lg border border-destructive/40 bg-destructive/10 p-3 font-mono"
+              >
+                {errorMessage}
+              </div>
+            )}
             {messages.length > 0 && (
               <div className="flex justify-end">
                 <ParkThisThoughtButton
