@@ -36,6 +36,13 @@ const bannedCorporatePhrases = [
   /please let me know/i,
   /i'm designed to/i,
   /what do you need assistance with today/i,
+  /i['’]d be happy to/i,
+  /i'm here and ready to help/i,
+  /i'd be happy to help/i,
+  /absolutely/i,
+  /certainly/i,
+  /great question/i,
+  /excellent question/i,
 ];
 
 const identityQuestions = [
