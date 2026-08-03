@@ -19,14 +19,11 @@ const completionHistory: ChatCompletionMessageParam[][] = [];
 const jobsiteFriendlyPatterns = [
   /alright\b/i,
   /what(?:’|')s crackin/i,
-  /pretty deadly/i,
-  /yoooo\b/i,
-  /fair enough/i,
-  /let’s sort it out/i,
-  /walk me through/i,
-  /what['’]s the setup/i,
-  /good call/i,
+  /what['’]s happening/i,
   /what happened/i,
+  /slow it down/i,
+  /who has control/i,
+  /let\s+me\s+through/i,
 ];
 
 const bannedCorporatePhrases = [
@@ -121,6 +118,14 @@ function generateDeterministicReply(
     return "Could be heat too high, wrong polarity, bad fit-up, or gap. What process were you on and at what setup?";
   }
 
+  if (/(i['’]m|i'm)\s+already in my own head/.test(lower)) {
+    return "Alright. Slow it down. What’s tripping you up?";
+  }
+
+  if (/today(?:’|')s been dog shit/.test(lower)) {
+    return "Uh-oh . What happened?";
+  }
+
   if (systemStrict && /\bfcaw\.?(\s|$)/i.test(lower) && hadHoleContext) {
     if (!sufficientDiagnostic) {
       return "Got it. What was your plate thickness and backing condition?";
@@ -140,7 +145,7 @@ function generateDeterministicReply(
       lower,
     )
   ) {
-    return "Alright. Cut the noise, lock the objective, and protect safety. Who controls the sheet and what’s the next controlled move?";
+    return "Alright. Who has control right now?";
   }
 
   if (
@@ -148,14 +153,14 @@ function generateDeterministicReply(
       lower,
     )
   ) {
-    return "Pretty deadly. What’s happening?";
+    return "Alright. What’s happening?";
   }
 
   if (hadHoleContext && sufficientDiagnostic) {
     return "Set your travel angle flatter, tighten root gap, and keep a stable arc with the proper polarity. If it continues, reduce heat input and tighten bead placement immediately.";
   }
 
-  return "Yoooo. What’s the setup?";
+  return "Alright. What’s the setup?";
 }
 
 function assertNoCorporateOrIdentityFallback(
@@ -266,6 +271,27 @@ describe("POST /api/chat — conversational policy regression", () => {
       expect(res.status).toBe(200);
       assertNoCorporateOrIdentityFallback(res.body.answer);
       assertHasJobsiteTone(res.body.answer);
+    },
+  );
+
+  it.each([
+    {
+      message: "Today's been dog shit",
+      match: /Uh-oh\s*\.\s*What happened\?/i,
+    },
+    {
+      message: "I'm already in my own head",
+      match: /Slow it down/i,
+    },
+  ])(
+    "supports calm one-question stress responses: %s",
+    async ({ message, match }) => {
+      const res = await request(app).post("/api/chat").send({ message });
+      expect(res.status).toBe(200);
+      const answer = String(res.body.answer);
+      expect(answer).toMatch(match);
+      assertOneQuestionOnly(answer);
+      assertHasJobsiteTone(answer);
     },
   );
 
@@ -398,9 +424,8 @@ describe("POST /api/chat — conversational policy regression", () => {
     const res = await request(app).post("/api/chat").send({ message });
     expect(res.status).toBe(200);
     const answer = String(res.body.answer);
-    expect(answer).toMatch(
-      /cut the noise|lock the objective|next|objective|safety/i,
-    );
+    expect(answer).toMatch(/Who has control right now/i);
+    assertOneQuestionOnly(answer);
     expect(answer).not.toMatch(/macho|beast|prove|ego|motivation/i);
     assertNoCorporateOrIdentityFallback(answer);
   });
