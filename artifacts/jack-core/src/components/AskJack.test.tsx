@@ -182,6 +182,34 @@ describe("AskJack UX", () => {
     expect(input.value).to.equal("");
   });
 
+  it("restores focus for repeated sends without requiring a click", async () => {
+    configureAskJackSuccess();
+    renderAskJack();
+
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    const sendButton = screen.getByTestId("send-button");
+
+    input.focus();
+    fireEvent.change(input, { target: { value: "How's it going?" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      const answer = screen.getByTestId("assistant-message");
+      expect(answer).to.not.be.null;
+      expect(answer.textContent).to.equal("Alright. Let’s sort it out.");
+      expect(document.activeElement).to.equal(input);
+    });
+
+    fireEvent.change(input, { target: { value: "Need another help" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      const answers = screen.getAllByTestId("assistant-message");
+      expect(answers.length).to.equal(2);
+      expect(document.activeElement).to.equal(input);
+    });
+  });
+
   it("renders a local timestamp for user and assistant messages", async () => {
     askJackHistory.data = [
       {
