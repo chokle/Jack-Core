@@ -182,6 +182,34 @@ describe("AskJack UX", () => {
     expect(input.value).to.equal("");
   });
 
+  it("restores focus for repeated sends without requiring a click", async () => {
+    configureAskJackSuccess();
+    renderAskJack();
+
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    const sendButton = screen.getByTestId("send-button");
+
+    input.focus();
+    fireEvent.change(input, { target: { value: "How's it going?" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      const answer = screen.getByTestId("assistant-message");
+      expect(answer).to.not.be.null;
+      expect(answer.textContent).to.equal("Alright. Let’s sort it out.");
+      expect(document.activeElement).to.equal(input);
+    });
+
+    fireEvent.change(input, { target: { value: "Need another help" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      const answers = screen.getAllByTestId("assistant-message");
+      expect(answers.length).to.equal(2);
+      expect(document.activeElement).to.equal(input);
+    });
+  });
+
   it("renders a local timestamp for user and assistant messages", async () => {
     askJackHistory.data = [
       {
@@ -205,5 +233,25 @@ describe("AskJack UX", () => {
       /\b\d{1,2}:\d{2}(?:\s*[AP]M)?\b/,
     );
     expect(timestamps).to.have.length(2);
+  });
+
+  it("shows conversational loading copy while waiting for an assistant response", () => {
+    askJackState.isPending = true;
+    renderAskJack();
+
+    expect(screen.getByText("Lemme think for a sec...")).to.not.be.null;
+    cleanup();
+
+    askJackHistory.data = [
+      {
+        id: "history-user",
+        role: "user",
+        content: "Teach me about welding",
+        createdAt: "2026-01-01T15:24:00.000Z",
+      },
+    ];
+    renderAskJack();
+
+    expect(screen.getByText("Lemme think for a sec...")).to.not.be.null;
   });
 });
