@@ -16,6 +16,10 @@ const askJackState = vi.hoisted(() => ({
   status: 200,
   isPending: false,
   mutate: vi.fn(),
+  pendingOnSuccess: undefined as
+    | ((response: AskJackResponse) => void)
+    | undefined,
+  pendingOnError: undefined as ((error: unknown) => void) | undefined,
 }));
 const askJackHistory = vi.hoisted(() => ({
   data: [] as {
@@ -85,6 +89,39 @@ function configureAskJackError(errorStatus: number) {
   );
 }
 
+function configureAskJackPending() {
+  askJackState.next = "success";
+  askJackState.pendingOnSuccess = undefined;
+  askJackState.pendingOnError = undefined;
+  askJackState.mutate.mockImplementation(
+    (
+      _payload: { data: { message: string } },
+      options?: {
+        onSuccess?: (response: AskJackResponse) => void;
+        onError?: (error: { status: number }) => void;
+      },
+    ) => {
+      askJackState.isPending = true;
+      askJackState.pendingOnSuccess = options?.onSuccess;
+      askJackState.pendingOnError = options?.onError;
+    },
+  );
+}
+
+function resolveAskJackPendingSuccess(response: AskJackResponse) {
+  askJackState.isPending = false;
+  askJackState.pendingOnSuccess?.(response);
+  askJackState.pendingOnSuccess = undefined;
+}
+
+function resolveAskJackPendingError(error: number) {
+  askJackState.isPending = false;
+  askJackState.pendingOnError?.({
+    response: { status: error },
+  });
+  askJackState.pendingOnError = undefined;
+}
+
 function renderAskJack() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -114,6 +151,8 @@ function renderAskJack() {
 describe("AskJack UX", () => {
   beforeEach(() => {
     askJackState.isPending = false;
+    askJackState.pendingOnSuccess = undefined;
+    askJackState.pendingOnError = undefined;
     configureAskJackSuccess();
     askJackHistory.data = [];
   });
@@ -187,7 +226,7 @@ describe("AskJack UX", () => {
     renderAskJack();
 
     const input = screen.getByTestId("chat-input") as HTMLInputElement;
-    const sendButton = screen.getByTestId("send-button");
+    const sendButton = screen.getByTestId("send-button") as HTMLButtonElement;
 
     input.focus();
     fireEvent.change(input, { target: { value: "How's it going?" } });
@@ -206,6 +245,76 @@ describe("AskJack UX", () => {
     await waitFor(() => {
       const answers = screen.getAllByTestId("assistant-message");
       expect(answers.length).to.equal(2);
+      expect(document.activeElement).to.equal(input);
+    });
+  });
+
+  it("keeps composer editable during pending and preserves draft text", async () => {
+    configureAskJackPending();
+    renderAskJack();
+
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    const sendButton = screen.getByTestId("send-button") as HTMLButtonElement;
+
+    input.focus();
+    fireEvent.change(input, { target: { value: "Could you help with that?" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(sendButton.disabled).to.be.true;
+      expect(input.disabled).to.be.false;
+      expect(input.value).to.equal("");
+      expect(screen.getByText("Lemme think for a sec...")).to.not.be.null;
+    });
+
+    fireEvent.change(input, {
+      target: { value: "Second draft while waiting" },
+    });
+    expect(input.value).to.equal("Second draft while waiting");
+
+    fireEvent.click(sendButton);
+    expect(askJackState.mutate).toHaveBeenCalledTimes(1);
+
+    resolveAskJackPendingSuccess({
+      answer: "Alright. Let’s sort it out.",
+      citations: [],
+      usedInternalKnowledge: true,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-message").textContent).to.equal(
+        "Alright. Let’s sort it out.",
+      );
+      expect(input.value).to.equal("Second draft while waiting");
+      expect(document.activeElement).to.equal(input);
+    });
+  });
+
+  it("preserves a second draft if a request fails while pending", async () => {
+    configureAskJackPending();
+    renderAskJack();
+
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    const sendButton = screen.getByTestId("send-button") as HTMLButtonElement;
+
+    fireEvent.change(input, { target: { value: "What causes this defect?" } });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => {
+      expect(sendButton.disabled).to.be.true;
+      expect(input.disabled).to.be.false;
+    });
+
+    fireEvent.change(input, {
+      target: { value: "Second draft after submit" },
+    });
+
+    resolveAskJackPendingError(500);
+
+    await waitFor(() => {
+      const error = screen.getByTestId("ask-jack-error");
+      expect(error).to.not.be.null;
+      expect(input.value).to.equal("Second draft after submit");
       expect(document.activeElement).to.equal(input);
     });
   });

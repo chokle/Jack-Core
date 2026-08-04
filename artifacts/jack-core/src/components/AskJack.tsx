@@ -89,6 +89,7 @@ export function AskJack({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const shouldReturnFocusToInputRef = useRef(false);
+  const submittedMessageRef = useRef("");
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
@@ -186,6 +187,7 @@ export function AskJack({
       content: input,
       createdAt: new Date().toISOString(),
     };
+    submittedMessageRef.current = input;
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
@@ -210,7 +212,9 @@ export function AskJack({
           setErrorMessage(null);
         },
         onError: (error: unknown) => {
-          setInput(userMessage.content);
+          setInput((currentInput) =>
+            currentInput.trim() ? currentInput : submittedMessageRef.current,
+          );
           setMessages((prev) => prev.slice(0, -1));
           setErrorMessage(formatAskJackError(error));
           requestInputFocusAfterResponse();
@@ -421,7 +425,6 @@ export function AskJack({
                 placeholder="Ask about red seal standards..."
                 aria-label="Ask Jack a question"
                 className="h-11 pr-12 bg-card border-card-border focus-visible:ring-primary text-base md:h-9 md:text-sm"
-                disabled={askJack?.isPending}
               />
               <Button
                 type="submit"
