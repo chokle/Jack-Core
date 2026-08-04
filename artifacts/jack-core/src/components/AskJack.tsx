@@ -88,8 +88,7 @@ export function AskJack({
   const clearHistory = useClearChatHistory();
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [shouldReturnFocusToInput, setShouldReturnFocusToInput] =
-    useState(false);
+  const shouldReturnFocusToInputRef = useRef(false);
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
@@ -162,12 +161,42 @@ export function AskJack({
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
 
+  function requestInputFocusAfterResponse() {
+    if (!shouldReturnFocusToInputRef.current) return;
+    shouldReturnFocusToInputRef.current = false;
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  }
+
+  function getLoadingCopy(): string {
+    const lastUserMessage =
+      [...messages]
+        .reverse()
+        .find((message) => message.role === "user")
+        ?.content?.toLowerCase() ?? "";
+
+    if (/blueprint|plan|drawing|schematic|spec/.test(lastUserMessage)) {
+      return "Checking the blueprints...";
+    }
+
+    if (
+      /\b(teach|what|how|why|difference|causes|explain|weld|cut|fault|defect)\b/.test(
+        lastUserMessage,
+      )
+    ) {
+      return "Hold up, let's see what we got.";
+    }
+
+    return "Lemme think for a sec...";
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || askJack.isPending) return;
 
     const userTypedFromInput = document.activeElement === inputRef.current;
-    setShouldReturnFocusToInput(userTypedFromInput);
+    shouldReturnFocusToInputRef.current = userTypedFromInput;
     setErrorMessage(null);
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -195,20 +224,14 @@ export function AskJack({
           };
           setMessages((prev) => [...prev, assistantMessage]);
           setSuccessfulTurns((count) => count + 1);
-          if (shouldReturnFocusToInput) {
-            inputRef.current?.focus();
-          }
-          setShouldReturnFocusToInput(false);
+          requestInputFocusAfterResponse();
           setErrorMessage(null);
         },
         onError: (error: unknown) => {
           setInput(userMessage.content);
           setMessages((prev) => prev.slice(0, -1));
           setErrorMessage(formatAskJackError(error));
-          if (shouldReturnFocusToInput) {
-            inputRef.current?.focus();
-          }
-          setShouldReturnFocusToInput(false);
+          requestInputFocusAfterResponse();
         },
       },
     );
@@ -377,7 +400,7 @@ export function AskJack({
                   <div className="p-3 rounded-xl bg-card border border-card-border flex items-center">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     <span className="ml-2 text-xs font-mono">
-                      Analyzing library...
+                      {getLoadingCopy()}
                     </span>
                   </div>
                 </div>

@@ -206,4 +206,24 @@ describe("AskJack UX", () => {
     );
     expect(timestamps).to.have.length(2);
   });
+
+  it("shows conversational loading copy while waiting for an assistant response", () => {
+    askJackState.isPending = true;
+    renderAskJack();
+
+    expect(screen.getByText("Lemme think for a sec...")).to.not.be.null;
+    cleanup();
+
+    askJackHistory.data = [
+      {
+        id: "history-user",
+        role: "user",
+        content: "Teach me about welding",
+        createdAt: "2026-01-01T15:24:00.000Z",
+      },
+    ];
+    renderAskJack();
+
+    expect(screen.getByText("Hold up, let's see what we got.")).to.not.be.null;
+  });
 });

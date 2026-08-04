@@ -64,8 +64,9 @@ function systemEnforcesOneQuestionDiagnose(
   steps: ChatCompletionMessageParam[],
 ): boolean {
   const systemPrompt = String(steps[0]?.content ?? "");
-  return systemPrompt.includes(
-    "When essential diagnostic context is missing, briefly acknowledge the issue, ask exactly one highest-value clarifying question",
+  return (
+    systemPrompt.includes("ask one highest-value clarifying question") &&
+    systemPrompt.includes("one question per assistant turn")
   );
 }
 
@@ -113,7 +114,7 @@ function generateDeterministicReply(
 
   if (/i blew a hole through a 3g root pass/.test(lower)) {
     if (systemStrict) {
-      return "Uh-oh. What process are you running?";
+      return "Could be heat, travel speed, or fit-up. Let's see what we got here. What process are you running?";
     }
     return "Could be heat too high, wrong polarity, bad fit-up, or gap. What process were you on and at what setup?";
   }
@@ -126,9 +127,13 @@ function generateDeterministicReply(
     return "Uh-oh . What happened?";
   }
 
+  if (systemStrict && hadHoleContext && /3\/8/.test(lower)) {
+    return "Any open-root setup or backing bar in that joint?";
+  }
+
   if (systemStrict && /\bfcaw\.?(\s|$)/i.test(lower) && hadHoleContext) {
-    if (!sufficientDiagnostic) {
-      return "Got it. What was your plate thickness and backing condition?";
+    if (!hasConversationContext(steps, "3/8")) {
+      return "What thickness is the plate?";
     }
   }
 
@@ -362,7 +367,8 @@ describe("POST /api/chat — conversational policy regression", () => {
 
     expect(res.status).toBe(200);
     const answer = String(res.body.answer);
-    expect(answer).toMatch(/what process/i);
+    expect(answer).toMatch(/Could be heat, travel speed, or fit-up/i);
+    expect(answer).toMatch(/what process are you running\?/i);
     assertNoCorporateOrIdentityFallback(answer);
     assertOneQuestionOnly(answer);
     expect(answer).not.toMatch(/possible causes/i);
@@ -378,18 +384,25 @@ describe("POST /api/chat — conversational policy regression", () => {
 
     expect(res.status).toBe(200);
     const answer = String(res.body.answer);
-    expect(answer).toMatch(
-      /What was your plate thickness and backing condition/i,
-    );
+    expect(answer).toMatch(/What thickness is the plate/i);
     assertOneQuestionOnly(answer);
     assertNoCorporateOrIdentityFallback(answer);
   });
 
-  it("provides diagnosis once process context is sufficient", async () => {
+  it("continues one-question-per-turn diagnostic sequencing", async () => {
     await request(app)
       .post("/api/chat")
       .send({ message: "I blew a hole through a 3G root pass." });
     await request(app).post("/api/chat").send({ message: "FCAW." });
+    const second = await request(app)
+      .post("/api/chat")
+      .send({ message: "3/8" });
+    expect(second.status).toBe(200);
+    expect(String(second.body.answer)).toMatch(
+      /Any open-root setup or backing bar/i,
+    );
+    assertOneQuestionOnly(String(second.body.answer));
+    assertNoCorporateOrIdentityFallback(String(second.body.answer));
 
     const answerRes = await request(app).post("/api/chat").send({
       message:
