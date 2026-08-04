@@ -224,6 +224,6 @@ describe("AskJack UX", () => {
     ];
     renderAskJack();
 
-    expect(screen.getByText("Hold up, let's see what we got.")).to.not.be.null;
+    expect(screen.getByText("Lemme think for a sec...")).to.not.be.null;
   });
 });

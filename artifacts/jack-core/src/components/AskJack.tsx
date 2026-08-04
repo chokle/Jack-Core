@@ -170,24 +170,6 @@ export function AskJack({
   }
 
   function getLoadingCopy(): string {
-    const lastUserMessage =
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "user")
-        ?.content?.toLowerCase() ?? "";
-
-    if (/blueprint|plan|drawing|schematic|spec/.test(lastUserMessage)) {
-      return "Checking the blueprints...";
-    }
-
-    if (
-      /\b(teach|what|how|why|difference|causes|explain|weld|cut|fault|defect)\b/.test(
-        lastUserMessage,
-      )
-    ) {
-      return "Hold up, let's see what we got.";
-    }
-
     return "Lemme think for a sec...";
   }
 
