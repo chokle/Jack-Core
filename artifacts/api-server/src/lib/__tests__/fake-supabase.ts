@@ -71,22 +71,54 @@ const FOREIGN_KEYS: Record<
   { column: string; refTable: string; constraint: string }[]
 > = {
   knowledge_edges: [
-    { column: "source_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_source_id_fkey" },
-    { column: "target_id", refTable: "knowledge_nodes", constraint: "knowledge_edges_target_id_fkey" },
+    {
+      column: "source_id",
+      refTable: "knowledge_nodes",
+      constraint: "knowledge_edges_source_id_fkey",
+    },
+    {
+      column: "target_id",
+      refTable: "knowledge_nodes",
+      constraint: "knowledge_edges_target_id_fkey",
+    },
   ],
   transcript_segments: [
-    { column: "video_id", refTable: "videos", constraint: "transcript_segments_video_id_fkey" },
+    {
+      column: "video_id",
+      refTable: "videos",
+      constraint: "transcript_segments_video_id_fkey",
+    },
   ],
   interview_sessions: [
-    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "interview_sessions_mentor_profile_id_fkey" },
+    {
+      column: "mentor_profile_id",
+      refTable: "mentor_profiles",
+      constraint: "interview_sessions_mentor_profile_id_fkey",
+    },
   ],
   interview_answers: [
-    { column: "session_id", refTable: "interview_sessions", constraint: "interview_answers_session_id_fkey" },
-    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "interview_answers_mentor_profile_id_fkey" },
+    {
+      column: "session_id",
+      refTable: "interview_sessions",
+      constraint: "interview_answers_session_id_fkey",
+    },
+    {
+      column: "mentor_profile_id",
+      refTable: "mentor_profiles",
+      constraint: "interview_answers_mentor_profile_id_fkey",
+    },
   ],
   parked_thoughts: [
-    { column: "interview_session_id", refTable: "interview_sessions", constraint: "parked_thoughts_interview_session_id_fkey" },
-    { column: "mentor_profile_id", refTable: "mentor_profiles", constraint: "parked_thoughts_mentor_profile_id_fkey" },
+    {
+      column: "interview_session_id",
+      refTable: "interview_sessions",
+      constraint: "parked_thoughts_interview_session_id_fkey",
+    },
+    {
+      column: "mentor_profile_id",
+      refTable: "mentor_profiles",
+      constraint: "parked_thoughts_mentor_profile_id_fkey",
+    },
   ],
 };
 
@@ -119,7 +151,10 @@ export class FakeSupabase {
     return new QueryBuilder(this, table);
   }
 
-  async rpc(name: string, params: Record<string, unknown>): Promise<Result<unknown>> {
+  async rpc(
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<Result<unknown>> {
     if (name === "match_knowledge_nodes") {
       const query = (params["query_embedding"] as number[]) ?? [];
       const category = params["filter_category"] as string;
@@ -128,10 +163,19 @@ export class FakeSupabase {
       const exclude = new Set((params["exclude_ids"] as string[]) ?? []);
 
       const scored = (this.tables["knowledge_nodes"] ?? [])
-        .filter((n) => n["embedding"] != null && n["kind"] === category && !exclude.has(n["id"] as string))
+        .filter(
+          (n) =>
+            n["embedding"] != null &&
+            n["kind"] === category &&
+            !exclude.has(n["id"] as string),
+        )
         .map((n) => {
           const emb = JSON.parse(n["embedding"] as string) as number[];
-          return { id: n["id"] as string, label: n["label"] as string, similarity: cosine(query, emb) };
+          return {
+            id: n["id"] as string,
+            label: n["label"] as string,
+            similarity: cosine(query, emb),
+          };
         })
         .filter((r) => r.similarity > threshold)
         .sort((a, b) => b.similarity - a.similarity)
@@ -156,7 +200,9 @@ export class FakeSupabase {
         // or it carries a precomputed `similarity` for tests that need to pin the
         // exact retrieval scores they reason about (e.g. proving trust reranking
         // flips the order). Rows with neither can't be scored and are skipped.
-        .filter((s) => s["embedding"] != null || typeof s["similarity"] === "number")
+        .filter(
+          (s) => s["embedding"] != null || typeof s["similarity"] === "number",
+        )
         .map((s) => {
           const video = (videoById.get(s["video_id"]) ?? {}) as Row;
           const similarity =
@@ -188,7 +234,10 @@ export class FakeSupabase {
     // `knowledge_entries` table (rows are returned as-is, no cosine scoring); by
     // default it is empty so most tests still see "no entry matches".
     if (name === "match_knowledge_entries") {
-      return { data: (this.tables["knowledge_entries"] ?? []).map((r) => ({ ...r })), error: null };
+      return {
+        data: (this.tables["knowledge_entries"] ?? []).map((r) => ({ ...r })),
+        error: null,
+      };
     }
 
     return { data: null, error: { message: `unknown rpc ${name}` } };
@@ -221,7 +270,10 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this;
   }
 
-  upsert(rows: Row | Row[], opts: { onConflict?: string; ignoreDuplicates?: boolean } = {}): this {
+  upsert(
+    rows: Row | Row[],
+    opts: { onConflict?: string; ignoreDuplicates?: boolean } = {},
+  ): this {
     this.op = "upsert";
     this.upsertRows = Array.isArray(rows) ? rows : [rows];
     this.upsertOpts = opts;
@@ -268,7 +320,8 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
   // Only the `.not(col, "is", null)` form is modeled (that's all the code uses).
   not(col: string, op: string, val: unknown): this {
-    if (op !== "is") throw new Error(`fake-supabase: unsupported not() operator "${op}"`);
+    if (op !== "is")
+      throw new Error(`fake-supabase: unsupported not() operator "${op}"`);
     this.filters.push({ kind: "not-is", col, val });
     return this;
   }
@@ -337,7 +390,9 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     const foreignKeys = FOREIGN_KEYS[this.table];
     if (!foreignKeys) return null;
     for (const fk of foreignKeys) {
-      const refIds = new Set((this.db.tables[fk.refTable] ?? []).map((r) => r["id"]));
+      const refIds = new Set(
+        (this.db.tables[fk.refTable] ?? []).map((r) => r["id"]),
+      );
       for (const r of this.upsertRows) {
         const val = r[fk.column];
         if (val === undefined || val === null) continue;
@@ -365,7 +420,8 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let n = 0;
     for (const incoming of this.upsertRows) {
       const row: Row = { created_at: now, ...incoming };
-      if (row["id"] === undefined) row["id"] = `fake-${this.table}-${this.rows.length + n}`;
+      if (row["id"] === undefined)
+        row["id"] = `fake-${this.table}-${this.rows.length + n}`;
       this.rows.push(row);
       inserted.push({ ...row });
       n++;
@@ -390,13 +446,45 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private runSelect(): Result<unknown> {
-    let matched = this.rows.filter((r) => this.matches(r)).map((r) => ({ ...r }));
+    let matched = this.rows
+      .filter((r) => this.matches(r))
+      .map((r) => ({ ...r }));
     if (this.orderBy) {
       const { col, ascending } = this.orderBy;
+      const compareValues = (left: unknown, right: unknown): number => {
+        if (left == null && right == null) return 0;
+        if (left == null) return ascending ? 1 : -1;
+        if (right == null) return ascending ? -1 : 1;
+
+        if (typeof left === "number" && typeof right === "number") {
+          return left - right;
+        }
+
+        if (typeof left === "string" && typeof right === "string") {
+          const leftDate = Date.parse(left);
+          const rightDate = Date.parse(right);
+          if (!Number.isNaN(leftDate) && !Number.isNaN(rightDate)) {
+            return leftDate - rightDate;
+          }
+          return left.localeCompare(right);
+        }
+
+        if (typeof left === "boolean" && typeof right === "boolean") {
+          return Number(left) - Number(right);
+        }
+
+        const leftNumber = Number(left);
+        const rightNumber = Number(right);
+        if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber)) {
+          return leftNumber - rightNumber;
+        }
+
+        return String(left).localeCompare(String(right));
+      };
+
       matched = matched.sort((a, b) => {
-        const av = a[col] as number;
-        const bv = b[col] as number;
-        return ascending ? av - bv : bv - av;
+        const order = compareValues(a[col], b[col]);
+        return ascending ? order : -order;
       });
     }
     if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
@@ -420,7 +508,8 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     if (notNullCols && this.upsertRows.length > 0) {
       const union = new Set<string>();
       for (const r of this.upsertRows) {
-        for (const [k, v] of Object.entries(r)) if (v !== undefined) union.add(k);
+        for (const [k, v] of Object.entries(r))
+          if (v !== undefined) union.add(k);
       }
       for (const col of notNullCols) {
         const inUnion = union.has(col);
@@ -473,7 +562,9 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     // Emulate ON DELETE CASCADE from knowledge_nodes -> knowledge_edges.
     if (this.table === "knowledge_nodes" && deleted.length > 0) {
       const goneIds = new Set(deleted.map((r) => r["id"]));
-      this.db.tables["knowledge_edges"] = (this.db.tables["knowledge_edges"] ?? []).filter(
+      this.db.tables["knowledge_edges"] = (
+        this.db.tables["knowledge_edges"] ?? []
+      ).filter(
         (e) => !goneIds.has(e["source_id"]) && !goneIds.has(e["target_id"]),
       );
     }
@@ -482,12 +573,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     // interview_answers (both reference mentor_profile_id), mirroring the schema.
     if (this.table === "mentor_profiles" && deleted.length > 0) {
       const goneIds = new Set(deleted.map((r) => r["id"]));
-      this.db.tables["interview_sessions"] = (this.db.tables["interview_sessions"] ?? []).filter(
-        (s) => !goneIds.has(s["mentor_profile_id"]),
-      );
-      this.db.tables["interview_answers"] = (this.db.tables["interview_answers"] ?? []).filter(
-        (a) => !goneIds.has(a["mentor_profile_id"]),
-      );
+      this.db.tables["interview_sessions"] = (
+        this.db.tables["interview_sessions"] ?? []
+      ).filter((s) => !goneIds.has(s["mentor_profile_id"]));
+      this.db.tables["interview_answers"] = (
+        this.db.tables["interview_answers"] ?? []
+      ).filter((a) => !goneIds.has(a["mentor_profile_id"]));
     }
     return { data: null, error: null };
   }
@@ -497,13 +588,19 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       | ((value: Result<unknown>) => TResult1 | PromiseLike<TResult1>)
       | undefined
       | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | undefined | null,
+    onrejected?:
+      | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+      | undefined
+      | null,
   ): PromiseLike<TResult1 | TResult2> {
     try {
       const result = this.run();
       return Promise.resolve(result).then(onfulfilled, onrejected);
     } catch (err) {
-      return Promise.reject(err).then(onfulfilled, onrejected) as PromiseLike<TResult2>;
+      return Promise.reject(err).then(
+        onfulfilled,
+        onrejected,
+      ) as PromiseLike<TResult2>;
     }
   }
 }
