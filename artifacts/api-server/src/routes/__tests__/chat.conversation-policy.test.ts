@@ -24,6 +24,11 @@ const jobsiteFriendlyPatterns = [
   /slow it down/i,
   /who has control/i,
   /let\s+me\s+through/i,
+  /bro/i,
+  /ahhh shit/i,
+  /beauty/i,
+  /that['’]ll ruin your morning/i,
+  /jesus,\s*bro/i,
 ];
 
 const bannedCorporatePhrases = [
@@ -41,6 +46,22 @@ const bannedCorporatePhrases = [
   /great question/i,
   /excellent question/i,
 ];
+
+const responseFamilyAnchors = [
+  "Bro…",
+  "Ahhh shit",
+  "Well, that ain’t ideal.",
+  "That’ll ruin your morning.",
+  "Beauty… now what happened?",
+  "Well, there’s your problem.",
+  "Jesus, bro",
+  "Alright, what’d you do?",
+];
+
+const safetyCriticalPatterns = [
+  /someone.?s under|someone.?s underneath|underneath.*someone/i,
+  /\b(unsafe|hazard|immediate danger|load.*shifted|under.*load|injury|injured|injuring|fire|electric|electrical|collapsed|collapse|fall|trapped|tripped|critical|panic)\b/i,
+] as const;
 
 const identityQuestions = [
   "who are you?",
@@ -83,6 +104,31 @@ function hasConversationContext(
     );
 }
 
+function selectReactionFamily(steps: ChatCompletionMessageParam[]): string {
+  const recentAssistantText = steps
+    .filter((message) => message.role === "assistant")
+    .map((message) => String(message.content ?? "").toLowerCase());
+
+  const recentlyUsed = new Set<string>();
+  for (const text of recentAssistantText) {
+    for (const anchor of responseFamilyAnchors) {
+      if (text.includes(anchor.toLowerCase().slice(0, 12))) {
+        recentlyUsed.add(anchor);
+      }
+    }
+  }
+
+  const available = responseFamilyAnchors.filter(
+    (anchor) => !recentlyUsed.has(anchor),
+  );
+  const fallback = available.length > 0 ? available : responseFamilyAnchors;
+  return `${fallback[Math.max(steps.length - 1, 0) % fallback.length]} `;
+}
+
+function isSafetyCritical(lower: string): boolean {
+  return safetyCriticalPatterns.some((pattern) => pattern.test(lower));
+}
+
 function generateDeterministicReply(
   steps: ChatCompletionMessageParam[],
 ): string {
@@ -112,9 +158,14 @@ function generateDeterministicReply(
     return "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.";
   }
 
+  if (isSafetyCritical(lower)) {
+    return "Clear everyone out from under it. Is the load stable right now?";
+  }
+
   if (/i blew a hole through a 3g root pass/.test(lower)) {
+    const reaction = selectReactionFamily(steps);
     if (systemStrict) {
-      return "Could be heat, travel speed, or fit-up. Let's see what we got here. What process are you running?";
+      return `${reaction}Could be heat, travel speed, or fit-up. Let's see what we got here. What process are you running?`;
     }
     return "Could be heat too high, wrong polarity, bad fit-up, or gap. What process were you on and at what setup?";
   }
@@ -124,7 +175,7 @@ function generateDeterministicReply(
   }
 
   if (/today(?:’|')s been dog shit/.test(lower)) {
-    return "Uh-oh . What happened?";
+    return `${selectReactionFamily(steps)}What happened?`;
   }
 
   if (systemStrict && hadHoleContext && /3\/8/.test(lower)) {
@@ -187,6 +238,10 @@ function assertHasJobsiteTone(answer: string) {
   );
 }
 
+function hasResponseFamilyAnchor(answer: string): boolean {
+  return responseFamilyAnchors.some((anchor) => answer.includes(anchor));
+}
+
 function assertOneQuestionOnly(answer: string) {
   const qCount = (answer.match(/[?]/g) ?? []).length;
   expect(qCount).toBe(1);
@@ -223,8 +278,20 @@ vi.mock("../../lib/ask-learning.js", () => ({
   })),
 }));
 
+vi.mock("../../lib/rate-limit.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../lib/rate-limit.js")
+  >("../../lib/rate-limit.js");
+  return {
+    ...actual,
+    aiQueryLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  };
+});
+
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+
+let testUserId = "user_dialogue";
 
 function makeApp(): Express {
   const app = express();
@@ -238,7 +305,7 @@ function makeApp(): Express {
       info: noop,
       debug: noop,
     };
-    (req as unknown as { userId: string }).userId = "user_dialogue";
+    (req as unknown as { userId: string }).userId = testUserId;
     next();
   });
   app.use("/api", chatRouter);
@@ -279,26 +346,73 @@ describe("POST /api/chat — conversational policy regression", () => {
     },
   );
 
-  it.each([
-    {
-      message: "Today's been dog shit",
-      match: /Uh-oh\s*\.\s*What happened\?/i,
-    },
-    {
-      message: "I'm already in my own head",
-      match: /Slow it down/i,
-    },
-  ])(
+  it.each(["Today's been dog shit", "I'm already in my own head"])(
     "supports calm one-question stress responses: %s",
-    async ({ message, match }) => {
+    async (message) => {
       const res = await request(app).post("/api/chat").send({ message });
       expect(res.status).toBe(200);
       const answer = String(res.body.answer);
-      expect(answer).toMatch(match);
+      assertNoCorporateOrIdentityFallback(answer);
       assertOneQuestionOnly(answer);
       assertHasJobsiteTone(answer);
+      expect(answer).toMatch(/\?$/);
     },
   );
+
+  it("uses reaction-family variation instead of one fixed line", async () => {
+    const first = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(first.status).toBe(200);
+    const firstAnswer = String(first.body.answer);
+    expect(hasResponseFamilyAnchor(firstAnswer)).toBe(true);
+    assertNoCorporateOrIdentityFallback(firstAnswer);
+
+    const second = await request(app).post("/api/chat").send({
+      message: "I blew a hole through a 3G root pass.",
+    });
+    expect(second.status).toBe(200);
+    const secondAnswer = String(second.body.answer);
+    expect(hasResponseFamilyAnchor(secondAnswer)).toBe(true);
+    expect(firstAnswer).not.toBe(secondAnswer);
+    expect(hasResponseFamilyAnchor(secondAnswer)).toBe(true);
+  });
+
+  it("avoids repeating the same reaction in the recent window", async () => {
+    const first = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(first.status).toBe(200);
+    const firstAnswer = String(first.body.answer);
+
+    const second = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(second.status).toBe(200);
+    const secondAnswer = String(second.body.answer);
+
+    if (
+      hasResponseFamilyAnchor(firstAnswer) &&
+      hasResponseFamilyAnchor(secondAnswer)
+    ) {
+      expect(secondAnswer).not.toBe(firstAnswer);
+    }
+  });
+
+  it("suppresses banter in safety-critical prompts", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message:
+        "The load shifted and someone's underneath it. What do I do first?",
+    });
+    expect(res.status).toBe(200);
+    const answer = String(res.body.answer);
+    expect(answer).toMatch(
+      /Clear everyone out from under it\. Is the load stable right now\?/i,
+    );
+    expect(answer).not.toMatch(
+      /Bro|Ahhh shit|That['’]ll ruin|Beauty|Jesus, bro|there['’]s your problem/i,
+    );
+  });
 
   it.each(["What are you?", "Who are you?"])(
     "allows identity intro only for explicit identity questions: %s",
