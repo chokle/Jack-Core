@@ -94,6 +94,16 @@ export function AskJack({
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
 
+  function formatMessageTime(createdAt?: string): string | null {
+    if (!createdAt) return null;
+    const date = new Date(createdAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
   const close = () => {
     if (successfulTurns > 0) onMeaningfulSessionComplete?.();
     setSuccessfulTurns(0);
@@ -312,44 +322,52 @@ export function AskJack({
                   </p>
                 </div>
               ) : (
-                messages.map((msg) => (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    key={msg.id}
-                    className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
-                  >
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "user" ? "bg-secondary" : "bg-primary text-primary-foreground"}`}
+                messages.map((msg) => {
+                  const messageTime = formatMessageTime(msg.createdAt);
+                  return (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      key={msg.id}
+                      className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
                     >
-                      {msg.role === "user" ? (
-                        <User className="h-4 w-4" />
-                      ) : (
-                        <Bot className="h-4 w-4" />
-                      )}
-                    </div>
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "user" ? "bg-secondary" : "bg-primary text-primary-foreground"}`}
+                      >
+                        {msg.role === "user" ? (
+                          <User className="h-4 w-4" />
+                        ) : (
+                          <Bot className="h-4 w-4" />
+                        )}
+                      </div>
 
-                    <div
-                      className={`flex flex-col gap-2 ${msg.role === "user" ? "max-w-[80%] items-end" : "min-w-0 flex-1 items-start"}`}
-                    >
-                      {msg.role === "user" ? (
-                        <div className="p-3 rounded-xl text-sm bg-secondary text-secondary-foreground">
-                          <div className="whitespace-pre-wrap break-words">
-                            {msg.content}
+                      <div
+                        className={`flex flex-col gap-2 ${msg.role === "user" ? "max-w-[80%] items-end" : "min-w-0 flex-1 items-start"}`}
+                      >
+                        {msg.role === "user" ? (
+                          <div className="p-3 rounded-xl text-sm bg-secondary text-secondary-foreground">
+                            <div className="whitespace-pre-wrap break-words">
+                              {msg.content}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <StructuredAnswer
-                          content={msg.content}
-                          citations={msg.citations}
-                          usedInternalKnowledge={msg.usedInternalKnowledge}
-                          onCitationClick={onCitationClick}
-                          onFieldNoteClick={onFieldNoteClick}
-                        />
-                      )}
-                    </div>
-                  </motion.div>
-                ))
+                        ) : (
+                          <StructuredAnswer
+                            content={msg.content}
+                            citations={msg.citations}
+                            usedInternalKnowledge={msg.usedInternalKnowledge}
+                            onCitationClick={onCitationClick}
+                            onFieldNoteClick={onFieldNoteClick}
+                          />
+                        )}
+                        {messageTime && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {messageTime}
+                          </span>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })
               )}
               {askJack?.isPending && (
                 <div className="flex gap-3">

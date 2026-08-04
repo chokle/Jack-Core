@@ -17,13 +17,22 @@ const askJackState = vi.hoisted(() => ({
   isPending: false,
   mutate: vi.fn(),
 }));
+const askJackHistory = vi.hoisted(() => ({
+  data: [] as {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    createdAt?: string;
+    citations?: unknown[];
+  }[],
+}));
 
 vi.mock("@workspace/api-client-react", () => ({
   useAskJack: () => ({
     isPending: askJackState.isPending,
     mutate: askJackState.mutate,
   }),
-  useGetChatHistory: () => ({ data: [] }),
+  useGetChatHistory: () => ({ data: askJackHistory.data }),
   useClearChatHistory: () => ({ mutate: vi.fn(), isPending: false }),
   getGetChatHistoryQueryKey: () => ["chat-history"],
 }));
@@ -106,6 +115,7 @@ describe("AskJack UX", () => {
   beforeEach(() => {
     askJackState.isPending = false;
     configureAskJackSuccess();
+    askJackHistory.data = [];
   });
 
   afterEach(() => {
@@ -170,5 +180,30 @@ describe("AskJack UX", () => {
     });
     expect(document.activeElement).to.not.equal(input);
     expect(input.value).to.equal("");
+  });
+
+  it("renders a local timestamp for user and assistant messages", async () => {
+    askJackHistory.data = [
+      {
+        id: "history-user",
+        role: "user",
+        content: "Hello Jack",
+        createdAt: "2026-01-01T15:24:00.000Z",
+      },
+      {
+        id: "history-assistant",
+        role: "assistant",
+        content: "Got you.",
+        createdAt: "2026-01-01T15:24:30.000Z",
+        citations: [],
+      },
+    ];
+    configureAskJackSuccess();
+    renderAskJack();
+
+    const timestamps = await screen.findAllByText(
+      /\b\d{1,2}:\d{2}(?:\s*[AP]M)?\b/,
+    );
+    expect(timestamps).to.have.length(2);
   });
 });

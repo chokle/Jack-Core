@@ -476,12 +476,13 @@ router.get("/chat/history", async (req, res) => {
       historyQuery = historyQuery.eq("session_id", session);
     }
     const { data, error } = await historyQuery
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(50);
 
     if (error) throw error;
+    const sortedRows = [...(data ?? [])].reverse();
     return res.json(
-      (data ?? []).map((m: Record<string, unknown>) => ({
+      sortedRows.map((m: Record<string, unknown>) => ({
         id: m["id"],
         // Ownership fields (session_id / user_id) are intentionally omitted —
         // they are server-side identity, never echoed back into the response.

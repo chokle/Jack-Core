@@ -86,6 +86,7 @@ const app = makeApp();
 interface HistoryRow {
   role: string;
   content: string;
+  createdAt?: string;
 }
 
 beforeEach(() => {
@@ -220,6 +221,115 @@ describe("GET /api/chat/history — account-scoped, not device-scoped", () => {
     expect((ownSession.body as HistoryRow[]).map((row) => row.content)).toEqual(
       ["This browser"],
     );
+  });
+
+  it("returns the most recent 50 messages in ascending (chronological) order", async () => {
+    fake.tables["chat_messages"] = [];
+    const seeded = Array.from({ length: 60 }, (_item, index) => {
+      const stamp = new Date(Date.UTC(2026, 0, 1, 0, 1, 59 - index));
+      return {
+        id: `message-${String(index).padStart(2, "0")}`,
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "user",
+        content: `message ${index}`,
+        citations: [],
+        created_at: stamp.toISOString(),
+      };
+    });
+
+    fake.tables["chat_messages"] = [
+      ...seeded,
+      {
+        id: "other-user-1",
+        session_id: SHARED_SESSION,
+        user_id: USER_B,
+        role: "user",
+        content: "other user",
+        citations: [],
+        created_at: new Date(Date.UTC(2026, 0, 1, 0, 2, 0)).toISOString(),
+      },
+    ];
+
+    const res = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`);
+    expect(res.status).toBe(200);
+
+    const rows = res.body as HistoryRow[];
+    expect(rows).toHaveLength(50);
+    expect(rows.map((row) => row.content)).toEqual(
+      seeded
+        .slice(0, 50)
+        .map((message) => message.content)
+        .reverse(),
+    );
+    expect(rows[0]?.content).to.equal("message 49");
+    expect(rows.at(-1)?.content).to.equal("message 0");
+  });
+
+  it("returns a smaller list when the user has fewer than 50 messages", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "short-a1",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "user",
+        content: "Short A",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "short-a2",
+        session_id: SHARED_SESSION,
+        user_id: USER_A,
+        role: "assistant",
+        content: "Short B",
+        citations: [],
+        created_at: "2026-01-01T00:00:01Z",
+      },
+      {
+        id: "short-b1",
+        session_id: SHARED_SESSION,
+        user_id: USER_B,
+        role: "user",
+        content: "Other user row",
+        citations: [],
+        created_at: "2026-01-01T00:00:02Z",
+      },
+    ];
+
+    const res = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`);
+    expect(res.status).toBe(200);
+    expect((res.body as HistoryRow[]).map((row) => row.content)).toEqual([
+      "Short A",
+      "Short B",
+    ]);
+  });
+
+  it("returns empty history for an authenticated user with no rows", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        id: "other-only",
+        session_id: SHARED_SESSION,
+        user_id: USER_B,
+        role: "user",
+        content: "not mine",
+        citations: [],
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    const res = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", USER_A)
+      .set("Cookie", `jack_session=${SHARED_SESSION}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 });
 
@@ -416,14 +526,19 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const requestMessages =
       vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages ?? [];
     const system =
-      requestMessages.find((message) => message.role === "system")?.content ?? "";
+      requestMessages.find((message) => message.role === "system")?.content ??
+      "";
     expect(system).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
     expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-    expect(system).toContain("When responding to an identity-only question, output exactly:");
+    expect(system).toContain(
+      "When responding to an identity-only question, output exactly:",
+    );
     expect(system).toContain(
       "with no preamble, no explanation, and no additional content.",
     );
-    expect(system).not.toContain("AI Trade Intelligence Engine designed to support skilled trades workers in Canada");
+    expect(system).not.toContain(
+      "AI Trade Intelligence Engine designed to support skilled trades workers in Canada",
+    );
   });
 
   it("still answers repeated identity-only questions with the exact canonical introduction", async () => {
@@ -433,7 +548,8 @@ describe("POST /api/chat — writes carry the owner and load account history", (
         session_id: SHARED_SESSION,
         user_id: USER_A,
         role: "assistant",
-        content: "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.",
+        content:
+          "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.",
         citations: [],
         created_at: "2026-01-01T00:00:00Z",
       },
@@ -458,7 +574,8 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const requestMessages =
       vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages ?? [];
     const system =
-      requestMessages.find((message) => message.role === "system")?.content ?? "";
+      requestMessages.find((message) => message.role === "system")?.content ??
+      "";
     expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
     expect(system).toContain(
       "When responding to an identity-only question, output exactly:",
@@ -475,7 +592,8 @@ describe("POST /api/chat — writes carry the owner and load account history", (
         session_id: SHARED_SESSION,
         user_id: USER_A,
         role: "assistant",
-        content: "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.",
+        content:
+          "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.",
         citations: [],
         created_at: "2026-01-01T00:00:00Z",
       },
@@ -501,15 +619,22 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const requestMessages =
       vi.mocked(chatCompletion).mock.calls.at(-1)?.[0].messages ?? [];
     const system =
-      requestMessages.find((message) => message.role === "system")?.content ?? "";
+      requestMessages.find((message) => message.role === "system")?.content ??
+      "";
     expect(system).toContain(
       "Use the exact canonical introduction only when the user's primary intent is identity-only:",
     );
-    expect(system).toContain("Capability, knowledge, suitability, and problem-solving questions are not identity questions.");
-    expect(system).toContain("For those questions, answer the capability being asked about.");
-    expect(system).toContain("Do not merely repeat the canonical introduction.");
     expect(system).toContain(
-      "It must not force identity repetition when current intent is capability/knowledge/suitability/problem-solving.",
+      "Capability, knowledge, suitability, and problem-solving questions are not identity questions.",
+    );
+    expect(system).toContain(
+      "Answer the capability being asked about directly.",
+    );
+    expect(system).toContain(
+      "Identity-only inputs are limited to these prompts:",
+    );
+    expect(system).toContain(
+      "Jack should not introduce the canonical identity for normal conversation, check-ins,",
     );
     expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
   });
@@ -536,7 +661,9 @@ describe("POST /api/chat — writes carry the owner and load account history", (
 
     const rows = fake.tables["chat_messages"];
     expect(rows).toHaveLength(38);
-    const legacyRows = rows.filter((row) => String(row["id"] ?? "").startsWith("legacy-"));
+    const legacyRows = rows.filter((row) =>
+      String(row["id"] ?? "").startsWith("legacy-"),
+    );
     expect(legacyRows).toHaveLength(36);
 
     for (const row of before) {
