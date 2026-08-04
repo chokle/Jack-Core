@@ -90,6 +90,14 @@ export function AskJack({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const shouldReturnFocusToInputRef = useRef(false);
   const submittedMessageRef = useRef("");
+  const activeRequestIdRef = useRef(0);
+  const steerChoiceInputRef = useRef("");
+  const queueFocusIntentRef = useRef(false);
+  const queuedMessageRef = useRef<string | null>(null);
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [steerChoiceMessage, setSteerChoiceMessage] = useState<string | null>(
+    null,
+  );
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
@@ -174,32 +182,57 @@ export function AskJack({
     return "Lemme think for a sec...";
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || askJack.isPending) return;
+  const setQueuedMessageWithRef = (message: string | null) => {
+    queuedMessageRef.current = message;
+    setQueuedMessage(message);
+  };
 
-    const userTypedFromInput = document.activeElement === inputRef.current;
-    shouldReturnFocusToInputRef.current = userTypedFromInput;
-    setErrorMessage(null);
+  const clearQueuedMessage = () => {
+    setQueuedMessageWithRef(null);
+    queueFocusIntentRef.current = false;
+  };
+
+  const updateQueuedMessageDraft = (next: string) => {
+    if (queuedMessageRef.current !== null) {
+      setQueuedMessageWithRef(next);
+    }
+  };
+
+  const onInputChange = (nextValue: string) => {
+    setInput(nextValue);
+    if (steerChoiceMessage) {
+      steerChoiceInputRef.current = nextValue;
+      setSteerChoiceMessage(nextValue);
+    }
+    if (queuedMessageRef.current !== null) {
+      updateQueuedMessageDraft(nextValue);
+    }
+  };
+
+  const submitChatTurn = (message: string, shouldRestoreFocus: boolean) => {
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${++activeRequestIdRef.current}`,
       role: "user",
-      content: input,
+      content: message,
       createdAt: new Date().toISOString(),
     };
-    submittedMessageRef.current = input;
 
+    shouldReturnFocusToInputRef.current = shouldRestoreFocus;
+    setErrorMessage(null);
+    submittedMessageRef.current = message;
+
+    const requestId = activeRequestIdRef.current;
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
 
-    // sessionId is omitted — the server binds the request to the caller's
-    // HttpOnly cookie session and ignores any id in the body.
     askJack.mutate(
       { data: { message: userMessage.content } },
       {
         onSuccess: (data) => {
+          if (requestId !== activeRequestIdRef.current) return;
+
           const assistantMessage: DisplayMessage = {
-            id: Date.now().toString(),
+            id: `${requestId}-${Date.now()}`,
             role: "assistant",
             content: data.answer,
             citations: data.citations,
@@ -208,19 +241,74 @@ export function AskJack({
           };
           setMessages((prev) => [...prev, assistantMessage]);
           setSuccessfulTurns((count) => count + 1);
-          requestInputFocusAfterResponse();
           setErrorMessage(null);
+          requestInputFocusAfterResponse();
+
+          if (queuedMessageRef.current !== null) {
+            const nextMessage = queuedMessageRef.current;
+            const nextFocusIntent = queueFocusIntentRef.current;
+            clearQueuedMessage();
+            submitChatTurn(nextMessage, nextFocusIntent);
+          }
         },
         onError: (error: unknown) => {
-          setInput((currentInput) =>
-            currentInput.trim() ? currentInput : submittedMessageRef.current,
-          );
+          if (requestId !== activeRequestIdRef.current) return;
+
+          const waitingMessage = queuedMessageRef.current;
           setMessages((prev) => prev.slice(0, -1));
+
+          setInput((currentInput) => {
+            if (currentInput.trim()) return currentInput;
+            if (waitingMessage) return waitingMessage;
+            return submittedMessageRef.current;
+          });
+
+          if (waitingMessage) {
+            clearQueuedMessage();
+          }
+
           setErrorMessage(formatAskJackError(error));
           requestInputFocusAfterResponse();
         },
       },
     );
+  };
+
+  const openSteerChoice = (message: string) => {
+    if (steerChoiceMessage) return;
+    steerChoiceInputRef.current = message.trim();
+    setSteerChoiceMessage(message.trim());
+  };
+
+  const closeSteerChoice = () => {
+    steerChoiceInputRef.current = "";
+    setSteerChoiceMessage(null);
+  };
+
+  const handleWait = () => {
+    const draft = steerChoiceMessage || steerChoiceInputRef.current;
+    if (!draft) return;
+
+    closeSteerChoice();
+    setQueuedMessageWithRef(draft);
+    queueFocusIntentRef.current = document.activeElement === inputRef.current;
+    setInput("");
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+
+    if (askJack.isPending) {
+      openSteerChoice(input);
+      return;
+    }
+
+    if (queuedMessage !== null) {
+      setQueuedMessageWithRef(null);
+    }
+
+    submitChatTurn(input, document.activeElement === inputRef.current);
   };
 
   function formatAskJackError(error: unknown): string {
@@ -417,12 +505,43 @@ export function AskJack({
               </div>
             )}
             <form onSubmit={handleSubmit} className="relative">
+              {steerChoiceMessage && (
+                <div className="mb-2 rounded-md border border-primary/40 bg-primary/10 p-2 text-xs">
+                  <p className="font-medium text-sidebar-foreground/80">
+                    Jack’s still thinking. What should happen?
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={handleWait}
+                    >
+                      Wait
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={closeSteerChoice}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
               <Input
                 ref={inputRef}
                 data-testid="chat-input"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about red seal standards..."
+                onChange={(e) => onInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && steerChoiceMessage) {
+                    e.preventDefault();
+                    closeSteerChoice();
+                  }
+                }}
+                placeholder="What’s going on?"
                 aria-label="Ask Jack a question"
                 className="h-11 pr-12 bg-card border-card-border focus-visible:ring-primary text-base md:h-9 md:text-sm"
               />
@@ -432,7 +551,7 @@ export function AskJack({
                 data-testid="send-button"
                 aria-label="Send question"
                 className="absolute right-1 top-1 h-9 w-9 bg-primary hover:bg-primary/90 text-primary-foreground md:h-8 md:w-8"
-                disabled={!input.trim() || askJack?.isPending}
+                disabled={!input.trim()}
               >
                 <Send className="h-4 w-4" />
               </Button>
