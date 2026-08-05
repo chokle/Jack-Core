@@ -24,6 +24,46 @@ const jobsiteFriendlyPatterns = [
   /slow it down/i,
   /who has control/i,
   /let\s+me\s+through/i,
+  /ahhh shit/i,
+  /what['’]s it look like/i,
+  /that['’]ll ruin your morning/i,
+];
+
+const responseFamilyAnchors = {
+  greeting: ["Alright.", "Pretty deadly.", "What’s crackin’?"],
+  stress: [
+    "Uh-oh . What happened?",
+    "Ah shit. What happened?",
+    "Alright. Give me the deets.",
+    "What went sideways?",
+  ],
+  technicalFailure: [
+    "Bro…",
+    "Ahhh shit .",
+    "Well, that ain’t ideal.",
+    "That’ll ruin your morning.",
+  ],
+  diagnostic: [
+    "Could be heat, travel speed, or fit-up.",
+    "Let’s narrow this down.",
+  ],
+  safety: [
+    "Clear everyone out.",
+    "Stop and secure the area.",
+    "Hold up, call everyone back.",
+  ],
+  leadership: [
+    "Alright. Who has control right now?",
+    "Cut the noise and lock the sequence.",
+    "Let's lock the first move.",
+  ],
+} as const;
+
+const explicitAddressPatterns = [
+  /call me bro/i,
+  /address me as bro/i,
+  /you can call me bro/i,
+  /call me by bro/i,
 ];
 
 const bannedCorporatePhrases = [
@@ -41,6 +81,11 @@ const bannedCorporatePhrases = [
   /great question/i,
   /excellent question/i,
 ];
+
+const safetyCriticalPatterns = [
+  /someone.?s under|someone.?s underneath|underneath.*someone/i,
+  /\b(unsafe|hazard|immediate danger|load.*shifted|under.*load|injury|injured|injuring|fire|electric|electrical|collapsed|collapse|fall|trapped|tripped|critical|panic)\b/i,
+] as const;
 
 const identityQuestions = [
   "who are you?",
@@ -83,6 +128,79 @@ function hasConversationContext(
     );
 }
 
+type FamilyName = keyof typeof responseFamilyAnchors;
+
+function hasExplicitAddressPreference(
+  steps: ChatCompletionMessageParam[],
+): boolean {
+  return steps
+    .filter((m) => m.role === "user")
+    .some((m) => {
+      const content = String(m.content ?? "");
+      return explicitAddressPatterns.some((pattern) => pattern.test(content));
+    });
+}
+
+function selectReactionFamily(
+  steps: ChatCompletionMessageParam[],
+  family: FamilyName,
+  allowPersonalizedAddress = false,
+): string {
+  const recentAssistantText = steps
+    .filter((message) => message.role === "assistant")
+    .map((message) => String(message.content ?? "").toLowerCase())
+    .join(" ");
+
+  const selectedFamily = responseFamilyAnchors[family];
+  const filtered = selectedFamily.filter((anchor) => {
+    const lower = anchor.toLowerCase();
+    if (!allowPersonalizedAddress && lower.includes("bro")) {
+      return false;
+    }
+    return !recentAssistantText.includes(lower);
+  });
+
+  const fallback =
+    filtered.length > 0
+      ? filtered
+      : selectedFamily.filter(
+          (anchor) => allowPersonalizedAddress || !anchor.includes("bro"),
+        );
+
+  const recentFamilyUsage = selectedFamily.filter((anchor) => {
+    const normalized = anchor.toLowerCase();
+    return recentAssistantText.includes(normalized);
+  }).length;
+  const nextIndex = Math.max(0, recentFamilyUsage % fallback.length);
+  return fallback[nextIndex] ?? "";
+}
+
+function isGreetingOrCasual(lower: string): boolean {
+  return /(good morning|hey jack|how'?s it going|how are you|what['’]s up|you good|good day)/i.test(
+    lower,
+  );
+}
+
+function isRoughDay(lower: string): boolean {
+  return /(today(?:’|')s been dog shit|i['’]m already in my own head|having a bad day|what a mess of a day|stress(ed|ing))/i.test(
+    lower,
+  );
+}
+
+function isTechnicalFailure(lower: string): boolean {
+  return /i blew a hole through a .*root pass/.test(lower);
+}
+
+function isLeadership(lower: string): boolean {
+  return /(everyone['’]?s? yelling on the radio|foreman wants me to rush|leading the crew and everything is going sideways)/i.test(
+    lower,
+  );
+}
+
+function isSafetyCritical(lower: string): boolean {
+  return safetyCriticalPatterns.some((pattern) => pattern.test(lower));
+}
+
 function generateDeterministicReply(
   steps: ChatCompletionMessageParam[],
 ): string {
@@ -112,19 +230,36 @@ function generateDeterministicReply(
     return "I'm Jack, Torch's Field Intelligence. I help crews solve problems, capture hard-earned knowledge, and pass it forward.";
   }
 
-  if (/i blew a hole through a 3g root pass/.test(lower)) {
+  const explicitAddress = hasExplicitAddressPreference(steps);
+
+  if (isSafetyCritical(lower)) {
+    return "Clear everyone out from under it. Is the load stable right now?";
+  }
+
+  if (isGreetingOrCasual(lower) && !isRoughDay(lower)) {
+    const reaction = selectReactionFamily(steps, "greeting");
+    return `${reaction} What’s happening?`;
+  }
+
+  if (isRoughDay(lower)) {
+    const reaction = selectReactionFamily(steps, "stress");
+    return reaction.includes("?") ? reaction : `${reaction} What happened?`;
+  }
+
+  if (isTechnicalFailure(lower)) {
+    const reaction = selectReactionFamily(
+      steps,
+      "technicalFailure",
+      explicitAddress,
+    );
     if (systemStrict) {
-      return "Could be heat, travel speed, or fit-up. Let's see what we got here. What process are you running?";
+      return `${reaction} Could be heat, travel speed, or fit-up. Let's see what we got here. What process are you running?`;
     }
     return "Could be heat too high, wrong polarity, bad fit-up, or gap. What process were you on and at what setup?";
   }
 
   if (/(i['’]m|i'm)\s+already in my own head/.test(lower)) {
     return "Alright. Slow it down. What’s tripping you up?";
-  }
-
-  if (/today(?:’|')s been dog shit/.test(lower)) {
-    return "Uh-oh . What happened?";
   }
 
   if (systemStrict && hadHoleContext && /3\/8/.test(lower)) {
@@ -145,20 +280,9 @@ function generateDeterministicReply(
     return "FCAW is flux-cored arc welding: fast deposition and wind resistance. We’ll start with wire choice, shielding behavior, and transfer mode for your thickness.";
   }
 
-  if (
-    /everyone['’]?s? yelling on the radio|foreman wants me to rush|leading the crew and everything is going sideways/.test(
-      lower,
-    )
-  ) {
+  if (isLeadership(lower)) {
+    const reaction = selectReactionFamily(steps, "leadership");
     return "Alright. Who has control right now?";
-  }
-
-  if (
-    /(good morning|how are you|hey jack|how\'s it going|what['’]s going|you good|thanks man|fuck you jack|you['’]re useless|today['’]s been dog shit|in my own head)/.test(
-      lower,
-    )
-  ) {
-    return "Alright. What’s happening?";
   }
 
   if (hadHoleContext && sufficientDiagnostic) {
@@ -185,6 +309,11 @@ function assertHasJobsiteTone(answer: string) {
   expect(jobsiteFriendlyPatterns.some((pattern) => pattern.test(answer))).toBe(
     true,
   );
+}
+
+function hasResponseFamilyAnchor(answer: string): boolean {
+  const allAnchors = Object.values(responseFamilyAnchors).flat();
+  return allAnchors.some((anchor) => answer.includes(anchor));
 }
 
 function assertOneQuestionOnly(answer: string) {
@@ -223,8 +352,20 @@ vi.mock("../../lib/ask-learning.js", () => ({
   })),
 }));
 
+vi.mock("../../lib/rate-limit.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../lib/rate-limit.js")
+  >("../../lib/rate-limit.js");
+  return {
+    ...actual,
+    aiQueryLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  };
+});
+
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+
+let testUserId = "user_dialogue";
 
 function makeApp(): Express {
   const app = express();
@@ -238,7 +379,7 @@ function makeApp(): Express {
       info: noop,
       debug: noop,
     };
-    (req as unknown as { userId: string }).userId = "user_dialogue";
+    (req as unknown as { userId: string }).userId = testUserId;
     next();
   });
   app.use("/api", chatRouter);
@@ -279,26 +420,142 @@ describe("POST /api/chat — conversational policy regression", () => {
     },
   );
 
-  it.each([
-    {
-      message: "Today's been dog shit",
-      match: /Uh-oh\s*\.\s*What happened\?/i,
-    },
-    {
-      message: "I'm already in my own head",
-      match: /Slow it down/i,
-    },
-  ])(
+  it.each(["Today's been dog shit", "I'm already in my own head"])(
     "supports calm one-question stress responses: %s",
-    async ({ message, match }) => {
+    async (message) => {
       const res = await request(app).post("/api/chat").send({ message });
       expect(res.status).toBe(200);
       const answer = String(res.body.answer);
-      expect(answer).toMatch(match);
+      assertNoCorporateOrIdentityFallback(answer);
       assertOneQuestionOnly(answer);
       assertHasJobsiteTone(answer);
+      expect(answer).toMatch(/\?$/);
     },
   );
+
+  it("routes rough-day prompts to the stress family", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message: "Today's been dog shit",
+    });
+    expect(res.status).toBe(200);
+    const answer = String(res.body.answer);
+    expect(answer).toMatch(
+      /Uh-oh|Ah shit|Give me the deets|What went sideways/i,
+    );
+  });
+
+  it("keeps personalized forms opt-in", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message: "Today's been dog shit",
+    });
+    expect(res.status).toBe(200);
+    const answer = String(res.body.answer);
+    expect(answer).not.toMatch(/\bbro\b/i);
+  });
+
+  it("allows personalized address only after explicit preference", async () => {
+    const preference = await request(app)
+      .post("/api/chat")
+      .send({ message: "You can call me bro." });
+    expect(preference.status).toBe(200);
+
+    const technical = await request(app)
+      .post("/api/chat")
+      .send({ message: "I blew a hole through a root pass." });
+    expect(technical.status).toBe(200);
+    expect(String(technical.body.answer)).toMatch(/\bbro\b/i);
+  });
+
+  it("uses reaction-family variation instead of one fixed line", async () => {
+    const first = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(first.status).toBe(200);
+    const firstAnswer = String(first.body.answer);
+    expect(hasResponseFamilyAnchor(firstAnswer)).toBe(true);
+    assertNoCorporateOrIdentityFallback(firstAnswer);
+
+    const second = await request(app).post("/api/chat").send({
+      message: "I blew a hole through a 3G root pass.",
+    });
+    expect(second.status).toBe(200);
+    const secondAnswer = String(second.body.answer);
+    expect(secondAnswer).toMatch(/Could be heat, travel speed, or fit-up/i);
+    expect(hasResponseFamilyAnchor(secondAnswer)).toBe(true);
+    expect(firstAnswer).not.toBe(secondAnswer);
+    expect(hasResponseFamilyAnchor(secondAnswer)).toBe(true);
+  });
+
+  it("uses technical-failure-specific family for hole-root-pass context", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message: "I blew a hole through a 3G root pass.",
+    });
+    expect(res.status).toBe(200);
+    const answer = String(res.body.answer);
+    expect(answer).toMatch(/Could be heat, travel speed, or fit-up/i);
+    expect(answer).toMatch(/What process are you running\?/i);
+  });
+
+  it("keeps diagnostic quality consistent as familiarity changes", async () => {
+    const neutral = await request(app)
+      .post("/api/chat")
+      .send({ message: "I blew a hole through a root pass." });
+    expect(neutral.status).toBe(200);
+
+    const withPreference = await request(app)
+      .post("/api/chat")
+      .send({ message: "Call me bro. What can you do?" });
+    expect(withPreference.status).toBe(200);
+
+    const diagnostic = await request(app)
+      .post("/api/chat")
+      .send({ message: "I blew a hole through a root pass." });
+    expect(diagnostic.status).toBe(200);
+
+    const diagnosticText = String(diagnostic.body.answer);
+    const neutralText = String(neutral.body.answer);
+
+    expect(diagnosticText).toMatch(/Could be heat, travel speed, or fit-up/i);
+    expect(diagnosticText).toMatch(/What process are you running\?/i);
+    expect(neutralText).toMatch(/Could be heat, travel speed, or fit-up/i);
+    expect(neutralText).toMatch(/What process are you running\?/i);
+  });
+
+  it("avoids repeating the same reaction in the recent window", async () => {
+    const first = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(first.status).toBe(200);
+    const firstAnswer = String(first.body.answer);
+
+    const second = await request(app)
+      .post("/api/chat")
+      .send({ message: "Today's been dog shit" });
+    expect(second.status).toBe(200);
+    const secondAnswer = String(second.body.answer);
+
+    if (
+      hasResponseFamilyAnchor(firstAnswer) &&
+      hasResponseFamilyAnchor(secondAnswer)
+    ) {
+      expect(secondAnswer).not.toBe(firstAnswer);
+    }
+  });
+
+  it("suppresses banter in safety-critical prompts", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message:
+        "The load shifted and someone's underneath it. What do I do first?",
+    });
+    expect(res.status).toBe(200);
+    const answer = String(res.body.answer);
+    expect(answer).toMatch(
+      /Clear everyone out from under it\. Is the load stable right now\?/i,
+    );
+    expect(answer).not.toMatch(
+      /Bro|Ahhh shit|That['’]ll ruin|Beauty|Jesus, bro|there['’]s your problem/i,
+    );
+  });
 
   it.each(["What are you?", "Who are you?"])(
     "allows identity intro only for explicit identity questions: %s",
