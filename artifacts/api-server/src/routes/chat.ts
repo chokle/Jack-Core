@@ -19,6 +19,7 @@ import {
   learnFromAskInteraction,
   type AskLearningResult,
 } from "../lib/ask-learning.js";
+import { queueSralReflection } from "../lib/sral.js";
 import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
 import {
   recordServerAskJackEvent,
@@ -440,6 +441,16 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       eventType: "ask_jack_completed",
       correlationId: chatMessageId,
       citationCount: citations.length,
+    });
+
+    queueSralReflection({
+      actorUserId: userId,
+      sessionId: session,
+      interactionReference: chatMessageId,
+      subsystem: "chat",
+      userMessage: message,
+      assistantAnswer: answer,
+      learning: learning,
     });
 
     return res.json({ answer, citations, usedInternalKnowledge, learning });

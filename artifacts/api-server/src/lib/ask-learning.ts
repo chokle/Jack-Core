@@ -6,6 +6,11 @@ export interface AskLearningResult {
   status: "verified" | "discarded" | "failed";
   extractedCount: number;
   summary?: string;
+  supportingEvidenceRefs?: string[];
+  assumptionNotes?: string[];
+  uncertaintyNotes?: string[];
+  objectiveSolved?: boolean;
+  riskSignals?: string[];
 }
 
 /**
@@ -58,13 +63,48 @@ export async function learnFromAskInteraction(input: {
   });
 
   if (result.items.length === 0)
-    return { status: "discarded", extractedCount: 0 };
+    return {
+      status: "discarded",
+      extractedCount: 0,
+      summary: "No durable reusable contribution was extracted.",
+      supportingEvidenceRefs: [],
+      uncertaintyNotes: ["No reusable concepts were identified for durable knowledge capture."],
+      objectiveSolved: false,
+      assumptionNotes: ["User intent was conversational or non-reusable in this turn."],
+    };
+
   const verification = await verifyAndRecordGraphWrite(result.manifest, {
     startedAtMs,
   });
+  const outcomeSummary = `Verified ${result.items.length} extract(s).`;
+  const supportingEvidenceRefs = Array.from(
+    new Set(
+      result.items
+        .map((item) => `knowledge:${item.id}`)
+        .filter((value): value is string => value.length > 0),
+    ),
+  );
+
+  if (verification.status !== "verified") {
+    return {
+      status: "failed",
+      extractedCount: result.items.length,
+      summary: verification.summary ?? "Knowledge write partially landed and needs retry.",
+      supportingEvidenceRefs,
+      uncertaintyNotes: ["Knowledge graph verification was partial or failed; impact is uncertain."],
+      assumptionNotes: ["Graph write verification was not complete."],
+      objectiveSolved: false,
+      riskSignals: [],
+    };
+  }
   return {
-    status: verification.status === "verified" ? "verified" : "failed",
+    status: "verified",
     extractedCount: result.items.length,
-    summary: verification.summary,
+    summary: outcomeSummary,
+    supportingEvidenceRefs,
+    assumptionNotes: [],
+    uncertaintyNotes: [],
+    objectiveSolved: true,
+    riskSignals: [],
   };
 }
