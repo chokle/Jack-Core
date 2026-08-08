@@ -24,6 +24,10 @@ import {
   recordServerAskJackEvent,
   requestIdentifier,
 } from "../lib/activity-telemetry.js";
+import {
+  analyzeMessageContext,
+  generateAcknowledgementWithClarification,
+} from "../lib/perceive-first.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -68,6 +72,69 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+
+    // PERCEIVE-FIRST RUNTIME: Analyze message context before proceeding
+    const messageContext = analyzeMessageContext(message);
+
+    // In this pilot, perceive-first analysis is available for logging and validation,
+    // but not for early-exit logic. Safety and diagnostic decisions are handled by
+    // the system prompt and LLM. The perceive-first module is ready to enforce
+    // these policies at the validation layer in future phases.
+    // (Disable early exits to avoid regressions)
+    const shouldUseSafetyEarlyExit = false;
+    const shouldUsePerceiveFirstEarlyExit = false;
+
+    if (shouldUseSafetyEarlyExit && messageContext.isSafetyCritical) {
+      // For safety-critical situations, acknowledge immediately and ask for
+      // immediate actions. Don't delay with retrieval/LLM calls.
+      const safetyResponse = generateAcknowledgementWithClarification(messageContext);
+      
+      // Save the user message
+      await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "user",
+          content: message,
+          citations: [],
+        });
+
+      // Return immediate safety response without normal RAG/LLM processing
+      return res.json({
+        answer: safetyResponse,
+        citations: [],
+        usedInternalKnowledge: false,
+        learning: { status: "discarded", extractedCount: 0 },
+      });
+    }
+
+    // For non-safety cases with missing critical context, use perceive-first
+    // response ONLY in the absolute most minimal cases - essentially disabled
+    // in this pilot to avoid regression. The perceive-first analysis is available
+    // for validation and can be enabled with tighter conditions in future.
+    if (shouldUsePerceiveFirstEarlyExit) {
+      const clarifyingResponse = generateAcknowledgementWithClarification(messageContext);
+
+      // Save the user message
+      await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "user",
+          content: message,
+          citations: [],
+        });
+
+      // Return perceive-first response
+      return res.json({
+        answer: clarifyingResponse,
+        citations: [],
+        usedInternalKnowledge: false,
+        learning: { status: "discarded", extractedCount: 0 },
+      });
+    }
 
     const embedding = await createEmbedding(message);
 
