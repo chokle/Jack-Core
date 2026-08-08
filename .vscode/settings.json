@@ -1,0 +1,4 @@
+{
+  "chat.useCustomAgentHooks": true,
+  "chat.useCustomizationsInParentRepositories": true
+}
