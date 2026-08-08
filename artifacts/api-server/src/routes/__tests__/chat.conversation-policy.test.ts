@@ -410,6 +410,81 @@ beforeEach(() => {
 });
 
 describe("POST /api/chat — conversational policy regression", () => {
+  it('handles "I meant 3G weld" with one process question and no model call', async () => {
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "I meant 3G weld." });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toBe(
+      "Got it — 3G noted. What welding process are you running?",
+    );
+    expect(res.body.citations).toEqual([]);
+    assertOneQuestionOnly(String(res.body.answer));
+    expect(completionHistory).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      "The grinder bogs when I put pressure on it.",
+      /I hear the symptom.*What exactly slows down/i,
+    ],
+    [
+      "This grinder is fucked.",
+      /I hear the conclusion.*What observable behaviour/i,
+    ],
+    [
+      "I changed everything you told me and the weld still looks like shit.",
+      /previous diagnosis is still unresolved.*What changed/i,
+    ],
+  ] as const)(
+    "guards unsupported diagnostic conclusions: %s",
+    async (message, pattern) => {
+      const res = await request(app).post("/api/chat").send({ message });
+
+      expect(res.status).toBe(200);
+      expect(String(res.body.answer)).toMatch(pattern);
+      assertOneQuestionOnly(String(res.body.answer));
+      expect(res.body.citations).toEqual([]);
+      expect(completionHistory).toHaveLength(0);
+    },
+  );
+
+  it("puts immediate safety response before ordinary diagnostic flow", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message: "The load shifted and someone's underneath it.",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(
+      /Stop and secure the area first.*Is anyone still exposed/i,
+    );
+    assertOneQuestionOnly(String(res.body.answer));
+    expect(completionHistory).toHaveLength(0);
+  });
+
+  it("does not ask for process again when the prior turn established it", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        role: "user",
+        content: "I'm running FCAW.",
+        user_id: testUserId,
+        session_id: "test-session",
+        created_at: new Date().toISOString(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "I meant 3G weld." });
+
+    expect(res.status).toBe(200);
+    expect(completionHistory).toHaveLength(1);
+    expect(res.body.answer).not.toBe(
+      "Got it — 3G noted. What welding process are you running?",
+    );
+  });
+
   it.each(GREETING_CASES)(
     "handles casual/non-identity turns without identity introduction: %s",
     async (message) => {
@@ -550,7 +625,7 @@ describe("POST /api/chat — conversational policy regression", () => {
     expect(res.status).toBe(200);
     const answer = String(res.body.answer);
     expect(answer).toMatch(
-      /Clear everyone out from under it\. Is the load stable right now\?/i,
+      /Stop and secure the area first\. Is anyone still exposed to the hazard\?/i,
     );
     expect(answer).not.toMatch(
       /Bro|Ahhh shit|That['’]ll ruin|Beauty|Jesus, bro|there['’]s your problem/i,

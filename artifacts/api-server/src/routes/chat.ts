@@ -7,6 +7,7 @@ import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
+import { getConversationPolicyResponse } from "../lib/conversation-policy.js";
 import {
   fetchVerificationCoverage,
   rerankByVerification,
@@ -371,6 +372,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       { role: "user", content: message },
     ];
 
+    const policyResponse = getConversationPolicyResponse(
+      message,
+      (history ?? []) as Array<{ role: "user" | "assistant"; content: string }>,
+    );
+
     // Save the contributor's words verbatim before any downstream AI work so a
     // distillation or answer failure cannot lose the interaction.
     const { data: userMessage, error: userMessageError } = await supabase
@@ -410,11 +416,15 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       publish({ type: "memory:write:end" });
     });
 
-    const completionPromise = chatCompletion({
-      model: MODELS.chat,
-      messages,
-      max_tokens: 1024,
-    });
+    const completionPromise = policyResponse
+      ? Promise.resolve({
+          choices: [{ message: { content: policyResponse.answer } }],
+        })
+      : chatCompletion({
+          model: MODELS.chat,
+          messages,
+          max_tokens: 1024,
+        });
     const [completion, learning] = await Promise.all([
       completionPromise,
       trackedLearningPromise,
@@ -423,6 +433,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     const answer =
       completion.choices[0]?.message?.content ??
       "I wasn't able to generate a response.";
+    const responseCitations = policyResponse ? [] : citations;
 
     const { error: assistantMessageError } = await supabase
       .from("chat_messages")
@@ -431,7 +442,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         user_id: userId,
         role: "assistant",
         content: answer,
-        citations,
+        citations: responseCitations,
       });
     if (assistantMessageError) throw assistantMessageError;
 
@@ -453,7 +464,12 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       learning: learning,
     });
 
-    return res.json({ answer, citations, usedInternalKnowledge, learning });
+    return res.json({
+      answer,
+      citations: responseCitations,
+      usedInternalKnowledge: policyResponse ? false : usedInternalKnowledge,
+      learning,
+    });
   } catch (err) {
     req.log.error({ err }, "askJack error");
     if (req.userId) {
