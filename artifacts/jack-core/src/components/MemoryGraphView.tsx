@@ -622,13 +622,19 @@ export function MemoryGraphView({
         <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-4 p-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="pointer-events-none">
             <h1 className="text-2xl font-extrabold tracking-tight text-white drop-shadow">
-              JACK'S LIVING MEMORY
+              Jack&apos;s Living Memory
             </h1>
-            <p className="mt-1 hidden font-mono text-xs text-white/55 md:block">
-              Click any node for its full capture · double-click to pin
+            <p className="mt-1 hidden max-w-[58ch] text-xs text-white/75 md:block">
+              Explore the knowledge behind Jack — where it came from, how it connects,
+              and what Jack is learning.
             </p>
-            <p className="mt-1 font-mono text-xs text-white/55 md:hidden">
-              Tap a node for details · long-press to pin
+            <p className="mt-1 hidden max-w-[58ch] text-xs text-white/75 md:block">
+              Looking for something specific? Ask Jack.
+            </p>
+            <p className="mt-1 max-w-[46ch] text-xs text-white/75 md:hidden">
+              Explore the knowledge behind Jack — where it came from, how it
+              connects, and what Jack is learning. Looking for something specific? Ask
+              Jack.
             </p>
             <div ref={onboardingGrowthRef} className="w-fit">
               <GrowthCounter
