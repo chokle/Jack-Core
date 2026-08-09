@@ -13,11 +13,12 @@ import {
   X,
   LogOut,
   Radio,
+  ClipboardList,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 
-export type JackView = "graph" | "library" | "interview" | "review" | "reports";
+export type JackView = "graph" | "library" | "interview" | "review" | "reports" | "command-centre";
 
 interface JackShellProps {
   active: JackView;
@@ -180,6 +181,14 @@ export function JackShell({
               label="Pilot Reports"
               active={active === "reports"}
               onClick={() => go("reports")}
+            />
+          )}
+          {canViewPilotReports && (
+            <NavItem
+              icon={<ClipboardList className="h-4 w-4" />}
+              label="Command Centre"
+              active={active === "command-centre"}
+              onClick={() => go("command-centre")}
             />
           )}
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />

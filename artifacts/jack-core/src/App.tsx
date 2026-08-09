@@ -27,6 +27,7 @@ import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
 import { KnowledgeReview } from "./components/KnowledgeReview";
+import { CommandCentre } from "./components/CommandCentre";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
@@ -285,7 +286,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [view, setView] = useState<JackView>(() => {
     if (interviewPreload) return "interview";
     const requested = new URLSearchParams(window.location.search).get("view");
-    return requested === "review" ? "review" : "graph";
+    return requested === "review"
+      ? "review"
+      : requested === "command-centre"
+        ? "command-centre"
+        : requested === "reports"
+          ? "reports"
+          : "graph";
   });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -409,6 +416,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       interview: "interview_mode",
       review: "knowledge_review",
       reports: null,
+      "command-centre": null,
     } as const;
     if (feature[next]) {
       feedbackRef.current?.markFeature(feature[next]);
@@ -696,6 +704,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <KnowledgeReview />
         ) : view === "reports" ? (
           <PilotActivityReports />
+        ) : view === "command-centre" ? (
+          <CommandCentre />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}

@@ -10,6 +10,16 @@
  */
 
 /**
+ * Question type discrimination for policy enforcement.
+ *
+ * - "missing-context": User needs job context clarified before diagnosis (Acceptance A)
+ * - "general-fact": User is asking about general knowledge/external retrieval, answerable without job context (Acceptance B)
+ * - "hybrid": User is asking about general fact + asking for job-specific recommendation (Acceptance C)
+ * - "unknown": Can't determine type yet
+ */
+export type QuestionType = "missing-context" | "general-fact" | "hybrid" | "unknown";
+
+/**
  * Represents the perceived context from a user message.
  */
 export interface MessageContext {
@@ -39,6 +49,18 @@ export interface MessageContext {
 
   /** Highest-value single clarifying question if needed */
   suggestionForClarification: string | null;
+
+  /** Policy discrimination: what type of question is this? (NEW) */
+  questionType: QuestionType;
+
+  /** Whether user is asking for external retrieval/lookup (NEW) */
+  isAskingForExternalRetrieval: boolean;
+
+  /** If external retrieval is requested, what should be looked up? (NEW) */
+  retrievalTarget?: string;
+
+  /** Suggested source/citation for response if external retrieval used (NEW) */
+  suggestedSource?: string;
 }
 
 /**
@@ -73,9 +95,22 @@ export function analyzeMessageContext(message: string): MessageContext {
   // Determine if this is a question
   const isQuestion = message.trim().endsWith("?");
 
+  // Detect if user is asking for external retrieval
+  const { isAskingForExternalRetrieval, retrievalTarget, suggestedSource } =
+    detectExternalRetrievalRequest(message);
+
+  // Determine question type via policy discrimination
+  const questionType = discriminateQuestionType(
+    message,
+    isQuestion,
+    isAskingForExternalRetrieval,
+    missingCriticalContext,
+    topicMatch,
+  );
+
   // Suggest a clarifying question if needed
   const suggestionForClarification =
-    missingCriticalContext.length > 0
+    missingCriticalContext.length > 0 && questionType === "missing-context"
       ? selectClarifyingQuestion(topicMatch, providedContext, missingCriticalContext)
       : null;
 
@@ -89,6 +124,10 @@ export function analyzeMessageContext(message: string): MessageContext {
     isSafetyCritical,
     isQuestion,
     suggestionForClarification,
+    questionType,
+    isAskingForExternalRetrieval,
+    retrievalTarget,
+    suggestedSource,
   };
 }
 
@@ -97,7 +136,7 @@ export function analyzeMessageContext(message: string): MessageContext {
  */
 function detectTopic(lower: string): string | null {
   if (
-    /\b(weld|welding|smaw|fcaw|gmaw|gtaw|tack|root pass|bead|arc|shielding|heat input|travel speed|polarity|electrode|wire|3g|4g)\b/i.test(
+    /\b(weld|welding|smaw|fcaw|gmaw|gtaw|tack|root pass|bead|arc|shielding|heat input|travel speed|polarity|electrode|wire|3g|4g|feeder|wire feeder)\b/i.test(
       lower,
     )
   ) {
@@ -402,4 +441,185 @@ export function generateAcknowledgementWithClarification(
   response += ` ${context.suggestionForClarification}`;
 
   return response;
+}
+
+/**
+ * Detect if the user is asking for external retrieval/lookup.
+ * Examples:
+ * - "Look up the general meaning of a 3G weld position."
+ * - "Find the manufacturer's recommended operating range for this feeder."
+ */
+function detectExternalRetrievalRequest(
+  message: string,
+): {
+  isAskingForExternalRetrieval: boolean;
+  retrievalTarget?: string;
+  suggestedSource?: string;
+} {
+  const lower = message.toLowerCase();
+
+  // Patterns that indicate external retrieval request
+  // Order matters: more specific patterns first
+  const retrievalPatterns = [
+    {
+      pattern: /\b(manufacturer|datasheet|data sheet|spec sheet|manual).{0,50}(?:recommend|suggest|spec|range|operating|setting|data)/i,
+      source: "manufacturer manual or data sheet",
+    },
+    {
+      pattern: /\b(technical|technical data|technical spec).{0,30}(?:spec|data|standard|guide|sheet)/i,
+      source: "technical documentation",
+    },
+    {
+      pattern: /\b(code|standard|specification|guideline|requirement|IEEE|AWS|ASME)\b/i,
+      source: "industry standard or code",
+    },
+    {
+      pattern: /\b(look up|find|retrieve|search for|what is|what are|define|definition of|what's the|what does|meaning of|explain|what.*means?)\b/i,
+      source: "knowledge or general definition",
+    },
+  ];
+
+  for (const { pattern, source } of retrievalPatterns) {
+    if (pattern.test(message)) {
+      // Extract what should be looked up
+      const retrievalTarget = extractRetrievalTarget(message);
+      return {
+        isAskingForExternalRetrieval: true,
+        retrievalTarget,
+        suggestedSource: source,
+      };
+    }
+  }
+
+  return {
+    isAskingForExternalRetrieval: false,
+  };
+}
+
+/**
+ * Extract what specifically should be looked up from the message.
+ */
+function extractRetrievalTarget(message: string): string {
+  // Try to capture the thing being asked about
+  const patterns = [
+    /(?:look up|find|search for)\s+(?:the\s+)?([^.?]+)/i,
+    /(?:what|meaning|definition|explain).*?(?:of|about)?\s+([^.?]+)/i,
+    /(?:manufacturer.*?range|spec.*?for)\s+(?:the\s+)?([^.?]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return "the information requested";
+}
+
+/**
+ * Discriminate question type based on policy rules.
+ *
+ * Rules:
+ * - If user is asking for external retrieval AND has job context → "general-fact" (B)
+ * - If user is asking for external retrieval AND asking for job-specific recommendation → "hybrid" (C)
+ * - If missing critical job context AND detected a topic → "missing-context" (A)
+ * - If topic detected but sufficient context → "unknown" (answer directly)
+ * - Otherwise → "unknown"
+ */
+function discriminateQuestionType(
+  message: string,
+  isQuestion: boolean,
+  isAskingForExternalRetrieval: boolean,
+  missingCriticalContext: string[],
+  topic: string | null,
+): QuestionType {
+  // Check if this is asking for job-specific recommendation
+  const isAskingForJobRecommendation = /\b(should|should i|what.*run|what.*set|recommend|suggest|best|optimal|what settings?|what.*use)\b/i.test(
+    message,
+  );
+
+  if (isAskingForExternalRetrieval) {
+    // User is asking for lookup/retrieval
+    if (isAskingForJobRecommendation) {
+      // "Find manufacturer's range AND tell me what I should run" → hybrid
+      return "hybrid";
+    } else {
+      // "Look up what a 3G weld is" → general fact (don't require job context)
+      return "general-fact";
+    }
+  }
+
+  // Check if this is a topic-specific message with missing context
+  // (not just a casual question)
+  if (topic !== null) {
+    if (missingCriticalContext.length > 0) {
+      // Has a topic and missing context → missing-context case
+      return "missing-context";
+    }
+  }
+
+  // Default: unknown (could be casual chat, statement, etc.)
+  return "unknown";
+}
+
+/**
+ * Generate response for general-fact questions (Acceptance B).
+ * Should answer from knowledge/retrieval + cite source, without requiring job context.
+ */
+export function generateGeneralFactResponse(
+  context: MessageContext,
+): { response: string; citation?: string } {
+  if (context.questionType !== "general-fact") {
+    return { response: "" };
+  }
+
+  // Build a response that acknowledges the retrieval request and cites the source
+  const citation = context.suggestedSource
+    ? `(based on ${context.suggestedSource})`
+    : "";
+
+  // This is a placeholder response structure. In production, this would:
+  // 1. Call a retrieval engine or LLM with external context
+  // 2. Return the answer with proper citation
+  // 3. NOT assume any job-specific details
+
+  const response = `I can help you look up ${context.retrievalTarget || "that information"}. ${citation}`;
+
+  return { response, citation: context.suggestedSource };
+}
+
+/**
+ * Generate response for hybrid questions (Acceptance C).
+ * Should:
+ * 1. Answer the general fact part (with citation)
+ * 2. Then ask for job-specific variables before final recommendation
+ * 3. Clearly separate manufacturer range from job recommendation
+ */
+export function generateHybridResponse(
+  context: MessageContext,
+): { factualAnswer: string; jobContextQuestion: string; citation?: string } {
+  if (context.questionType !== "hybrid") {
+    return { factualAnswer: "", jobContextQuestion: "" };
+  }
+
+  const citation = context.suggestedSource
+    ? `(from ${context.suggestedSource})`
+    : "";
+
+  // Separate concern 1: Answer the factual/retrieval part
+  const factualAnswer = `Let me look up ${context.retrievalTarget || "that information"} for you. ${citation}`;
+
+  // Separate concern 2: Ask for job-specific context
+  // This would be determined based on what was in the retrieval target
+  const jobContextQuestion =
+    context.missingCriticalContext.length > 0
+      ? selectClarifyingQuestion(context.topic, context.providedContext, context.missingCriticalContext)
+      : "Once I have those details, I can give you a specific recommendation for your setup.";
+
+  return {
+    factualAnswer,
+    jobContextQuestion,
+    citation: context.suggestedSource,
+  };
 }

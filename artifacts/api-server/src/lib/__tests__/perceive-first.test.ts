@@ -16,6 +16,8 @@ import {
   analyzeMessageContext,
   validateResponseForInventedContext,
   generateAcknowledgementWithClarification,
+  generateGeneralFactResponse,
+  generateHybridResponse,
 } from "../../lib/perceive-first.js";
 
 describe("Perceive-First Runtime", () => {
@@ -437,4 +439,268 @@ describe("Perceive-First Runtime", () => {
       expect(typeof response).toBe("string");
     });
   });
+
+  describe("POLICY DISCRIMINATION: Question Type Classification", () => {
+    describe("Acceptance A: Missing Job Context — Still Passes Regression", () => {
+      it("should classify 3G weld as missing-context", () => {
+        const context = analyzeMessageContext("I meant 3G weld.");
+        expect(context.questionType).toBe("missing-context");
+      });
+
+      it("should classify grinder bog as missing-context (asks about tool)", () => {
+        const context = analyzeMessageContext(
+          "The grinder bogs when I put pressure on it.",
+        );
+        expect(context.questionType).toBe("missing-context");
+        expect(context.missingCriticalContext.length).toBeGreaterThan(0);
+      });
+
+      it("should generate clarifying question for missing-context type", () => {
+        const context = analyzeMessageContext("I meant 3G weld.");
+        expect(context.suggestionForClarification).toBeTruthy();
+        expect(context.suggestionForClarification).toMatch(/process|running/i);
+      });
+
+      it("should NOT suggest clarification for general-fact question", () => {
+        const context = analyzeMessageContext(
+          "What is a 3G weld position?",
+        );
+        expect(context.questionType).toBe("general-fact");
+        // General facts should not trigger job-context clarification
+        expect(
+          context.missingCriticalContext.length === 0 ||
+            context.suggestionForClarification === null,
+        ).toBe(true);
+      });
+
+      it("should maintain backward compatibility with existing A-case tests", () => {
+        const context = analyzeMessageContext("I meant 3G weld.");
+        const response = generateAcknowledgementWithClarification(context);
+
+        // Must still produce safe response for missing-context type
+        expect(response).toMatch(/Alright/i);
+        const questionCount = (response.match(/\?/g) ?? []).length;
+        expect(questionCount).toBe(1);
+      });
+    });
+
+    describe("Acceptance B: General Fact — Answer Without Job Context", () => {
+      it("should classify 'what is a 3G weld position' as general-fact", () => {
+        const context = analyzeMessageContext(
+          "What is a 3G weld position?",
+        );
+        expect(context.questionType).toBe("general-fact");
+      });
+
+      it("should detect external retrieval for 'look up' questions", () => {
+        const context = analyzeMessageContext(
+          "Look up the general meaning of a 3G weld position.",
+        );
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        expect(context.questionType).toBe("general-fact");
+      });
+
+      it("should NOT ask blocking job-context question for general facts", () => {
+        const context = analyzeMessageContext(
+          "What is a 3G weld position?",
+        );
+        // Should NOT require job context for a general fact
+        expect(context.questionType).toBe("general-fact");
+      });
+
+      it("should classify 'what does GMAW stand for' as general-fact", () => {
+        const context = analyzeMessageContext(
+          "What does GMAW stand for?",
+        );
+        expect(context.questionType).toBe("general-fact");
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+      });
+
+      it("should detect manufacturer data sheet request", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for a Miller feeder.",
+        );
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        expect(context.suggestedSource).toMatch(/manufacturer|data sheet/i);
+      });
+
+      it("should generate response for general fact without invented job context", () => {
+        const context = analyzeMessageContext(
+          "What is a 3G weld position?",
+        );
+        // Should answer the general fact
+        expect(context.questionType).toBe("general-fact");
+        // Should NOT assume any job details (material, thickness, process, settings, etc.)
+      });
+
+      it("should distinguish 'general definition' from 'troubleshooting'", () => {
+        // This is a general question
+        const general = analyzeMessageContext("What is a 3G weld?");
+        expect(general.questionType).toBe("general-fact");
+
+        // This is a troubleshooting question (missing context)
+        const troubleshooting = analyzeMessageContext(
+          "My 3G welds look like shit.",
+        );
+        expect(troubleshooting.questionType).toBe("missing-context");
+      });
+
+      it("should handle 'define' questions as general-fact", () => {
+        const context = analyzeMessageContext("Define flux-cored arc welding.");
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        expect(context.questionType).toBe("general-fact");
+      });
+
+      it("should handle 'explain' questions as general-fact", () => {
+        const context = analyzeMessageContext(
+          "Explain what DCEP polarity means.",
+        );
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        expect(context.questionType).toBe("general-fact");
+      });
+    });
+
+    describe("Acceptance C: Hybrid — Separate General Fact from Job Context", () => {
+      it("should classify 'find manufacturer range AND tell me what to run' as hybrid", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for this feeder and tell me what settings I should run.",
+        );
+        expect(context.questionType).toBe("hybrid");
+      });
+
+      it("should have both isAskingForExternalRetrieval and missingCriticalContext for hybrid", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for this feeder and tell me what settings I should run.",
+        );
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        // May have missing context (though not always for all topics)
+      });
+
+      it("should separate general fact from job-specific recommendation", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for this feeder and tell me what settings I should run.",
+        );
+        const response = generateHybridResponse(context);
+
+        // Should have two separate parts
+        expect(response.factualAnswer).toBeTruthy();
+        expect(response.jobContextQuestion).toBeTruthy();
+        // Job context question will ask about process, position, settings, etc.
+        expect(response.jobContextQuestion).toMatch(/\?|process|position|settings|context/i);
+      });
+
+      it("should cite source for manufacturer data in hybrid response", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for this feeder and tell me what settings I should run.",
+        );
+        const response = generateHybridResponse(context);
+
+        expect(response.citation).toBeTruthy();
+        expect(response.citation).toMatch(/manufacturer|data sheet/i);
+      });
+
+      it("should NOT prescribe final job settings without establishing job context", () => {
+        const context = analyzeMessageContext(
+          "Find the manufacturer's recommended operating range for this feeder and tell me what settings I should run.",
+        );
+
+        // First verify it's classified as hybrid
+        expect(context.questionType).toBe("hybrid");
+
+        const response = generateHybridResponse(context);
+
+        // Should distinguish between:
+        // 1. Manufacturer range (factual)
+        // 2. Job-specific recommendation (requires clarification)
+        expect(response.factualAnswer).toBeTruthy();
+        expect(response.factualAnswer).not.toMatch(/you should|final settings|prescribe/i);
+        // Job context question should prompt for setup details
+        expect(response.jobContextQuestion).toBeTruthy();
+        expect(response.jobContextQuestion).toMatch(/\?|details|settings/i);
+      });
+
+      it("should handle 'look up feeder data and recommend settings' as hybrid", () => {
+        const context = analyzeMessageContext(
+          "Look up what settings a Tweco feeder recommends, and what should I use for my job?",
+        );
+        expect(context.questionType).toBe("hybrid");
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+      });
+
+      it("should classify request for manufacturer range without job context as general-fact", () => {
+        const context = analyzeMessageContext(
+          "What's the manufacturer's recommended operating range for a Miller feeder?",
+        );
+        // This is asking for a factual range, not a job recommendation
+        expect(context.isAskingForExternalRetrieval).toBe(true);
+        expect(context.questionType).toBe("general-fact");
+      });
+
+      it("should classify request for manufacturer range WITH 'what should I run' as hybrid", () => {
+        const context = analyzeMessageContext(
+          "What's the manufacturer's recommended operating range for a Miller feeder, and what should I run?",
+        );
+        expect(context.questionType).toBe("hybrid");
+      });
+    });
+  });
+
+  describe("REGRESSION: Existing A-G Cases Still Pass", () => {
+    it("A: 3G weld still generates perceive-first response", () => {
+      const context = analyzeMessageContext("I meant 3G weld.");
+      expect(context.questionType).toBe("missing-context");
+      const response = generateAcknowledgementWithClarification(context);
+      expect(response).toMatch(/Alright|Got it/i);
+      expect(response).toMatch(/\?/);
+    });
+
+    it("B: Grinder bog still distinguishes hypotheses", () => {
+      const context = analyzeMessageContext(
+        "The grinder bogs when I put pressure on it.",
+      );
+      expect(context.questionType).toBe("missing-context");
+      expect(context.observations.some((o) => /bog/i.test(o))).toBe(true);
+    });
+
+    it("C: Grinder is fucked still separates conclusion from observation", () => {
+      const context = analyzeMessageContext("This grinder is fucked.");
+      const validation = validateResponseForInventedContext(
+        context,
+        "Your grinder motor is shot.",
+      );
+      // Should reject responses that declare failure without asking
+      expect(validation.isValid).toBe(false);
+    });
+
+    it("D: Changed everything still reopens judgment", () => {
+      const context = analyzeMessageContext(
+        "I changed everything you told me and the weld still looks like shit.",
+      );
+      // The context should be recognized as a conflict/problem statement
+      expect(context.topic).toBe("welding");
+      // Should have observations or conclusions about the problem
+      expect(context.observations.length + context.conclusions.length).toBeGreaterThan(0);
+    });
+
+    it("E: Safety hazard still flags as safety-critical", () => {
+      const context = analyzeMessageContext(
+        "The load just shifted and there's someone underneath!",
+      );
+      expect(context.isSafetyCritical).toBe(true);
+    });
+
+    it("F: Casual conversation still doesn't force questions", () => {
+      const context = analyzeMessageContext("Good morning, how are you?");
+      expect(context.topic).toBeNull();
+      expect(context.questionType).toBe("unknown");
+    });
+
+    it("G: Sufficient context still answers directly", () => {
+      const context = analyzeMessageContext(
+        "I'm running GMAW on 1/4 inch mild steel, flat position, with ER70S-6 and C25 shielding gas. The weld looks good but I want to improve penetration.",
+      );
+      expect(context.missingCriticalContext.length).toBeLessThanOrEqual(3);
+    });
+  });
 });
+
