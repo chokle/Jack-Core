@@ -69,15 +69,24 @@ async function requireReportScope(
       "Reports are unavailable in presentation mode.",
       "Reports are temporarily unavailable.",
     )
-  ) return null;
+  )
+    return null;
   const organizationId =
-    typeof req.query["organizationId"] === "string" ? req.query["organizationId"] : "";
-  const pilotId = typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
-  const authorization = await authorizeReportScope(identity.userId, organizationId, pilotId);
+    typeof req.query["organizationId"] === "string"
+      ? req.query["organizationId"]
+      : "";
+  const pilotId =
+    typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
+  const authorization = await authorizeReportScope(
+    identity.userId,
+    organizationId,
+    pilotId,
+  );
   await auditReportAccess({
     userId: identity.userId,
     targetUserId:
-      typeof req.params.userId === "string" && USER_ID_RE.test(req.params.userId)
+      typeof req.params.userId === "string" &&
+      USER_ID_RE.test(req.params.userId)
         ? req.params.userId
         : null,
     organizationId: UUID_RE.test(organizationId) ? organizationId : null,
@@ -88,7 +97,9 @@ async function requireReportScope(
     requestId: requestIdentifier(req),
   });
   if (!authorization.allowed || !authorization.authority) {
-    res.status(403).json({ error: "No active report role exists for this organization and pilot." });
+    res.status(403).json({
+      error: "No active report role exists for this organization and pilot.",
+    });
     return null;
   }
   return {
@@ -99,7 +110,9 @@ async function requireReportScope(
   };
 }
 
-function eventCounts(events: Array<Record<string, unknown>>): Record<string, number> {
+function eventCounts(
+  events: Array<Record<string, unknown>>,
+): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const event of events) {
     const type = String(event["event_type"] ?? "unknown");
@@ -114,9 +127,15 @@ function buildSummary(
   feedback: Array<Record<string, unknown>>,
   failures: Array<Record<string, unknown>>,
 ) {
-  const actors = new Set(sessions.map((session) => String(session["actor_user_id"])));
-  const completed = sessions.filter((session) => session["status"] === "completed").length;
-  const active = sessions.filter((session) => session["status"] === "active").length;
+  const actors = new Set(
+    sessions.map((session) => String(session["actor_user_id"])),
+  );
+  const completed = sessions.filter(
+    (session) => session["status"] === "completed",
+  ).length;
+  const active = sessions.filter(
+    (session) => session["status"] === "active",
+  ).length;
   const onboardingCompleted = sessions.filter(
     (session) => session["onboarding_status"] === "completed",
   ).length;
@@ -135,7 +154,9 @@ function buildSummary(
     activeSessions: active,
     completedSessions: completed,
     completionRate: sessions.length ? completed / sessions.length : 0,
-    onboardingCompletionRate: sessions.length ? onboardingCompleted / sessions.length : 0,
+    onboardingCompletionRate: sessions.length
+      ? onboardingCompleted / sessions.length
+      : 0,
     recordingOptInRate: sessions.length ? recordingOptIns / sessions.length : 0,
     feedbackCount: feedback.length,
     droppedEventCount: dropped,
@@ -169,7 +190,9 @@ async function loadScopeRows(scope: PilotScope) {
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId),
   ]);
-  const failed = [sessions, events, feedback, failures].find((result) => result.error);
+  const failed = [sessions, events, feedback, failures].find(
+    (result) => result.error,
+  );
   if (failed?.error) throw failed.error;
   return {
     sessions: (sessions.data ?? []) as Array<Record<string, unknown>>,
@@ -230,11 +253,14 @@ router.get("/testing/reports/scopes", async (req, res) => {
         "Reports are unavailable in presentation mode.",
         "Report scopes could not be loaded.",
       )
-    ) return;
+    )
+      return;
     return res.json({ scopes: await listReportScopes(identity.userId) });
   } catch (error) {
     req.log.error({ err: error }, "Could not list report scopes");
-    return res.status(503).json({ error: "Report scopes could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Report scopes could not be loaded." });
   }
 });
 
@@ -245,13 +271,20 @@ router.get("/testing/reports/summary", async (req, res) => {
     const rows = await loadScopeRows(scope);
     return res.json({
       scope: { organizationId: scope.organizationId, pilotId: scope.pilotId },
-      summary: buildSummary(rows.sessions, rows.events, rows.feedback, rows.failures),
+      summary: buildSummary(
+        rows.sessions,
+        rows.events,
+        rows.feedback,
+        rows.failures,
+      ),
       users: rows.sessions.map(serializeSession),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not generate pilot report summary");
-    return res.status(503).json({ error: "Pilot report could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Pilot report could not be generated." });
   }
 });
 
@@ -270,7 +303,9 @@ router.get("/testing/progress", async (req, res) => {
     return res.json({ testers: (sessions.data ?? []).map(serializeSession) });
   } catch (error) {
     req.log.error({ err: error }, "Could not load scoped test progress");
-    return res.status(503).json({ error: "Test progress could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Test progress could not be loaded." });
   }
 });
 
@@ -279,14 +314,20 @@ router.get("/testing/reports/closeouts", async (req, res) => {
     const scope = await requireReportScope(req, res, "pilot_closeout_list");
     if (!scope) return;
     const limit = clampLimit(req.query["limit"]);
-    const state = typeof req.query["state"] === "string" ? req.query["state"].trim() : "";
+    const state =
+      typeof req.query["state"] === "string" ? req.query["state"].trim() : "";
     const workDateFrom = parseWindowDate(req.query["workDateFrom"]);
     const workDateTo = parseWindowDate(req.query["workDateTo"]);
     if (state && !CLOSEOUT_STATUS_VALUES.has(state)) {
       return res.status(400).json({ error: "Invalid closeout status." });
     }
-    if ((req.query["workDateFrom"] && !workDateFrom) || (req.query["workDateTo"] && !workDateTo)) {
-      return res.status(400).json({ error: "Invalid closeout work-date filter." });
+    if (
+      (req.query["workDateFrom"] && !workDateFrom) ||
+      (req.query["workDateTo"] && !workDateTo)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Invalid closeout work-date filter." });
     }
     let query = db
       .from("end_of_shift_closeouts")
@@ -328,7 +369,9 @@ router.get("/testing/reports/closeouts", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "could not load pilot closeouts");
-    return res.status(503).json({ error: "Pilot closeouts could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Pilot closeouts could not be loaded." });
   }
 });
 
@@ -336,8 +379,10 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
   try {
     const scope = await requireReportScope(req, res, "pilot_user_timeline");
     if (!scope) return;
-    const actorUserId = typeof req.params.userId === "string" ? req.params.userId : "";
-    if (!USER_ID_RE.test(actorUserId)) return res.status(400).json({ error: "Invalid user id." });
+    const actorUserId =
+      typeof req.params.userId === "string" ? req.params.userId : "";
+    if (!USER_ID_RE.test(actorUserId))
+      return res.status(400).json({ error: "Invalid user id." });
     const participant = await db
       .from("test_sessions")
       .select("id")
@@ -347,10 +392,13 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
       .limit(1)
       .maybeSingle();
     if (participant.error) throw participant.error;
-    if (!participant.data) return res.status(404).json({ error: "Pilot participant not found." });
+    if (!participant.data)
+      return res.status(404).json({ error: "Pilot participant not found." });
     const events = await db
       .from("test_events")
-      .select("event_id,event_type,occurred_at,surface,result,metadata,schema_version")
+      .select(
+        "event_id,event_type,occurred_at,surface,result,metadata,schema_version",
+      )
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId)
       .eq("actor_user_id", actorUserId)
@@ -370,7 +418,9 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not load pilot timeline");
-    return res.status(503).json({ error: "Pilot timeline could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Pilot timeline could not be loaded." });
   }
 });
 
@@ -402,10 +452,9 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     const lines = [header.map(csvCell).join(",")];
     for (const session of rows.sessions) {
       const actor = String(session["actor_user_id"]);
-      const count = Object.values(countsBySession.get(String(session["id"])) ?? {}).reduce(
-        (sum, value) => sum + value,
-        0,
-      );
+      const count = Object.values(
+        countsBySession.get(String(session["id"])) ?? {},
+      ).reduce((sum, value) => sum + value, 0);
       lines.push(
         [
           actor,
@@ -432,13 +481,19 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     return res.send(`${lines.join("\r\n")}\r\n`);
   } catch (error) {
     req.log.error({ err: error }, "Could not export pilot report CSV");
-    return res.status(503).json({ error: "Pilot CSV export could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Pilot CSV export could not be generated." });
   }
 });
 
 router.post("/testing/reports/generate", async (req, res) => {
   try {
-    const scope = await requireReportScope(req, res, "pilot_report_manual_generation");
+    const scope = await requireReportScope(
+      req,
+      res,
+      "pilot_report_manual_generation",
+    );
     if (!scope) return;
     if (
       !req.body ||
@@ -450,7 +505,12 @@ router.post("/testing/reports/generate", async (req, res) => {
       return res.status(400).json({ error: "Invalid report request." });
     }
     const rows = await loadScopeRows(scope);
-    const snapshot = buildSummary(rows.sessions, rows.events, rows.feedback, rows.failures);
+    const snapshot = buildSummary(
+      rows.sessions,
+      rows.events,
+      rows.feedback,
+      rows.failures,
+    );
     const now = new Date();
     const retainedUntil = new Date(now);
     retainedUntil.setUTCMonth(retainedUntil.getUTCMonth() + 12);
@@ -480,7 +540,9 @@ router.post("/testing/reports/generate", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not persist manual pilot report");
-    return res.status(503).json({ error: "Manual pilot report could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Manual pilot report could not be generated." });
   }
 });
 
