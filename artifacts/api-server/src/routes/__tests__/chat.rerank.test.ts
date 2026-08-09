@@ -58,7 +58,7 @@ vi.mock("../../lib/ask-learning.js", () => ({
 }));
 
 import chatRouter from "../chat.js";
-import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+import { createEmbedding, fake, resetMocks } from "../../lib/__tests__/mocks.js";
 
 // A retrieved topic taught in one master-class video (VID_VERIFIED) and confirmed
 // across two more (VID_CORROB_2/3), versus a one-off mention in VID_LONE.
@@ -157,6 +157,7 @@ interface Citation {
   verified?: boolean;
   sourceCount?: number;
   sourceType: string;
+  entryId?: string;
 }
 
 beforeEach(() => {
@@ -301,5 +302,54 @@ describe("POST /api/chat — trust steers citations end-to-end", () => {
       verified: true,
     });
     expect(citations.some((c) => c.videoId === VID_LONE)).toBe(false);
+  });
+
+  it("backfills graph-memory matches when high-signal rejected concepts would otherwise consume caps", async () => {
+    const message = "What should I inspect when welding a pressure vessel?";
+    const queryVector = await createEmbedding(message);
+    fake.tables["transcript_segments"] = [];
+    fake.tables["knowledge_edges"] = [];
+    fake.tables["knowledge_entries"] = [];
+    fake.tables["knowledge_nodes"] = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `k:concept:rejected-${index + 1}`,
+        kind: "concept",
+        label: `Rejected Concept ${index + 1}`,
+        description: "Previously rejected.",
+        embedding: JSON.stringify(queryVector),
+        verification_status: "rejected",
+        meta: { sourceCount: 1 },
+      })),
+      {
+        id: "k:tool:accepted-backfilled",
+        kind: "tool",
+        label: "Accepted fallback concept",
+        description: "Should remain after rejected nodes are filtered.",
+        embedding: JSON.stringify(
+          queryVector.map((value, index) => (index === 0 ? -value : value)),
+        ),
+        verification_status: "verified",
+        meta: { sourceCount: 2 },
+      },
+    ];
+
+    const res = await request(app).post("/api/chat").send({ message });
+
+    expect(res.status).toBe(200);
+    const knowledgeCitations = (res.body.citations as Citation[]).filter(
+      (c) => c.sourceType === "knowledge",
+    );
+    expect(knowledgeCitations).toMatchObject([
+      {
+        entryId: "k:tool:accepted-backfilled",
+        verified: true,
+        sourceCount: 2,
+      },
+    ]);
+    expect(
+      knowledgeCitations.some((citation) =>
+        String(citation.entryId).startsWith("k:concept:rejected-"),
+      ),
+    ).toBe(false);
   });
 });

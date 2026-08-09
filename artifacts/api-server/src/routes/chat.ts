@@ -44,6 +44,50 @@ const CUTTING_QUERY_KEYWORDS =
 
 const router = Router();
 
+type ChatRole = "system" | "user" | "assistant";
+
+async function insertChatMessage(input: {
+  session: string;
+  userId: string;
+  role: ChatRole;
+  content: string;
+  citations?: unknown[];
+}): Promise<void> {
+  const record = {
+    session_id: input.session,
+    user_id: input.userId,
+    role: input.role,
+    content: input.content,
+    citations: input.citations ?? [],
+  };
+  const { error } = await supabase.from("chat_messages").insert(record);
+  if (error) throw error;
+}
+
+async function insertChatMessageWithId(input: {
+  session: string;
+  userId: string;
+  role: ChatRole;
+  content: string;
+  citations?: unknown[];
+}): Promise<string> {
+  const record = {
+    session_id: input.session,
+    user_id: input.userId,
+    role: input.role,
+    content: input.content,
+    citations: input.citations ?? [],
+  };
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .insert(record)
+    .select("id")
+    .single();
+  if (error) throw error;
+  const maybeId = data && (data as Record<string, unknown>)["id"];
+  return typeof maybeId === "string" ? maybeId : input.session;
+}
+
 router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
@@ -90,15 +134,12 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       const safetyResponse = generateAcknowledgementWithClarification(messageContext);
       
       // Save the user message
-      await supabase
-        .from("chat_messages")
-        .insert({
-          session_id: session,
-          user_id: userId,
-          role: "user",
-          content: message,
-          citations: [],
-        });
+      await insertChatMessage({
+        session,
+        userId,
+        role: "user",
+        content: message,
+      });
 
       // Return immediate safety response without normal RAG/LLM processing
       return res.json({
@@ -117,15 +158,12 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       const clarifyingResponse = generateAcknowledgementWithClarification(messageContext);
 
       // Save the user message
-      await supabase
-        .from("chat_messages")
-        .insert({
-          session_id: session,
-          user_id: userId,
-          role: "user",
-          content: message,
-          citations: [],
-        });
+      await insertChatMessage({
+        session,
+        userId,
+        role: "user",
+        content: message,
+      });
 
       // Return perceive-first response
       return res.json({
@@ -439,23 +477,13 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
     // Save the contributor's words verbatim before any downstream AI work so a
     // distillation or answer failure cannot lose the interaction.
-    const { data: userMessage, error: userMessageError } = await supabase
-      .from("chat_messages")
-      .insert({
-        session_id: session,
-        user_id: userId,
-        role: "user",
-        content: message,
-        citations: [],
-      })
-      .select("id")
-      .single();
-    if (userMessageError) throw userMessageError;
-    const chatMessageId =
-      userMessage &&
-      typeof (userMessage as Record<string, unknown>)["id"] === "string"
-        ? String((userMessage as Record<string, unknown>)["id"])
-        : session;
+    const chatMessageId = await insertChatMessageWithId({
+      session,
+      userId,
+      role: "user",
+      content: message,
+      citations: [],
+    });
 
     // Answering and learning run concurrently: Ask Jack stays responsive while
     // the same interaction is filtered for durable knowledge and, when useful,
@@ -490,16 +518,13 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       completion.choices[0]?.message?.content ??
       "I wasn't able to generate a response.";
 
-    const { error: assistantMessageError } = await supabase
-      .from("chat_messages")
-      .insert({
-        session_id: session,
-        user_id: userId,
-        role: "assistant",
-        content: answer,
-        citations,
-      });
-    if (assistantMessageError) throw assistantMessageError;
+    await insertChatMessage({
+      session,
+      userId,
+      role: "assistant",
+      content: answer,
+      citations,
+    });
 
     await recordServerAskJackEvent({
       req,
@@ -634,7 +659,7 @@ async function findGraphMemoryMatches(
         .map((m) => m["id"])
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
-  ).slice(0, MAX_GRAPH_MEMORY_MATCHES);
+  );
   if (ids.length === 0) return [];
 
   const { data: rows, error: rowError } = await supabase
@@ -654,7 +679,11 @@ async function findGraphMemoryMatches(
   );
   return ids
     .map((id) => byId.get(id))
-    .filter((row): row is Record<string, unknown> => !!row)
+    .filter((row): row is Record<string, unknown> => {
+      if (!row) return false;
+      return row["verification_status"] !== "rejected";
+    })
+    .slice(0, MAX_GRAPH_MEMORY_MATCHES)
     .map((row) => {
       const meta = row["meta"] as Record<string, unknown> | null | undefined;
       const sourceCount =
