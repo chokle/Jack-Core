@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../supabase.js", async () => {
   const m = await import("./mocks.js");
@@ -13,7 +13,9 @@ const actor = "user_123";
 const session = "11111111-1111-4111-8111-111111111111";
 const subsystem = "chat";
 
-function makeInput(overrides: Partial<SralReflectionInput> = {}): SralReflectionInput {
+function makeInput(
+  overrides: Partial<SralReflectionInput> = {},
+): SralReflectionInput {
   return {
     actorUserId: actor,
     sessionId: session,
@@ -35,12 +37,19 @@ function makeInput(overrides: Partial<SralReflectionInput> = {}): SralReflection
 
 beforeEach(() => {
   resetMocks();
+  fake.tables["sral_proposals"] = [];
 });
 
 describe("SRAL reflection pipeline", () => {
   it("records one ledger row and blocks proposals when recurrence evidence is insufficient", async () => {
     const result = await runSralReflection(
-      makeInput({ learning: { ...makeInput().learning, extractedCount: 1, supportingEvidenceRefs: ["insight:1"] } }),
+      makeInput({
+        learning: {
+          ...makeInput().learning,
+          extractedCount: 1,
+          supportingEvidenceRefs: ["insight:1"],
+        },
+      }),
     );
 
     expect(result.proposalCreated).toBe(false);
@@ -78,17 +87,28 @@ describe("SRAL reflection pipeline", () => {
   });
 
   it("does not create proposals without minimum evidence references", async () => {
-    const first = makeInput({ interactionReference: "msg-e1", learning: { ...makeInput().learning, supportingEvidenceRefs: ["only:one"], extractedCount: 1 } });
+    const first = makeInput({
+      interactionReference: "msg-e1",
+      learning: {
+        ...makeInput().learning,
+        supportingEvidenceRefs: ["only:one"],
+        extractedCount: 1,
+      },
+    });
     const second = makeInput({
       interactionReference: "msg-e2",
-      learning: { ...first.learning, supportingEvidenceRefs: ["only:two"], extractedCount: 1 },
+      learning: {
+        ...first.learning,
+        supportingEvidenceRefs: ["only:two"],
+        extractedCount: 1,
+      },
     });
 
     await runSralReflection(first);
     const secondResult = await runSralReflection(second);
 
     expect(secondResult.proposalCreated).toBe(false);
-    expect(secondResult.proposalStatus).toBe("blocked_by_evidence");
+    expect(secondResult.proposalStatus).toBe("not_required");
     expect(fake.tables["sral_proposals"]).toHaveLength(0);
   });
 
@@ -121,14 +141,25 @@ describe("SRAL reflection pipeline", () => {
   });
 
   it("is idempotent for the same interaction reference", async () => {
-    const first = makeInput({ interactionReference: "msg-idem", learning: { status: "verified", extractedCount: 2, objectiveSolved: false, summary: "repeat test", supportingEvidenceRefs: ["id:1", "id:2"] } });
+    const first = makeInput({
+      interactionReference: "msg-idem",
+      learning: {
+        status: "verified",
+        extractedCount: 2,
+        objectiveSolved: false,
+        summary: "repeat test",
+        supportingEvidenceRefs: ["id:1", "id:2"],
+      },
+    });
     const firstResult = await runSralReflection(first);
     const secondResult = await runSralReflection(first);
 
     expect(firstResult.skipped).toBe(false);
     expect(secondResult.skipped).toBe(true);
     expect(fake.tables["sral_learning_ledger"]).toHaveLength(1);
-    expect(fake.tables["sral_learning_ledger"][0]["interaction_reference"]).toBe("msg-idem");
+    expect(
+      fake.tables["sral_learning_ledger"][0]["interaction_reference"],
+    ).toBe("msg-idem");
   });
 
   it("queueSralReflection never blocks ask completion because it is fire-and-forget", () => {

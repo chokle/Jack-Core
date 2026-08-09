@@ -8,8 +8,13 @@ export interface ConversationPolicyResponse {
 const WELDING_PROCESS_PATTERN =
   /\b(?:smaw|gmaw|gtaw|fcaw|mig|tig|stick|flux[- ]?cored|gas metal|gas tungsten|shielded metal)\b/i;
 
-const SAFETY_HAZARD_PATTERN =
-  /someone.?s under|someone.?s underneath|underneath.*someone|\b(?:unsafe|hazard|immediate danger|load.*shifted|under.*load|injur(?:y|ed|ing)|fire|electrical?|collapsed?|collapse|fall|trapped|tripped|critical|panic)\b/i;
+const IMMEDIATE_PERSONNEL_HAZARD_PATTERNS = [
+  /\b(?:someone|somebody|anyone|a person|worker|crew member|operator)\b.{0,50}\b(?:under|underneath|trapped|injured|hurt|falling|on fire|being shocked|electrocuted|in immediate danger)\b/i,
+  /\b(?:under|underneath)\b.{0,40}\b(?:load|equipment|structure|vehicle)\b.{0,40}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:load|equipment|structure|scaffold|wall)\b.{0,50}\b(?:shifted|collapsed|falling|fell)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew|injured|hurt|exposed)\b/i,
+  /\b(?:someone|somebody|anyone|person|worker|crew)\b.{0,50}\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b/i,
+];
 
 function conversationText(
   history: readonly ChatCompletionMessageParam[],
@@ -38,7 +43,9 @@ export function getConversationPolicyResponse(
 ): ConversationPolicyResponse | null {
   const lower = message.toLowerCase().trim();
 
-  if (SAFETY_HAZARD_PATTERN.test(lower)) {
+  if (
+    IMMEDIATE_PERSONNEL_HAZARD_PATTERNS.some((pattern) => pattern.test(lower))
+  ) {
     return {
       answer:
         "Stop and secure the area first. Is anyone still exposed to the hazard?",

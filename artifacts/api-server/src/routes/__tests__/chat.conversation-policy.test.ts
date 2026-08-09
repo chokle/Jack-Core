@@ -83,8 +83,11 @@ const bannedCorporatePhrases = [
 ];
 
 const safetyCriticalPatterns = [
-  /someone.?s under|someone.?s underneath|underneath.*someone/i,
-  /\b(unsafe|hazard|immediate danger|load.*shifted|under.*load|injury|injured|injuring|fire|electric|electrical|collapsed|collapse|fall|trapped|tripped|critical|panic)\b/i,
+  /\b(?:someone|somebody|anyone|a person|worker|crew member|operator)\b.{0,50}\b(?:under|underneath|trapped|injured|hurt|falling|on fire|being shocked|electrocuted|in immediate danger)\b/i,
+  /\b(?:under|underneath)\b.{0,40}\b(?:load|equipment|structure|vehicle)\b.{0,40}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:load|equipment|structure|scaffold|wall)\b.{0,50}\b(?:shifted|collapsed|falling|fell)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew|injured|hurt|exposed)\b/i,
+  /\b(?:someone|somebody|anyone|person|worker|crew)\b.{0,50}\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b/i,
 ] as const;
 
 const identityQuestions = [
@@ -631,6 +634,24 @@ describe("POST /api/chat — conversational policy regression", () => {
       /Bro|Ahhh shit|That['’]ll ruin|Beauty|Jesus, bro|there['’]s your problem/i,
     );
   });
+
+  it.each([
+    "The critical weld review is tomorrow.",
+    "I panic before a difficult repair.",
+    "The fall on this bracket is too small.",
+    "I need to understand electrical troubleshooting.",
+  ])(
+    "does not trigger emergency preflight for ordinary trade language: %s",
+    async (message) => {
+      const res = await request(app).post("/api/chat").send({ message });
+
+      expect(res.status).toBe(200);
+      expect(completionHistory).toHaveLength(1);
+      expect(String(res.body.answer)).not.toMatch(
+        /Stop and secure the area first|Is anyone still exposed/i,
+      );
+    },
+  );
 
   it.each(["What are you?", "Who are you?"])(
     "allows identity intro only for explicit identity questions: %s",
