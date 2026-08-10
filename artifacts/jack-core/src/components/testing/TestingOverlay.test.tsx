@@ -398,6 +398,25 @@ describe("TestingOverlay lifecycle", () => {
     expect(recorderServiceState.instance?.stopCalls).toBe(1);
   });
 
+  it("completes when Stop Test is clicked immediately after native stop", async () => {
+    renderOverlay();
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy(),
+    );
+
+    act(() => {
+      recorderServiceState.ended?.();
+      fireEvent.click(getStopButton());
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
+    );
+    expect(completedEvents()).toBe(1);
+    expect(recorderServiceState.instance?.stopCalls).toBe(1);
+  });
+
   it("remains idempotent for repeated native ended and repeated stop actions", async () => {
     renderOverlay();
     fireEvent.click(screen.getByTestId("testing-overlay-start"));
