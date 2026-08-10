@@ -56,6 +56,7 @@ function knowledgeEntryScopeAllowed(
   metadata: KnowledgeObjectMeta | undefined,
   scope: KnowledgeScope | null,
 ): boolean {
+  if (!metadata) return false;
   const metadataPilotId = metadata?.pilotId;
   if (typeof metadataPilotId !== "string" || !metadataPilotId.trim())
     return true;
@@ -255,6 +256,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       .map((e) => e["id"])
       .filter((id): id is string => typeof id === "string" && !!id);
     const metaByEntryId = new Map<string, KnowledgeObjectMeta>();
+    const metaAvailableById = new Set<string>();
     if (entryIds.length > 0) {
       const { data: metaRows, error: metaError } = await supabase
         .from("knowledge_entries")
@@ -268,8 +270,10 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       } else {
         for (const row of (metaRows ?? []) as Array<Record<string, unknown>>) {
           const id = row["id"];
-          if (typeof id === "string")
+          if (typeof id === "string") {
             metaByEntryId.set(id, readKnowledgeMeta(row["metadata"]));
+            metaAvailableById.add(id);
+          }
         }
       }
     }
@@ -280,6 +284,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     ).filter((entry) => {
       const entryId = entry["id"];
       if (typeof entryId !== "string") return false;
+      if (!metaAvailableById.has(entryId)) return false;
       const metadata = metaByEntryId.get(entryId);
       return knowledgeEntryScopeAllowed(metadata, knowledgeScope);
     });

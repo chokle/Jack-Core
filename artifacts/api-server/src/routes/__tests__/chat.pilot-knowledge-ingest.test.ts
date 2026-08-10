@@ -227,6 +227,51 @@ function seedEntries(): void {
   }));
 }
 
+function withKnowledgeMetadataLookupFailure(): () => void {
+  const originalFrom = fake.from;
+  const spy = vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    if (table !== "knowledge_entries") return originalFrom.call(fake, table);
+
+    return {
+      select: () => ({
+        in: () =>
+          Promise.resolve({
+            data: null,
+            error: { message: "metadata unavailable" },
+          }),
+      }),
+    } as unknown as ReturnType<typeof fake.from>;
+  });
+
+  return () => spy.mockRestore();
+}
+
+function withKnowledgeMetadataRows(
+  rows: Array<{ id: string; metadata: unknown }>,
+): () => void {
+  const originalFrom = fake.from;
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const spy = vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    if (table !== "knowledge_entries") return originalFrom.call(fake, table);
+
+    return {
+      select: () => ({
+        in: (_column: string, ids: unknown[]) => {
+          const filtered = (ids ?? [])
+            .filter((id): id is string => typeof id === "string")
+            .map((id) => rowsById.get(id))
+            .filter((row): row is { id: string; metadata: unknown } => !!row)
+            .map((row) => ({ id: row.id, metadata: row.metadata }));
+
+          return Promise.resolve({ data: filtered, error: null });
+        },
+      }),
+    } as unknown as ReturnType<typeof fake.from>;
+  });
+
+  return () => spy.mockRestore();
+}
+
 function makeApp(): Express {
   const app = express();
   app.use(cookieParser());
@@ -443,6 +488,65 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     expect(
       knowledgeCitations.some((c) => c.entryId === GLOBAL_KNOWLEDGE_ENTRY.id),
     ).toBe(true);
+  });
+
+  it("does not expose Pilot 001 knowledge when metadata lookup fails", async () => {
+    const restore = withKnowledgeMetadataLookupFailure();
+    try {
+      const res = await request(app).post("/api/chat").send({
+        message: "How do I make sure this install is square and level?",
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.usedInternalKnowledge).toBe(false);
+
+      const knowledgeCitations = (
+        res.body.citations as Array<{
+          sourceType: "video" | "knowledge";
+          entryId?: string;
+        }>
+      ).filter((c) => c.sourceType === "knowledge");
+      expect(
+        knowledgeCitations.some(
+          (c) =>
+            c.entryId === "e1e1e1e1-0006-4001-8001-000000000006" ||
+            c.entryId === "e1e1e1e1-0012-4001-8001-000000000012",
+        ),
+      ).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("treats missing per-entry metadata as unknown and excludes it while allowing proven global rows", async () => {
+    const restore = withKnowledgeMetadataRows([
+      {
+        id: GLOBAL_KNOWLEDGE_ENTRY.id,
+        metadata: GLOBAL_KNOWLEDGE_ENTRY.metadata,
+      },
+    ]);
+    try {
+      const res = await request(app).post("/api/chat").send({
+        message: "How do I make sure this install is square and level?",
+      });
+      expect(res.status).toBe(200);
+
+      const knowledgeCitations = (
+        res.body.citations as Array<{
+          sourceType: "video" | "knowledge";
+          entryId?: string;
+        }>
+      ).filter((c) => c.sourceType === "knowledge");
+      expect(
+        knowledgeCitations.some(
+          (c) => c.entryId === "e1e1e1e1-0006-4001-8001-000000000006",
+        ),
+      ).toBe(false);
+      expect(
+        knowledgeCitations.some((c) => c.entryId === GLOBAL_KNOWLEDGE_ENTRY.id),
+      ).toBe(true);
+    } finally {
+      restore();
+    }
   });
 
   it("retains Pilot 001 provenance metadata on all seeded entries", () => {
