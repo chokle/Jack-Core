@@ -254,6 +254,70 @@ describe("canonical user-test sessions", () => {
     expect(fake.tables.test_sessions[0]!.status).toBe("completed");
   });
 
+  it("replays a duplicate recording_stopped event without duplicating terminal session events", async () => {
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
+    const base = {
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: {},
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+    };
+    const stop = {
+      ...base,
+      eventId: "22222222-3333-4333-8444-222222222222",
+      eventType: "recording_stopped",
+      metadata: { stop_reason: "user" },
+    };
+    const firstStop = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(stop);
+    const duplicateStop = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(stop);
+    const complete = {
+      ...base,
+      eventId: "33333333-4444-4433-8444-333333333333",
+      eventType: "test_completed",
+    };
+    const completeAfterStop = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(complete);
+    const duplicateComplete = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(complete);
+
+    expect(firstStop.status).toBe(201);
+    expect(completeAfterStop.status).toBe(201);
+    expect(firstStop.body.session.recordingStatus).toBe("stopped");
+    expect(duplicateStop.status).toBe(200);
+    expect(duplicateStop.body).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      session: { recordingStatus: "stopped" },
+    });
+    expect(duplicateComplete.status).toBe(200);
+    expect(duplicateComplete.body).toMatchObject({
+      accepted: true,
+      duplicate: true,
+    });
+    expect(
+      fake.tables.test_events.filter(
+        (row) => row.event_type === "recording_stopped",
+      ),
+    ).toHaveLength(1);
+    expect(
+      fake.tables.test_events.filter(
+        (row) => row.event_type === "test_completed",
+      ),
+    ).toHaveLength(1);
+    expect(fake.tables.test_events.at(-1)?.event_type).toBe("test_completed");
+    expect(fake.tables.test_events.at(-1)?.event_id).toBe(complete.eventId);
+  });
+
   it("rejects a dedupe-key collision without applying the conflicting session outcome", async () => {
     const started = await request(app)
       .post("/api/testing/sessions/start")
