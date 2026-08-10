@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { createRef, useEffect, useState } from "react";
 import { fireEvent } from "@testing-library/react";
 import { TestingOverlay, type TestingOverlayHandle } from "./TestingOverlay";
 
+const recordingSupport = { value: true };
 const recordingUpload = vi
   .fn()
   .mockResolvedValue({ status: "uploaded", id: "recording-1" });
@@ -27,6 +28,12 @@ const sharedSession = {
   lastActivityAt: "2026-07-31T00:00:00Z",
   expiresAt: "2026-07-31T12:00:00Z",
 };
+const trackTestEvent = vi.fn(
+  async (
+    eventType: string,
+    ..._rest: Array<string | number | boolean | Record<string, unknown>>
+  ) => sharedSession,
+);
 
 interface FakeStopResult {
   blob: Blob;
@@ -37,10 +44,20 @@ interface FakeStopResult {
   stopReason: "user" | "native-stop-sharing" | "error";
 }
 
+const defaultStopResult: FakeStopResult = {
+  blob: new Blob(["fake"], { type: "video/webm" }),
+  mimeType: "video/webm",
+  durationMs: 1200,
+  screenResolution: "1280x720",
+  micIncluded: false,
+  stopReason: "user",
+};
+
 const recordingFixture = vi.hoisted(() => {
   const state = {
     instance: null as unknown as RecordingServiceMock | null,
     ended: null as (() => void) | null,
+    stopResult: null as FakeStopResult | null,
   };
 
   class RecordingServiceMock {
@@ -50,38 +67,33 @@ const recordingFixture = vi.hoisted(() => {
     resumeCalls = 0;
     startCalls = 0;
     elapsedCalls = 0;
-    paused = false;
-    started = false;
-    stopped = false;
+    stopReasons: string[] = [];
     lastStopReason: string | null = null;
-    private stopResult: FakeStopResult | null = {
-      blob: new Blob(["fake"], { type: "video/webm" }),
-      mimeType: "video/webm",
-      durationMs: 1200,
-      screenResolution: "1280x720",
-      micIncluded: false,
-      stopReason: "user",
-    };
+    private stopped = false;
+    private stopPromise: Promise<FakeStopResult | null> | null = null;
+    private stopResult: FakeStopResult | null;
     private onStop?: (result: FakeStopResult | null) => void;
     private onPauseStateChange?: (isPaused: boolean) => void;
 
     constructor(callbacks: {
       onStop?: (result: FakeStopResult | null) => void;
       onPauseStateChange?: (isPaused: boolean) => void;
+      onError?: () => void;
     }) {
       this.onStop = callbacks.onStop;
       this.onPauseStateChange = callbacks.onPauseStateChange;
+      this.stopResult = state.stopResult;
       state.instance = this;
       state.ended = () => this.triggerEnded();
       RecordingServiceMock.callCount += 1;
     }
 
     get isRecording() {
-      return this.started && !this.stopped;
+      return this.startCalls > this.stopCalls;
     }
 
     get isPaused() {
-      return this.paused;
+      return this.pauseCalls > this.resumeCalls;
     }
 
     get micIncluded() {
@@ -90,52 +102,39 @@ const recordingFixture = vi.hoisted(() => {
 
     start() {
       this.startCalls += 1;
-      this.started = true;
-      this.stopped = false;
-      this.paused = false;
       this.onPauseStateChange?.(false);
       return Promise.resolve();
     }
 
     pause() {
       this.pauseCalls += 1;
-      if (!this.started || this.stopped || this.paused) return false;
-      this.paused = true;
       this.onPauseStateChange?.(true);
       return true;
     }
 
     resume() {
       this.resumeCalls += 1;
-      if (!this.started || this.stopped || !this.paused) return false;
-      this.paused = false;
       this.onPauseStateChange?.(false);
       return true;
     }
 
     stop(reason: "user" | "native-stop-sharing" | "error" = "user") {
+      if (this.stopped) return this.stopPromise ?? Promise.resolve(null);
+      this.stopped = true;
       this.lastStopReason = reason;
       this.stopCalls += 1;
-      if (this.stopCalls > 1) {
-        return Promise.resolve(
-          this.stopResult && {
-            ...this.stopResult,
-            stopReason:
-              (this.lastStopReason as
-                | "user"
-                | "native-stop-sharing"
-                | "error") ?? "user",
-          },
-        );
-      }
-      this.stopped = true;
-      const result = this.stopResult && {
-        ...this.stopResult,
-        stopReason:
-          (reason as "user" | "native-stop-sharing" | "error") ?? "user",
+      this.stopReasons.push(reason);
+      const result = this.stopResult;
+      const effective = result && {
+        ...result,
+        stopReason: result.stopReason ?? reason,
       };
-      this.onStop?.(result ?? null);
-      return Promise.resolve(result);
+      const next = Promise.resolve(effective).then((payload) => {
+        this.onStop?.(payload ?? null);
+        return payload ?? null;
+      });
+      this.stopPromise = next;
+      return next;
     }
 
     elapsedMs() {
@@ -158,7 +157,7 @@ vi.mock("@/hooks/use-toast", () => ({
 }));
 vi.mock("@/lib/user-testing/recording-service", () => ({
   RecordingService: recordingFixture.RecordingServiceMock,
-  isScreenRecordingSupported: () => true,
+  isScreenRecordingSupported: () => recordingSupport.value,
 }));
 vi.mock("@/lib/user-testing/upload-service", () => ({
   uploadTestRecording: (..._args: unknown[]) => recordingUpload(..._args),
@@ -166,7 +165,8 @@ vi.mock("@/lib/user-testing/upload-service", () => ({
 vi.mock("@/lib/user-testing/test-session-service", () => ({
   getCachedTestSession: () => sharedSession,
   loadCurrentTestSession: vi.fn(async () => sharedSession),
-  trackTestEvent: vi.fn(),
+  trackTestEvent: (...args: Parameters<typeof trackTestEvent>) =>
+    trackTestEvent(...args),
 }));
 vi.mock("./UserTestingModal", () => ({
   UserTestingModal: ({
@@ -195,25 +195,40 @@ vi.mock("./UserTestingModal", () => ({
 }));
 vi.mock("./RecordingIndicator", () => ({
   RecordingIndicator: ({
+    getElapsedMs,
     isPaused,
     onPause,
     onResume,
     onStop,
   }: {
+    getElapsedMs: () => number;
     isPaused: boolean;
     onPause: () => void;
     onResume: () => void;
     onStop: () => void;
-  }) => (
-    <div>
-      <button type="button" onClick={isPaused ? onResume : onPause}>
-        {isPaused ? "Resume" : "Pause"}
-      </button>
-      <button type="button" onClick={onStop}>
-        Stop Test
-      </button>
-    </div>
-  ),
+  }) => {
+    const [elapsed, setElapsed] = useState(0);
+
+    useEffect(() => {
+      const interval = window.setInterval(() => {
+        setElapsed(getElapsedMs());
+      }, 200);
+      setElapsed(getElapsedMs());
+      return () => window.clearInterval(interval);
+    }, [getElapsedMs]);
+
+    return (
+      <div>
+        <div data-testid="session-timer">{Math.round(elapsed)}</div>
+        <button type="button" onClick={isPaused ? onResume : onPause}>
+          {isPaused ? "Resume" : "Pause"}
+        </button>
+        <button type="button" onClick={onStop}>
+          Stop Test
+        </button>
+      </div>
+    );
+  },
 }));
 vi.mock("./ThinkAloudBanner", () => ({ ThinkAloudBanner: () => null }));
 
@@ -224,53 +239,201 @@ function renderOverlay() {
   return ref;
 }
 
+function completedEvents() {
+  return trackTestEvent.mock.calls.filter(
+    (call) => call[0] === "test_completed",
+  ).length;
+}
+
+function getPauseButton() {
+  return screen.getByRole("button", { name: "Pause" });
+}
+
+function getResumeButton() {
+  return screen.getByRole("button", { name: "Resume" });
+}
+
+function getStopButton() {
+  return screen.getByRole("button", { name: "Stop Test" });
+}
+
+function timerValue() {
+  return Number(screen.getByTestId("session-timer").textContent ?? "0");
+}
+
 describe("TestingOverlay lifecycle", () => {
   beforeEach(() => {
     recordingFixture.RecordingServiceMock.callCount = 0;
     recorderServiceState.instance = null;
     recorderServiceState.ended = null;
+    recorderServiceState.stopResult = defaultStopResult;
     recordingUpload.mockClear();
+    trackTestEvent.mockClear();
   });
 
   afterEach(() => {
+    cleanup();
+    recordingSupport.value = true;
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
-  it("works when stopping after pause and removes recording UI", async () => {
+  it("allows pause/resume and stop after native sharing ended", async () => {
     renderOverlay();
     fireEvent.click(screen.getByTestId("testing-overlay-start"));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy(),
-    );
+    await waitFor(() => expect(getPauseButton()).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    expect(recorderServiceState.instance?.pauseCalls).toBe(1);
-    fireEvent.click(screen.getByRole("button", { name: "Stop Test" }));
+    act(() => {
+      recorderServiceState.ended?.();
+    });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull();
+      expect(recorderServiceState.instance?.lastStopReason).toBe(
+        "native-stop-sharing",
+      );
     });
+
+    fireEvent.click(getPauseButton());
+    await waitFor(() => expect(getResumeButton()).toBeTruthy());
+    fireEvent.click(getResumeButton());
+    fireEvent.click(getStopButton());
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
+    );
+    expect(completedEvents()).toBe(1);
     expect(recorderServiceState.instance?.stopCalls).toBe(1);
   });
 
-  it("treats browser share-end as a normal stop and remains safe to stop again", async () => {
+  it("freezes timer while paused and resumes correctly", async () => {
+    renderOverlay();
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() => expect(getPauseButton()).toBeTruthy());
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    expect(timerValue()).toBeGreaterThan(0);
+    const beforePause = timerValue();
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    expect(timerValue()).toBeGreaterThan(beforePause);
+
+    fireEvent.click(getPauseButton());
+    await Promise.resolve();
+    expect(getResumeButton()).toBeTruthy();
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    const duringPause = timerValue();
+    expect(duringPause).toBeLessThanOrEqual(beforePause + 350);
+
+    fireEvent.click(getResumeButton());
+    await Promise.resolve();
+    expect(getPauseButton()).toBeTruthy();
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    const afterResume = timerValue();
+    expect(afterResume).toBeGreaterThan(duringPause);
+
+    fireEvent.click(getStopButton());
+    const secondStop = screen.queryByRole("button", { name: "Stop Test" });
+    if (secondStop) {
+      fireEvent.click(secondStop);
+    }
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
+    );
+    expect(completedEvents()).toBe(1);
+  });
+
+  it("completes even if stop is triggered by native end and upload fails", async () => {
+    recordingUpload.mockResolvedValueOnce({
+      status: "saved-locally",
+      filename: "fallback.webm",
+      reason: "forced failure",
+    });
+
     renderOverlay();
     fireEvent.click(screen.getByTestId("testing-overlay-start"));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy(),
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
 
     act(() => {
       recorderServiceState.ended?.();
     });
     await waitFor(() =>
+      expect(recorderServiceState.instance?.lastStopReason).toBe(
+        "native-stop-sharing",
+      ),
+    );
+
+    fireEvent.click(getStopButton());
+    await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
     );
-    const instance = recorderServiceState.instance;
-    expect(instance?.stopCalls).toBe(1);
-    expect(instance?.lastStopReason).toBe("native-stop-sharing");
+    expect(completedEvents()).toBe(1);
+    expect(recordingUpload).toHaveBeenCalledTimes(1);
+    expect(
+      trackTestEvent.mock.calls.some(
+        (call) => call[0] === "recording_upload_failed",
+      ),
+    ).toBe(true);
+  });
+
+  it("completes when native stop yields null blob", async () => {
+    recorderServiceState.stopResult = null;
+    renderOverlay();
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy(),
+    );
+
+    act(() => {
+      recorderServiceState.ended?.();
+    });
+
+    await waitFor(() =>
+      expect(recorderServiceState.instance?.stopCalls).toBe(1),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop Test" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
+    );
+    expect(completedEvents()).toBe(1);
+    expect(recorderServiceState.instance?.stopCalls).toBe(1);
+  });
+
+  it("remains idempotent for repeated native ended and repeated stop actions", async () => {
+    renderOverlay();
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy(),
+    );
+
+    act(() => {
+      recorderServiceState.ended?.();
+      recorderServiceState.ended?.();
+    });
+    await waitFor(() =>
+      expect(recorderServiceState.instance?.stopCalls).toBe(1),
+    );
+
+    fireEvent.click(getStopButton());
+    const secondStopAfterNative = screen.queryByRole("button", {
+      name: "Stop Test",
+    });
+    if (secondStopAfterNative) {
+      fireEvent.click(secondStopAfterNative);
+    }
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop Test" })).toBeNull(),
+    );
+    expect(completedEvents()).toBe(1);
+  });
+
+  it("starts no recording safely when screen capture support is unavailable", async () => {
+    recordingSupport.value = false;
+    renderOverlay();
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull(),
+    );
+    expect(recorderServiceState.instance).toBeNull();
+    recordingSupport.value = true;
   });
 });
