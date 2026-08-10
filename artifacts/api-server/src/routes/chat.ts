@@ -25,6 +25,7 @@ import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
 import {
   recordServerAskJackEvent,
   requestIdentifier,
+  resolveActiveTesterScope,
 } from "../lib/activity-telemetry.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -34,6 +35,7 @@ const MAX_VIDEO_CONTEXT_TRANSCRIPT_CHARS = 1800;
 const MAX_GRAPH_MEMORY_MATCHES = 4;
 const PRESENTATION_USER_ID = "presentation-demo";
 const TOPIC_BIAS_WEIGHT = 0.12;
+const PILOT_ID_PREFIX = /^\s*(?:pilot-?)?\s*/i;
 
 const WELDING_QUERY_KEYWORDS =
   /\b(weld|welding|smaw|fcaw|gmaw|gtaw|tack|root pass|bead|arc|shielding)\b/i;
@@ -41,6 +43,51 @@ const CUTTING_QUERY_KEYWORDS =
   /\b(oxy[-\s]*fuel|oxyfuel|gas cutting|flame cut|flame|cutting|torch cut|acetylene|plasma|kerf)\b/i;
 
 const router = Router();
+
+interface KnowledgeScope {
+  pilotId: string;
+  pilotName: string | null;
+}
+
+function normalizePilotLookup(value: string): string {
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.replace(PILOT_ID_PREFIX, "").trim();
+}
+
+function knowledgeEntryScopeAllowed(
+  metadata: KnowledgeObjectMeta | undefined,
+  scope: KnowledgeScope | null,
+): boolean {
+  const metadataPilotId = metadata?.pilotId;
+  if (typeof metadataPilotId !== "string" || !metadataPilotId.trim())
+    return true;
+  if (!scope) return false;
+
+  const metadataPilotCode = normalizePilotLookup(metadataPilotId);
+  const scopedPilotCode = normalizePilotLookup(scope.pilotId);
+  if (metadataPilotCode === scopedPilotCode) return true;
+
+  const nameHint =
+    typeof scope.pilotName === "string"
+      ? normalizePilotLookup(scope.pilotName)
+      : "";
+  return nameHint.length > 0 && nameHint === metadataPilotCode;
+}
+
+async function resolveKnowledgeScope(
+  userId: string,
+): Promise<KnowledgeScope | null> {
+  try {
+    const membership = await resolveActiveTesterScope(userId);
+    if (!membership.scope) return null;
+    return {
+      pilotId: membership.scope.pilotId,
+      pilotName: membership.scope.pilotName ?? null,
+    };
+  } catch (_error) {
+    return null;
+  }
+}
 
 router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {
@@ -70,6 +117,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+    const knowledgeScope = await resolveKnowledgeScope(userId);
 
     const embedding = await createEmbedding(message);
 
@@ -228,7 +276,15 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       }
     }
 
-    const rebalancedEntries = rebalanceEntriesForTopic(rawEntries, topicBias);
+    const rebalancedEntries = rebalanceEntriesForTopic(
+      rawEntries,
+      topicBias,
+    ).filter((entry) => {
+      const entryId = entry["id"];
+      if (typeof entryId !== "string") return false;
+      const metadata = metaByEntryId.get(entryId);
+      return knowledgeEntryScopeAllowed(metadata, knowledgeScope);
+    });
     for (const e of rebalancedEntries) {
       const title = (e["title"] as string) ?? "Knowledge Entry";
       const description = (e["description"] as string) ?? "";
