@@ -9,10 +9,24 @@ type ClerkError = {
 
 type SignInAttempt = {
   supportedFirstFactors?: Array<{ strategy: string; emailAddressId?: string }>;
+  supportedSecondFactors?: Array<{ strategy: string }>;
   prepareFirstFactor: (input: {
     strategy: "email_code";
     emailAddressId: string;
   }) => Promise<unknown>;
+};
+
+type SignInAttemptStatus =
+  | "complete"
+  | "needs_second_factor"
+  | "needs_client_trust"
+  | "needs_new_password"
+  | (string & {});
+
+type SignInAttemptResult = {
+  status?: SignInAttemptStatus | null;
+  createdSessionId?: string | null;
+  supportedSecondFactors?: Array<{ strategy: string }>;
 };
 
 function messageFrom(error: unknown): string {
@@ -23,6 +37,48 @@ function messageFrom(error: unknown): string {
     (error instanceof Error ? error.message : null) ??
     "Sign-in could not continue. Please try again."
   );
+}
+
+function formatVerificationContinuation(
+  attempt: SignInAttemptResult,
+): string | null {
+  if (!attempt.status) return null;
+
+  const supportedSecondFactors = attempt.supportedSecondFactors ?? [];
+  const hasStrategy = (strategy: string) =>
+    supportedSecondFactors.some((factor) => factor.strategy === strategy);
+
+  switch (attempt.status) {
+    case "needs_second_factor":
+      if (hasStrategy("totp")) {
+        return "Password was verified, but two-factor verification is still required. Please enter your TOTP code to continue.";
+      }
+      if (hasStrategy("phone_code")) {
+        return "Password was verified, but SMS two-factor verification is still required. Please continue with the phone code flow.";
+      }
+      if (hasStrategy("email_code")) {
+        return "Password was verified, but email-code two-factor verification is still required. Please continue with the code flow.";
+      }
+      return "Password was verified, but a second factor is still required.";
+
+    case "needs_client_trust":
+      if (hasStrategy("email_code")) {
+        return "Password was verified, but Device Trust requires email-code verification. Please complete the code challenge sent to this account.";
+      }
+      if (hasStrategy("phone_code")) {
+        return "Password was verified, but Device Trust requires phone-code verification. Please complete the phone verification challenge.";
+      }
+      if (hasStrategy("email_link")) {
+        return "Password was verified, but Device Trust requires an email-link verification. Please continue with the email link challenge.";
+      }
+      return "Password was verified, but Device Trust verification is required.";
+
+    case "needs_new_password":
+      return "Password was verified, but a new password is required for this account.";
+
+    default:
+      return `Sign-in requires an additional step: ${attempt.status}.`;
+  }
 }
 
 export function EmailCodeSignIn() {
@@ -130,11 +186,20 @@ export function EmailCodeSignIn() {
         strategy: "password",
         password: password.trim(),
       });
-      if (attempt.status !== "complete" || !attempt.createdSessionId) {
-        throw new Error("Invalid password. Please try again.");
+      if (attempt.status === "complete" && attempt.createdSessionId) {
+        await setActive({ session: attempt.createdSessionId });
+        window.location.assign("/app");
+        return;
       }
-      await setActive({ session: attempt.createdSessionId });
-      window.location.assign("/app");
+
+      const actionableError = formatVerificationContinuation(
+        attempt as SignInAttemptResult,
+      );
+      if (actionableError) {
+        throw new Error(actionableError);
+      }
+
+      throw new Error("Invalid password. Please try again.");
     } catch (caught) {
       setError(
         caught instanceof Error && !(caught as ClerkError).errors?.length

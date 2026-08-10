@@ -28,6 +28,14 @@ vi.mock("@clerk/react/legacy", () => ({
 }));
 
 const completeSession = { status: "complete", createdSessionId: "session_123" };
+const needsSecondFactor = {
+  status: "needs_second_factor",
+  supportedSecondFactors: [{ strategy: "totp" }],
+};
+const needsClientTrust = {
+  status: "needs_client_trust",
+  supportedSecondFactors: [{ strategy: "email_code" }],
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -91,6 +99,52 @@ describe("EmailCodeSignIn", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain(
         "Invalid email or password.",
+      ),
+    );
+    expect(h.setActive).not.toHaveBeenCalled();
+  });
+
+  it("surfaces password success with an actionable MFA prompt when second factor is required", async () => {
+    h.attempt.mockResolvedValueOnce(needsSecondFactor);
+    render(<EmailCodeSignIn />);
+
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "pilot@torchlabs.ca" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByLabelText("Password");
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "mypassword" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Password was verified, but two-factor verification is still required.",
+      ),
+    );
+    expect(h.setActive).not.toHaveBeenCalled();
+  });
+
+  it("surfaces password success with Device Trust instructions when client trust is required", async () => {
+    h.attempt.mockResolvedValueOnce(needsClientTrust);
+    render(<EmailCodeSignIn />);
+
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "pilot@torchlabs.ca" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByLabelText("Password");
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "mypassword" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Password was verified, but Device Trust requires email-code verification.",
       ),
     );
     expect(h.setActive).not.toHaveBeenCalled();
