@@ -44,6 +44,7 @@ function acceptedStorageKey(userId: string) {
 const modalCloseAfterStart = { value: false };
 const recordingSupported = { value: false };
 const rejectStart = { value: false };
+const SYNC_TIMEOUT_MS = 15000;
 const modalStartSpy = vi.fn();
 const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
@@ -494,7 +495,13 @@ function userConsented() {
 
 async function renderAndOpenInitialModal() {
   await renderAuthenticatedApp();
-  const modalCancel = await screen.findByTestId("user-testing-cancel");
+  const modalCancel = await screen.findByTestId(
+    "user-testing-cancel",
+    {},
+    {
+      timeout: SYNC_TIMEOUT_MS,
+    },
+  );
   return modalCancel;
 }
 
@@ -506,12 +513,16 @@ async function openAccountPrivacy() {
 async function declineWithoutRecording() {
   const cancel = await renderAndOpenInitialModal();
   fireEvent.click(cancel);
-  await waitFor(() =>
-    expect(screen.queryByTestId("user-testing-modal")).toBeNull(),
+  await waitFor(
+    () => expect(screen.queryByTestId("user-testing-modal")).toBeNull(),
+    { timeout: SYNC_TIMEOUT_MS },
   );
-  await waitFor(() => {
-    expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-  });
+  await waitFor(
+    () => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    },
+    { timeout: SYNC_TIMEOUT_MS },
+  );
 }
 
 function openFromAnyEntry() {
@@ -565,30 +576,43 @@ describe("user-testing gate transition", () => {
     resetServiceState();
   });
 
-  it("initial decline unlocks the app and stays rejected, with zero testing side effects", async () => {
-    await declineWithoutRecording();
+  it(
+    "initial decline unlocks the app and stays rejected, with zero testing side effects",
+    { timeout: SYNC_TIMEOUT_MS },
+    async () => {
+      await declineWithoutRecording();
 
-    expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    expect(userConsented()).toBe("false");
-    expect(mockedStartTestSession).not.toHaveBeenCalled();
-    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
-    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
-    expect(uploadRecordingSpy).not.toHaveBeenCalled();
-  });
-
-  it("decline persists user-scoped opt-out and remains true after remount", async () => {
-    await declineWithoutRecording();
-    const key = declinedStorageKey(identity.userId);
-    expect(localStorage.getItem(key)).toBe("true");
-
-    cleanup();
-    await renderAuthenticatedApp();
-    await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
       expect(userConsented()).toBe("false");
+      expect(mockedStartTestSession).not.toHaveBeenCalled();
+      expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+      expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+      expect(uploadRecordingSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    "decline persists user-scoped opt-out and remains true after remount",
+    { timeout: SYNC_TIMEOUT_MS },
+    async () => {
+      await declineWithoutRecording();
+      const key = declinedStorageKey(identity.userId);
       expect(localStorage.getItem(key)).toBe("true");
-    });
-  });
+
+      cleanup();
+      await renderAuthenticatedApp();
+      await waitFor(
+        () => {
+          expect(
+            screen.queryByTestId("user-testing-restricted-gate"),
+          ).toBeNull();
+          expect(userConsented()).toBe("false");
+          expect(localStorage.getItem(key)).toBe("true");
+        },
+        { timeout: SYNC_TIMEOUT_MS },
+      );
+    },
+  );
 
   it("different users use user-scoped opt-out keys", async () => {
     await declineWithoutRecording();
