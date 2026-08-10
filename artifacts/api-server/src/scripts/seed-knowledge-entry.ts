@@ -191,7 +191,8 @@ Field tips:
   },
   {
     id: "e1e1e1e1-0004-4001-8001-000000000004",
-    title: "Laying Out Stair Stringers: Rise, Run, the 7-11 Rule & Dropping the Stringer",
+    title:
+      "Laying Out Stair Stringers: Rise, Run, the 7-11 Rule & Dropping the Stringer",
     trade: "Carpenter",
     category: "Framing",
     tags: [
@@ -231,7 +232,8 @@ Watch for:
   },
   {
     id: "e1e1e1e1-0005-4001-8001-000000000005",
-    title: "Charging AC/Heat Pumps: Superheat vs Subcooling (Fixed Orifice vs TXV)",
+    title:
+      "Charging AC/Heat Pumps: Superheat vs Subcooling (Fixed Orifice vs TXV)",
     trade: "HVAC/R Technician",
     category: "Refrigeration Systems",
     tags: [
@@ -267,9 +269,296 @@ Use accurate clamp thermocouples and a calibrated manifold or probes — small t
     image: {
       path: `${REPO_ROOT}attached_assets/stock_images/hvac_manifold_gauges.jpg`,
       contentType: "image/jpeg",
-      caption: "Outdoor condensing unit — confirm airflow, then set the charge by superheat or subcooling.",
+      caption:
+        "Outdoor condensing unit — confirm airflow, then set the charge by superheat or subcooling.",
     },
     metadata: { origin: "manual-seed", entryNumber: 5 },
+  },
+  {
+    id: "e1e1e1e1-0006-4001-8001-000000000006",
+    title: "Plumbing layout: install square, level, and plumb",
+    trade: "Plumber",
+    category: "Layout",
+    tags: [
+      "plumbing",
+      "layout",
+      "square",
+      "level",
+      "plumb",
+      "dimensions",
+      "inspection",
+    ],
+    description:
+      "Field note on how to confirm square, level, and plumb before committing to install.",
+    body: `Sequence for a clean plumbing install:
+- Mark the line and identify each anchor point from the plan.
+- Set both level and plumb checks before fastening or gluing.
+- Verify twice in both directions: square, then level, then plumb, then re-check all dimensions.
+- Only then install in one pass.
+
+Common mistake: rushing through layout and assuming a board check is good enough.
+The correction method is to recheck before each major install step.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 6,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0007-4001-8001-000000000007",
+    title: "Keeping connections truly watertight",
+    trade: "Plumber",
+    category: "Connections and leak prevention",
+    tags: [
+      "plumbing",
+      "joint",
+      "water",
+      "leak",
+      "washer",
+      "seal",
+      "pressure test",
+      "connections",
+    ],
+    description:
+      "Field note on confirming seal and preventing false confidence before a leak shows up.",
+    body: `When a connection must stay watertight:
+- Make sure every joint is seated and fully tightened evenly.
+- Inspect surfaces and gaskets before final assembly.
+- Confirm each connection can be pressure checked in sequence before it is closed off.
+
+Do not treat a single visual sign as proof. Ask for a pressure check before handoff when possible.
+If signs are uncertain, stop and confirm the sequence rather than guessing what is wrong.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 7,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0008-4001-8001-000000000008",
+    title: "Work safely without scraping knuckles",
+    trade: "Plumber",
+    category: "Work practices",
+    tags: [
+      "plumbing",
+      "knuckle",
+      "cut",
+      "wrist",
+      "tool control",
+      "materials handling",
+    ],
+    description:
+      "Field note on avoiding common hand injuries while handling pipe and fittings.",
+    body: `Use calm setup and leverage over force:
+- Keep the hand braced, gloves fit correctly, and edges known before moving pipe.
+- Let the tool do the correction, then re-check line and alignment.
+- Move slowly through a task and do not force a part to seat by hand if the geometry is off.
+
+This is a practical safety-first pattern when working in tight spaces.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 8,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0009-4001-8001-000000000009",
+    title: "Diagnosing backed up drains and plugged lines",
+    trade: "Plumber",
+    category: "Drainage and system troubleshooting",
+    tags: [
+      "plumbing",
+      "drains",
+      "backup",
+      "clog",
+      "diagnostic",
+      "observation",
+      "inspection",
+      "basin drain",
+      "connections",
+    ],
+    description:
+      "Field note on how to confirm the actual block points before choosing a fix.",
+    body: `When a drain appears plugged:
+- First confirm actual blockage signs across the whole drainage behavior.
+- Check the basin drain and nearby connections, not just one symptom.
+- Verify body connections before assuming rework or re-pipe.
+
+The wrong move is to jump from the first observed symptom directly into rework.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 9,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0010-4001-8001-000000000010",
+    title: "Pre-pour sequencing for slab and mechanical penetrations",
+    trade: "Plumber",
+    category: "Coordination before pour",
+    tags: [
+      "plumbing",
+      "slab",
+      "mechanical penetration",
+      "formwork",
+      "rebar",
+      "coordination",
+      "review drawings",
+    ],
+    description:
+      "Field note on pre-pour coordination to avoid stoppages and expensive exposure.",
+    body: `Coordinate slab and vertical mechanical penetrations before pour with:
+- formwork and reinforcing schedule,
+- mechanical trades,
+- and full drawing review before irreversible work.
+
+Missed coordination can stop or disrupt a pour and create avoidable operational exposure.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 10,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0011-4001-8001-000000000011",
+    title: "Cut length verification and recheck discipline",
+    trade: "Plumber",
+    category: "Fit-up quality",
+    tags: [
+      "plumbing",
+      "measure",
+      "dimensions",
+      "wrong cut",
+      "revision",
+      "material waste",
+      "common mistakes",
+      "reality check",
+    ],
+    description:
+      "Field note on avoiding wrong cuts, dimension mistakes, and avoidable waste.",
+    body: `If a piece is cut and the measurement is wrong:
+- do not force it into place to hide the error;
+- confirm actual dimensions and decide whether to trim, re-cut, or revise the sequence.
+- keep material controlled and secured after install to prevent losses and callbacks.
+
+This is a common area where rushing causes waste and schedule risk.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 11,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "field note",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      failureCost:
+        "Rob noted approximately $50K/day in bank financing/line-of-credit capacity for day-to-day operations.",
+    },
+  },
+  {
+    id: "e1e1e1e1-0012-4001-8001-000000000012",
+    title: "Question-first approach for difficult plumbing work",
+    trade: "Plumber",
+    category: "Work method",
+    tags: [
+      "plumbing",
+      "ask",
+      "clarify",
+      "scope",
+      "tools",
+      "problem solving",
+      "judgment",
+    ],
+    description:
+      "Inferred reasoning pattern: ask, clarify, understand scope, then execute with the right tools.",
+    body: `Reasoning pattern from repeated field notes:
+- Ask clear questions before deciding the approach.
+- Clarify the scope and constraints before committing.
+- Confirm tool setup and access.
+- Execute once aligned, not while guessing.
+
+This pattern separates observation from conclusion and reduces avoidable rework.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 12,
+      issueId: 39,
+      sourceType: "inferred reasoning pattern",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0013-4001-8001-000000000013",
+    title: "Verify system behavior before acting on first diagnosis",
+    trade: "Plumber",
+    category: "Problem solving",
+    tags: [
+      "plumbing",
+      "diagnostic",
+      "investigation",
+      "verify",
+      "observation",
+      "approach",
+      "troubleshooting",
+    ],
+    description:
+      "Inferred reasoning pattern: verify evidence before action when symptoms point to a possible fault.",
+    body: `When a symptom is visible, do not jump to a fix.
+Verify the larger system behavior, compare what is observed, and only then choose the first controlled correction.
+This helps distinguish root cause from appearance.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 13,
+      issueId: 39,
+      sourceType: "inferred reasoning pattern",
+      pilotId: "001",
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Issue #39: Rob Field Notes Intake Form",
+    },
   },
 ];
 
@@ -283,16 +572,23 @@ async function seedEntry(entry: Entry): Promise<void> {
     const storagePath = `knowledge/${entry.id}/image${ext}`;
     const { error: upErr } = await supabase.storage
       .from("jack-videos")
-      .upload(storagePath, bytes, { contentType: entry.image.contentType, upsert: true });
-    if (upErr) throw new Error(`[${entry.title}] image upload failed: ${upErr.message}`);
+      .upload(storagePath, bytes, {
+        contentType: entry.image.contentType,
+        upsert: true,
+      });
+    if (upErr)
+      throw new Error(`[${entry.title}] image upload failed: ${upErr.message}`);
     const imageUrl = `${process.env["SUPABASE_URL"]}/storage/v1/object/public/jack-videos/${storagePath}`;
     images = [{ url: imageUrl, caption: entry.image.caption }];
   }
 
   // 2) Embed title + description + body so Ask Jack can retrieve it semantically.
-  const embedInput = [entry.title, entry.description, entry.body].filter(Boolean).join("\n\n");
+  const embedInput = [entry.title, entry.description, entry.body]
+    .filter(Boolean)
+    .join("\n\n");
   const embedding = await createEmbedding(embedInput, { cache: false });
-  if (embedding.length === 0) throw new Error(`[${entry.title}] embedding came back empty`);
+  if (embedding.length === 0)
+    throw new Error(`[${entry.title}] embedding came back empty`);
 
   // 3) Upsert the row (embedding stored JSON-serialized, like videos.embedding).
   const { error: insErr } = await supabase.from("knowledge_entries").upsert({
@@ -311,9 +607,12 @@ async function seedEntry(entry: Entry): Promise<void> {
     embedding: JSON.stringify(embedding),
     updated_at: new Date().toISOString(),
   });
-  if (insErr) throw new Error(`[${entry.title}] insert failed: ${insErr.message}`);
+  if (insErr)
+    throw new Error(`[${entry.title}] insert failed: ${insErr.message}`);
 
-  console.log(`✅ Seeded "${entry.title}" (${entry.trade})${images.length ? " [image]" : ""}`);
+  console.log(
+    `✅ Seeded "${entry.title}" (${entry.trade})${images.length ? " [image]" : ""}`,
+  );
 }
 
 async function main(): Promise<void> {
