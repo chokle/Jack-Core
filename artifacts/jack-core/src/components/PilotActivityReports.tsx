@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ChangeEvent } from "react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
@@ -89,6 +90,11 @@ export function PilotActivityReports() {
   const [scopes, setScopes] = useState<ReportScope[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [report, setReport] = useState<SummaryResponse | null>(null);
+  const hasSummaryDataRef = useRef(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [heartbeat, setHeartbeat] = useState(0);
   const [timeline, setTimeline] = useState<{
     userId: string;
     events: TimelineEvent[];
@@ -104,6 +110,12 @@ export function PilotActivityReports() {
   const [closeoutTruncated, setCloseoutTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const summaryInFlight = useRef(false);
+  const activeSummaryAbort = useRef<AbortController | null>(null);
+
+  const pollMs = 12_000;
+  const staleThresholdMs = 2 * pollMs;
+
   const selected = useMemo(
     () =>
       scopes.find(
@@ -114,6 +126,16 @@ export function PilotActivityReports() {
   const query = selected
     ? `organizationId=${encodeURIComponent(selected.organizationId)}&pilotId=${encodeURIComponent(selected.pilotId)}`
     : "";
+
+  useEffect(() => {
+    if (!query) return;
+    setTimeline(null);
+    setReport(null);
+    hasSummaryDataRef.current = false;
+    setSummaryError(null);
+    setLastUpdatedAt(null);
+    setError(null);
+  }, [query]);
 
   useEffect(() => {
     void json<{ scopes: ReportScope[] }>("/api/testing/reports/scopes")
@@ -129,18 +151,93 @@ export function PilotActivityReports() {
       );
   }, []);
 
+  const loadSummary = useCallback(async () => {
+    if (!query || summaryInFlight.current) return;
+    const controller = new AbortController();
+    activeSummaryAbort.current = controller;
+    summaryInFlight.current = true;
+    setIsRefreshing(true);
+    const hadReport = hasSummaryDataRef.current;
+    try {
+      const response = await fetch(`/api/testing/reports/summary?${query}`, {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("Reports unavailable.");
+      const body = (await response.json()) as SummaryResponse;
+      setReport(body);
+      hasSummaryDataRef.current = true;
+      setSummaryError(null);
+      setError(null);
+      setLastUpdatedAt(body.generatedAt);
+    } catch (reason) {
+      if ((reason as { name?: string }).name === "AbortError") return;
+      const message =
+        reason instanceof Error ? reason.message : "Reports unavailable.";
+      setSummaryError(message);
+      if (!hadReport) {
+        setError(message);
+      }
+    } finally {
+      if (activeSummaryAbort.current === controller) {
+        activeSummaryAbort.current = null;
+      }
+      summaryInFlight.current = false;
+      setIsRefreshing(false);
+    }
+  }, [query]);
+
   useEffect(() => {
     if (!query) return;
-    setTimeline(null);
-    setError(null);
-    void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
-      .then(setReport)
-      .catch((reason) =>
-        setError(
-          reason instanceof Error ? reason.message : "Reports unavailable.",
-        ),
-      );
+    void loadSummary();
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible" || !query) return;
+      void loadSummary();
+    }, pollMs);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void loadSummary();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      activeSummaryAbort.current?.abort();
+      activeSummaryAbort.current = null;
+      summaryInFlight.current = false;
+    };
+  }, [loadSummary, pollMs, query]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setHeartbeat((value) => value + 1),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!query) {
+      setSummaryError(null);
+      setLastUpdatedAt(null);
+      setError(null);
+    }
   }, [query]);
+
+  const isStale = useMemo(() => {
+    if (!lastUpdatedAt) return false;
+    return Date.now() - new Date(lastUpdatedAt).getTime() > staleThresholdMs;
+  }, [heartbeat, lastUpdatedAt, staleThresholdMs]);
+
+  const refreshSummary = () => {
+    if (!query) return;
+    void loadSummary();
+  };
+
+  const refreshButtonLabel = isRefreshing ? "Refreshing…" : "Manual refresh";
 
   useEffect(() => {
     if (selected) return;
@@ -223,6 +320,16 @@ export function PilotActivityReports() {
           <div className="flex flex-wrap gap-2 print:hidden">
             <Button
               variant="outline"
+              onClick={() => void refreshSummary()}
+              disabled={!query || isRefreshing}
+            >
+              {isRefreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              {refreshButtonLabel}
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => window.print()}
               disabled={!report}
             >
@@ -272,6 +379,18 @@ export function PilotActivityReports() {
             {error}
           </p>
         )}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+          <span>
+            Last Updated:{" "}
+            {lastUpdatedAt
+              ? new Date(lastUpdatedAt).toLocaleTimeString()
+              : "No successful update yet"}
+          </span>
+          <span>
+            {isRefreshing ? "Refreshing" : isStale ? "Stale" : "Up to date"}
+            {summaryError ? " · Error on last update" : ""}
+          </span>
+        </div>
         {scopes.length === 0 && !error && (
           <p>No active report scope is assigned.</p>
         )}
