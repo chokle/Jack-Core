@@ -61,34 +61,45 @@ beforeEach(() => {
     isPresentation: false,
     classification: "resolved",
   });
-  fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
-  fake.tables.pilots = [{
-    id: PILOT_ID,
-    organization_id: ORGANIZATION_ID,
-    name: "Pilot",
-    status: "active",
-  }];
-  fake.tables.pilot_memberships = [{
-    id: "membership-1",
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    user_id: "tester-1",
-    role: "tester",
-    active: true,
-    valid_from: "2026-01-01T00:00:00.000Z",
-    valid_until: null,
-  }];
-  fake.tables.telemetry_consents = ["telemetry", "screen", "microphone"].map((scope, index) => ({
-    id: index === 0 ? CONSENT_ID : `55555555-5555-4555-8555-55555555555${index}`,
-    actor_user_id: "tester-1",
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    scope,
-    state: scope === "telemetry" ? "granted" : "declined",
-    privacy_notice_version: "jack-pilot-privacy-2026-07-25",
-    consent_version: "jack-pilot-consent-2026-07-25",
-    occurred_at: "2026-07-25T00:00:00.000Z",
-  }));
+  fake.tables.organizations = [
+    { id: ORGANIZATION_ID, name: "Org", status: "active" },
+  ];
+  fake.tables.pilots = [
+    {
+      id: PILOT_ID,
+      organization_id: ORGANIZATION_ID,
+      name: "Pilot",
+      status: "active",
+    },
+  ];
+  fake.tables.pilot_memberships = [
+    {
+      id: "membership-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      user_id: "tester-1",
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    },
+  ];
+  fake.tables.telemetry_consents = ["telemetry", "screen", "microphone"].map(
+    (scope, index) => ({
+      id:
+        index === 0
+          ? CONSENT_ID
+          : `55555555-5555-4555-8555-55555555555${index}`,
+      actor_user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      scope,
+      state: scope === "telemetry" ? "granted" : "declined",
+      privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+      consent_version: "jack-pilot-consent-2026-07-25",
+      occurred_at: "2026-07-25T00:00:00.000Z",
+    }),
+  );
   fake.tables.test_sessions = [];
   fake.tables.test_events = [];
   fake.tables.activity_ingest_failures = [];
@@ -96,8 +107,12 @@ beforeEach(() => {
 
 describe("canonical user-test sessions", () => {
   it("creates one active session and emits started then resumed", async () => {
-    const first = await request(app).post("/api/testing/sessions/start").send(startBody);
-    const second = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const first = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
+    const second = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     expect(first.status).toBe(201);
     expect(second.status).toBe(200);
     expect(second.body.session.id).toBe(first.body.session.id);
@@ -109,17 +124,25 @@ describe("canonical user-test sessions", () => {
   });
 
   it("expires a stale session and creates a fresh canonical session", async () => {
-    const first = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const first = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     fake.tables.test_sessions[0]!.expires_at = "2020-01-01T00:00:00.000Z";
-    const second = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const second = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     expect(second.status).toBe(201);
     expect(second.body.session.id).not.toBe(first.body.session.id);
     expect(fake.tables.test_sessions[0]!.status).toBe("expired");
-    expect(fake.tables.test_events.map((event) => event.event_type)).toContain("test_expired");
+    expect(fake.tables.test_events.map((event) => event.event_type)).toContain(
+      "test_expired",
+    );
   });
 
   it("accepts minimized events and rejects raw content metadata", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     const eventBase = {
       eventId: "66666666-6666-4666-8666-666666666666",
       occurredAt: new Date().toISOString(),
@@ -137,7 +160,9 @@ describe("canonical user-test sessions", () => {
         dedupeKey: "feature:library",
       });
     expect(accepted.status).toBe(201);
-    expect(fake.tables.test_events.at(-1)?.metadata).toEqual({ feature: "library" });
+    expect(fake.tables.test_events.at(-1)?.metadata).toEqual({
+      feature: "library",
+    });
 
     const rejected = await request(app)
       .post(`/api/testing/sessions/${started.body.session.id}/events`)
@@ -164,7 +189,9 @@ describe("canonical user-test sessions", () => {
   });
 
   it("accepts an idempotent retry after a terminal event completed the session", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     const event = {
       eventId: "99999999-9999-4999-8999-999999999999",
       eventType: "test_completed",
@@ -185,11 +212,15 @@ describe("canonical user-test sessions", () => {
     expect(first.body.session.status).toBe("completed");
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({ accepted: true, duplicate: true });
-    expect(fake.tables.test_events.filter((row) => row.event_id === event.eventId)).toHaveLength(1);
+    expect(
+      fake.tables.test_events.filter((row) => row.event_id === event.eventId),
+    ).toHaveLength(1);
   });
 
   it("replays event projection on duplicate retry even if stored session state drifted", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     const event = {
       eventId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       eventType: "test_completed",
@@ -212,13 +243,21 @@ describe("canonical user-test sessions", () => {
       .send(event);
 
     expect(retry.status).toBe(200);
-    expect(retry.body).toMatchObject({ accepted: true, duplicate: true, session: { status: "completed" } });
-    expect(fake.tables.test_events.filter((row) => row.event_id === event.eventId)).toHaveLength(1);
+    expect(retry.body).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      session: { status: "completed" },
+    });
+    expect(
+      fake.tables.test_events.filter((row) => row.event_id === event.eventId),
+    ).toHaveLength(1);
     expect(fake.tables.test_sessions[0]!.status).toBe("completed");
   });
 
   it("rejects a dedupe-key collision without applying the conflicting session outcome", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     const base = {
       occurredAt: new Date().toISOString(),
       appSessionId: APP_SESSION_ID,
@@ -249,11 +288,17 @@ describe("canonical user-test sessions", () => {
     expect(collision.body.code).toBe("idempotency_conflict");
     expect(fake.tables.test_sessions[0]?.status).toBe("active");
     expect(fake.tables.test_events).toHaveLength(2);
-    expect(fake.tables.test_events.some((row) => row.event_type === "test_completed")).toBe(false);
+    expect(
+      fake.tables.test_events.some(
+        (row) => row.event_type === "test_completed",
+      ),
+    ).toBe(false);
   });
 
   it("records payload-free dropped counters only while consent remains active", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     const accepted = await request(app)
       .post(`/api/testing/sessions/${started.body.session.id}/ingest-failures`)
       .send({ reasonCode: "queue_overflow", eventCount: 2 });
@@ -273,7 +318,9 @@ describe("canonical user-test sessions", () => {
   });
 
   it("enforces ownership, explicit consent, admin exemption, and presentation denial", async () => {
-    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const started = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
     identity.userId = "tester-2";
     const foreign = await request(app)
       .post(`/api/testing/sessions/${started.body.session.id}/events`)
@@ -292,38 +339,67 @@ describe("canonical user-test sessions", () => {
     identity.userId = "tester-1";
     fake.tables.telemetry_consents[0]!.state = "declined";
     expect(
-      (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
+      (await request(app).post("/api/testing/sessions/start").send(startBody))
+        .status,
     ).toBe(412);
+    const declinedResponse = await request(app)
+      .post("/api/testing/sessions/start")
+      .send(startBody);
+    expect(declinedResponse.status).toBe(412);
+    expect(declinedResponse.body.error).toContain(
+      "Explicit optional telemetry consent is required",
+    );
     identity.isAdmin = true;
     expect(
-      (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
+      (await request(app).post("/api/testing/sessions/start").send(startBody))
+        .status,
     ).toBe(403);
     identity.isAdmin = false;
     identity.userId = "clerk-presentation-account";
     identity.isPresentation = true;
     expect(
-      (await request(app).post("/api/testing/sessions/start").send(startBody)).status,
+      (await request(app).post("/api/testing/sessions/start").send(startBody))
+        .status,
     ).toBe(403);
     expect(
-      (await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status,
+      (
+        await request(app).get(
+          `/api/testing/sessions/current?pilotId=${PILOT_ID}`,
+        )
+      ).status,
     ).toBe(403);
 
     identity.userId = "presentation-demo";
     identity.isPresentation = false;
     expect(
-      (await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status,
+      (
+        await request(app).get(
+          `/api/testing/sessions/current?pilotId=${PILOT_ID}`,
+        )
+      ).status,
     ).toBe(403);
   });
 
   it("fails closed when trusted identity resolution is unavailable", async () => {
     identity.classification = "unavailable";
 
-    expect((await request(app).post("/api/testing/sessions/start").send(startBody)).status).toBe(503);
-    expect((await request(app).get(`/api/testing/sessions/current?pilotId=${PILOT_ID}`)).status).toBe(503);
+    expect(
+      (await request(app).post("/api/testing/sessions/start").send(startBody))
+        .status,
+    ).toBe(503);
+    expect(
+      (
+        await request(app).get(
+          `/api/testing/sessions/current?pilotId=${PILOT_ID}`,
+        )
+      ).status,
+    ).toBe(503);
     expect(
       (
         await request(app)
-          .post("/api/testing/sessions/99999999-9999-4999-8999-999999999999/events")
+          .post(
+            "/api/testing/sessions/99999999-9999-4999-8999-999999999999/events",
+          )
           .send({
             eventId: "88888888-8888-4888-8888-888888888888",
             eventType: "feature_viewed",
@@ -339,7 +415,9 @@ describe("canonical user-test sessions", () => {
     expect(
       (
         await request(app)
-          .post("/api/testing/sessions/99999999-9999-4999-8999-999999999999/ingest-failures")
+          .post(
+            "/api/testing/sessions/99999999-9999-4999-8999-999999999999/ingest-failures",
+          )
           .send({ reasonCode: "queue_overflow", eventCount: 1 })
       ).status,
     ).toBe(503);

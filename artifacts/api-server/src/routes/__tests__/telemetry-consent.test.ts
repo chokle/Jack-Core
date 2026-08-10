@@ -47,22 +47,28 @@ beforeEach(() => {
     isPresentation: false,
     classification: "resolved",
   });
-  fake.tables.organizations = [{ id: ORGANIZATION_ID, name: "Org", status: "active" }];
-  fake.tables.pilots = [{
-    id: PILOT_ID,
-    organization_id: ORGANIZATION_ID,
-    name: "Pilot",
-    status: "active",
-  }];
-  fake.tables.pilot_memberships = [{
-    user_id: "tester-1",
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    role: "tester",
-    active: true,
-    valid_from: "2026-01-01T00:00:00.000Z",
-    valid_until: null,
-  }];
+  fake.tables.organizations = [
+    { id: ORGANIZATION_ID, name: "Org", status: "active" },
+  ];
+  fake.tables.pilots = [
+    {
+      id: PILOT_ID,
+      organization_id: ORGANIZATION_ID,
+      name: "Pilot",
+      status: "active",
+    },
+  ];
+  fake.tables.pilot_memberships = [
+    {
+      user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    },
+  ];
   fake.tables.telemetry_consents = [];
   fake.tables.test_sessions = [];
   fake.tables.test_events = [];
@@ -99,33 +105,39 @@ describe("telemetry consent", () => {
     );
     expect(context.status).toBe(403);
 
-    const exportResponse = await request(app()).get("/api/testing/telemetry/export");
+    const exportResponse = await request(app()).get(
+      "/api/testing/telemetry/export",
+    );
     expect(exportResponse.status).toBe(403);
   });
 
   it("continues to deny the legacy presentation-demo identity", async () => {
     identity.userId = "presentation-demo";
 
-    expect((await request(app()).get("/api/testing/telemetry/context")).status).toBe(403);
-    expect((await request(app()).get("/api/testing/telemetry/export")).status).toBe(403);
+    expect(
+      (await request(app()).get("/api/testing/telemetry/context")).status,
+    ).toBe(403);
+    expect(
+      (await request(app()).get("/api/testing/telemetry/export")).status,
+    ).toBe(403);
   });
 
   it("fails closed when trusted identity resolution is unavailable", async () => {
     identity.classification = "unavailable";
 
-    expect((await request(app()).get("/api/testing/telemetry/context")).status).toBe(503);
+    expect(
+      (await request(app()).get("/api/testing/telemetry/context")).status,
+    ).toBe(503);
     expect(
       (
-        await request(app())
-          .post("/api/testing/telemetry/consents")
-          .send({
-            pilotId: PILOT_ID,
-            telemetry: "granted",
-            screen: "declined",
-            microphone: "declined",
-            privacyNoticeVersion: "jack-pilot-privacy-2026-07-25",
-            consentVersion: "jack-pilot-consent-2026-07-25",
-          })
+        await request(app()).post("/api/testing/telemetry/consents").send({
+          pilotId: PILOT_ID,
+          telemetry: "granted",
+          screen: "declined",
+          microphone: "declined",
+          privacyNoticeVersion: "jack-pilot-privacy-2026-07-25",
+          consentVersion: "jack-pilot-consent-2026-07-25",
+        })
       ).status,
     ).toBe(503);
     expect(
@@ -135,7 +147,9 @@ describe("telemetry consent", () => {
           .send({ pilotId: PILOT_ID, scopes: ["telemetry"] })
       ).status,
     ).toBe(503);
-    expect((await request(app()).get("/api/testing/telemetry/export")).status).toBe(503);
+    expect(
+      (await request(app()).get("/api/testing/telemetry/export")).status,
+    ).toBe(503);
     expect(fake.tables.telemetry_consents).toHaveLength(0);
   });
 
@@ -184,44 +198,89 @@ describe("telemetry consent", () => {
     expect(fake.tables.telemetry_consents).toHaveLength(0);
   });
 
-  it("withdraws immediately, redacts events, and schedules deletion within 30 days", async () => {
-    fake.tables.telemetry_consents = [{
-      id: "77777777-7777-4777-8777-777777777777",
-      actor_user_id: "tester-1",
-      organization_id: ORGANIZATION_ID,
-      pilot_id: PILOT_ID,
+  it("persists telemetry scope as granted and leaves screen/microphone independent", async () => {
+    const response = await request(app())
+      .post("/api/testing/telemetry/consents")
+      .send({
+        pilotId: PILOT_ID,
+        telemetry: "granted",
+        screen: "granted",
+        microphone: "declined",
+        privacyNoticeVersion: "jack-pilot-privacy-2026-07-25",
+        consentVersion: "jack-pilot-consent-2026-07-25",
+      });
+
+    expect(response.status).toBe(201);
+    expect(fake.tables.telemetry_consents).toHaveLength(3);
+    const telemetryRow = fake.tables.telemetry_consents.find(
+      (row) => row.scope === "telemetry",
+    );
+    const screenRow = fake.tables.telemetry_consents.find(
+      (row) => row.scope === "screen",
+    );
+    const microphoneRow = fake.tables.telemetry_consents.find(
+      (row) => row.scope === "microphone",
+    );
+
+    expect(telemetryRow).toMatchObject({
       scope: "telemetry",
       state: "granted",
-      retained_until: "2027-01-01T00:00:00.000Z",
-      occurred_at: "2026-01-01T00:00:00.000Z",
-    }];
-    fake.tables.test_sessions = [{
-      id: SESSION_ID,
-      actor_user_id: "tester-1",
-      pilot_id: PILOT_ID,
-      organization_id: ORGANIZATION_ID,
-      status: "active",
-      telemetry_status: "granted",
-    }];
-    fake.tables.test_events = [{
-      event_id: "44444444-4444-4444-8444-444444444444",
-      actor_user_id: "tester-1",
-      pilot_id: PILOT_ID,
-      metadata: { feature: "library" },
-      correlation_id: "request-1",
-    }];
-    fake.tables.test_recordings = [{
-      id: "55555555-5555-4555-8555-555555555555",
-      tester_user_id: "tester-1",
-      test_session_id: SESSION_ID,
-    }];
-    fake.tables.activity_report_runs = [{
-      id: "88888888-8888-4888-8888-888888888888",
-      organization_id: ORGANIZATION_ID,
-      pilot_id: PILOT_ID,
-      report_type: "pilot_summary",
-      aggregate_snapshot: { participants: 1 },
-    }];
+    });
+    expect(screenRow).toMatchObject({ scope: "screen", state: "granted" });
+    expect(microphoneRow).toMatchObject({
+      scope: "microphone",
+      state: "declined",
+    });
+  });
+
+  it("withdraws immediately, redacts events, and schedules deletion within 30 days", async () => {
+    fake.tables.telemetry_consents = [
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        retained_until: "2027-01-01T00:00:00.000Z",
+        occurred_at: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    fake.tables.test_sessions = [
+      {
+        id: SESSION_ID,
+        actor_user_id: "tester-1",
+        pilot_id: PILOT_ID,
+        organization_id: ORGANIZATION_ID,
+        status: "active",
+        telemetry_status: "granted",
+      },
+    ];
+    fake.tables.test_events = [
+      {
+        event_id: "44444444-4444-4444-8444-444444444444",
+        actor_user_id: "tester-1",
+        pilot_id: PILOT_ID,
+        metadata: { feature: "library" },
+        correlation_id: "request-1",
+      },
+    ];
+    fake.tables.test_recordings = [
+      {
+        id: "55555555-5555-4555-8555-555555555555",
+        tester_user_id: "tester-1",
+        test_session_id: SESSION_ID,
+      },
+    ];
+    fake.tables.activity_report_runs = [
+      {
+        id: "88888888-8888-4888-8888-888888888888",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        report_type: "pilot_summary",
+        aggregate_snapshot: { participants: 1 },
+      },
+    ];
 
     const response = await request(app())
       .post("/api/testing/telemetry/withdraw")
@@ -230,9 +289,9 @@ describe("telemetry consent", () => {
     expect(response.body.withdrawn).toEqual(
       expect.arrayContaining(["telemetry", "screen", "microphone"]),
     );
-    expect(Date.parse(response.body.deletionDueAt) - Date.now()).toBeLessThanOrEqual(
-      30 * 24 * 60 * 60 * 1000,
-    );
+    expect(
+      Date.parse(response.body.deletionDueAt) - Date.now(),
+    ).toBeLessThanOrEqual(30 * 24 * 60 * 60 * 1000);
     expect(fake.tables.test_sessions[0]).toMatchObject({
       status: "withdrawn",
       telemetry_status: "withdrawn",
@@ -243,24 +302,26 @@ describe("telemetry consent", () => {
       correlation_id: null,
       redacted_at: expect.any(String),
     });
-    expect(Date.parse(String(fake.tables.telemetry_consents[0]?.retained_until))).toBeGreaterThan(
-      Date.now() + 23 * 30 * 24 * 60 * 60 * 1000,
-    );
+    expect(
+      Date.parse(String(fake.tables.telemetry_consents[0]?.retained_until)),
+    ).toBeGreaterThan(Date.now() + 23 * 30 * 24 * 60 * 60 * 1000);
     expect(fake.tables.activity_report_runs).toHaveLength(1);
   });
 
   it("allows withdrawal from retained consent history after membership is inactive", async () => {
     fake.tables.pilot_memberships[0]!.active = false;
-    fake.tables.telemetry_consents = [{
-      id: "77777777-7777-4777-8777-777777777777",
-      actor_user_id: "tester-1",
-      organization_id: ORGANIZATION_ID,
-      pilot_id: PILOT_ID,
-      scope: "telemetry",
-      state: "granted",
-      retained_until: "2027-01-01T00:00:00.000Z",
-      occurred_at: "2026-01-01T00:00:00.000Z",
-    }];
+    fake.tables.telemetry_consents = [
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        retained_until: "2027-01-01T00:00:00.000Z",
+        occurred_at: "2026-01-01T00:00:00.000Z",
+      },
+    ];
 
     const response = await request(app())
       .post("/api/testing/telemetry/withdraw")
@@ -276,23 +337,27 @@ describe("telemetry consent", () => {
   });
 
   it("stops active recording and schedules microphone-bearing media when mic consent is withdrawn", async () => {
-    fake.tables.test_sessions = [{
-      id: SESSION_ID,
-      actor_user_id: "tester-1",
-      pilot_id: PILOT_ID,
-      organization_id: ORGANIZATION_ID,
-      status: "active",
-      telemetry_status: "granted",
-      screen_consent_state: "granted",
-      microphone_consent_state: "granted",
-      recording_status: "recording",
-    }];
-    fake.tables.test_recordings = [{
-      id: "55555555-5555-4555-8555-555555555555",
-      tester_user_id: "tester-1",
-      pilot_id: PILOT_ID,
-      microphone_consent_id: "66666666-6666-4666-8666-666666666666",
-    }];
+    fake.tables.test_sessions = [
+      {
+        id: SESSION_ID,
+        actor_user_id: "tester-1",
+        pilot_id: PILOT_ID,
+        organization_id: ORGANIZATION_ID,
+        status: "active",
+        telemetry_status: "granted",
+        screen_consent_state: "granted",
+        microphone_consent_state: "granted",
+        recording_status: "recording",
+      },
+    ];
+    fake.tables.test_recordings = [
+      {
+        id: "55555555-5555-4555-8555-555555555555",
+        tester_user_id: "tester-1",
+        pilot_id: PILOT_ID,
+        microphone_consent_id: "66666666-6666-4666-8666-666666666666",
+      },
+    ];
 
     const response = await request(app())
       .post("/api/testing/telemetry/withdraw")

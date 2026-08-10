@@ -384,6 +384,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [telemetryContext, setTelemetryContext] =
     useState<TelemetryContext | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
+  const [telemetryConsentMode, setTelemetryConsentMode] = useState<
+    "start" | "settings"
+  >("start");
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
     restricted: boolean;
@@ -571,6 +574,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       testingOverlayRef.current?.open();
       return;
     }
+    setTelemetryConsentMode("start");
     setTelemetryConsentOpen(true);
   };
 
@@ -605,7 +609,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
   };
 
-  const handleTelemetryConsent = async (choices: TelemetryConsentChoices) => {
+  const handleTelemetryConsent = async (
+    choices: TelemetryConsentChoices,
+    launchAfterSave: boolean,
+  ) => {
     if (!telemetryContext?.scope || testStartPendingRef.current) return;
     testStartPendingRef.current = true;
     setTestStartPending(true);
@@ -618,11 +625,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       });
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
-      if (choices.telemetry === "granted") {
+      if (choices.telemetry === "granted" && launchAfterSave) {
         testStartPendingRef.current = false;
         setTestStartPending(false);
         await launchTestSession(context.scope?.pilotId);
-      } else {
+      } else if (choices.telemetry === "declined" && launchAfterSave) {
         persistUserTestingDeclined(me?.userId);
         clearUserTestingAccepted(me?.userId);
         setTestingGate({ accepted: false, restricted: false });
@@ -638,6 +645,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       testStartPendingRef.current = false;
       setTestStartPending(false);
     }
+  };
+
+  const handleCloseTelemetryConsent = () => {
+    if (telemetryConsentMode === "start") {
+      persistUserTestingDeclined(me?.userId);
+      clearUserTestingAccepted(me?.userId);
+      setTestingGate({ accepted: false, restricted: false });
+      handleNavigate("graph");
+    }
+    setTelemetryConsentOpen(false);
   };
 
   const handleTelemetryWithdrawal = async (
@@ -804,8 +821,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       <TelemetryConsentModal
         open={telemetryConsentOpen}
         saving={testStartPending}
-        onSave={(choices) => void handleTelemetryConsent(choices)}
-        onClose={() => setTelemetryConsentOpen(false)}
+        onSave={(choices) =>
+          void handleTelemetryConsent(choices, telemetryConsentMode === "start")
+        }
+        onClose={handleCloseTelemetryConsent}
       />
       <UserTestingGate
         open={
@@ -880,12 +899,27 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                     Withdraw screen recording
                   </Button>
                 )}
-                <Button
-                  variant="outline"
-                  onClick={() => void handleTelemetryWithdrawal(["telemetry"])}
-                >
-                  Withdraw telemetry
-                </Button>
+                {telemetryContext.consents.telemetry?.state === "granted" && (
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      void handleTelemetryWithdrawal(["telemetry"])
+                    }
+                  >
+                    Withdraw telemetry
+                  </Button>
+                )}
+                {telemetryContext.consents.telemetry?.state !== "granted" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setTelemetryConsentMode("settings");
+                      setTelemetryConsentOpen(true);
+                    }}
+                  >
+                    Enable telemetry to join pilot
+                  </Button>
+                )}
               </div>
             </div>
           )}
