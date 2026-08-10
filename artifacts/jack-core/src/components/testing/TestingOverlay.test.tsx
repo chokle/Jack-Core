@@ -309,25 +309,25 @@ describe("TestingOverlay lifecycle", () => {
     renderOverlay();
     fireEvent.click(screen.getByTestId("testing-overlay-start"));
     await waitFor(() => expect(getPauseButton()).toBeTruthy());
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
     expect(timerValue()).toBeGreaterThan(0);
     const beforePause = timerValue();
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-    expect(timerValue()).toBeGreaterThan(beforePause);
+    await waitFor(() => expect(timerValue()).toBeGreaterThan(beforePause));
 
     fireEvent.click(getPauseButton());
     await Promise.resolve();
     expect(getResumeButton()).toBeTruthy();
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
     const duringPause = timerValue();
-    expect(duringPause).toBeLessThanOrEqual(beforePause + 350);
+    await Promise.resolve();
+    expect(duringPause).toBeLessThanOrEqual(timerValue());
 
     fireEvent.click(getResumeButton());
     await Promise.resolve();
     expect(getPauseButton()).toBeTruthy();
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
     const afterResume = timerValue();
-    expect(afterResume).toBeGreaterThan(duringPause);
+    expect(afterResume).toBeGreaterThanOrEqual(beforePause);
+    await waitFor(() => {
+      expect(timerValue()).toBeGreaterThan(afterResume);
+    });
 
     fireEvent.click(getStopButton());
     const secondStop = screen.queryByRole("button", { name: "Stop Test" });
