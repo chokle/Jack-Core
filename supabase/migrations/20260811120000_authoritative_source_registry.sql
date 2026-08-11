@@ -1,5 +1,7 @@
 -- Metadata-only authority registry. Intentionally no body, extracted text,
 -- embedding, file, or blob column. No restricted content is ingested here.
+create extension if not exists btree_gist;
+
 create table if not exists public.authoritative_sources (
   source_id text primary key,
   authority text not null,
@@ -30,18 +32,45 @@ create table if not exists public.authoritative_sources (
       'metadata', 'official_link', 'citation', 'section_retrieval',
       'model_context', 'embedding'
     ]::text[]),
+  authorized_section_locators text[] not null default '{}'::text[],
   verified_at timestamptz not null,
   content_fingerprint text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (effective_to is null or effective_from is null or effective_to >= effective_from),
   check (
+    source_type not in ('adopted_code', 'municipal_bylaw')
+    or (edition is not null and effective_from is not null)
+  ),
+  check (
     license_access_classification <> 'restricted_metadata_only'
     or not (permitted_uses && array[
       'section_retrieval', 'model_context', 'embedding'
     ]::text[])
+  ),
+  check (
+    license_access_classification <> 'restricted_metadata_only'
+    or cardinality(authorized_section_locators) = 0
   )
 );
+
+-- Only one active governing primary may cover a jurisdiction/edition/date.
+-- Superseded historical rows retain their closed windows for replay and audit.
+alter table public.authoritative_sources
+  drop constraint if exists authoritative_sources_no_overlapping_active_primary;
+alter table public.authoritative_sources
+  add constraint authoritative_sources_no_overlapping_active_primary
+  exclude using gist (
+    jurisdiction with =,
+    authority with =,
+    source_type with =,
+    document_title with =,
+    edition with =,
+    daterange(effective_from, effective_to, '[]') with &&
+  ) where (
+    source_type in ('adopted_code', 'municipal_bylaw')
+    and status in ('current', 'requires_review')
+  );
 
 create index if not exists idx_authoritative_sources_resolution
   on public.authoritative_sources
@@ -144,9 +173,6 @@ on conflict (source_id) do update set
   superseded_by = excluded.superseded_by,
   citation_label = excluded.citation_label,
   retrieval_priority = excluded.retrieval_priority,
-  status = excluded.status,
   license_access_classification = excluded.license_access_classification,
   permitted_uses = excluded.permitted_uses,
-  verified_at = excluded.verified_at,
-  content_fingerprint = excluded.content_fingerprint,
   updated_at = now();

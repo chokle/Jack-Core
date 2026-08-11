@@ -1378,7 +1378,8 @@ components:
           type: string
         permitApplicationDate:
           type: string
-          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: User-supplied calendar date in YYYY-MM-DD form; not image-derived.
         explicitCodeEdition:
           type: string
         authorityHavingJurisdiction:
@@ -1436,11 +1437,22 @@ components:
     CodeSafetyResult:
       type: object
       required:
-        [outcome, jurisdiction, known, missing, reason, nextSteps, citations]
+        [
+          outcome,
+          sensitivity,
+          jurisdiction,
+          known,
+          missing,
+          reason,
+          nextSteps,
+          citations,
+        ]
       properties:
         outcome:
           type: string
           enum: [bypass, blocked, allowed]
+        sensitivity:
+          $ref: "#/components/schemas/CodeSensitivityResult"
         jurisdiction:
           type: string
           enum: [BC_GENERAL, VANCOUVER, UNKNOWN_SPECIAL_AUTHORITY]
@@ -1466,6 +1478,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AuthorityCitationMetadata"
+
+    CodeSensitivityResult:
+      type: object
+      required: [isCodeSensitive, topics, requiresMeasurements]
+      properties:
+        isCodeSensitive:
+          type: boolean
+        topics:
+          type: array
+          items:
+            type: string
+        requiresMeasurements:
+          type: boolean
 
     AuthorityCitationMetadata:
       type: object

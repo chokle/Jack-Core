@@ -320,15 +320,22 @@ export interface SearchResults {
   results: SearchResult[];
 }
 
-export interface AuthorityContextMeasurementsItem {
+export type AuthorityContextMeasurementsItem = {
   name: string;
   value: string;
   unit?: string;
-}
+};
 
+/**
+ * Trusted user/project context for deterministic authority resolution. Jurisdiction must not be inferred from photos, EXIF, faces, signs, or model guesses.
+ */
 export interface AuthorityContext {
   province?: string;
   municipality?: string;
+  /**
+     * User-supplied calendar date in YYYY-MM-DD form; not image-derived.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
   permitApplicationDate?: string;
   explicitCodeEdition?: string;
   authorityHavingJurisdiction?: string;
@@ -373,6 +380,32 @@ export const CitationSourceType = {
   authority: 'authority',
 } as const;
 
+export type CitationSourceStatus = typeof CitationSourceStatus[keyof typeof CitationSourceStatus];
+
+
+export const CitationSourceStatus = {
+  current: 'current',
+  superseded: 'superseded',
+  requires_review: 'requires_review',
+} as const;
+
+export type CitationAmendmentIndicator = typeof CitationAmendmentIndicator[keyof typeof CitationAmendmentIndicator];
+
+
+export const CitationAmendmentIndicator = {
+  bc_amendment: 'bc_amendment',
+  vancouver_specific: 'vancouver_specific',
+  none: 'none',
+} as const;
+
+export type CitationContentAvailability = typeof CitationContentAvailability[keyof typeof CitationContentAvailability];
+
+
+export const CitationContentAvailability = {
+  metadata_only: 'metadata_only',
+  licensed_section: 'licensed_section',
+} as const;
+
 export interface Citation {
   videoId: string;
   videoTitle: string;
@@ -392,41 +425,113 @@ export interface Citation {
   verified?: boolean;
   /** How many independent sources corroborate this citation. For "video" citations it is the distinct source videos of the covering concept; for "knowledge" citations it is the field note's own evidence count (metadata `evidenceCount`). Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal. */
   sourceCount?: number;
-  jurisdiction?: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  jurisdiction?: string;
   authority?: string;
   documentTitle?: string;
+  /** @nullable */
   edition?: string | null;
+  /** @nullable */
   revision?: string | null;
+  /** @nullable */
   section?: string | null;
+  /** @nullable */
   subsection?: string | null;
+  /** @nullable */
   effectiveDateBasis?: string | null;
-  sourceStatus?: 'current' | 'superseded' | 'requires_review';
+  sourceStatus?: CitationSourceStatus;
   officialSourceUrl?: string;
-  amendmentIndicator?: 'bc_amendment' | 'vancouver_specific' | 'none';
-  contentAvailability?: 'metadata_only' | 'licensed_section';
+  amendmentIndicator?: CitationAmendmentIndicator;
+  contentAvailability?: CitationContentAvailability;
 }
+
+export type CodeSafetyResultOutcome = typeof CodeSafetyResultOutcome[keyof typeof CodeSafetyResultOutcome];
+
+
+export const CodeSafetyResultOutcome = {
+  bypass: 'bypass',
+  blocked: 'blocked',
+  allowed: 'allowed',
+} as const;
+
+export interface CodeSensitivityResult {
+  isCodeSensitive: boolean;
+  topics: string[];
+  requiresMeasurements: boolean;
+}
+
+export type CodeSafetyResultJurisdiction = typeof CodeSafetyResultJurisdiction[keyof typeof CodeSafetyResultJurisdiction];
+
+
+export const CodeSafetyResultJurisdiction = {
+  BC_GENERAL: 'BC_GENERAL',
+  VANCOUVER: 'VANCOUVER',
+  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+} as const;
+
+export type AuthorityCitationMetadataJurisdiction = typeof AuthorityCitationMetadataJurisdiction[keyof typeof AuthorityCitationMetadataJurisdiction];
+
+
+export const AuthorityCitationMetadataJurisdiction = {
+  BC_GENERAL: 'BC_GENERAL',
+  VANCOUVER: 'VANCOUVER',
+  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+} as const;
+
+export type AuthorityCitationMetadataSourceStatus = typeof AuthorityCitationMetadataSourceStatus[keyof typeof AuthorityCitationMetadataSourceStatus];
+
+
+export const AuthorityCitationMetadataSourceStatus = {
+  current: 'current',
+  superseded: 'superseded',
+  requires_review: 'requires_review',
+} as const;
+
+export type AuthorityCitationMetadataAmendmentIndicator = typeof AuthorityCitationMetadataAmendmentIndicator[keyof typeof AuthorityCitationMetadataAmendmentIndicator];
+
+
+export const AuthorityCitationMetadataAmendmentIndicator = {
+  bc_amendment: 'bc_amendment',
+  vancouver_specific: 'vancouver_specific',
+  none: 'none',
+} as const;
+
+export type AuthorityCitationMetadataContentAvailability = typeof AuthorityCitationMetadataContentAvailability[keyof typeof AuthorityCitationMetadataContentAvailability];
+
+
+export const AuthorityCitationMetadataContentAvailability = {
+  metadata_only: 'metadata_only',
+  licensed_section: 'licensed_section',
+} as const;
 
 export interface AuthorityCitationMetadata {
   sourceId: string;
-  jurisdiction: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  jurisdiction: AuthorityCitationMetadataJurisdiction;
   authority: string;
   document: string;
+  /** @nullable */
   edition: string | null;
+  /** @nullable */
   revision: string | null;
+  /** @nullable */
   section: string | null;
+  /** @nullable */
   subsection: string | null;
+  /** @nullable */
   effectiveDateBasis: string | null;
-  sourceStatus: 'current' | 'superseded' | 'requires_review';
+  sourceStatus: AuthorityCitationMetadataSourceStatus;
   officialSourceUrl: string;
-  amendmentIndicator: 'bc_amendment' | 'vancouver_specific' | 'none';
-  contentAvailability: 'metadata_only' | 'licensed_section';
+  amendmentIndicator: AuthorityCitationMetadataAmendmentIndicator;
+  contentAvailability: AuthorityCitationMetadataContentAvailability;
   citationLabel: string;
 }
 
 export interface CodeSafetyResult {
-  outcome: 'bypass' | 'blocked' | 'allowed';
-  jurisdiction: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  outcome: CodeSafetyResultOutcome;
+  sensitivity: CodeSensitivityResult;
+  jurisdiction: CodeSafetyResultJurisdiction;
+  /** @nullable */
   applicableEdition?: string | null;
+  /** @nullable */
   authoritySnapshotId?: string | null;
   known: string[];
   missing: string[];

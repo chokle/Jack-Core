@@ -75,12 +75,16 @@ describe("Ask Jack code authority safety gate", () => {
           province: "BC",
           municipality: "Burnaby",
           permitApplicationDate: "2026-08-11",
+          projectType: "new construction",
+          knownConditions: [
+            "New permit application; no delayed provisions apply",
+          ],
           measurements: [
             { name: "trap arm length", value: "1200", unit: "mm" },
           ],
         },
       });
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(() => AskJackResponse.parse(res.body)).not.toThrow();
     expect(res.body.codeSafety).toMatchObject({
       outcome: "blocked",
@@ -110,10 +114,14 @@ describe("Ask Jack code authority safety gate", () => {
           province: "British Columbia",
           municipality: "Vancouver",
           permitApplicationDate: "2026-08-11",
+          projectType: "new construction",
+          knownConditions: [
+            "New permit application; no delayed provisions apply",
+          ],
           measurements: [{ name: "vent distance", value: "1.2", unit: "m" }],
         },
       });
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.codeSafety.jurisdiction).toBe("VANCOUVER");
     expect(res.body.citations[0].authority).toBe("City of Vancouver");
     expect(
@@ -135,12 +143,32 @@ describe("Ask Jack code authority safety gate", () => {
           permitApplicationDate: "2026-08-11",
         },
       });
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.codeSafety.jurisdiction).toBe("UNKNOWN_SPECIAL_AUTHORITY");
     expect(res.body.codeSafety.missing).toContain(
       "Municipality or authority having jurisdiction",
     );
     expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "is this legal?",
+    "can I install this?",
+    "does this pass?",
+    "what size does code require?",
+    "inspection requirement",
+    "minimum slope",
+    "required clearance",
+  ])("blocks required detector phrasing before RAG: %s", async (message) => {
+    const res = await request(app).post("/api/chat").send({ message });
+    expect(res.status).toBe(200);
+    expect(res.body.codeSafety).toMatchObject({
+      outcome: "blocked",
+      sensitivity: { isCodeSensitive: true },
+    });
+    expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
+    expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
+    expect(learningMock).not.toHaveBeenCalled();
   });
 
   it("keeps normal non-code Ask Jack behavior unchanged", async () => {

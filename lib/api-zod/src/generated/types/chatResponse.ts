@@ -7,10 +7,12 @@
  */
 import type { ChatResponseLearning } from './chatResponseLearning';
 import type { Citation } from './citation';
+import type { CodeSafetyResult } from './codeSafetyResult';
 
 export interface ChatResponse {
   answer: string;
   citations: Citation[];
   usedInternalKnowledge?: boolean;
   learning: ChatResponseLearning;
+  codeSafety?: CodeSafetyResult;
 }

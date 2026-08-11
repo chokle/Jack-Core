@@ -16,24 +16,31 @@ const bcContext = {
   province: "BC",
   municipality: "Burnaby",
   permitApplicationDate: "2026-08-11",
+  projectType: "new construction",
+  knownConditions: ["New permit application; no delayed provisions apply"],
   measurements: [{ name: "trap arm", value: "1200", unit: "mm" }],
 };
 
 describe("code-sensitive question detector", () => {
   it.each([
-    "Is this venting to code?",
-    "What slope is required for this drain pipe?",
-    "What is the minimum pipe diameter?",
-    "Does this plumbing work need a permit?",
-    "What clearance is required?",
+    "is this legal?",
+    "can I install this?",
+    "does this pass?",
+    "what size does code require?",
+    "inspection requirement",
+    "minimum slope",
+    "required clearance",
   ])("classifies %s", (question) => {
     expect(classifyCodeSensitiveQuestion(question).isCodeSensitive).toBe(true);
   });
 
-  it("leaves an ordinary technique question on the existing path", () => {
-    expect(
-      classifyCodeSensitiveQuestion("How do I keep a consistent torch angle?"),
-    ).toEqual({
+  it.each([
+    "How do I keep a consistent torch angle?",
+    "How do I level a welding table slope?",
+    "How can we improve workplace drainage?",
+    "Where did I put the clearance wrench?",
+  ])("leaves ordinary-use phrasing on the existing path: %s", (question) => {
+    expect(classifyCodeSensitiveQuestion(question)).toEqual({
       isCodeSensitive: false,
       topics: [],
       requiresMeasurements: false,
@@ -85,7 +92,45 @@ describe("authority context provenance", () => {
     expect(result.missing).toContain(
       "Resolve conflicting municipality and authority context values",
     );
+    expect(result.known).toEqual(
+      expect.arrayContaining([
+        "Permit/application date (supplied context): 2026-08-11",
+        "Municipality (supplied context): Vancouver",
+        "Authority having jurisdiction (supplied context): Burnaby",
+      ]),
+    );
   });
+
+  it.each([
+    {
+      label: "special authority",
+      context: { ...bcContext, specialAuthority: true },
+    },
+    { label: "mine-related", context: { ...bcContext, mineRelated: true } },
+    {
+      label: "Treaty First Nation",
+      context: { ...bcContext, municipality: "Example Treaty First Nation" },
+    },
+    {
+      label: "non-BC",
+      context: { ...bcContext, province: "Alberta" },
+    },
+  ])(
+    "preserves all supplied provenance on the $label refusal path",
+    ({ context }) => {
+      const result = resolveJurisdiction(context);
+      expect(result.status).toBe("unknown_special_authority");
+      expect(result.known).toEqual(
+        expect.arrayContaining([
+          `Province (supplied context): ${context.province}`,
+          `Municipality/AHJ (supplied context): ${context.municipality}`,
+          "Permit/application date (supplied context): 2026-08-11",
+          "Project type (supplied context): new construction",
+          "Known condition (supplied context): New permit application; no delayed provisions apply",
+        ]),
+      );
+    },
+  );
 
   it("does not infer missing trusted project context", () => {
     const result = evaluateCodeSafetyGate({
@@ -96,6 +141,26 @@ describe("authority context provenance", () => {
     expect(result.outcome).toBe("blocked");
     expect(result.jurisdiction).toBe("UNKNOWN_SPECIAL_AUTHORITY");
     expect(result.known).toEqual([]);
+  });
+
+  it("preserves supplied provenance when authority context is incomplete", () => {
+    const result = resolveJurisdiction({
+      province: "BC",
+      permitApplicationDate: "2026-08-11",
+      explicitCodeEdition: "2024",
+      projectType: "new construction",
+      knownConditions: ["New permit application"],
+    });
+    expect(result.status).toBe("missing_context");
+    expect(result.known).toEqual(
+      expect.arrayContaining([
+        "Province (supplied context): BC",
+        "Permit/application date (supplied context): 2026-08-11",
+        "Explicit code edition (supplied context): 2024",
+        "Project type (supplied context): new construction",
+        "Known condition (supplied context): New permit application",
+      ]),
+    );
   });
 
   it("does not accept photo content or EXIF as jurisdiction context", () => {
@@ -134,13 +199,30 @@ describe("jurisdiction and edition resolution", () => {
   it("refuses an unknown municipality or AHJ", () => {
     expect(
       resolveJurisdiction({
-        province: "BC",
-        permitApplicationDate: "2026-08-11",
+        ...bcContext,
+        municipality: "Unsupported Regional Authority",
       }),
     ).toMatchObject({
-      status: "missing_context",
+      status: "unknown_special_authority",
       jurisdiction: "UNKNOWN_SPECIAL_AUTHORITY",
     });
+  });
+
+  it("fails closed when project transition applicability is unresolved", () => {
+    const result = resolveJurisdiction({
+      province: "BC",
+      municipality: "Burnaby",
+      permitApplicationDate: "2026-08-11",
+      projectType: "renovation",
+      knownConditions: ["Existing permit; transition rule unresolved"],
+    });
+    expect(result).toMatchObject({
+      status: "transition_context_required",
+      applicableEdition: null,
+    });
+    expect(result.missing).toContain(
+      "Resolution of in-stream or delayed-provision rules",
+    );
   });
 
   it("does not silently use current code for a historical permit", () => {
@@ -169,6 +251,10 @@ describe("authority snapshot and supersession", () => {
         province: "BC",
         municipality: "Vancouver",
         permitApplicationDate: "2025-10-01",
+        projectType: "new construction",
+        knownConditions: [
+          "New permit application; no delayed provisions apply",
+        ],
       }),
       INITIAL_AUTHORITY_SOURCES,
     );
@@ -182,6 +268,10 @@ describe("authority snapshot and supersession", () => {
         province: "BC",
         municipality: "Vancouver",
         permitApplicationDate: "2026-01-01",
+        projectType: "new construction",
+        knownConditions: [
+          "New permit application; no delayed provisions apply",
+        ],
       }),
       INITIAL_AUTHORITY_SOURCES,
     );
@@ -204,6 +294,33 @@ describe("authority snapshot and supersession", () => {
     );
   });
 
+  it("rejects overlapping governing primary windows", () => {
+    const duplicate = {
+      ...INITIAL_AUTHORITY_SOURCES.find(
+        ({ sourceId }) => sourceId === "bc-plumbing-code-2024",
+      )!,
+      sourceId: "bc-plumbing-code-2024-overlap",
+      revisionId: "overlap",
+    };
+    expect(
+      selectAuthoritySnapshot(resolveJurisdiction(bcContext), [
+        ...INITIAL_AUTHORITY_SOURCES,
+        duplicate,
+      ]),
+    ).toBeNull();
+  });
+
+  it("fails closed when the revision feed has never been fingerprinted", () => {
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      context: bcContext,
+      sources: INITIAL_AUTHORITY_SOURCES,
+    });
+    expect(result.missing).toContain(
+      "Current revision-feed fingerprint reconciliation",
+    );
+  });
+
   it("blocks the authority snapshot until a changed revision feed is reconciled", () => {
     const sources = INITIAL_AUTHORITY_SOURCES.map((item) =>
       item.sourceType === "revision_feed"
@@ -218,7 +335,7 @@ describe("authority snapshot and supersession", () => {
 
     expect(result.outcome).toBe("blocked");
     expect(result.missing).toContain(
-      "Reconciliation of the changed official revision feed",
+      "Current revision-feed fingerprint reconciliation",
     );
   });
 });
@@ -302,19 +419,108 @@ describe("licensing and code safety gate", () => {
     );
   });
 
-  it("allows only a resolved snapshot with explicitly licensed evidence", () => {
-    const licensed = INITIAL_AUTHORITY_SOURCES.map((item) =>
+  it("rejects licensed model-code evidence without governing BC evidence", () => {
+    const sources = licenseSource(reconciledSources(), "npc-2020", "2.5.2.1");
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      context: bcContext,
+      sources,
+      evidence: [
+        {
+          sourceId: "npc-2020",
+          section: "2.5.2.1",
+          content: "Synthetic model-code evidence only.",
+        },
+      ],
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(result.missing).toContain(
+      "Governing primary-source section evidence",
+    );
+  });
+
+  it("rejects BC evidence for a Vancouver ruling", () => {
+    const sources = licenseSource(
+      reconciledSources(),
+      "bc-plumbing-code-2024",
+      "2.5.2.1",
+    );
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      context: { ...bcContext, municipality: "Vancouver" },
+      sources,
+      evidence: [
+        {
+          sourceId: "bc-plumbing-code-2024",
+          section: "2.5.2.1",
+          content: "Synthetic BC evidence only.",
+        },
+      ],
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(result.missing).toContain(
+      "Evidence limited to the selected authority snapshot",
+    );
+  });
+
+  it("rejects a fabricated section locator", () => {
+    const sources = licenseSource(
+      reconciledSources(),
+      "bc-plumbing-code-2024",
+      "2.5.2.1",
+    );
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      context: bcContext,
+      sources,
+      evidence: [
+        {
+          sourceId: "bc-plumbing-code-2024",
+          section: "fabricated-section",
+          content: "Synthetic test evidence.",
+        },
+      ],
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(result.missing).toContain(
+      "Licensed section-level authoritative evidence",
+    );
+  });
+
+  it("rejects restricted metadata-only evidence despite malformed permissions", () => {
+    const sources = reconciledSources().map((item) =>
       item.sourceId === "bc-plumbing-code-2024"
-        ? ({
+        ? {
             ...item,
-            licenseAccessClassification: "open_legislation",
             permittedUses: [
               ...item.permittedUses,
-              "section_retrieval",
-              "model_context",
+              "section_retrieval" as const,
+              "model_context" as const,
             ],
-          } satisfies AuthoritativeSource)
+            authorizedSectionLocators: ["2.5.2.1"],
+          }
         : item,
+    );
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      context: bcContext,
+      sources,
+      evidence: [
+        {
+          sourceId: "bc-plumbing-code-2024",
+          section: "2.5.2.1",
+          content: "Synthetic test evidence.",
+        },
+      ],
+    });
+    expect(result.outcome).toBe("blocked");
+  });
+
+  it("allows only a resolved snapshot with explicitly licensed evidence", () => {
+    const licensed = licenseSource(
+      reconciledSources(),
+      "bc-plumbing-code-2024",
+      "2.5.2.1",
     );
     const result = evaluateCodeSafetyGate({
       question: "Is this venting to code?",
@@ -323,16 +529,45 @@ describe("licensing and code safety gate", () => {
       evidence: [
         {
           sourceId: "bc-plumbing-code-2024",
-          section: "synthetic-section",
+          section: "2.5.2.1",
           content: "Synthetic test evidence only.",
         },
       ],
     });
     expect(result.outcome).toBe("allowed");
     expect(result.authoritySnapshotId).toContain("BC_GENERAL:2024");
-    expect(result.citations[0]?.section).toBe("synthetic-section");
+    expect(result.citations[0]?.section).toBe("2.5.2.1");
   });
 });
+
+function reconciledSources(): AuthoritativeSource[] {
+  return INITIAL_AUTHORITY_SOURCES.map((item) =>
+    item.sourceType === "revision_feed"
+      ? { ...item, contentFingerprint: "verified-test-fingerprint" }
+      : item,
+  );
+}
+
+function licenseSource(
+  sources: AuthoritativeSource[],
+  sourceId: string,
+  locator: string,
+): AuthoritativeSource[] {
+  return sources.map((item) =>
+    item.sourceId === sourceId
+      ? {
+          ...item,
+          licenseAccessClassification: "open_legislation",
+          permittedUses: [
+            ...item.permittedUses,
+            "section_retrieval" as const,
+            "model_context" as const,
+          ],
+          authorizedSectionLocators: [locator],
+        }
+      : item,
+  );
+}
 
 it("defines the photo contract without a jurisdiction field", () => {
   const photoContext: PhotoCodeContext = {

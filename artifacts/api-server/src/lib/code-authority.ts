@@ -40,6 +40,7 @@ export interface AuthoritativeSource {
   status: SourceStatus;
   licenseAccessClassification: LicenseAccessClassification;
   permittedUses: PermittedUse[];
+  authorizedSectionLocators: string[];
   verifiedAt: string;
   contentFingerprint: string | null;
 }
@@ -87,6 +88,7 @@ export interface JurisdictionResolution {
     | "missing_context"
     | "historical_source_required"
     | "edition_conflict"
+    | "transition_context_required"
     | "unknown_special_authority";
   jurisdiction: JurisdictionResolutionCode;
   applicableEdition: string | null;
@@ -143,6 +145,37 @@ export interface CodeSafetyDecision {
 
 const LINK_ONLY: PermittedUse[] = ["metadata", "official_link", "citation"];
 const VERIFIED_AT = "2026-08-11T00:00:00.000Z";
+const SUPPORTED_BC_GENERAL_AUTHORITIES = new Set([
+  "abbotsford",
+  "burnaby",
+  "campbell river",
+  "chilliwack",
+  "coquitlam",
+  "delta",
+  "kamloops",
+  "kelowna",
+  "langley",
+  "maple ridge",
+  "nanaimo",
+  "new westminster",
+  "north vancouver",
+  "penticton",
+  "port coquitlam",
+  "port moody",
+  "prince george",
+  "richmond",
+  "saanich",
+  "surrey",
+  "victoria",
+  "west vancouver",
+  "whistler",
+]);
+const SPECIAL_AUTHORITY_PATTERN =
+  /\b(?:first nation|treaty|indigenous|reserve|nisga'?a|special authority|mine|mining)\b/i;
+const CONFIRMED_APPLICABILITY_PATTERN =
+  /\b(?:new permit application|not an in-stream project|no delayed provisions apply|applicability confirmed by (?:the )?(?:ahj|authority having jurisdiction))\b/i;
+const UNRESOLVED_TRANSITION_PATTERN =
+  /\b(?:existing permit|in-stream project|transition rule unresolved|delayed provision applies|phased permit|prior permit)\b/i;
 
 /** Mirrors the migration's metadata-only seed rows for pure policy tests. */
 export const INITIAL_AUTHORITY_SOURCES: AuthoritativeSource[] = [
@@ -266,7 +299,7 @@ const DETECTOR_RULES: Array<{
   {
     topic: "code_compliance",
     pattern:
-      /\b(?:to code|meet(?:s|ing)? (?:the )?code|code[- ]compliant|code compliance|according to (?:the )?code|regulatory minimum|code requirement)\b/i,
+      /\b(?:to code|meet(?:s|ing)? (?:the )?code|code[- ]compliant|code compliance|according to (?:the )?code|regulatory minimum|code requirement|what size does (?:the )?code require|is (?:this|that|it|these|those) legal|can (?:i|we|you) install (?:this|that|it|these|those)|does (?:this|that|it) pass(?: inspection| code)?)\b/i,
   },
   {
     topic: "required_dimensions",
@@ -274,10 +307,16 @@ const DETECTOR_RULES: Array<{
       /\b(?:required|minimum|maximum|dimension|distance)\b.{0,40}\b(?:size|diameter|height|length|distance|spacing|measurement|mm|cm|metres?|meters?|inches?|feet|ft)\b/i,
     measurements: true,
   },
-  { topic: "clearance", pattern: /\bclearance(?:s)?\b/i, measurements: true },
+  {
+    topic: "clearance",
+    pattern:
+      /\b(?:(?:required|minimum|maximum|code)\b.{0,32}\bclearances?|clearances?\b.{0,32}\b(?:required|minimum|maximum|by code))\b/i,
+    measurements: true,
+  },
   {
     topic: "slope",
-    pattern: /\b(?:slope|grade|fall per foot|fall per metre|fall per meter)\b/i,
+    pattern:
+      /\b(?:(?:required|minimum|maximum|code|drain|pipe|plumbing)\b.{0,32}\b(?:slope|grade|fall per foot|fall per metre|fall per meter)|(?:slope|grade|fall per foot|fall per metre|fall per meter)\b.{0,32}\b(?:required|minimum|maximum|code|drain|pipe|plumbing))\b/i,
     measurements: true,
   },
   {
@@ -287,7 +326,8 @@ const DETECTOR_RULES: Array<{
   },
   {
     topic: "drainage",
-    pattern: /\b(?:drainage|sanitary drain|storm drain|drain pipe)\b/i,
+    pattern:
+      /\b(?:sanitary drain|storm drain|drain pipe|(?:plumbing|code|required)\b.{0,24}\bdrainage|drainage\b.{0,24}\b(?:requirement|code|system))\b/i,
     measurements: true,
   },
   {
@@ -330,21 +370,31 @@ export function classifyCodeSensitiveQuestion(
 export function resolveJurisdiction(
   context: AuthorityContext | undefined,
 ): JurisdictionResolution {
-  const known: string[] = [];
+  const known = suppliedContextProvenance(context);
   const province = normalizePlace(context?.province);
   const municipality = normalizePlace(context?.municipality);
   const ahj = normalizePlace(context?.authorityHavingJurisdiction);
-  const canonicalMunicipality =
-    municipality === "city of vancouver" ? "vancouver" : municipality;
-  const canonicalAhj = ahj === "city of vancouver" ? "vancouver" : ahj;
+  const canonicalMunicipality = canonicalAuthority(municipality);
+  const canonicalAhj = canonicalAuthority(ahj);
+  const suppliedAuthority = [
+    municipality,
+    ahj,
+    ...(context?.knownConditions ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  if (context?.specialAuthority || context?.mineRelated) {
+  if (
+    context?.specialAuthority ||
+    context?.mineRelated ||
+    SPECIAL_AUTHORITY_PATTERN.test(suppliedAuthority)
+  ) {
     return resolution(
       "unknown_special_authority",
       "UNKNOWN_SPECIAL_AUTHORITY",
       null,
       null,
-      ["A special authority or mine-related context was supplied."],
+      known,
       ["Confirmation from the authority having jurisdiction"],
     );
   }
@@ -358,10 +408,7 @@ export function resolveJurisdiction(
       "UNKNOWN_SPECIAL_AUTHORITY",
       null,
       null,
-      [
-        `Municipality (supplied context): ${context?.municipality}`,
-        `Authority having jurisdiction (supplied context): ${context?.authorityHavingJurisdiction}`,
-      ],
+      known,
       ["Resolve conflicting municipality and authority context values"],
     );
   }
@@ -371,13 +418,12 @@ export function resolveJurisdiction(
       "UNKNOWN_SPECIAL_AUTHORITY",
       null,
       null,
-      province ? [`Province supplied: ${context?.province}`] : [],
+      known,
       province
         ? ["Supported British Columbia authority context"]
         : ["Province"],
     );
   }
-  known.push("Province (supplied context): British Columbia");
   if (!municipality && !ahj) {
     return resolution(
       "missing_context",
@@ -389,17 +435,22 @@ export function resolveJurisdiction(
     );
   }
 
-  const isVancouver = [municipality, ahj].some(
-    (value) => value === "vancouver" || value === "city of vancouver",
-  );
+  const authority = canonicalMunicipality || canonicalAhj;
+  const isVancouver = authority === "vancouver";
+  const isSupportedBcGeneral = SUPPORTED_BC_GENERAL_AUTHORITIES.has(authority);
+  if (!isVancouver && !isSupportedBcGeneral) {
+    return resolution(
+      "unknown_special_authority",
+      "UNKNOWN_SPECIAL_AUTHORITY",
+      null,
+      null,
+      known,
+      ["Positive confirmation that the supplied authority uses BC_GENERAL"],
+    );
+  }
   const jurisdiction: ResolvedJurisdiction = isVancouver
     ? "VANCOUVER"
     : "BC_GENERAL";
-  known.push(
-    isVancouver
-      ? "Municipality/AHJ (supplied context): Vancouver"
-      : `Municipality/AHJ (supplied context): ${context?.municipality ?? context?.authorityHavingJurisdiction}`,
-  );
 
   const permitDate = parseDateOnly(context?.permitApplicationDate);
   if (!permitDate) {
@@ -409,7 +460,6 @@ export function resolveJurisdiction(
         : "Permit/application date",
     ]);
   }
-  known.push(`Permit/application date (supplied context): ${permitDate}`);
   const threshold = jurisdiction === "VANCOUVER" ? "2025-09-15" : "2024-03-08";
   if (permitDate < threshold) {
     return resolution(
@@ -423,11 +473,6 @@ export function resolveJurisdiction(
   }
 
   const edition = jurisdiction === "VANCOUVER" ? "2025" : "2024";
-  if (context?.explicitCodeEdition) {
-    known.push(
-      `Explicit code edition (supplied context): ${context.explicitCodeEdition}`,
-    );
-  }
   if (
     context?.explicitCodeEdition &&
     !new RegExp(`(?:^|\\D)${edition}(?:\\D|$)`).test(
@@ -443,6 +488,37 @@ export function resolveJurisdiction(
       [
         `Resolve conflict between permit-date edition ${edition} and explicitly supplied edition ${context.explicitCodeEdition}`,
       ],
+    );
+  }
+  const conditions = context?.knownConditions ?? [];
+  const hasConfirmedApplicability = conditions.some((condition) =>
+    CONFIRMED_APPLICABILITY_PATTERN.test(condition),
+  );
+  const hasUnresolvedTransition = conditions.some(
+    (condition) =>
+      UNRESOLVED_TRANSITION_PATTERN.test(condition) &&
+      !/\b(?:not an in-stream project|no delayed provisions apply)\b/i.test(
+        condition,
+      ),
+  );
+  const transitionMissing: string[] = [];
+  if (!context?.projectType?.trim()) transitionMissing.push("Project type");
+  if (!hasConfirmedApplicability)
+    transitionMissing.push(
+      "Confirmed transition/applicability basis from project conditions or the AHJ",
+    );
+  if (hasUnresolvedTransition)
+    transitionMissing.push(
+      "Resolution of in-stream or delayed-provision rules",
+    );
+  if (transitionMissing.length > 0) {
+    return resolution(
+      "transition_context_required",
+      jurisdiction,
+      null,
+      permitDate,
+      known,
+      transitionMissing,
     );
   }
   return resolution("resolved", jurisdiction, edition, permitDate, known, []);
@@ -472,7 +548,7 @@ export function selectAuthoritySnapshot(
       item.edition === resolved.applicableEdition &&
       isEffectiveOn(item, resolved.effectiveDateBasis!),
   );
-  if (primary.length === 0) return null;
+  if (primary.length !== 1) return null;
   const model = sources.filter(
     (item) =>
       item.jurisdiction === "CANADA_MODEL" &&
@@ -489,6 +565,7 @@ export function selectAuthoritySnapshot(
             isEffectiveOn(item, resolved.effectiveDateBasis!),
         )
       : [];
+  if (revisionFeeds.length > 1) return null;
   const selected = [...primary, ...revisionFeeds, ...model].sort(
     (left, right) => right.retrievalPriority - left.retrievalPriority,
   );
@@ -504,7 +581,7 @@ export function selectAuthoritySnapshot(
     edition: resolved.applicableEdition,
     effectiveDateBasis: resolved.effectiveDateBasis,
     sources: selected,
-    requiresReview: selected.some((item) => item.status === "requires_review"),
+    requiresReview: selected.some(sourceNeedsReconciliation),
   };
 }
 
@@ -512,6 +589,12 @@ export function sourceAllowsUse(
   source: AuthoritativeSource,
   use: PermittedUse,
 ): boolean {
+  if (
+    source.licenseAccessClassification === "restricted_metadata_only" &&
+    ["section_retrieval", "model_context", "embedding"].includes(use)
+  ) {
+    return false;
+  }
   return source.permittedUses.includes(use);
 }
 
@@ -522,6 +605,33 @@ export function markRevisionFeedObservation(
   if (item.sourceType !== "revision_feed") return item;
   if (item.contentFingerprint === observedFingerprint) return item;
   return { ...item, status: "requires_review" };
+}
+
+function sourceNeedsReconciliation(item: AuthoritativeSource): boolean {
+  return (
+    item.status === "requires_review" ||
+    (item.sourceType === "revision_feed" && !item.contentFingerprint?.trim())
+  );
+}
+
+function evidenceIsAuthorized(
+  evidence: AuthoritativeEvidence,
+  source: AuthoritativeSource,
+  effectiveDateBasis: string | undefined,
+): boolean {
+  const locator = normalizeLocator(evidence.section);
+  return Boolean(
+    locator &&
+    evidence.content.trim() &&
+    source.status !== "requires_review" &&
+    effectiveDateBasis &&
+    isEffectiveOn(source, effectiveDateBasis) &&
+    sourceAllowsUse(source, "section_retrieval") &&
+    sourceAllowsUse(source, "model_context") &&
+    source.authorizedSectionLocators.some(
+      (authorized) => normalizeLocator(authorized) === locator,
+    ),
+  );
 }
 
 export function evaluateCodeSafetyGate(input: {
@@ -554,7 +664,7 @@ export function evaluateCodeSafetyGate(input: {
   }
   if (!snapshot) missing.push("Applicable authoritative source snapshot");
   else if (snapshot.requiresReview)
-    missing.push("Reconciliation of the changed official revision feed");
+    missing.push("Current revision-feed fingerprint reconciliation");
 
   const evidence = input.evidence ?? [];
   const snapshotIds = new Set(
@@ -569,14 +679,24 @@ export function evaluateCodeSafetyGate(input: {
     );
     return Boolean(
       registered &&
-      item.section.trim() &&
-      item.content.trim() &&
-      sourceAllowsUse(registered, "section_retrieval") &&
-      sourceAllowsUse(registered, "model_context"),
+      evidenceIsAuthorized(item, registered, snapshot?.effectiveDateBasis),
     );
   });
   if (licensedEvidence.length === 0) {
     missing.push("Licensed section-level authoritative evidence");
+  }
+  const governingType =
+    snapshot?.jurisdiction === "VANCOUVER" ? "municipal_bylaw" : "adopted_code";
+  const governingSource = snapshot?.sources.find(
+    (item) =>
+      item.jurisdiction === snapshot.jurisdiction &&
+      item.sourceType === governingType,
+  );
+  const governingEvidence = licensedEvidence.filter(
+    (item) => item.sourceId === governingSource?.sourceId,
+  );
+  if (snapshot && governingEvidence.length === 0) {
+    missing.push("Governing primary-source section evidence");
   }
 
   const citationSources = snapshot?.sources.length
@@ -592,7 +712,7 @@ export function evaluateCodeSafetyGate(input: {
     ),
   );
   const uniqueMissing = [...new Set(missing)];
-  const allowed = uniqueMissing.length === 0 && licensedEvidence.length > 0;
+  const allowed = uniqueMissing.length === 0 && governingEvidence.length > 0;
   return decision(
     allowed ? "allowed" : "blocked",
     sensitivity,
@@ -657,6 +777,40 @@ export function authoritativeSourceFromRow(
   ];
   if (required.some((key) => typeof row[key] !== "string")) return null;
   if (!Array.isArray(row["permitted_uses"])) return null;
+  if (
+    !["BC_GENERAL", "VANCOUVER", "CANADA_MODEL"].includes(
+      row["jurisdiction"] as string,
+    ) ||
+    !["current", "superseded", "requires_review"].includes(
+      row["status"] as string,
+    ) ||
+    ![
+      "legislation",
+      "regulation",
+      "adopted_code",
+      "model_code",
+      "revision_feed",
+      "bulletin_index",
+      "municipal_bylaw",
+    ].includes(row["source_type"] as string) ||
+    !["open_legislation", "restricted_metadata_only"].includes(
+      row["license_access_classification"] as string,
+    ) ||
+    (row["permitted_uses"] as unknown[]).some(
+      (value) =>
+        typeof value !== "string" ||
+        ![
+          "metadata",
+          "official_link",
+          "citation",
+          "section_retrieval",
+          "model_context",
+          "embedding",
+        ].includes(value),
+    )
+  ) {
+    return null;
+  }
   return {
     sourceId: row["source_id"] as string,
     authority: row["authority"] as string,
@@ -682,6 +836,11 @@ export function authoritativeSourceFromRow(
     permittedUses: (row["permitted_uses"] as unknown[]).filter(
       (value): value is PermittedUse => typeof value === "string",
     ),
+    authorizedSectionLocators: Array.isArray(row["authorized_section_locators"])
+      ? (row["authorized_section_locators"] as unknown[]).filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
     verifiedAt: row["verified_at"] as string,
     contentFingerprint: nullableString(row["content_fingerprint"]),
   };
@@ -708,6 +867,7 @@ export function authoritativeSourceToRow(
     status: item.status,
     license_access_classification: item.licenseAccessClassification,
     permitted_uses: item.permittedUses,
+    authorized_section_locators: item.authorizedSectionLocators,
     verified_at: item.verifiedAt,
     content_fingerprint: item.contentFingerprint,
   };
@@ -726,6 +886,7 @@ function source(
     | "permittedUses"
     | "verifiedAt"
     | "contentFingerprint"
+    | "authorizedSectionLocators"
   > &
     Partial<
       Pick<
@@ -750,6 +911,7 @@ function source(
     licenseAccessClassification: "restricted_metadata_only",
     ...input,
     permittedUses: [...LINK_ONLY],
+    authorizedSectionLocators: [],
     verifiedAt: VERIFIED_AT,
     contentFingerprint: null,
   };
@@ -787,14 +949,18 @@ function candidateSources(
   resolved: JurisdictionResolution,
   sources: AuthoritativeSource[],
 ): AuthoritativeSource[] {
+  if (
+    resolved.jurisdiction !== "BC_GENERAL" &&
+    resolved.jurisdiction !== "VANCOUVER"
+  ) {
+    return [];
+  }
   const type =
     resolved.jurisdiction === "VANCOUVER" ? "municipal_bylaw" : "adopted_code";
-  const jurisdiction =
-    resolved.jurisdiction === "VANCOUVER" ? "VANCOUVER" : "BC_GENERAL";
   return sources
     .filter(
       (item) =>
-        item.jurisdiction === jurisdiction &&
+        item.jurisdiction === resolved.jurisdiction &&
         item.sourceType === type &&
         item.status === "current",
     )
@@ -811,6 +977,10 @@ function buildNextSteps(
     steps.push("Provide the municipality and authority having jurisdiction.");
   if (!resolved.effectiveDateBasis)
     steps.push("Provide the permit or application date in YYYY-MM-DD format.");
+  if (resolved.status === "transition_context_required")
+    steps.push(
+      "Provide the project type and an AHJ-confirmed transition/applicability basis, including any in-stream or delayed provisions.",
+    );
   if (sensitivity.requiresMeasurements)
     steps.push(
       "Provide the relevant pipe sizes, distances, slope, connection layout, and other field measurements.",
@@ -888,6 +1058,68 @@ function parseDateOnly(value: string | undefined): string | null {
     parsed.toISOString().slice(0, 10) === value
     ? value
     : null;
+}
+
+function suppliedContextProvenance(
+  context: AuthorityContext | undefined,
+): string[] {
+  if (!context) return [];
+  const known: string[] = [];
+  if (context.province?.trim())
+    known.push(`Province (supplied context): ${context.province}`);
+  if (
+    context.municipality?.trim() &&
+    context.authorityHavingJurisdiction?.trim()
+  ) {
+    known.push(`Municipality (supplied context): ${context.municipality}`);
+    known.push(
+      `Authority having jurisdiction (supplied context): ${context.authorityHavingJurisdiction}`,
+    );
+  } else if (
+    context.municipality?.trim() ||
+    context.authorityHavingJurisdiction?.trim()
+  ) {
+    known.push(
+      `Municipality/AHJ (supplied context): ${context.municipality ?? context.authorityHavingJurisdiction}`,
+    );
+  }
+  if (context.permitApplicationDate?.trim())
+    known.push(
+      `Permit/application date (supplied context): ${context.permitApplicationDate}`,
+    );
+  if (context.explicitCodeEdition?.trim())
+    known.push(
+      `Explicit code edition (supplied context): ${context.explicitCodeEdition}`,
+    );
+  if (context.projectType?.trim())
+    known.push(`Project type (supplied context): ${context.projectType}`);
+  for (const condition of context.knownConditions ?? []) {
+    if (condition.trim())
+      known.push(`Known condition (supplied context): ${condition}`);
+  }
+  if (context.specialAuthority !== undefined)
+    known.push(
+      `Special-authority flag (supplied context): ${String(context.specialAuthority)}`,
+    );
+  if (context.mineRelated !== undefined)
+    known.push(
+      `Mine-related flag (supplied context): ${String(context.mineRelated)}`,
+    );
+  return known;
+}
+
+function canonicalAuthority(value: string): string {
+  return value
+    .replace(
+      /^(?:city|district|town|village|township|municipality) of (?:the )?/,
+      "",
+    )
+    .replace(/^corporation of (?:the )?/, "")
+    .trim();
+}
+
+function normalizeLocator(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, "").replace(/[–—]/g, "-");
 }
 
 function normalizePlace(value: string | undefined): string {
