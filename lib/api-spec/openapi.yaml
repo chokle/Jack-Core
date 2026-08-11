@@ -1363,6 +1363,48 @@ components:
         message:
           type: string
           minLength: 1
+        authorityContext:
+          $ref: "#/components/schemas/AuthorityContext"
+
+    AuthorityContext:
+      type: object
+      description: >-
+        Trusted user/project context for deterministic authority resolution.
+        Jurisdiction must not be inferred from photos, EXIF, faces, signs, or model guesses.
+      properties:
+        province:
+          type: string
+        municipality:
+          type: string
+        permitApplicationDate:
+          type: string
+          format: date
+        explicitCodeEdition:
+          type: string
+        authorityHavingJurisdiction:
+          type: string
+        specialAuthority:
+          type: boolean
+        mineRelated:
+          type: boolean
+        projectType:
+          type: string
+        measurements:
+          type: array
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+              unit:
+                type: string
+        knownConditions:
+          type: array
+          items:
+            type: string
 
     ChatResponse:
       type: object
@@ -1388,6 +1430,96 @@ components:
               minimum: 0
             summary:
               type: string
+        codeSafety:
+          $ref: "#/components/schemas/CodeSafetyResult"
+
+    CodeSafetyResult:
+      type: object
+      required:
+        [outcome, jurisdiction, known, missing, reason, nextSteps, citations]
+      properties:
+        outcome:
+          type: string
+          enum: [bypass, blocked, allowed]
+        jurisdiction:
+          type: string
+          enum: [BC_GENERAL, VANCOUVER, UNKNOWN_SPECIAL_AUTHORITY]
+        applicableEdition:
+          type: ["string", "null"]
+        authoritySnapshotId:
+          type: ["string", "null"]
+        known:
+          type: array
+          items:
+            type: string
+        missing:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        nextSteps:
+          type: array
+          items:
+            type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthorityCitationMetadata"
+
+    AuthorityCitationMetadata:
+      type: object
+      required:
+        [
+          sourceId,
+          jurisdiction,
+          authority,
+          document,
+          edition,
+          revision,
+          section,
+          subsection,
+          effectiveDateBasis,
+          sourceStatus,
+          officialSourceUrl,
+          amendmentIndicator,
+          contentAvailability,
+          citationLabel,
+        ]
+      properties:
+        sourceId:
+          type: string
+        jurisdiction:
+          type: string
+          enum: [BC_GENERAL, VANCOUVER, UNKNOWN_SPECIAL_AUTHORITY]
+        authority:
+          type: string
+        document:
+          type: string
+        edition:
+          type: ["string", "null"]
+        revision:
+          type: ["string", "null"]
+        section:
+          type: ["string", "null"]
+        subsection:
+          type: ["string", "null"]
+        effectiveDateBasis:
+          type: ["string", "null"]
+        sourceStatus:
+          type: string
+          enum: [current, superseded, requires_review]
+        officialSourceUrl:
+          type: string
+          format: uri
+        amendmentIndicator:
+          type: string
+          enum: [bc_amendment, vancouver_specific, none]
+        contentAvailability:
+          type: string
+          enum: [metadata_only, licensed_section]
+        citationLabel:
+          type: string
 
     Citation:
       type: object
@@ -1407,7 +1539,7 @@ components:
           type: ["string", "null"]
         sourceType:
           type: string
-          enum: [video, knowledge]
+          enum: [video, knowledge, authority]
           description: >-
             Origin of the citation. "video" (the default when omitted) cites a
             transcript segment. "knowledge" cites a non-video Knowledge Entry —
@@ -1435,6 +1567,34 @@ components:
             (metadata `evidenceCount`). Drives a "confirmed across N videos" trust
             badge; values below 2 are not corroboration and are not badged. Absent
             when there is no corroboration signal.
+        jurisdiction:
+          type: string
+        authority:
+          type: string
+        documentTitle:
+          type: string
+        edition:
+          type: ["string", "null"]
+        revision:
+          type: ["string", "null"]
+        section:
+          type: ["string", "null"]
+        subsection:
+          type: ["string", "null"]
+        effectiveDateBasis:
+          type: ["string", "null"]
+        sourceStatus:
+          type: string
+          enum: [current, superseded, requires_review]
+        officialSourceUrl:
+          type: string
+          format: uri
+        amendmentIndicator:
+          type: string
+          enum: [bc_amendment, vancouver_specific, none]
+        contentAvailability:
+          type: string
+          enum: [metadata_only, licensed_section]
 
     ChatMessage:
       type: object

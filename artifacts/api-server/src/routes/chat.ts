@@ -24,6 +24,14 @@ import {
   recordServerAskJackEvent,
   requestIdentifier,
 } from "../lib/activity-telemetry.js";
+import {
+  authoritativeSourceFromRow,
+  classifyCodeSensitiveQuestion,
+  evaluateCodeSafetyGate,
+  formatCodeSafetyRefusal,
+  type AuthoritativeSource,
+  type AuthorityCitation,
+} from "../lib/code-authority.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -40,13 +48,38 @@ const CUTTING_QUERY_KEYWORDS =
 
 const router = Router();
 
+interface ChatCitation {
+  videoId: string;
+  videoTitle: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  thumbnailUrl: string | null;
+  sourceType: "video" | "knowledge" | "authority";
+  entryId?: string;
+  verified?: boolean;
+  sourceCount?: number;
+  jurisdiction?: string;
+  authority?: string;
+  documentTitle?: string;
+  edition?: string | null;
+  revision?: string | null;
+  section?: string | null;
+  subsection?: string | null;
+  effectiveDateBasis?: string | null;
+  sourceStatus?: string;
+  officialSourceUrl?: string;
+  amendmentIndicator?: string;
+  contentAvailability?: string;
+}
+
 router.post("/chat", aiQueryLimiter, async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.message });
 
-    const { message } = parsed.data;
+    const { message, authorityContext } = parsed.data;
 
     if (message.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({
@@ -68,6 +101,64 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+
+    const sensitivity = classifyCodeSensitiveQuestion(message);
+    if (sensitivity.isCodeSensitive) {
+      const authoritativeSources = await loadAuthoritativeSources(req.log);
+      const codeSafety = evaluateCodeSafetyGate({
+        question: message,
+        context: authorityContext,
+        sources: authoritativeSources,
+      });
+      if (codeSafety.outcome !== "allowed") {
+        const answer = formatCodeSafetyRefusal(codeSafety);
+        const citations = codeSafety.citations.map(toChatAuthorityCitation);
+        const { data: userMessage, error: userMessageError } = await supabase
+          .from("chat_messages")
+          .insert({
+            session_id: session,
+            user_id: userId,
+            role: "user",
+            content: message,
+            citations: [],
+          })
+          .select("id")
+          .single();
+        if (userMessageError) throw userMessageError;
+        const chatMessageId =
+          userMessage &&
+          typeof (userMessage as Record<string, unknown>)["id"] === "string"
+            ? String((userMessage as Record<string, unknown>)["id"])
+            : session;
+
+        const { error: assistantMessageError } = await supabase
+          .from("chat_messages")
+          .insert({
+            session_id: session,
+            user_id: userId,
+            role: "assistant",
+            content: answer,
+            citations,
+          });
+        if (assistantMessageError) throw assistantMessageError;
+
+        await recordServerAskJackEvent({
+          req,
+          actorIdentity: await resolveIdentity(req),
+          eventType: "ask_jack_completed",
+          correlationId: chatMessageId,
+          citationCount: citations.length,
+        });
+
+        return res.json({
+          answer,
+          citations,
+          usedInternalKnowledge: false,
+          learning: { status: "discarded", extractedCount: 0 },
+          codeSafety,
+        });
+      }
+    }
 
     const embedding = await createEmbedding(message);
 
@@ -113,18 +204,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     // segment; "knowledge" cites a Knowledge Entry (reusing videoTitle/text/
     // thumbnailUrl for the entry's title/snippet/image so the client renders it
     // without a bespoke shape — see the Citation schema in openapi.yaml).
-    const citations: Array<{
-      videoId: string;
-      videoTitle: string;
-      startTime: number;
-      endTime: number;
-      text: string;
-      thumbnailUrl: string | null;
-      sourceType: "video" | "knowledge";
-      entryId?: string;
-      verified?: boolean;
-      sourceCount?: number;
-    }> = [];
+    const citations: ChatCitation[] = [];
 
     let contextText = "";
     const topicBias = inferPromptTopic(message);
@@ -527,6 +607,51 @@ router.delete("/chat/history", async (req, res) => {
     return res.status(500).json({ error: "Failed to clear chat history" });
   }
 });
+
+async function loadAuthoritativeSources(log: {
+  error: (obj: Record<string, unknown>, msg: string) => void;
+}): Promise<AuthoritativeSource[]> {
+  const { data, error } = await supabase
+    .from("authoritative_sources")
+    .select("*");
+  if (error) {
+    log.error(
+      { err: error },
+      "authoritative source registry unavailable; code answer will fail closed",
+    );
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>)
+    .map(authoritativeSourceFromRow)
+    .filter((source): source is AuthoritativeSource => source !== null);
+}
+
+function toChatAuthorityCitation(citation: AuthorityCitation): ChatCitation {
+  return {
+    videoId: "",
+    videoTitle: citation.citationLabel,
+    startTime: 0,
+    endTime: 0,
+    text:
+      citation.contentAvailability === "metadata_only"
+        ? "Official source metadata only; no licensed section-level text is indexed."
+        : `Authoritative section ${citation.section ?? "available"}`,
+    thumbnailUrl: null,
+    sourceType: "authority",
+    jurisdiction: citation.jurisdiction,
+    authority: citation.authority,
+    documentTitle: citation.document,
+    edition: citation.edition,
+    revision: citation.revision,
+    section: citation.section,
+    subsection: citation.subsection,
+    effectiveDateBasis: citation.effectiveDateBasis,
+    sourceStatus: citation.sourceStatus,
+    officialSourceUrl: citation.officialSourceUrl,
+    amendmentIndicator: citation.amendmentIndicator,
+    contentAvailability: citation.contentAvailability,
+  };
+}
 
 interface GraphMemoryMatch {
   id: string;

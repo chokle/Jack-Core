@@ -389,8 +389,58 @@ export const SemanticSearchResponse = zod.object({
 
 
 
+const AuthorityContextSchema = zod.object({
+  "province": zod.string().optional(),
+  "municipality": zod.string().optional(),
+  "permitApplicationDate": zod.string().date().optional(),
+  "explicitCodeEdition": zod.string().optional(),
+  "authorityHavingJurisdiction": zod.string().optional(),
+  "specialAuthority": zod.boolean().optional(),
+  "mineRelated": zod.boolean().optional(),
+  "projectType": zod.string().optional(),
+  "measurements": zod.array(zod.object({
+  "name": zod.string(),
+  "value": zod.string(),
+  "unit": zod.string().optional()
+})).optional(),
+  "knownConditions": zod.array(zod.string()).optional()
+})
+
+const AuthorityCitationMetadataSchema = zod.object({
+  "sourceId": zod.string(),
+  "jurisdiction": zod.enum(['BC_GENERAL', 'VANCOUVER', 'UNKNOWN_SPECIAL_AUTHORITY']),
+  "authority": zod.string(),
+  "document": zod.string(),
+  "edition": zod.string().nullable(),
+  "revision": zod.string().nullable(),
+  "section": zod.string().nullable(),
+  "subsection": zod.string().nullable(),
+  "effectiveDateBasis": zod.string().nullable(),
+  "sourceStatus": zod.enum(['current', 'superseded', 'requires_review']),
+  "officialSourceUrl": zod.string().url(),
+  "amendmentIndicator": zod.enum(['bc_amendment', 'vancouver_specific', 'none']),
+  "contentAvailability": zod.enum(['metadata_only', 'licensed_section']),
+  "citationLabel": zod.string()
+})
+
+const AuthorityCitationFields = {
+  "jurisdiction": zod.enum(['BC_GENERAL', 'VANCOUVER', 'UNKNOWN_SPECIAL_AUTHORITY']).optional(),
+  "authority": zod.string().optional(),
+  "documentTitle": zod.string().optional(),
+  "edition": zod.string().nullish(),
+  "revision": zod.string().nullish(),
+  "section": zod.string().nullish(),
+  "subsection": zod.string().nullish(),
+  "effectiveDateBasis": zod.string().nullish(),
+  "sourceStatus": zod.enum(['current', 'superseded', 'requires_review']).optional(),
+  "officialSourceUrl": zod.string().url().optional(),
+  "amendmentIndicator": zod.enum(['bc_amendment', 'vancouver_specific', 'none']).optional(),
+  "contentAvailability": zod.enum(['metadata_only', 'licensed_section']).optional()
+}
+
 export const AskJackBody = zod.object({
-  "message": zod.string().min(1)
+  "message": zod.string().min(1),
+  "authorityContext": AuthorityContextSchema.optional()
 })
 
 export const askJackResponseLearningExtractedCountMin = 0;
@@ -406,17 +456,29 @@ export const AskJackResponse = zod.object({
   "endTime": zod.number(),
   "text": zod.string(),
   "thumbnailUrl": zod.string().nullish(),
-  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
+  "sourceType": zod.enum(['video', 'knowledge', 'authority']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
   "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
   "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
-  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
+  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.'),
+  ...AuthorityCitationFields
 })),
   "usedInternalKnowledge": zod.boolean().optional(),
   "learning": zod.object({
   "status": zod.enum(['verified', 'discarded', 'failed']),
   "extractedCount": zod.number().min(askJackResponseLearningExtractedCountMin),
   "summary": zod.string().optional()
-})
+}),
+  "codeSafety": zod.object({
+  "outcome": zod.enum(['bypass', 'blocked', 'allowed']),
+  "jurisdiction": zod.enum(['BC_GENERAL', 'VANCOUVER', 'UNKNOWN_SPECIAL_AUTHORITY']),
+  "applicableEdition": zod.string().nullish(),
+  "authoritySnapshotId": zod.string().nullish(),
+  "known": zod.array(zod.string()),
+  "missing": zod.array(zod.string()),
+  "reason": zod.string(),
+  "nextSteps": zod.array(zod.string()),
+  "citations": zod.array(AuthorityCitationMetadataSchema)
+}).optional()
 })
 
 
@@ -434,10 +496,11 @@ export const GetChatHistoryResponseItem = zod.object({
   "endTime": zod.number(),
   "text": zod.string(),
   "thumbnailUrl": zod.string().nullish(),
-  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
+  "sourceType": zod.enum(['video', 'knowledge', 'authority']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
   "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
   "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
-  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
+  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.'),
+  ...AuthorityCitationFields
 })).optional(),
   "createdAt": zod.string()
 })

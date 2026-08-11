@@ -320,9 +320,29 @@ export interface SearchResults {
   results: SearchResult[];
 }
 
+export interface AuthorityContextMeasurementsItem {
+  name: string;
+  value: string;
+  unit?: string;
+}
+
+export interface AuthorityContext {
+  province?: string;
+  municipality?: string;
+  permitApplicationDate?: string;
+  explicitCodeEdition?: string;
+  authorityHavingJurisdiction?: string;
+  specialAuthority?: boolean;
+  mineRelated?: boolean;
+  projectType?: string;
+  measurements?: AuthorityContextMeasurementsItem[];
+  knownConditions?: string[];
+}
+
 export interface ChatInput {
   /** @minLength 1 */
   message: string;
+  authorityContext?: AuthorityContext;
 }
 
 export type ChatResponseLearningStatus = typeof ChatResponseLearningStatus[keyof typeof ChatResponseLearningStatus];
@@ -350,6 +370,7 @@ export type CitationSourceType = typeof CitationSourceType[keyof typeof Citation
 export const CitationSourceType = {
   video: 'video',
   knowledge: 'knowledge',
+  authority: 'authority',
 } as const;
 
 export interface Citation {
@@ -371,6 +392,47 @@ export interface Citation {
   verified?: boolean;
   /** How many independent sources corroborate this citation. For "video" citations it is the distinct source videos of the covering concept; for "knowledge" citations it is the field note's own evidence count (metadata `evidenceCount`). Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal. */
   sourceCount?: number;
+  jurisdiction?: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  authority?: string;
+  documentTitle?: string;
+  edition?: string | null;
+  revision?: string | null;
+  section?: string | null;
+  subsection?: string | null;
+  effectiveDateBasis?: string | null;
+  sourceStatus?: 'current' | 'superseded' | 'requires_review';
+  officialSourceUrl?: string;
+  amendmentIndicator?: 'bc_amendment' | 'vancouver_specific' | 'none';
+  contentAvailability?: 'metadata_only' | 'licensed_section';
+}
+
+export interface AuthorityCitationMetadata {
+  sourceId: string;
+  jurisdiction: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  authority: string;
+  document: string;
+  edition: string | null;
+  revision: string | null;
+  section: string | null;
+  subsection: string | null;
+  effectiveDateBasis: string | null;
+  sourceStatus: 'current' | 'superseded' | 'requires_review';
+  officialSourceUrl: string;
+  amendmentIndicator: 'bc_amendment' | 'vancouver_specific' | 'none';
+  contentAvailability: 'metadata_only' | 'licensed_section';
+  citationLabel: string;
+}
+
+export interface CodeSafetyResult {
+  outcome: 'bypass' | 'blocked' | 'allowed';
+  jurisdiction: 'BC_GENERAL' | 'VANCOUVER' | 'UNKNOWN_SPECIAL_AUTHORITY';
+  applicableEdition?: string | null;
+  authoritySnapshotId?: string | null;
+  known: string[];
+  missing: string[];
+  reason: string;
+  nextSteps: string[];
+  citations: AuthorityCitationMetadata[];
 }
 
 export interface ChatResponse {
@@ -378,6 +440,7 @@ export interface ChatResponse {
   citations: Citation[];
   usedInternalKnowledge?: boolean;
   learning: ChatResponseLearning;
+  codeSafety?: CodeSafetyResult;
 }
 
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];

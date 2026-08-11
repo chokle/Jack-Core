@@ -28,7 +28,11 @@ import {
   type Block,
   type Run,
 } from "@/lib/parse-answer";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface StructuredAnswerProps {
   content: string;
@@ -58,7 +62,10 @@ function fmtTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function deriveConfidence(citations: Citation[], used?: boolean): { label: string; tone: string } {
+export function deriveConfidence(
+  citations: Citation[],
+  used?: boolean,
+): { label: string; tone: string } {
   const n = citations.length;
   if (n >= 2) return { label: "High confidence", tone: "high" };
   if (n === 1) return { label: "Medium confidence", tone: "medium" };
@@ -119,7 +126,13 @@ function TrustBadge({
 // trust signal from retrieval: `verified` = a mentor reviewer confirmed a
 // covering concept; `sourceCount` >= 2 = the claim is corroborated across that
 // many videos. Neutral/untrusted citations render nothing (return null).
-export function TrustBadges({ verified, sourceCount }: { verified?: boolean; sourceCount?: number | null }) {
+export function TrustBadges({
+  verified,
+  sourceCount,
+}: {
+  verified?: boolean;
+  sourceCount?: number | null;
+}) {
   const corroborated = typeof sourceCount === "number" && sourceCount >= 2;
   if (!verified && !corroborated) return null;
   return (
@@ -151,7 +164,10 @@ export function fastScanRuns(runs: Run[]): Run[] {
   if (runs.some((run) => run.bold)) return runs;
 
   const chunks =
-    runsToText(runs).match(/[^,;.!?]+(?:[,;.!?]+|$)/g)?.map((text) => text.trim()).filter(Boolean) ?? [];
+    runsToText(runs)
+      .match(/[^,;.!?]+(?:[,;.!?]+|$)/g)
+      ?.map((text) => text.trim())
+      .filter(Boolean) ?? [];
   let highlighted = 0;
   const emphasized = chunks.map((text) => {
     const bold = highlighted < 3 && FAST_SCAN_SIGNAL.test(text);
@@ -208,7 +224,9 @@ function BlockView({ block }: { block: Block }) {
           <span className="text-foreground/90">
             {"kv" in item ? (
               <>
-                <span className="font-semibold text-primary">{item.kv.label}: </span>
+                <span className="font-semibold text-primary">
+                  {item.kv.label}:{" "}
+                </span>
                 <span className="text-white">
                   <Runs runs={item.kv.value} />
                 </span>
@@ -229,7 +247,9 @@ function SectionCard({ section }: { section: AnswerSection }) {
     <div className="rounded-lg border border-card-border bg-card p-3 space-y-2">
       <div className="flex items-center gap-2">
         <Icon className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-primary">{section.title}</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-primary">
+          {section.title}
+        </h4>
       </div>
       <div className="space-y-2">
         {section.blocks.map((b, i) => (
@@ -251,7 +271,10 @@ export function StructuredAnswer({
   const parsed = parseAnswer(content);
   const cites = citations ?? [];
   const confidence = deriveConfidence(cites, usedInternalKnowledge);
-  const sections = cites.length > 0 ? parsed.sections.filter((s) => s.key !== "sources") : parsed.sections;
+  const sections =
+    cites.length > 0
+      ? parsed.sections.filter((s) => s.key !== "sources")
+      : parsed.sections;
   const safetySections = sections.filter((s) => s.key === "safety");
   const detailSections = sections.filter((s) => s.key !== "safety");
   const hasDetail = detailSections.length > 0;
@@ -268,8 +291,12 @@ export function StructuredAnswer({
       </div>
 
       <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
-        <div className="mb-1.5 text-[10px] font-mono uppercase tracking-wider text-primary">Short Answer</div>
-        <p className="text-[15px] font-medium leading-snug text-white break-words">{parsed.shortAnswer}</p>
+        <div className="mb-1.5 text-[10px] font-mono uppercase tracking-wider text-primary">
+          Short Answer
+        </div>
+        <p className="text-[15px] font-medium leading-snug text-white break-words">
+          {parsed.shortAnswer}
+        </p>
       </div>
 
       {safetySections.map((s, i) => (
@@ -283,7 +310,9 @@ export function StructuredAnswer({
             onClick={() => setOpen((o) => !o)}
             className="flex min-h-11 w-full items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
           >
-            <span className="text-sm font-semibold text-foreground">{open ? "Show Less" : "Expand Answer"}</span>
+            <span className="text-sm font-semibold text-foreground">
+              {open ? "Show Less" : "Expand Answer"}
+            </span>
             {open ? (
               <ChevronUp className="h-4 w-4 text-primary" />
             ) : (
@@ -314,10 +343,52 @@ export function StructuredAnswer({
         <div className="rounded-xl border border-card-border bg-card p-3 space-y-3">
           <div className="flex items-center gap-1.5">
             <Film className="h-3.5 w-3.5 text-primary flex-shrink-0" />
-            <span className="text-[10px] font-mono uppercase tracking-wider text-primary">Source</span>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-primary">
+              Source
+            </span>
           </div>
           {cites.map((c, i) => {
-            const sep = i > 0 ? "space-y-2 border-t border-border pt-3" : "space-y-2";
+            const sep =
+              i > 0 ? "space-y-2 border-t border-border pt-3" : "space-y-2";
+            if (c.sourceType === "authority") {
+              return (
+                <div key={i} className={sep}>
+                  <div className="flex items-center gap-2">
+                    <BookMarked className="h-4 w-4 flex-shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1 text-sm font-semibold leading-tight text-white">
+                      {c.videoTitle}
+                    </div>
+                    <span className="flex-shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-primary">
+                      Authority
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {c.jurisdiction && (
+                      <div>Jurisdiction: {c.jurisdiction}</div>
+                    )}
+                    {c.edition && <div>Edition: {c.edition}</div>}
+                    {c.revision && <div>Revision: {c.revision}</div>}
+                    {c.effectiveDateBasis && (
+                      <div>Effective-date basis: {c.effectiveDateBasis}</div>
+                    )}
+                    {c.contentAvailability === "metadata_only" && (
+                      <div>No licensed section-level text is indexed.</div>
+                    )}
+                  </div>
+                  {c.officialSourceUrl && (
+                    <a
+                      href={c.officialSourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/35 bg-primary/10 text-sm font-semibold text-primary transition-colors hover:bg-primary/20"
+                    >
+                      <Link2 className="h-4 w-4" />
+                      Open official source
+                    </a>
+                  )}
+                </div>
+              );
+            }
             // A "knowledge" citation is a non-video Knowledge Entry: surface its
             // image and snippet, with no clip to jump to.
             if (c.sourceType === "knowledge") {
@@ -333,9 +404,14 @@ export function StructuredAnswer({
                     </span>
                   </div>
                   {c.text && (
-                    <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{c.text}</div>
+                    <div className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                      {c.text}
+                    </div>
                   )}
-                  <TrustBadges verified={c.verified} sourceCount={c.sourceCount} />
+                  <TrustBadges
+                    verified={c.verified}
+                    sourceCount={c.sourceCount}
+                  />
                   {onFieldNoteClick && (
                     <button
                       type="button"
@@ -349,7 +425,11 @@ export function StructuredAnswer({
                   )}
                   {c.thumbnailUrl && (
                     <div className="overflow-hidden rounded-lg border border-border bg-zinc-900">
-                      <img src={c.thumbnailUrl} className="max-h-56 w-full object-contain" alt={c.videoTitle} />
+                      <img
+                        src={c.thumbnailUrl}
+                        className="max-h-56 w-full object-contain"
+                        alt={c.videoTitle}
+                      />
                     </div>
                   )}
                 </div>
@@ -360,18 +440,31 @@ export function StructuredAnswer({
                 <div className="flex gap-2">
                   <div className="h-10 w-16 flex-shrink-0 overflow-hidden rounded bg-zinc-800">
                     {c.thumbnailUrl && (
-                      <img src={c.thumbnailUrl} className="h-full w-full object-cover" alt="" />
+                      <img
+                        src={c.thumbnailUrl}
+                        className="h-full w-full object-cover"
+                        alt=""
+                      />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold leading-tight text-white">{c.videoTitle}</div>
+                    <div className="truncate text-sm font-semibold leading-tight text-white">
+                      {c.videoTitle}
+                    </div>
                     <div className="font-mono text-xs text-primary">
                       {fmtTime(c.startTime)}–{fmtTime(c.endTime)}
                     </div>
-                    {c.text && <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{c.text}</div>}
+                    {c.text && (
+                      <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">
+                        {c.text}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <TrustBadges verified={c.verified} sourceCount={c.sourceCount} />
+                <TrustBadges
+                  verified={c.verified}
+                  sourceCount={c.sourceCount}
+                />
                 <button
                   type="button"
                   onClick={() => onCitationClick(c.videoId, c.startTime)}
