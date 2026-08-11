@@ -62,9 +62,7 @@ alter table public.authoritative_sources
   add constraint authoritative_sources_no_overlapping_active_primary
   exclude using gist (
     jurisdiction with =,
-    authority with =,
     source_type with =,
-    document_title with =,
     edition with =,
     daterange(effective_from, effective_to, '[]') with &&
   ) where (
@@ -173,6 +171,4 @@ on conflict (source_id) do update set
   superseded_by = excluded.superseded_by,
   citation_label = excluded.citation_label,
   retrieval_priority = excluded.retrieval_priority,
-  license_access_classification = excluded.license_access_classification,
-  permitted_uses = excluded.permitted_uses,
   updated_at = now();

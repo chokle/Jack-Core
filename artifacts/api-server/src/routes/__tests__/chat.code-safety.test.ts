@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type Express, type Request } from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
@@ -13,6 +13,9 @@ const openAiMocks = vi.hoisted(() => ({
 const learningMock = vi.hoisted(() =>
   vi.fn(async () => ({ status: "discarded", extractedCount: 0 })),
 );
+const codeAuthorityMocks = vi.hoisted(() => ({
+  evaluateCodeSafetyGate: vi.fn(),
+}));
 
 vi.mock("../../lib/supabase.js", async () => {
   const mocks = await import("../../lib/__tests__/mocks.js");
@@ -26,6 +29,17 @@ vi.mock("../../lib/openai.js", () => ({
 vi.mock("../../lib/ask-learning.js", () => ({
   learnFromAskInteraction: learningMock,
 }));
+vi.mock("../../lib/code-authority.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../lib/code-authority.js")>();
+  codeAuthorityMocks.evaluateCodeSafetyGate.mockImplementation(
+    actual.evaluateCodeSafetyGate,
+  );
+  return {
+    ...actual,
+    evaluateCodeSafetyGate: codeAuthorityMocks.evaluateCodeSafetyGate,
+  };
+});
 
 import chatRouter from "../chat.js";
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
@@ -60,9 +74,14 @@ beforeEach(() => {
   openAiMocks.createEmbedding.mockClear();
   openAiMocks.chatCompletion.mockClear();
   learningMock.mockClear();
+  codeAuthorityMocks.evaluateCodeSafetyGate.mockClear();
   fake.tables["authoritative_sources"] = INITIAL_AUTHORITY_SOURCES.map(
     authoritativeSourceToRow,
   );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("Ask Jack code authority safety gate", () => {
@@ -103,6 +122,69 @@ describe("Ask Jack code authority safety gate", () => {
     expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
     expect(learningMock).not.toHaveBeenCalled();
     expect(fake.tables["chat_messages"]).toHaveLength(2);
+  });
+
+  it("persists a changed upstream revision fingerprint before answering", async () => {
+    fake.tables["authoritative_sources"] = INITIAL_AUTHORITY_SOURCES.map(
+      (source) =>
+        authoritativeSourceToRow(
+          source.sourceType === "revision_feed"
+            ? {
+                ...source,
+                contentFingerprint:
+                  'etag:"stored"|last-modified:Mon, 10 Aug 2026 00:00:00 GMT',
+              }
+            : source,
+        ),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(null, {
+            status: 200,
+            headers: {
+              etag: '"changed"',
+              "last-modified": "Tue, 11 Aug 2026 00:00:00 GMT",
+            },
+          }),
+        ),
+      ),
+    );
+
+    const res = await request(app)
+      .post("/api/chat")
+      .send({
+        message: "Is this venting to code?",
+        authorityContext: {
+          province: "BC",
+          municipality: "Burnaby",
+          permitApplicationDate: "2026-08-11",
+          projectType: "new construction",
+          knownConditions: [
+            "New permit application; no delayed provisions apply",
+          ],
+          measurements: [
+            { name: "trap arm length", value: "1200", unit: "mm" },
+          ],
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.codeSafety).toMatchObject({
+      outcome: "blocked",
+      missing: expect.arrayContaining([
+        "Current revision-feed fingerprint reconciliation",
+      ]),
+    });
+    expect(
+      fake.tables["authoritative_sources"].find(
+        (row) => row["source_id"] === "bc-code-revisions-feed",
+      )?.["status"],
+    ).toBe("requires_review");
+    expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
+    expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
+    expect(learningMock).not.toHaveBeenCalled();
   });
 
   it("never falls from Vancouver through to BC general", async () => {
@@ -170,6 +252,50 @@ describe("Ask Jack code authority safety gate", () => {
     expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
     expect(learningMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { label: "allowed", outcome: "allowed" },
+    { label: "unrecognized", outcome: "unexpected_future_outcome" },
+  ])(
+    "fails closed before every generic Ask Jack subsystem for $label code-sensitive outcomes",
+    async ({ outcome }) => {
+      codeAuthorityMocks.evaluateCodeSafetyGate.mockReturnValueOnce({
+        outcome,
+        sensitivity: {
+          isCodeSensitive: true,
+          topics: ["code_compliance"],
+          requiresMeasurements: false,
+        },
+        jurisdiction: "BC_GENERAL",
+        applicableEdition: "2024",
+        authoritySnapshotId: "BC_GENERAL:2024:test",
+        known: [],
+        missing: [],
+        reason: "Synthetic route-boundary test result.",
+        nextSteps: [],
+        citations: [],
+      } as never);
+      const rpcSpy = vi.spyOn(fake, "rpc");
+
+      const res = await request(app)
+        .post("/api/chat")
+        .send({ message: "Is this installation code compliant?" });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(() => AskJackResponse.parse(res.body)).not.toThrow();
+      expect(res.body.codeSafety).toMatchObject({
+        outcome: "blocked",
+        missing: expect.arrayContaining([
+          "Licensed authoritative answering path",
+        ]),
+      });
+      expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
+      expect(learningMock).not.toHaveBeenCalled();
+      rpcSpy.mockRestore();
+    },
+  );
 
   it("keeps normal non-code Ask Jack behavior unchanged", async () => {
     const res = await request(app)

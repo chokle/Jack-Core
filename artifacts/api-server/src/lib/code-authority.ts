@@ -607,6 +607,71 @@ export function markRevisionFeedObservation(
   return { ...item, status: "requires_review" };
 }
 
+export interface RevisionFeedReconciliationDependencies {
+  observeFingerprint: (source: AuthoritativeSource) => Promise<string | null>;
+  persistRequiresReview: (sourceId: string) => Promise<void>;
+  onError?: (error: unknown, source: AuthoritativeSource) => void;
+}
+
+/**
+ * Reconciles trusted upstream revision observations before authority selection.
+ * Any missing, changed, or unreadable fingerprint fails closed in memory. The
+ * review-required state is also persisted when possible so later requests and
+ * operators see the same gate state; a persistence failure never restores the
+ * source to an answerable state for the current request.
+ */
+export async function reconcileRevisionFeedObservations(
+  sources: AuthoritativeSource[],
+  dependencies: RevisionFeedReconciliationDependencies,
+): Promise<AuthoritativeSource[]> {
+  return Promise.all(
+    sources.map(async (source) => {
+      if (
+        source.sourceType !== "revision_feed" ||
+        source.status === "requires_review"
+      ) {
+        return source;
+      }
+
+      const storedFingerprint = source.contentFingerprint?.trim() || null;
+      if (!storedFingerprint) {
+        const reviewRequired = {
+          ...source,
+          status: "requires_review" as const,
+        };
+        try {
+          await dependencies.persistRequiresReview(source.sourceId);
+        } catch (error) {
+          dependencies.onError?.(error, source);
+        }
+        return reviewRequired;
+      }
+
+      let observedFingerprint: string | null = null;
+      try {
+        observedFingerprint =
+          (await dependencies.observeFingerprint(source))?.trim() || null;
+      } catch (error) {
+        dependencies.onError?.(error, source);
+      }
+
+      if (observedFingerprint && storedFingerprint === observedFingerprint) {
+        return source;
+      }
+
+      const reviewRequired = observedFingerprint
+        ? markRevisionFeedObservation(source, observedFingerprint)
+        : { ...source, status: "requires_review" as const };
+      try {
+        await dependencies.persistRequiresReview(source.sourceId);
+      } catch (error) {
+        dependencies.onError?.(error, source);
+      }
+      return reviewRequired;
+    }),
+  );
+}
+
 function sourceNeedsReconciliation(item: AuthoritativeSource): boolean {
   return (
     item.status === "requires_review" ||

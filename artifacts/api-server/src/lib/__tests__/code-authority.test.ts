@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   INITIAL_AUTHORITY_SOURCES,
   classifyCodeSensitiveQuestion,
   evaluateCodeSafetyGate,
   markRevisionFeedObservation,
+  reconcileRevisionFeedObservations,
   resolveJurisdiction,
   selectAuthoritySnapshot,
   sourceAllowsUse,
@@ -336,6 +337,90 @@ describe("authority snapshot and supersession", () => {
     expect(result.outcome).toBe("blocked");
     expect(result.missing).toContain(
       "Current revision-feed fingerprint reconciliation",
+    );
+  });
+});
+
+describe("revision-feed runtime reconciliation", () => {
+  function revisionFeed(contentFingerprint: string | null) {
+    return {
+      ...INITIAL_AUTHORITY_SOURCES.find(
+        ({ sourceType }) => sourceType === "revision_feed",
+      )!,
+      contentFingerprint,
+    };
+  }
+
+  it("keeps an unchanged observed fingerprint answerable", async () => {
+    const persistRequiresReview = vi.fn(async () => undefined);
+    const [result] = await reconcileRevisionFeedObservations(
+      [revisionFeed("etag:stable|last-modified:stable")],
+      {
+        observeFingerprint: async () => "etag:stable|last-modified:stable",
+        persistRequiresReview,
+      },
+    );
+
+    expect(result?.status).toBe("current");
+    expect(persistRequiresReview).not.toHaveBeenCalled();
+  });
+
+  it("persists requires_review when the observed fingerprint changes", async () => {
+    const persistRequiresReview = vi.fn(async () => undefined);
+    const [result] = await reconcileRevisionFeedObservations(
+      [revisionFeed("etag:stored|last-modified:stored")],
+      {
+        observeFingerprint: async () => "etag:changed|last-modified:changed",
+        persistRequiresReview,
+      },
+    );
+
+    expect(result?.status).toBe("requires_review");
+    expect(persistRequiresReview).toHaveBeenCalledWith(
+      "bc-code-revisions-feed",
+    );
+  });
+
+  it.each([
+    { label: "stored", stored: null, observed: "etag:current" },
+    { label: "observed", stored: "etag:stored", observed: null },
+  ])(
+    "fails closed when the $label fingerprint is missing",
+    async ({ stored, observed }) => {
+      const persistRequiresReview = vi.fn(async () => undefined);
+      const [result] = await reconcileRevisionFeedObservations(
+        [revisionFeed(stored)],
+        {
+          observeFingerprint: async () => observed,
+          persistRequiresReview,
+        },
+      );
+
+      expect(result?.status).toBe("requires_review");
+      expect(persistRequiresReview).toHaveBeenCalledWith(
+        "bc-code-revisions-feed",
+      );
+    },
+  );
+
+  it("remains fail-closed when requires_review persistence fails", async () => {
+    const persistenceFailure = new Error("synthetic persistence failure");
+    const onError = vi.fn();
+    const [result] = await reconcileRevisionFeedObservations(
+      [revisionFeed("etag:stored")],
+      {
+        observeFingerprint: async () => "etag:changed",
+        persistRequiresReview: async () => {
+          throw persistenceFailure;
+        },
+        onError,
+      },
+    );
+
+    expect(result?.status).toBe("requires_review");
+    expect(onError).toHaveBeenCalledWith(
+      persistenceFailure,
+      expect.objectContaining({ sourceId: "bc-code-revisions-feed" }),
     );
   });
 });

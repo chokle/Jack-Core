@@ -29,6 +29,7 @@ import {
   classifyCodeSensitiveQuestion,
   evaluateCodeSafetyGate,
   formatCodeSafetyRefusal,
+  reconcileRevisionFeedObservations,
   type AuthoritativeSource,
   type AuthorityCitation,
 } from "../lib/code-authority.js";
@@ -105,59 +106,74 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     const sensitivity = classifyCodeSensitiveQuestion(message);
     if (sensitivity.isCodeSensitive) {
       const authoritativeSources = await loadAuthoritativeSources(req.log);
-      const codeSafety = evaluateCodeSafetyGate({
+      const gateResult = evaluateCodeSafetyGate({
         question: message,
         context: authorityContext,
         sources: authoritativeSources,
       });
-      if (codeSafety.outcome !== "allowed") {
-        const answer = formatCodeSafetyRefusal(codeSafety);
-        const citations = codeSafety.citations.map(toChatAuthorityCitation);
-        const { data: userMessage, error: userMessageError } = await supabase
-          .from("chat_messages")
-          .insert({
-            session_id: session,
-            user_id: userId,
-            role: "user",
-            content: message,
-            citations: [],
-          })
-          .select("id")
-          .single();
-        if (userMessageError) throw userMessageError;
-        const chatMessageId =
-          userMessage &&
-          typeof (userMessage as Record<string, unknown>)["id"] === "string"
-            ? String((userMessage as Record<string, unknown>)["id"])
-            : session;
+      // A licensed-evidence answer path does not exist yet. Treat every other
+      // code-sensitive gate result, including future `allowed` values and any
+      // unrecognized value, as blocked at the route boundary. This must remain
+      // before every generic Ask Jack retrieval, model, memory, and learning path.
+      const codeSafety =
+        gateResult.outcome === "blocked"
+          ? gateResult
+          : {
+              ...gateResult,
+              outcome: "blocked" as const,
+              missing: [
+                ...gateResult.missing,
+                "Licensed authoritative answering path",
+              ],
+              reason:
+                "The authority gate did not return a supported blocked result, and no licensed-evidence answering path is implemented.",
+            };
+      const answer = formatCodeSafetyRefusal(codeSafety);
+      const citations = codeSafety.citations.map(toChatAuthorityCitation);
+      const { data: userMessage, error: userMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "user",
+          content: message,
+          citations: [],
+        })
+        .select("id")
+        .single();
+      if (userMessageError) throw userMessageError;
+      const chatMessageId =
+        userMessage &&
+        typeof (userMessage as Record<string, unknown>)["id"] === "string"
+          ? String((userMessage as Record<string, unknown>)["id"])
+          : session;
 
-        const { error: assistantMessageError } = await supabase
-          .from("chat_messages")
-          .insert({
-            session_id: session,
-            user_id: userId,
-            role: "assistant",
-            content: answer,
-            citations,
-          });
-        if (assistantMessageError) throw assistantMessageError;
-
-        await recordServerAskJackEvent({
-          req,
-          actorIdentity: await resolveIdentity(req),
-          eventType: "ask_jack_completed",
-          correlationId: chatMessageId,
-          citationCount: citations.length,
-        });
-
-        return res.json({
-          answer,
+      const { error: assistantMessageError } = await supabase
+        .from("chat_messages")
+        .insert({
+          session_id: session,
+          user_id: userId,
+          role: "assistant",
+          content: answer,
           citations,
-          usedInternalKnowledge: false,
-          learning: { status: "discarded", extractedCount: 0 },
-          codeSafety,
         });
-      }
+      if (assistantMessageError) throw assistantMessageError;
+
+      await recordServerAskJackEvent({
+        req,
+        actorIdentity: await resolveIdentity(req),
+        eventType: "ask_jack_completed",
+        correlationId: chatMessageId,
+        citationCount: citations.length,
+      });
+
+      return res.json({
+        answer,
+        citations,
+        usedInternalKnowledge: false,
+        learning: { status: "discarded", extractedCount: 0 },
+        codeSafety,
+      });
     }
 
     const embedding = await createEmbedding(message);
@@ -621,9 +637,50 @@ async function loadAuthoritativeSources(log: {
     );
     return [];
   }
-  return ((data ?? []) as Array<Record<string, unknown>>)
+  const sources = ((data ?? []) as Array<Record<string, unknown>>)
     .map(authoritativeSourceFromRow)
     .filter((source): source is AuthoritativeSource => source !== null);
+  return reconcileRevisionFeedObservations(sources, {
+    observeFingerprint: observeRevisionFeedFingerprint,
+    persistRequiresReview: persistRevisionFeedRequiresReview,
+    onError: (reconciliationError, source) =>
+      log.error(
+        { err: reconciliationError, sourceId: source.sourceId },
+        "revision-feed reconciliation failed closed",
+      ),
+  });
+}
+
+async function observeRevisionFeedFingerprint(
+  source: AuthoritativeSource,
+): Promise<string | null> {
+  const response = await fetch(source.sourceUrl, {
+    method: "HEAD",
+    redirect: "follow",
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Revision feed HEAD returned ${response.status}`);
+  }
+  const etag = response.headers.get("etag")?.trim() || null;
+  const lastModified = response.headers.get("last-modified")?.trim() || null;
+  if (!etag && !lastModified) return null;
+  return `etag:${etag ?? ""}|last-modified:${lastModified ?? ""}`;
+}
+
+async function persistRevisionFeedRequiresReview(
+  sourceId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("authoritative_sources")
+    .update({ status: "requires_review", updated_at: new Date().toISOString() })
+    .eq("source_id", sourceId)
+    .select("source_id")
+    .single();
+  if (error) throw error;
+  if (!data) {
+    throw new Error(`Revision feed ${sourceId} was not updated`);
+  }
 }
 
 function toChatAuthorityCitation(citation: AuthorityCitation): ChatCitation {
