@@ -9,6 +9,7 @@ Delivery status: delivered via PR; not reviewed by Daz
 - PR: https://github.com/chokle/Jack-Core/pull/41
 - Branch: `codex/jack-pilot-hardening`
 - Implementation commit: `8d82de3`
+- Consent tie-break follow-up: `7959c10`
 - Base: `5da78f9`
 
 ## Outcomes
