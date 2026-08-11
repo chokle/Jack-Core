@@ -334,6 +334,9 @@ export function resolveJurisdiction(
   const province = normalizePlace(context?.province);
   const municipality = normalizePlace(context?.municipality);
   const ahj = normalizePlace(context?.authorityHavingJurisdiction);
+  const canonicalMunicipality =
+    municipality === "city of vancouver" ? "vancouver" : municipality;
+  const canonicalAhj = ahj === "city of vancouver" ? "vancouver" : ahj;
 
   if (context?.specialAuthority || context?.mineRelated) {
     return resolution(
@@ -343,6 +346,23 @@ export function resolveJurisdiction(
       null,
       ["A special authority or mine-related context was supplied."],
       ["Confirmation from the authority having jurisdiction"],
+    );
+  }
+  if (
+    canonicalMunicipality &&
+    canonicalAhj &&
+    canonicalMunicipality !== canonicalAhj
+  ) {
+    return resolution(
+      "unknown_special_authority",
+      "UNKNOWN_SPECIAL_AUTHORITY",
+      null,
+      null,
+      [
+        `Municipality (supplied context): ${context?.municipality}`,
+        `Authority having jurisdiction (supplied context): ${context?.authorityHavingJurisdiction}`,
+      ],
+      ["Resolve conflicting municipality and authority context values"],
     );
   }
   if (province !== "bc" && province !== "british columbia") {
@@ -357,7 +377,7 @@ export function resolveJurisdiction(
         : ["Province"],
     );
   }
-  known.push("Province: British Columbia");
+  known.push("Province (supplied context): British Columbia");
   if (!municipality && !ahj) {
     return resolution(
       "missing_context",
@@ -377,8 +397,8 @@ export function resolveJurisdiction(
     : "BC_GENERAL";
   known.push(
     isVancouver
-      ? "Authority: City of Vancouver"
-      : `Municipality/AHJ: ${context?.municipality ?? context?.authorityHavingJurisdiction}`,
+      ? "Municipality/AHJ (supplied context): Vancouver"
+      : `Municipality/AHJ (supplied context): ${context?.municipality ?? context?.authorityHavingJurisdiction}`,
   );
 
   const permitDate = parseDateOnly(context?.permitApplicationDate);
@@ -389,7 +409,7 @@ export function resolveJurisdiction(
         : "Permit/application date",
     ]);
   }
-  known.push(`Permit/application date: ${permitDate}`);
+  known.push(`Permit/application date (supplied context): ${permitDate}`);
   const threshold = jurisdiction === "VANCOUVER" ? "2025-09-15" : "2024-03-08";
   if (permitDate < threshold) {
     return resolution(
@@ -403,6 +423,11 @@ export function resolveJurisdiction(
   }
 
   const edition = jurisdiction === "VANCOUVER" ? "2025" : "2024";
+  if (context?.explicitCodeEdition) {
+    known.push(
+      `Explicit code edition (supplied context): ${context.explicitCodeEdition}`,
+    );
+  }
   if (
     context?.explicitCodeEdition &&
     !new RegExp(`(?:^|\\D)${edition}(?:\\D|$)`).test(

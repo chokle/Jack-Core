@@ -8,6 +8,7 @@ import {
   selectAuthoritySnapshot,
   sourceAllowsUse,
   type AuthoritativeSource,
+  type AuthorityContext,
   type PhotoCodeContext,
 } from "../code-authority.js";
 
@@ -37,6 +38,80 @@ describe("code-sensitive question detector", () => {
       topics: [],
       requiresMeasurements: false,
     });
+  });
+});
+
+describe("authority context provenance", () => {
+  it("identifies municipality and permit date as supplied context", () => {
+    const result = resolveJurisdiction({
+      province: "BC",
+      municipality: "Burnaby",
+      permitApplicationDate: "2026-08-11",
+    });
+
+    expect(result.known).toContain(
+      "Municipality/AHJ (supplied context): Burnaby",
+    );
+    expect(result.known).toContain(
+      "Permit/application date (supplied context): 2026-08-11",
+    );
+  });
+
+  it("fails closed when an explicit edition conflicts with effective-date rules", () => {
+    const result = resolveJurisdiction({
+      province: "BC",
+      municipality: "Vancouver",
+      permitApplicationDate: "2025-10-01",
+      explicitCodeEdition: "2024",
+    });
+
+    expect(result.status).toBe("edition_conflict");
+    expect(result.applicableEdition).toBe("2025");
+    expect(result.known).toContain(
+      "Explicit code edition (supplied context): 2024",
+    );
+  });
+
+  it("fails closed when municipality and supplied AHJ conflict", () => {
+    const result = resolveJurisdiction({
+      province: "BC",
+      municipality: "Vancouver",
+      authorityHavingJurisdiction: "Burnaby",
+      permitApplicationDate: "2026-08-11",
+    });
+
+    expect(result.status).toBe("unknown_special_authority");
+    expect(result.jurisdiction).toBe("UNKNOWN_SPECIAL_AUTHORITY");
+    expect(result.missing).toContain(
+      "Resolve conflicting municipality and authority context values",
+    );
+  });
+
+  it("does not infer missing trusted project context", () => {
+    const result = evaluateCodeSafetyGate({
+      question: "Is this venting to code?",
+      sources: INITIAL_AUTHORITY_SOURCES,
+    });
+
+    expect(result.outcome).toBe("blocked");
+    expect(result.jurisdiction).toBe("UNKNOWN_SPECIAL_AUTHORITY");
+    expect(result.known).toEqual([]);
+  });
+
+  it("does not accept photo content or EXIF as jurisdiction context", () => {
+    const photoDerivedContext = {
+      province: "BC",
+      permitApplicationDate: "2026-08-11",
+      photoExif: { municipality: "Vancouver" },
+      observedMunicipality: "Vancouver",
+    } as AuthorityContext;
+    const result = resolveJurisdiction(photoDerivedContext);
+
+    expect(result.status).toBe("missing_context");
+    expect(result.jurisdiction).toBe("UNKNOWN_SPECIAL_AUTHORITY");
+    expect(result.missing).toContain(
+      "Municipality or authority having jurisdiction",
+    );
   });
 });
 
