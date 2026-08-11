@@ -4,7 +4,7 @@ Recipient: Daz
 
 Prepared by: Dex (Codex)
 
-Delivery status: not delivered / not reviewed
+Delivery status: delivered through the PR #40 branch / not reviewed
 
 ## Outcome
 
