@@ -278,6 +278,27 @@ describe("jurisdiction and edition resolution", () => {
       resolveJurisdiction({ ...bcContext, explicitCodeEdition: "2018" }),
     ).toMatchObject({ status: "edition_conflict" });
   });
+
+  it("accepts one normalized explicit edition token", () => {
+    expect(
+      resolveJurisdiction({ ...bcContext, explicitCodeEdition: " 2024 " }),
+    ).toMatchObject({ status: "resolved", applicableEdition: "2024" });
+  });
+
+  it.each([
+    "2020-2024",
+    "2018 and 2024",
+    "2020 / 2024",
+    "2020, 2024",
+    "2020 or 2024",
+  ])("blocks an ambiguous explicit edition: %s", (explicitCodeEdition) => {
+    expect(
+      resolveJurisdiction({ ...bcContext, explicitCodeEdition }),
+    ).toMatchObject({
+      status: "edition_conflict",
+      applicableEdition: "2024",
+    });
+  });
 });
 
 describe("authority snapshot and supersession", () => {
@@ -713,6 +734,41 @@ describe("licensing and code safety gate", () => {
     expect(result.authoritySnapshotId).toContain("BC_GENERAL:2024");
     expect(result.citations[0]?.section).toBe("2.5.2.1");
   });
+
+  it.each([
+    "2020-2024",
+    "2018 and 2024",
+    "2020 / 2024",
+    "2020, 2024",
+    "2020 or 2024",
+  ])(
+    "cannot allow licensed evidence with ambiguous explicit edition %s",
+    (explicitCodeEdition) => {
+      const licensed = licenseSource(
+        reconciledSources(),
+        "bc-plumbing-code-2024",
+        "2.5.2.1",
+      );
+      const result = evaluateCodeSafetyGate({
+        question: "Is this venting to code?",
+        context: { ...bcContext, explicitCodeEdition },
+        sources: licensed,
+        evidence: [
+          {
+            sourceId: "bc-plumbing-code-2024",
+            section: "2.5.2.1",
+            content: "Synthetic test evidence only.",
+          },
+        ],
+      });
+
+      expect(result.outcome).toBe("blocked");
+      expect(result.authoritySnapshotId).toBeNull();
+      expect(result.missing).toContain(
+        "Applicable authoritative source snapshot",
+      );
+    },
+  );
 });
 
 function reconciledSources(): AuthoritativeSource[] {

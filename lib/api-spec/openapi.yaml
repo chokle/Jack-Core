@@ -1368,6 +1368,7 @@ components:
 
     AuthorityContext:
       type: object
+      additionalProperties: false
       description: >-
         Trusted user/project context for deterministic authority resolution.
         Jurisdiction must not be inferred from photos, EXIF, faces, signs, or model guesses.
@@ -1395,6 +1396,7 @@ components:
           type: array
           items:
             type: object
+            additionalProperties: false
             required: [name, value]
             properties:
               name:

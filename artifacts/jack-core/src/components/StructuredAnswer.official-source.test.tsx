@@ -31,7 +31,7 @@ describe("StructuredAnswer official source URL safety", () => {
       );
 
       expect(
-        screen.queryByRole("link", { name: "Open official source" }),
+        screen.queryByRole("link", { name: /open official source/i }),
       ).toBeNull();
     },
   );
@@ -46,10 +46,10 @@ describe("StructuredAnswer official source URL safety", () => {
       />,
     );
 
-    expect(
-      screen
-        .getByRole("link", { name: "Open official source" })
-        .getAttribute("href"),
-    ).toBe(officialSourceUrl);
+    const link = screen.getByRole("link", {
+      name: "Open official source (opens in a new tab)",
+    });
+    expect(link.getAttribute("href")).toBe(officialSourceUrl);
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 });

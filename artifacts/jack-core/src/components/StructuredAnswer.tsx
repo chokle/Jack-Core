@@ -395,6 +395,7 @@ export function StructuredAnswer({
                       href={officialSourceUrl}
                       target="_blank"
                       rel="noreferrer"
+                      aria-label="Open official source (opens in a new tab)"
                       className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/35 bg-primary/10 text-sm font-semibold text-primary transition-colors hover:bg-primary/20"
                     >
                       <Link2 className="h-4 w-4" />

@@ -481,12 +481,8 @@ export function resolveJurisdiction(
   }
 
   const edition = jurisdiction === "VANCOUVER" ? "2025" : "2024";
-  if (
-    context?.explicitCodeEdition &&
-    !new RegExp(`(?:^|\\D)${edition}(?:\\D|$)`).test(
-      context.explicitCodeEdition.trim(),
-    )
-  ) {
+  const explicitEdition = context?.explicitCodeEdition?.trim();
+  if (explicitEdition && explicitEdition !== edition) {
     return resolution(
       "edition_conflict",
       jurisdiction,
@@ -494,7 +490,7 @@ export function resolveJurisdiction(
       permitDate,
       known,
       [
-        `Resolve conflict between permit-date edition ${edition} and explicitly supplied edition ${context.explicitCodeEdition}`,
+        `Resolve conflict between permit-date edition ${edition} and explicitly supplied edition ${explicitEdition}`,
       ],
     );
   }
