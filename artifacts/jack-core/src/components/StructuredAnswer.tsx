@@ -79,6 +79,18 @@ export const TONE_CLASSES: Record<string, string> = {
   low: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
 };
 
+export function safeOfficialSourceUrl(
+  value: string | undefined,
+): string | null {
+  if (!value) return null;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 // A single trust badge that reveals a plain-language explanation of what it
 // means. Reachable on touch (tap toggles) and desktop (hover opens); the
 // Popover renders in a portal so it never clips inside the ~450px Ask Jack
@@ -351,6 +363,9 @@ export function StructuredAnswer({
             const sep =
               i > 0 ? "space-y-2 border-t border-border pt-3" : "space-y-2";
             if (c.sourceType === "authority") {
+              const officialSourceUrl = safeOfficialSourceUrl(
+                c.officialSourceUrl,
+              );
               return (
                 <div key={i} className={sep}>
                   <div className="flex items-center gap-2">
@@ -375,9 +390,9 @@ export function StructuredAnswer({
                       <div>No licensed section-level text is indexed.</div>
                     )}
                   </div>
-                  {c.officialSourceUrl && (
+                  {officialSourceUrl && (
                     <a
-                      href={c.officialSourceUrl}
+                      href={officialSourceUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/35 bg-primary/10 text-sm font-semibold text-primary transition-colors hover:bg-primary/20"

@@ -179,6 +179,41 @@ describe("authority context provenance", () => {
       "Municipality or authority having jurisdiction",
     );
   });
+
+  it("does not treat an incidental standalone mine word as special authority", () => {
+    const result = resolveJurisdiction({
+      ...bcContext,
+      knownConditions: [
+        "New permit application; no delayed provisions apply; the tool is mine.",
+      ],
+    });
+
+    expect(result).toMatchObject({
+      status: "resolved",
+      jurisdiction: "BC_GENERAL",
+    });
+  });
+
+  it.each([
+    {
+      label: "known condition",
+      context: {
+        ...bcContext,
+        knownConditions: [
+          "New permit application; no delayed provisions apply; mine-related project authority applies.",
+        ],
+      },
+    },
+    {
+      label: "project type",
+      context: { ...bcContext, projectType: "mining project" },
+    },
+  ])("recognizes structured mine authority from $label", ({ context }) => {
+    expect(resolveJurisdiction(context)).toMatchObject({
+      status: "unknown_special_authority",
+      jurisdiction: "UNKNOWN_SPECIAL_AUTHORITY",
+    });
+  });
 });
 
 describe("jurisdiction and edition resolution", () => {
@@ -339,6 +374,61 @@ describe("authority snapshot and supersession", () => {
       "Current revision-feed fingerprint reconciliation",
     );
   });
+
+  it.each([
+    {
+      label: "absent",
+      sources: reconciledSources().filter(
+        ({ sourceType }) => sourceType !== "revision_feed",
+      ),
+    },
+    {
+      label: "superseded",
+      sources: reconciledSources().map((item) =>
+        item.sourceType === "revision_feed"
+          ? { ...item, status: "superseded" as const }
+          : item,
+      ),
+    },
+    {
+      label: "duplicated",
+      sources: [
+        ...reconciledSources(),
+        {
+          ...reconciledSources().find(
+            ({ sourceType }) => sourceType === "revision_feed",
+          )!,
+          sourceId: "bc-code-revisions-feed-overlap",
+        },
+      ],
+    },
+  ])(
+    "cannot allow licensed evidence when the applicable revision feed is $label",
+    ({ sources }) => {
+      const licensed = licenseSource(
+        sources,
+        "bc-plumbing-code-2024",
+        "2.5.2.1",
+      );
+      const result = evaluateCodeSafetyGate({
+        question: "Is this venting to code?",
+        context: bcContext,
+        sources: licensed,
+        evidence: [
+          {
+            sourceId: "bc-plumbing-code-2024",
+            section: "2.5.2.1",
+            content: "Synthetic test evidence only.",
+          },
+        ],
+      });
+
+      expect(result.outcome).toBe("blocked");
+      expect(result.missing).toContain(
+        "Current revision-feed fingerprint reconciliation",
+      );
+    },
+  );
 });
 
 describe("revision-feed runtime reconciliation", () => {

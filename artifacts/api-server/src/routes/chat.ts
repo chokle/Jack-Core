@@ -26,13 +26,18 @@ import {
 } from "../lib/activity-telemetry.js";
 import {
   authoritativeSourceFromRow,
+  applicableRevisionFeeds,
   classifyCodeSensitiveQuestion,
   evaluateCodeSafetyGate,
   formatCodeSafetyRefusal,
   reconcileRevisionFeedObservations,
+  resolveJurisdiction,
+  scopeSourcesToResolvedJurisdiction,
   type AuthoritativeSource,
   type AuthorityCitation,
+  type JurisdictionResolution,
 } from "../lib/code-authority.js";
+import { createRevisionFeedFingerprintObserver } from "../lib/revision-feed-observer.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -105,7 +110,11 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
 
     const sensitivity = classifyCodeSensitiveQuestion(message);
     if (sensitivity.isCodeSensitive) {
-      const authoritativeSources = await loadAuthoritativeSources(req.log);
+      const jurisdiction = resolveJurisdiction(authorityContext);
+      const authoritativeSources = await loadAuthoritativeSources(
+        jurisdiction,
+        req.log,
+      );
       const gateResult = evaluateCodeSafetyGate({
         question: message,
         context: authorityContext,
@@ -624,9 +633,12 @@ router.delete("/chat/history", async (req, res) => {
   }
 });
 
-async function loadAuthoritativeSources(log: {
-  error: (obj: Record<string, unknown>, msg: string) => void;
-}): Promise<AuthoritativeSource[]> {
+async function loadAuthoritativeSources(
+  resolved: JurisdictionResolution,
+  log: {
+    error: (obj: Record<string, unknown>, msg: string) => void;
+  },
+): Promise<AuthoritativeSource[]> {
   const { data, error } = await supabase
     .from("authoritative_sources")
     .select("*");
@@ -640,33 +652,34 @@ async function loadAuthoritativeSources(log: {
   const sources = ((data ?? []) as Array<Record<string, unknown>>)
     .map(authoritativeSourceFromRow)
     .filter((source): source is AuthoritativeSource => source !== null);
-  return reconcileRevisionFeedObservations(sources, {
-    observeFingerprint: observeRevisionFeedFingerprint,
-    persistRequiresReview: persistRevisionFeedRequiresReview,
-    onError: (reconciliationError, source) =>
-      log.error(
-        { err: reconciliationError, sourceId: source.sourceId },
-        "revision-feed reconciliation failed closed",
-      ),
-  });
+  const scopedSources = scopeSourcesToResolvedJurisdiction(resolved, sources);
+  const applicableFeeds = applicableRevisionFeeds(resolved, scopedSources);
+  if (
+    applicableFeeds.length !== 1 ||
+    applicableFeeds[0]?.status === "superseded"
+  ) {
+    return scopedSources;
+  }
+  const [reconciledFeed] = await reconcileRevisionFeedObservations(
+    applicableFeeds,
+    {
+      observeFingerprint: observeRevisionFeedFingerprint,
+      persistRequiresReview: persistRevisionFeedRequiresReview,
+      onError: (reconciliationError, source) =>
+        log.error(
+          { err: reconciliationError, sourceId: source.sourceId },
+          "revision-feed reconciliation failed closed",
+        ),
+    },
+  );
+  return reconciledFeed
+    ? scopedSources.map((source) =>
+        source.sourceId === reconciledFeed.sourceId ? reconciledFeed : source,
+      )
+    : scopedSources;
 }
 
-async function observeRevisionFeedFingerprint(
-  source: AuthoritativeSource,
-): Promise<string | null> {
-  const response = await fetch(source.sourceUrl, {
-    method: "HEAD",
-    redirect: "follow",
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!response.ok) {
-    throw new Error(`Revision feed HEAD returned ${response.status}`);
-  }
-  const etag = response.headers.get("etag")?.trim() || null;
-  const lastModified = response.headers.get("last-modified")?.trim() || null;
-  if (!etag && !lastModified) return null;
-  return `etag:${etag ?? ""}|last-modified:${lastModified ?? ""}`;
-}
+const observeRevisionFeedFingerprint = createRevisionFeedFingerprintObserver();
 
 async function persistRevisionFeedRequiresReview(
   sourceId: string,

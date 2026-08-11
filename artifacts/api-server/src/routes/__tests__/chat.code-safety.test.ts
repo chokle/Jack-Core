@@ -15,6 +15,7 @@ const learningMock = vi.hoisted(() =>
 );
 const codeAuthorityMocks = vi.hoisted(() => ({
   evaluateCodeSafetyGate: vi.fn(),
+  reconcileRevisionFeedObservations: vi.fn(),
 }));
 
 vi.mock("../../lib/supabase.js", async () => {
@@ -35,9 +36,14 @@ vi.mock("../../lib/code-authority.js", async (importOriginal) => {
   codeAuthorityMocks.evaluateCodeSafetyGate.mockImplementation(
     actual.evaluateCodeSafetyGate,
   );
+  codeAuthorityMocks.reconcileRevisionFeedObservations.mockImplementation(
+    actual.reconcileRevisionFeedObservations,
+  );
   return {
     ...actual,
     evaluateCodeSafetyGate: codeAuthorityMocks.evaluateCodeSafetyGate,
+    reconcileRevisionFeedObservations:
+      codeAuthorityMocks.reconcileRevisionFeedObservations,
   };
 });
 
@@ -75,6 +81,7 @@ beforeEach(() => {
   openAiMocks.chatCompletion.mockClear();
   learningMock.mockClear();
   codeAuthorityMocks.evaluateCodeSafetyGate.mockClear();
+  codeAuthorityMocks.reconcileRevisionFeedObservations.mockClear();
   fake.tables["authoritative_sources"] = INITIAL_AUTHORITY_SOURCES.map(
     authoritativeSourceToRow,
   );
@@ -188,6 +195,20 @@ describe("Ask Jack code authority safety gate", () => {
   });
 
   it("never falls from Vancouver through to BC general", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Promise.resolve(
+        new Response(null, {
+          status: 200,
+          headers: { etag: '"must-not-be-observed"' },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const bcRevisionFeedBefore = structuredClone(
+      fake.tables["authoritative_sources"].find(
+        (row) => row["source_id"] === "bc-code-revisions-feed",
+      ),
+    );
     const res = await request(app)
       .post("/api/chat")
       .send({
@@ -212,6 +233,15 @@ describe("Ask Jack code authority safety gate", () => {
           citation.documentTitle === "British Columbia Plumbing Code 2024",
       ),
     ).toBe(false);
+    expect(
+      codeAuthorityMocks.reconcileRevisionFeedObservations,
+    ).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      fake.tables["authoritative_sources"].find(
+        (row) => row["source_id"] === "bc-code-revisions-feed",
+      ),
+    ).toEqual(bcRevisionFeedBefore);
     expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
   });
 

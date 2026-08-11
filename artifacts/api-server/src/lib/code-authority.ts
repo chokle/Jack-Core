@@ -171,7 +171,13 @@ const SUPPORTED_BC_GENERAL_AUTHORITIES = new Set([
   "whistler",
 ]);
 const SPECIAL_AUTHORITY_PATTERN =
-  /\b(?:first nation|treaty|indigenous|reserve|nisga'?a|special authority|mine|mining)\b/i;
+  /\b(?:first nation|treaty|indigenous|reserve|nisga'?a|special authority|mining authority|mines act)\b/i;
+const MINE_AUTHORITY_CONDITION_PATTERNS = [
+  /\bmine[-\s]+related\s+(?:jurisdiction|project|authority)\b/i,
+  /\bmining\s+(?:jurisdiction|project|authority)\b/i,
+  /\b(?:jurisdiction|project|authority)\s+(?:is|falls|operates|regulated)\s+(?:under|within)\s+(?:a\s+)?(?:mine|mining|mines act)\b/i,
+  /\b(?:regulated|permitted)\s+under\s+(?:the\s+)?mines act\b/i,
+];
 const CONFIRMED_APPLICABILITY_PATTERN =
   /\b(?:new permit application|not an in-stream project|no delayed provisions apply|applicability confirmed by (?:the )?(?:ahj|authority having jurisdiction))\b/i;
 const UNRESOLVED_TRANSITION_PATTERN =
@@ -376,18 +382,20 @@ export function resolveJurisdiction(
   const ahj = normalizePlace(context?.authorityHavingJurisdiction);
   const canonicalMunicipality = canonicalAuthority(municipality);
   const canonicalAhj = canonicalAuthority(ahj);
-  const suppliedAuthority = [
-    municipality,
-    ahj,
+  const suppliedAuthority = [municipality, ahj].filter(Boolean).join(" ");
+  const suppliedProjectAuthority = [
+    context?.projectType,
     ...(context?.knownConditions ?? []),
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ].filter((value): value is string => Boolean(value?.trim()));
+  const hasStructuredMineAuthority = suppliedProjectAuthority.some((value) =>
+    MINE_AUTHORITY_CONDITION_PATTERNS.some((pattern) => pattern.test(value)),
+  );
 
   if (
     context?.specialAuthority ||
     context?.mineRelated ||
-    SPECIAL_AUTHORITY_PATTERN.test(suppliedAuthority)
+    SPECIAL_AUTHORITY_PATTERN.test(suppliedAuthority) ||
+    hasStructuredMineAuthority
   ) {
     return resolution(
       "unknown_special_authority",
@@ -555,17 +563,9 @@ export function selectAuthoritySnapshot(
       item.sourceType === "model_code" &&
       item.edition === "2020",
   );
-  const revisionFeeds =
-    jurisdiction === "BC_GENERAL"
-      ? sources.filter(
-          (item) =>
-            item.jurisdiction === jurisdiction &&
-            item.sourceType === "revision_feed" &&
-            item.edition === resolved.applicableEdition &&
-            isEffectiveOn(item, resolved.effectiveDateBasis!),
-        )
-      : [];
-  if (revisionFeeds.length > 1) return null;
+  const revisionFeeds = applicableRevisionFeeds(resolved, sources);
+  const hasExactlyOneCurrentRevisionFeed =
+    revisionFeeds.length === 1 && revisionFeeds[0]?.status !== "superseded";
   const selected = [...primary, ...revisionFeeds, ...model].sort(
     (left, right) => right.retrievalPriority - left.retrievalPriority,
   );
@@ -581,8 +581,59 @@ export function selectAuthoritySnapshot(
     edition: resolved.applicableEdition,
     effectiveDateBasis: resolved.effectiveDateBasis,
     sources: selected,
-    requiresReview: selected.some(sourceNeedsReconciliation),
+    requiresReview:
+      !hasExactlyOneCurrentRevisionFeed ||
+      selected.some(sourceNeedsReconciliation),
   };
+}
+
+/**
+ * Returns only revision feeds applicable to the already-resolved authority
+ * snapshot. Callers must not observe or persist feeds outside this set.
+ */
+export function applicableRevisionFeeds(
+  resolved: JurisdictionResolution,
+  sources: AuthoritativeSource[],
+): AuthoritativeSource[] {
+  if (
+    resolved.status !== "resolved" ||
+    !RESOLVED_JURISDICTIONS.includes(
+      resolved.jurisdiction as ResolvedJurisdiction,
+    ) ||
+    !resolved.applicableEdition ||
+    !resolved.effectiveDateBasis
+  ) {
+    return [];
+  }
+  return sources.filter(
+    (item) =>
+      item.jurisdiction === resolved.jurisdiction &&
+      item.sourceType === "revision_feed" &&
+      item.edition === resolved.applicableEdition &&
+      isEffectiveOn(item, resolved.effectiveDateBasis!),
+  );
+}
+
+/**
+ * Restricts gate inputs to the resolved jurisdiction plus the shared model
+ * source. Unknown authority contexts receive no jurisdictional source state.
+ */
+export function scopeSourcesToResolvedJurisdiction(
+  resolved: JurisdictionResolution,
+  sources: AuthoritativeSource[],
+): AuthoritativeSource[] {
+  if (
+    !RESOLVED_JURISDICTIONS.includes(
+      resolved.jurisdiction as ResolvedJurisdiction,
+    )
+  ) {
+    return [];
+  }
+  return sources.filter(
+    (item) =>
+      item.jurisdiction === resolved.jurisdiction ||
+      item.jurisdiction === "CANADA_MODEL",
+  );
 }
 
 export function sourceAllowsUse(
@@ -675,7 +726,8 @@ export async function reconcileRevisionFeedObservations(
 function sourceNeedsReconciliation(item: AuthoritativeSource): boolean {
   return (
     item.status === "requires_review" ||
-    (item.sourceType === "revision_feed" && !item.contentFingerprint?.trim())
+    (item.sourceType === "revision_feed" &&
+      (item.status === "superseded" || !item.contentFingerprint?.trim()))
   );
 }
 
