@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
+import { resolveSession } from "../lib/session.js";
 import {
   activityDb as db,
   currentConsentGranted,
@@ -39,12 +40,15 @@ const EVENT_KEYS = new Set([
   "schemaVersion",
 ]);
 
-function hasOnlyKeys(value: unknown, allowed: ReadonlySet<string>): value is Record<string, unknown> {
+function hasOnlyKeys(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+): value is Record<string, unknown> {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).every((key) => allowed.has(key)),
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) => allowed.has(key)),
   );
 }
 
@@ -61,7 +65,8 @@ function eventProjectionFromRow(
     last_activity_at: now,
     updated_at: now,
   };
-  if (canonicalEventType === "onboarding_started") updates.onboarding_status = "in_progress";
+  if (canonicalEventType === "onboarding_started")
+    updates.onboarding_status = "in_progress";
   if (canonicalEventType === "onboarding_step_completed") {
     updates.onboarding_status = "in_progress";
     updates.onboarding_step = metadata["next_step"] ?? session.onboarding_step;
@@ -73,21 +78,27 @@ function eventProjectionFromRow(
   if (canonicalEventType === "onboarding_skipped") {
     updates.onboarding_status = "skipped";
   }
-  if (canonicalEventType === "recording_started") updates.recording_status = "recording";
-  if (canonicalEventType === "recording_stopped") updates.recording_status = "stopped";
-  if (canonicalEventType === "recording_upload_succeeded") updates.recording_status = "uploaded";
+  if (canonicalEventType === "recording_started")
+    updates.recording_status = "recording";
+  if (canonicalEventType === "recording_stopped")
+    updates.recording_status = "stopped";
+  if (canonicalEventType === "recording_upload_succeeded")
+    updates.recording_status = "uploaded";
   if (canonicalEventType === "recording_upload_failed") {
     updates.recording_status = "failed";
-    updates.error_count = Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
+    updates.error_count =
+      Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
   }
-  if (canonicalEventType === "feedback_submitted") updates.feedback_status = "submitted";
+  if (canonicalEventType === "feedback_submitted")
+    updates.feedback_status = "submitted";
   if (canonicalEventType === "test_completed") {
     updates.status = "completed";
     updates.completed_at = now;
   }
   if (canonicalEventType === "test_abandoned") updates.status = "abandoned";
   if (canonicalEventType === "reliability_error") {
-    updates.error_count = Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
+    updates.error_count =
+      Number(session.error_count ?? 0) + (duplicate ? 0 : 1);
   }
   return updates;
 }
@@ -133,7 +144,11 @@ async function expireSessionIfNeeded(
 ): Promise<boolean> {
   const expiresAt = Date.parse(String(row.expires_at ?? ""));
   if (!Number.isFinite(expiresAt) || expiresAt > Date.now()) return false;
-  const consent = await latestConsent(userId, String(row.pilot_id), "telemetry");
+  const consent = await latestConsent(
+    userId,
+    String(row.pilot_id),
+    "telemetry",
+  );
   const now = new Date().toISOString();
   const updated = await db
     .from("test_sessions")
@@ -174,9 +189,12 @@ router.post("/testing/sessions/start", async (req, res) => {
         "Pilot sessions are unavailable for this account.",
         "Pilot sessions are temporarily unavailable.",
       )
-    ) return;
+    )
+      return;
     if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot sessions are unavailable for this account." });
+      return res
+        .status(403)
+        .json({ error: "Pilot sessions are unavailable for this account." });
     }
     if (!hasOnlyKeys(req.body ?? {}, START_KEYS)) {
       return res.status(400).json({ error: "Invalid pilot-session request." });
@@ -189,7 +207,8 @@ router.post("/testing/sessions/start", async (req, res) => {
       return res.status(400).json({ error: "Invalid pilot identifier." });
     }
     const requestedAppSessionId =
-      typeof req.body?.appSessionId === "string" && UUID_RE.test(req.body.appSessionId)
+      typeof req.body?.appSessionId === "string" &&
+      UUID_RE.test(req.body.appSessionId)
         ? req.body.appSessionId
         : req.body?.appSessionId == null
           ? randomUUID()
@@ -209,17 +228,26 @@ router.post("/testing/sessions/start", async (req, res) => {
       },
       false,
     );
+    const chatSessionId = resolveSession(req, res);
     if ("error" in validatedStart) {
-      return res.status(400).json({ error: "Invalid pilot-session metadata.", code: validatedStart.error });
-    }
-    const membership = await resolveActiveTesterScope(identity.userId, requestedPilotId);
-    if (!membership.scope) {
-      return res.status(membership.reason === "ambiguous_pilot" ? 409 : 403).json({
-        error:
-          membership.reason === "ambiguous_pilot"
-            ? "Choose one active pilot before starting telemetry."
-            : "No active pilot membership was found.",
+      return res.status(400).json({
+        error: "Invalid pilot-session metadata.",
+        code: validatedStart.error,
       });
+    }
+    const membership = await resolveActiveTesterScope(
+      identity.userId,
+      requestedPilotId,
+    );
+    if (!membership.scope) {
+      return res
+        .status(membership.reason === "ambiguous_pilot" ? 409 : 403)
+        .json({
+          error:
+            membership.reason === "ambiguous_pilot"
+              ? "Choose one active pilot before starting telemetry."
+              : "No active pilot membership was found.",
+        });
     }
     const telemetryConsent = await latestConsent(
       identity.userId,
@@ -228,30 +256,46 @@ router.post("/testing/sessions/start", async (req, res) => {
     );
     if (!currentConsentGranted(telemetryConsent)) {
       return res.status(412).json({
-        error: "Explicit optional telemetry consent is required before a pilot session is created.",
+        error:
+          "Explicit optional telemetry consent is required before a pilot session is created.",
       });
     }
-    const screenConsent = await latestConsent(identity.userId, membership.scope.pilotId, "screen");
+    const screenConsent = await latestConsent(
+      identity.userId,
+      membership.scope.pilotId,
+      "screen",
+    );
     const microphoneConsent = await latestConsent(
       identity.userId,
       membership.scope.pilotId,
       "microphone",
     );
-    const existing = await activeSession(identity.userId, membership.scope.pilotId);
+    const existing = await activeSession(
+      identity.userId,
+      membership.scope.pilotId,
+    );
     if (existing.error) throw existing.error;
-    if (existing.data && !(await expireSessionIfNeeded(existing.data, identity.userId, req))) {
+    if (
+      existing.data &&
+      !(await expireSessionIfNeeded(existing.data, identity.userId, req))
+    ) {
       const resumedAt = new Date().toISOString();
       const updated = await db
         .from("test_sessions")
         .update({
           app_session_id: requestedAppSessionId,
+          chat_session_id: chatSessionId,
           device_category: validatedStart.value.deviceCategory,
           telemetry_consent_id: telemetryConsent.id,
-          screen_consent_id: currentConsentGranted(screenConsent) ? screenConsent.id : null,
+          screen_consent_id: currentConsentGranted(screenConsent)
+            ? screenConsent.id
+            : null,
           microphone_consent_id: currentConsentGranted(microphoneConsent)
             ? microphoneConsent.id
             : null,
-          screen_consent_state: currentConsentGranted(screenConsent) ? "granted" : "declined",
+          screen_consent_state: currentConsentGranted(screenConsent)
+            ? "granted"
+            : "declined",
           microphone_consent_state: currentConsentGranted(microphoneConsent)
             ? "granted"
             : "declined",
@@ -288,7 +332,9 @@ router.post("/testing/sessions/start", async (req, res) => {
 
     const now = new Date().toISOString();
     const sessionId = randomUUID();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const inserted = await db
       .from("test_sessions")
       .insert({
@@ -297,15 +343,20 @@ router.post("/testing/sessions/start", async (req, res) => {
         organization_id: membership.scope.organizationId,
         pilot_id: membership.scope.pilotId,
         app_session_id: requestedAppSessionId,
+        chat_session_id: chatSessionId,
         device_category: validatedStart.value.deviceCategory,
         status: "active",
         telemetry_status: "granted",
         telemetry_consent_id: telemetryConsent.id,
-        screen_consent_id: currentConsentGranted(screenConsent) ? screenConsent.id : null,
+        screen_consent_id: currentConsentGranted(screenConsent)
+          ? screenConsent.id
+          : null,
         microphone_consent_id: currentConsentGranted(microphoneConsent)
           ? microphoneConsent.id
           : null,
-        screen_consent_state: currentConsentGranted(screenConsent) ? "granted" : "declined",
+        screen_consent_state: currentConsentGranted(screenConsent)
+          ? "granted"
+          : "declined",
         microphone_consent_state: currentConsentGranted(microphoneConsent)
           ? "granted"
           : "declined",
@@ -325,8 +376,15 @@ router.post("/testing/sessions/start", async (req, res) => {
       .single();
     if (inserted.error) {
       if ((inserted.error as { code?: string }).code === "23505") {
-        const raced = await activeSession(identity.userId, membership.scope.pilotId);
-        if (raced.data) return res.json({ session: publicSession(raced.data), resumed: true });
+        const raced = await activeSession(
+          identity.userId,
+          membership.scope.pilotId,
+        );
+        if (raced.data)
+          return res.json({
+            session: publicSession(raced.data),
+            resumed: true,
+          });
       }
       throw inserted.error;
     }
@@ -350,10 +408,14 @@ router.post("/testing/sessions/start", async (req, res) => {
       },
     });
     if (event.error) throw new Error(event.error);
-    return res.status(201).json({ session: publicSession(inserted.data), resumed: false });
+    return res
+      .status(201)
+      .json({ session: publicSession(inserted.data), resumed: false });
   } catch (error) {
     req.log.error({ err: error }, "Could not start pilot session");
-    return res.status(503).json({ error: "Pilot session could not be started. Please try again." });
+    return res
+      .status(503)
+      .json({ error: "Pilot session could not be started. Please try again." });
   }
 });
 
@@ -368,22 +430,35 @@ router.get("/testing/sessions/current", async (req, res) => {
         "Forbidden",
         "Pilot sessions are temporarily unavailable.",
       )
-    ) return;
+    )
+      return;
     if (identity.isAdmin) {
       return res.json({ session: null });
     }
     const requestedPilotId =
-      typeof req.query["pilotId"] === "string" && UUID_RE.test(req.query["pilotId"])
+      typeof req.query["pilotId"] === "string" &&
+      UUID_RE.test(req.query["pilotId"])
         ? req.query["pilotId"]
         : null;
-    const membership = await resolveActiveTesterScope(identity.userId, requestedPilotId);
+    const membership = await resolveActiveTesterScope(
+      identity.userId,
+      requestedPilotId,
+    );
     if (!membership.scope) return res.json({ session: null });
-    const result = await activeSession(identity.userId, membership.scope.pilotId);
+    const result = await activeSession(
+      identity.userId,
+      membership.scope.pilotId,
+    );
     if (result.error) throw result.error;
-    if (result.data && (await expireSessionIfNeeded(result.data, identity.userId, req))) {
+    if (
+      result.data &&
+      (await expireSessionIfNeeded(result.data, identity.userId, req))
+    ) {
       return res.json({ session: null });
     }
-    return res.json({ session: result.data ? publicSession(result.data) : null });
+    return res.json({
+      session: result.data ? publicSession(result.data) : null,
+    });
   } catch (error) {
     req.log.error({ err: error }, "Could not load current pilot session");
     return res.status(503).json({ error: "Pilot session could not be loaded" });
@@ -400,19 +475,25 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       "Forbidden",
       "Pilot session updates are temporarily unavailable.",
     )
-  ) return;
+  )
+    return;
   if (identity.isAdmin) {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
-    if (!hasOnlyKeys(req.body ?? {}, EVENT_KEYS) || req.body?.schemaVersion !== 1) {
+    if (
+      !hasOnlyKeys(req.body ?? {}, EVENT_KEYS) ||
+      req.body?.schemaVersion !== 1
+    ) {
       await recordIngestFailure({
         actorUserId: identity.userId,
         testSessionId: req.params.id,
         reasonCode: "invalid_envelope",
         outcome: "rejected",
       });
-      return res.status(400).json({ error: "Invalid activity-event envelope." });
+      return res
+        .status(400)
+        .json({ error: "Invalid activity-event envelope." });
     }
     const event: CanonicalEventInput = {
       eventId: req.body.eventId,
@@ -446,7 +527,8 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           .eq("actor_user_id", identity.userId)
           .maybeSingle();
         if (existingSession.error) throw existingSession.error;
-        if (!existingSession.data) return res.status(404).json({ error: "Pilot session not found" });
+        if (!existingSession.data)
+          return res.status(404).json({ error: "Pilot session not found" });
         const duplicateProjection = eventProjectionFromRow(
           existingSession.data,
           existingEvent.data,
@@ -486,7 +568,11 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       });
       return res.status(404).json({ error: "Active pilot session not found" });
     }
-    const consent = await latestConsent(identity.userId, String(session.data.pilot_id), "telemetry");
+    const consent = await latestConsent(
+      identity.userId,
+      String(session.data.pilot_id),
+      "telemetry",
+    );
     if (!currentConsentGranted(consent)) {
       await recordIngestFailure({
         actorUserId: identity.userId,
@@ -496,7 +582,9 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
         reasonCode: "consent_not_granted",
         outcome: "rejected",
       });
-      return res.status(409).json({ error: "Telemetry consent is not active." });
+      return res
+        .status(409)
+        .json({ error: "Telemetry consent is not active." });
     }
     const inserted = await insertCanonicalEvent({
       req,
@@ -515,7 +603,9 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
         reasonCode: inserted.error,
         outcome: "rejected",
       });
-      return res.status(400).json({ error: "Activity event was rejected.", code: inserted.error });
+      return res
+        .status(400)
+        .json({ error: "Activity event was rejected.", code: inserted.error });
     }
 
     const now = new Date().toISOString();
@@ -523,7 +613,10 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       session.data,
       {
         event_type: inserted.row?.["event_type"] ?? event.eventType,
-        metadata: (inserted.row?.["metadata"] ?? event.metadata) as Record<string, unknown>,
+        metadata: (inserted.row?.["metadata"] ?? event.metadata) as Record<
+          string,
+          unknown
+        >,
         app_session_id: inserted.row?.["app_session_id"] ?? event.appSessionId,
       },
       now,
@@ -558,7 +651,8 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
       "Forbidden",
       "Pilot session updates are temporarily unavailable.",
     )
-  ) return;
+  )
+    return;
   if (identity.isAdmin) {
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -566,7 +660,9 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
     !req.body ||
     typeof req.body !== "object" ||
     Array.isArray(req.body) ||
-    Object.keys(req.body).some((key) => !["reasonCode", "eventCount"].includes(key)) ||
+    Object.keys(req.body).some(
+      (key) => !["reasonCode", "eventCount"].includes(key),
+    ) ||
     req.body.reasonCode !== "queue_overflow" ||
     !Number.isInteger(req.body.eventCount) ||
     req.body.eventCount < 1 ||
@@ -583,8 +679,13 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
     .eq("telemetry_status", "granted")
     .maybeSingle();
   if (session.error) throw session.error;
-  if (!session.data) return res.status(404).json({ error: "Pilot session not found." });
-  const consent = await latestConsent(identity.userId, String(session.data.pilot_id), "telemetry");
+  if (!session.data)
+    return res.status(404).json({ error: "Pilot session not found." });
+  const consent = await latestConsent(
+    identity.userId,
+    String(session.data.pilot_id),
+    "telemetry",
+  );
   if (!currentConsentGranted(consent)) {
     return res.status(409).json({ error: "Telemetry consent is not active." });
   }

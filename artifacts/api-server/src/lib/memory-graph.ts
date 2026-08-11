@@ -83,7 +83,10 @@ export function normalizeConcept(name: string): string {
  * name + category always yields the same id, so re-extracting it (from this or
  * any other video) upserts the one shared node instead of duplicating it.
  */
-export function knowledgeNodeId(category: KnowledgeCategory, title: string): string {
+export function knowledgeNodeId(
+  category: KnowledgeCategory,
+  title: string,
+): string {
   return `k:${category}:${normalizeConcept(title)}`;
 }
 
@@ -105,7 +108,13 @@ export type KnowledgeNodeKind = (typeof KNOWLEDGE_NODE_KINDS)[number];
 
 export interface GraphNode {
   id: string;
-  kind: "core" | "topic" | "competency" | "video" | "mentor" | KnowledgeNodeKind;
+  kind:
+    | "core"
+    | "topic"
+    | "competency"
+    | "video"
+    | "mentor"
+    | KnowledgeNodeKind;
   label: string;
   trade: string | null;
   refId: string | null;
@@ -181,11 +190,14 @@ async function upsertNodes(nodes: NodeUpsert[]): Promise<void> {
     };
     if (n.description !== undefined) row["description"] = n.description;
     if (n.confidence !== undefined) row["confidence"] = n.confidence;
-    if (n.verification_status !== undefined) row["verification_status"] = n.verification_status;
+    if (n.verification_status !== undefined)
+      row["verification_status"] = n.verification_status;
     if (n.embedding !== undefined) row["embedding"] = n.embedding;
     return row;
   });
-  const { error } = await supabase.from("knowledge_nodes").upsert(rows, { onConflict: "id" });
+  const { error } = await supabase
+    .from("knowledge_nodes")
+    .upsert(rows, { onConflict: "id" });
   if (error) throw error;
 }
 
@@ -231,7 +243,9 @@ async function upsertEdges(edges: EdgeUpsert[]): Promise<void> {
     row["meta"] = e.meta ?? {};
     return row;
   });
-  const { error } = await supabase.from("knowledge_edges").upsert(rows, { onConflict: "id" });
+  const { error } = await supabase
+    .from("knowledge_edges")
+    .upsert(rows, { onConflict: "id" });
   if (error) throw error;
 }
 
@@ -247,10 +261,14 @@ export async function ensureBaseGraph(): Promise<void> {
 
   const competencies = (comps ?? []) as Array<Record<string, string | null>>;
   const trades = [
-    ...new Set(competencies.map((c) => c["trade"]).filter((t): t is string => !!t)),
+    ...new Set(
+      competencies.map((c) => c["trade"]).filter((t): t is string => !!t),
+    ),
   ];
 
-  const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
+  const nodes: NodeUpsert[] = [
+    { id: GRAPH_CORE_ID, kind: "core", label: "JACK" },
+  ];
   const edges: EdgeUpsert[] = [];
 
   for (const trade of trades) {
@@ -273,7 +291,11 @@ export async function ensureBaseGraph(): Promise<void> {
       label: code,
       trade,
       ref_id: code,
-      meta: { code, trade, description: c["description"] ?? c["name"] ?? undefined },
+      meta: {
+        code,
+        trade,
+        description: c["description"] ?? c["name"] ?? undefined,
+      },
     });
     edges.push({
       id: edgeKey(topicNodeId(trade), compNodeId(code)),
@@ -297,7 +319,9 @@ export async function ensureBaseGraph(): Promise<void> {
 async function writeVideoNode(videoId: string): Promise<void> {
   const { data: video, error } = await supabase
     .from("videos")
-    .select("id, title, trade, status, description, competency_codes, uploader_user_id, uploader_email, uploader_name, created_at, updated_at")
+    .select(
+      "id, title, trade, status, description, competency_codes, uploader_user_id, uploader_email, uploader_name, created_at, updated_at",
+    )
     .eq("id", videoId)
     .maybeSingle();
   if (error) throw error;
@@ -310,24 +334,31 @@ async function writeVideoNode(videoId: string): Promise<void> {
   const v = video as Record<string, unknown>;
   const trade = (v["trade"] as string | null) ?? null;
   const codes = Array.isArray(v["competency_codes"])
-    ? (v["competency_codes"] as unknown[]).filter((c): c is string => typeof c === "string")
+    ? (v["competency_codes"] as unknown[]).filter(
+        (c): c is string => typeof c === "string",
+      )
     : [];
   const vNode = videoNodeId(videoId);
   const uploaderUserId =
-    typeof v["uploader_user_id"] === "string" && (v["uploader_user_id"] as string).trim()
+    typeof v["uploader_user_id"] === "string" &&
+    (v["uploader_user_id"] as string).trim()
       ? (v["uploader_user_id"] as string)
       : null;
   const uploaderEmail =
-    typeof v["uploader_email"] === "string" && (v["uploader_email"] as string).trim()
+    typeof v["uploader_email"] === "string" &&
+    (v["uploader_email"] as string).trim()
       ? (v["uploader_email"] as string)
       : null;
   const uploaderName =
-    typeof v["uploader_name"] === "string" && (v["uploader_name"] as string).trim()
+    typeof v["uploader_name"] === "string" &&
+    (v["uploader_name"] as string).trim()
       ? (v["uploader_name"] as string)
       : uploaderEmail;
   const cNode = uploaderUserId ? contributorNodeId(uploaderUserId) : null;
 
-  const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
+  const nodes: NodeUpsert[] = [
+    { id: GRAPH_CORE_ID, kind: "core", label: "JACK" },
+  ];
   const scaffoldEdges: EdgeUpsert[] = [];
 
   if (trade) {
@@ -389,16 +420,33 @@ async function writeVideoNode(videoId: string): Promise<void> {
     .eq("source_id", vNode)
     .neq("kind", "knowledge");
   if (del1.error) throw del1.error;
-  const del2 = await supabase.from("knowledge_edges").delete().eq("target_id", vNode);
+  const del2 = await supabase
+    .from("knowledge_edges")
+    .delete()
+    .eq("target_id", vNode);
   if (del2.error) throw del2.error;
 
   const parent = trade ? topicNodeId(trade) : GRAPH_CORE_ID;
   const edges: EdgeUpsert[] = [
     ...scaffoldEdges,
-    ...(cNode ? [] : [{ id: edgeKey(parent, vNode), source_id: parent, target_id: vNode, kind: "video" }]),
+    ...(cNode
+      ? []
+      : [
+          {
+            id: edgeKey(parent, vNode),
+            source_id: parent,
+            target_id: vNode,
+            kind: "video",
+          },
+        ]),
     ...(cNode
       ? [
-          { id: edgeKey(parent, cNode), source_id: parent, target_id: cNode, kind: "contributor" },
+          {
+            id: edgeKey(parent, cNode),
+            source_id: parent,
+            target_id: cNode,
+            kind: "contributor",
+          },
           {
             id: edgeKey(cNode, vNode),
             source_id: cNode,
@@ -450,7 +498,11 @@ async function pruneOrphanTopics(): Promise<void> {
   if (topics.error) throw topics.error;
 
   const keep = new Set<string>();
-  for (const r of [...(comps.data ?? []), ...(vids.data ?? []), ...(mentors.data ?? [])]) {
+  for (const r of [
+    ...(comps.data ?? []),
+    ...(vids.data ?? []),
+    ...(mentors.data ?? []),
+  ]) {
     const t = (r as Record<string, unknown>)["trade"];
     if (typeof t === "string" && t) keep.add(t);
   }
@@ -464,7 +516,10 @@ async function pruneOrphanTopics(): Promise<void> {
     .map((n) => n.id);
 
   if (orphanIds.length > 0) {
-    const { error } = await supabase.from("knowledge_nodes").delete().in("id", orphanIds);
+    const { error } = await supabase
+      .from("knowledge_nodes")
+      .delete()
+      .in("id", orphanIds);
     if (error) throw error;
   }
 }
@@ -479,8 +534,14 @@ async function pruneOrphanTopics(): Promise<void> {
  */
 export async function pruneOrphanKnowledge(): Promise<void> {
   const [nodes, edges] = await Promise.all([
-    supabase.from("knowledge_nodes").select("id, kind, meta").in("kind", [...KNOWLEDGE_NODE_KINDS]),
-    supabase.from("knowledge_edges").select("target_id").eq("kind", "knowledge"),
+    supabase
+      .from("knowledge_nodes")
+      .select("id, kind, meta")
+      .in("kind", [...KNOWLEDGE_NODE_KINDS]),
+    supabase
+      .from("knowledge_edges")
+      .select("target_id")
+      .eq("kind", "knowledge"),
   ]);
   if (nodes.error) throw nodes.error;
   if (edges.error) throw edges.error;
@@ -496,12 +557,17 @@ export async function pruneOrphanKnowledge(): Promise<void> {
     // Reviewer-restored (curated) concepts are intentionally source-free — the
     // reviewer, not a video/mentor, vouches for them — so they have no
     // provenance edge but must NOT be pruned.
-    .filter((r) => ((r["meta"] as Record<string, unknown>) ?? {})["curated"] !== true)
+    .filter(
+      (r) => ((r["meta"] as Record<string, unknown>) ?? {})["curated"] !== true,
+    )
     .map((r) => r["id"] as string)
     .filter((id) => !sourced.has(id));
 
   if (orphanIds.length > 0) {
-    const { error } = await supabase.from("knowledge_nodes").delete().in("id", orphanIds);
+    const { error } = await supabase
+      .from("knowledge_nodes")
+      .delete()
+      .in("id", orphanIds);
     if (error) throw error;
   }
 }
@@ -527,7 +593,9 @@ function clamp01(n: number): number {
  */
 const HISTORY_CAP = 50;
 function capHistory<T>(entries: T[]): T[] {
-  return entries.length > HISTORY_CAP ? entries.slice(entries.length - HISTORY_CAP) : entries;
+  return entries.length > HISTORY_CAP
+    ? entries.slice(entries.length - HISTORY_CAP)
+    : entries;
 }
 
 /**
@@ -592,9 +660,13 @@ interface ResolvedConcept {
 }
 
 /** Read the alias list (alternate wordings) recorded on a node's meta. */
-function metaAliases(meta: Record<string, unknown> | null | undefined): string[] {
+function metaAliases(
+  meta: Record<string, unknown> | null | undefined,
+): string[] {
   const raw = meta?.["aliases"];
-  return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === "string") : [];
+  return Array.isArray(raw)
+    ? raw.filter((a): a is string => typeof a === "string")
+    : [];
 }
 
 /**
@@ -604,7 +676,9 @@ function metaAliases(meta: Record<string, unknown> | null | undefined): string[]
  * (resolveMentorConcepts), so a wording a mentor taught as an alias also stops
  * a re-uploaded or differently-worded video from minting a duplicate node.
  */
-async function buildKnowledgeAliasIndex(): Promise<Map<string, { id: string; label: string }>> {
+async function buildKnowledgeAliasIndex(): Promise<
+  Map<string, { id: string; label: string }>
+> {
   const aliasIndex = new Map<string, { id: string; label: string }>();
   const { data, error } = await supabase
     .from("knowledge_nodes")
@@ -617,10 +691,12 @@ async function buildKnowledgeAliasIndex(): Promise<Map<string, { id: string; lab
     const label = (r["label"] as string) ?? "";
     const entry = { id, label };
     const normLabel = normalizeConcept(label);
-    if (normLabel && !aliasIndex.has(normLabel)) aliasIndex.set(normLabel, entry);
+    if (normLabel && !aliasIndex.has(normLabel))
+      aliasIndex.set(normLabel, entry);
     for (const alias of metaAliases(r["meta"] as Record<string, unknown>)) {
       const normAlias = normalizeConcept(alias);
-      if (normAlias && !aliasIndex.has(normAlias)) aliasIndex.set(normAlias, entry);
+      if (normAlias && !aliasIndex.has(normAlias))
+        aliasIndex.set(normAlias, entry);
     }
   }
   return aliasIndex;
@@ -632,9 +708,16 @@ async function buildKnowledgeAliasIndex(): Promise<Map<string, { id: string; lab
  * Used by both persist paths so alias growth behaves identically for video-
  * and mentor-sourced wordings.
  */
-function growAliases(label: string, prevMeta: Record<string, unknown>, newAliases: string[]): string[] {
+function growAliases(
+  label: string,
+  prevMeta: Record<string, unknown>,
+  newAliases: string[],
+): string[] {
   const prevAliases = metaAliases(prevMeta);
-  const seenNorms = new Set([normalizeConcept(label), ...prevAliases.map(normalizeConcept)]);
+  const seenNorms = new Set([
+    normalizeConcept(label),
+    ...prevAliases.map(normalizeConcept),
+  ]);
   const aliases = [...prevAliases];
   for (const a of newAliases) {
     const norm = normalizeConcept(a);
@@ -668,7 +751,9 @@ function growAliases(label: string, prevMeta: Record<string, unknown>, newAliase
  * (union timestamps, max confidence, most-complete description, first
  * competency). Nothing is written here — the caller persists the deduped set.
  */
-async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<ResolvedConcept[]> {
+async function resolveCanonicalItems(
+  items: AtomicKnowledge[],
+): Promise<ResolvedConcept[]> {
   if (items.length === 0) return [];
 
   // Which of the items' own deterministic ids already exist? Exact normalized-label
@@ -676,9 +761,13 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
   const exactIds = [...new Set(items.map((i) => i.id))];
   const existing = new Set<string>();
   {
-    const { data, error } = await supabase.from("knowledge_nodes").select("id").in("id", exactIds);
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id")
+      .in("id", exactIds);
     if (error) throw error;
-    for (const r of data ?? []) existing.add((r as Record<string, unknown>)["id"] as string);
+    for (const r of data ?? [])
+      existing.add((r as Record<string, unknown>)["id"] as string);
   }
 
   const aliasIndex = await buildKnowledgeAliasIndex();
@@ -688,7 +777,9 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
 
   for (const item of items) {
     const normTitle = normalizeConcept(item.title);
-    const embedding = await createEmbedding(conceptEmbeddingText(item.title, item.description));
+    const embedding = await createEmbedding(
+      conceptEmbeddingText(item.title, item.description),
+    );
 
     let canonicalId = item.id;
     let ownsId = true;
@@ -704,15 +795,20 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       } else if (embedding.length > 0) {
         // No exact node yet — look for a differently-worded duplicate of the same
         // category to merge onto instead of minting a near-duplicate.
-        const { data: matches, error } = await supabase.rpc("match_knowledge_nodes", {
-          query_embedding: embedding,
-          filter_category: item.category,
-          match_threshold: KNOWLEDGE_MATCH_THRESHOLD,
-          match_count: KNOWLEDGE_MATCH_COUNT,
-          exclude_ids: [item.id, ...claimed],
-        });
+        const { data: matches, error } = await supabase.rpc(
+          "match_knowledge_nodes",
+          {
+            query_embedding: embedding,
+            filter_category: item.category,
+            match_threshold: KNOWLEDGE_MATCH_THRESHOLD,
+            match_count: KNOWLEDGE_MATCH_COUNT,
+            exclude_ids: [item.id, ...claimed],
+          },
+        );
         if (error) throw error;
-        const hit = ((matches ?? []) as Array<{ id?: string; label?: string }>)[0];
+        const hit = (
+          (matches ?? []) as Array<{ id?: string; label?: string }>
+        )[0];
         if (hit?.id) {
           canonicalId = hit.id;
           ownsId = false;
@@ -721,7 +817,8 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       }
     }
 
-    const embeddingJson = ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
+    const embeddingJson =
+      ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
 
     // A differently-identified concept collapsing onto another canonical node is a
     // recorded merge. An exact normalized-label match (item.id === canonicalId) is
@@ -735,11 +832,16 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
     // differently-labelled node, so the next differently-worded upload (or a
     // mentor using the same wording) hits the alias index directly.
     const newAlias =
-      !ownsId && matchedLabel !== null && normalizeConcept(matchedLabel) !== normTitle
+      !ownsId &&
+      matchedLabel !== null &&
+      normalizeConcept(matchedLabel) !== normTitle
         ? item.title
         : null;
     if (newAlias && !aliasIndex.has(normTitle)) {
-      aliasIndex.set(normTitle, { id: canonicalId, label: matchedLabel ?? item.title });
+      aliasIndex.set(normTitle, {
+        id: canonicalId,
+        label: matchedLabel ?? item.title,
+      });
     }
 
     const prev = byCanonical.get(canonicalId);
@@ -747,13 +849,19 @@ async function resolveCanonicalItems(items: AtomicKnowledge[]): Promise<Resolved
       const ts = new Set([...prev.timestamps, ...item.timestamps]);
       prev.timestamps = [...ts].sort((a, b) => a - b);
       prev.confidence = Math.max(prev.confidence, item.confidence);
-      if (item.description.length > prev.description.length) prev.description = item.description;
-      if (!prev.competencyCode && item.competencyCode) prev.competencyCode = item.competencyCode;
-      if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
+      if (item.description.length > prev.description.length)
+        prev.description = item.description;
+      if (!prev.competencyCode && item.competencyCode)
+        prev.competencyCode = item.competencyCode;
+      if (!prev.embeddingJson && embeddingJson)
+        prev.embeddingJson = embeddingJson;
       if (mergeRef && !prev.mergedFrom.some((m) => m.id === mergeRef.id)) {
         prev.mergedFrom.push(mergeRef);
       }
-      if (newAlias && !prev.newAliases.some((a) => normalizeConcept(a) === normTitle)) {
+      if (
+        newAlias &&
+        !prev.newAliases.some((a) => normalizeConcept(a) === normTitle)
+      ) {
         prev.newAliases.push(newAlias);
       }
       continue;
@@ -843,175 +951,114 @@ async function resolveMentorConcepts(items: AtomicKnowledge[]): Promise<{
 }> {
   if (items.length === 0) return { resolved: [], queued: [], outcomes: [] };
 
-  // Signal 1: which items' own deterministic ids already exist?
   const exactIds = [...new Set(items.map((i) => i.id))];
-  const existing = new Set<string>();
+  const exactMatches = new Map<string, CandidateMatch>();
   {
-    const { data, error } = await supabase.from("knowledge_nodes").select("id").in("id", exactIds);
+    const { data, error } = await supabase
+      .from("knowledge_nodes")
+      .select("id,label")
+      .in("id", exactIds);
     if (error) throw error;
-    for (const r of data ?? []) existing.add((r as Record<string, unknown>)["id"] as string);
+    for (const row of data ?? []) {
+      const record = row as Record<string, unknown>;
+      const id = String(record["id"]);
+      exactMatches.set(id, {
+        nodeId: id,
+        label: String(record["label"] ?? id),
+        similarity: 1,
+      });
+    }
   }
 
-  // Signal 2: normalized label + recorded alias index across every knowledge
-  // category (shared with the video path).
   const aliasIndex = await buildKnowledgeAliasIndex();
-
-  const byCanonical = new Map<string, MentorResolvedConcept>();
   const queuedById = new Map<string, QueuedMentorConcept>();
   const outcomes: MentorKnowledgeOutcome[] = [];
-  const claimed: string[] = [];
 
   for (const item of items) {
     const normTitle = normalizeConcept(item.title);
-    const embedding = await createEmbedding(conceptEmbeddingText(item.title, item.description));
-
-    let canonicalId = item.id;
-    let ownsId = true;
-    let matchedLabel: string | null = null;
-    let outcome: MentorConceptOutcome;
-    let queuedMatches: CandidateMatch[] | null = null;
-
-    if (existing.has(item.id)) {
-      // Canonical title match — the node already lives in the graph.
-      outcome = "reinforced";
-    } else {
-      const aliasHit = aliasIndex.get(normTitle);
-      if (aliasHit && aliasHit.id !== item.id) {
-        canonicalId = aliasHit.id;
-        ownsId = false;
-        matchedLabel = aliasHit.label;
-        outcome = "reinforced";
-      } else if (embedding.length > 0) {
-        // Signal 3: top semantic neighbors down to the novelty threshold. Slang
-        // and regional terms also search the concept category, since a trade
-        // wording usually names a concept rather than another slang node.
-        const categories: KnowledgeCategory[] =
-          item.category === "slang" || item.category === "regional_term"
-            ? [item.category, "concept"]
-            : [item.category];
-        const matches: CandidateMatch[] = [];
-        for (const cat of categories) {
-          const { data, error } = await supabase.rpc("match_knowledge_nodes", {
-            query_embedding: embedding,
-            filter_category: cat,
-            match_threshold: MENTOR_NOVELTY_THRESHOLD,
-            match_count: MENTOR_NEIGHBOR_COUNT,
-            exclude_ids: [item.id, ...claimed],
-          });
-          if (error) throw error;
-          for (const m of (data ?? []) as Array<{ id?: string; label?: string; similarity?: number }>) {
-            if (typeof m.id === "string" && typeof m.similarity === "number") {
-              matches.push({ nodeId: m.id, label: m.label ?? m.id, similarity: m.similarity });
-            }
+    const embedding = await createEmbedding(
+      conceptEmbeddingText(item.title, item.description),
+    );
+    const matches = new Map<string, CandidateMatch>();
+    const exact = exactMatches.get(item.id);
+    if (exact) matches.set(exact.nodeId, exact);
+    const aliasHit = aliasIndex.get(normTitle);
+    if (aliasHit) {
+      matches.set(aliasHit.id, {
+        nodeId: aliasHit.id,
+        label: aliasHit.label,
+        similarity: 1,
+      });
+    }
+    if (embedding.length > 0) {
+      const categories: KnowledgeCategory[] =
+        item.category === "slang" || item.category === "regional_term"
+          ? [item.category, "concept"]
+          : [item.category];
+      for (const category of categories) {
+        const { data, error } = await supabase.rpc("match_knowledge_nodes", {
+          query_embedding: embedding,
+          filter_category: category,
+          match_threshold: MENTOR_NOVELTY_THRESHOLD,
+          match_count: MENTOR_NEIGHBOR_COUNT,
+          exclude_ids: [],
+        });
+        if (error) throw error;
+        for (const match of (data ?? []) as Array<{
+          id?: string;
+          label?: string;
+          similarity?: number;
+        }>) {
+          if (
+            typeof match.id !== "string" ||
+            typeof match.similarity !== "number"
+          )
+            continue;
+          const prior = matches.get(match.id);
+          if (!prior || match.similarity > prior.similarity) {
+            matches.set(match.id, {
+              nodeId: match.id,
+              label: match.label ?? match.id,
+              similarity: match.similarity,
+            });
           }
         }
-        matches.sort((a, b) => b.similarity - a.similarity);
-        const best = matches[0];
-        if (best && best.similarity >= MENTOR_REINFORCE_THRESHOLD) {
-          canonicalId = best.nodeId;
-          ownsId = false;
-          matchedLabel = best.label;
-          outcome = "reinforced";
-        } else if (best) {
-          // Plausible-but-uncertain: hold OUTSIDE the live graph for review.
-          outcome = "queued";
-          queuedMatches = matches.slice(0, MENTOR_NEIGHBOR_COUNT);
-        } else {
-          outcome = "created";
-        }
-      } else {
-        outcome = "created";
       }
     }
-
-    if (outcome === "queued") {
-      const prev = queuedById.get(item.id);
-      if (prev) {
-        prev.item.confidence = Math.max(prev.item.confidence, item.confidence);
-        if (item.description.length > prev.item.description.length) {
-          prev.item.description = item.description;
-        }
-      } else {
-        queuedById.set(item.id, { item: { ...item }, bestMatches: queuedMatches ?? [] });
-      }
-      outcomes.push({
-        itemId: item.id,
-        canonicalId: null,
-        title: item.title,
-        category: item.category,
-        outcome: "queued",
-        matchedLabel: null,
-      });
-      continue;
-    }
-
-    const embeddingJson = ownsId && embedding.length > 0 ? JSON.stringify(embedding) : null;
-    const mergeRef: MergedConceptRef | null =
-      item.id !== canonicalId
-        ? { id: item.id, label: item.title, category: item.category }
-        : null;
-    // Record the mentor's wording as an alias when it confidently resolved to a
-    // differently-labelled node, so the next mentor using the same wording hits
-    // the alias index directly.
-    const newAlias = !ownsId && matchedLabel !== null && normalizeConcept(matchedLabel) !== normTitle
-      ? item.title
-      : null;
-    if (newAlias && !aliasIndex.has(normTitle)) {
-      aliasIndex.set(normTitle, { id: canonicalId, label: matchedLabel ?? item.title });
-    }
-
-    const prev = byCanonical.get(canonicalId);
+    const bestMatches = [...matches.values()]
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, MENTOR_NEIGHBOR_COUNT);
+    const prev = queuedById.get(item.id);
     if (prev) {
-      const ts = new Set([...prev.timestamps, ...item.timestamps]);
-      prev.timestamps = [...ts].sort((a, b) => a - b);
-      prev.confidence = Math.max(prev.confidence, item.confidence);
-      if (item.description.length > prev.description.length) prev.description = item.description;
-      if (!prev.competencyCode && item.competencyCode) prev.competencyCode = item.competencyCode;
-      if (!prev.embeddingJson && embeddingJson) prev.embeddingJson = embeddingJson;
-      if (mergeRef && !prev.mergedFrom.some((m) => m.id === mergeRef.id)) {
-        prev.mergedFrom.push(mergeRef);
+      prev.item.confidence = Math.max(prev.item.confidence, item.confidence);
+      if (item.description.length > prev.item.description.length) {
+        prev.item.description = item.description;
       }
-      if (newAlias && !prev.newAliases.some((a) => normalizeConcept(a) === normTitle)) {
-        prev.newAliases.push(newAlias);
+      for (const match of bestMatches) {
+        if (
+          !prev.bestMatches.some(
+            (existingMatch) => existingMatch.nodeId === match.nodeId,
+          )
+        ) {
+          prev.bestMatches.push(match);
+        }
       }
-      outcomes.push({
-        itemId: item.id,
-        canonicalId,
-        title: item.title,
-        category: item.category,
-        outcome: prev.reinforced ? "reinforced" : "created",
-        matchedLabel: prev.reinforced ? (prev.matchedLabel ?? prev.title) : null,
-      });
-      continue;
+      prev.bestMatches.sort((a, b) => b.similarity - a.similarity);
+      prev.bestMatches.splice(MENTOR_NEIGHBOR_COUNT);
+    } else {
+      queuedById.set(item.id, { item: { ...item }, bestMatches });
     }
-
-    const reinforced = outcome === "reinforced";
-    claimed.push(canonicalId);
-    byCanonical.set(canonicalId, {
-      id: canonicalId,
-      category: item.category,
-      title: item.title,
-      description: item.description,
-      timestamps: [...item.timestamps].sort((a, b) => a - b),
-      confidence: item.confidence,
-      competencyCode: item.competencyCode,
-      embeddingJson,
-      mergedFrom: mergeRef ? [mergeRef] : [],
-      reinforced,
-      matchedLabel,
-      newAliases: newAlias ? [newAlias] : [],
-    });
     outcomes.push({
       itemId: item.id,
-      canonicalId,
+      canonicalId: null,
       title: item.title,
       category: item.category,
-      outcome,
-      matchedLabel,
+      outcome: "queued",
+      matchedLabel: bestMatches[0]?.label ?? null,
     });
   }
 
-  return { resolved: [...byCanonical.values()], queued: [...queuedById.values()], outcomes };
+  return { resolved: [], queued: [...queuedById.values()], outcomes };
 }
 
 /**
@@ -1030,13 +1077,18 @@ async function resolveMentorConcepts(items: AtomicKnowledge[]): Promise<{
  * Because everything is derived (not incremented), this is fully idempotent and
  * never double-counts a replayed video.
  */
-async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void> {
+async function recomputeKnowledgeAggregates(
+  conceptIds: string[],
+): Promise<void> {
   const ids = [...new Set(conceptIds)].filter((id) => id.startsWith("k:"));
   if (ids.length === 0) return;
   const nowIso = new Date().toISOString();
 
   const [nodesRes, provRes, hubRes] = await Promise.all([
-    supabase.from("knowledge_nodes").select("id, kind, label, trade, meta").in("id", ids),
+    supabase
+      .from("knowledge_nodes")
+      .select("id, kind, label, trade, meta")
+      .in("id", ids),
     supabase
       .from("knowledge_edges")
       .select("source_id, target_id, meta")
@@ -1056,16 +1108,16 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
   const provByConcept = new Map<string, Array<Record<string, unknown>>>();
   for (const e of provRes.data ?? []) {
     const target = (e as Record<string, unknown>)["target_id"] as string;
-    (provByConcept.get(target) ?? provByConcept.set(target, []).get(target)!).push(
-      e as Record<string, unknown>,
-    );
+    (
+      provByConcept.get(target) ?? provByConcept.set(target, []).get(target)!
+    ).push(e as Record<string, unknown>);
   }
   const hubByConcept = new Map<string, Array<Record<string, unknown>>>();
   for (const e of hubRes.data ?? []) {
     const source = (e as Record<string, unknown>)["source_id"] as string;
-    (hubByConcept.get(source) ?? hubByConcept.set(source, []).get(source)!).push(
-      e as Record<string, unknown>,
-    );
+    (
+      hubByConcept.get(source) ?? hubByConcept.set(source, []).get(source)!
+    ).push(e as Record<string, unknown>);
   }
 
   const nodeUpserts: NodeUpsert[] = [];
@@ -1080,14 +1132,22 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
     // Reviewer-restored (curated) concepts with no provenance are vouched for by
     // the reviewer, not derived from sources — leave their confidence and hub
     // edges intact instead of zeroing them out on a rebuild.
-    if (prov.length === 0 && ((node["meta"] as Record<string, unknown>) ?? {})["curated"] === true) {
+    if (
+      prov.length === 0 &&
+      ((node["meta"] as Record<string, unknown>) ?? {})["curated"] === true
+    ) {
       continue;
     }
 
     // Per-source provenance, de-duplicated by video (a concept links a video once).
     const sourceMap = new Map<
       string,
-      { timestamps: number[]; confidence: number; model: string | null; extractedAt: string | null }
+      {
+        timestamps: number[];
+        confidence: number;
+        model: string | null;
+        extractedAt: string | null;
+      }
     >();
     const topicCounts = new Map<string, number>();
     const compCounts = new Map<string, number>();
@@ -1095,20 +1155,31 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
       const videoId = stripVideoPrefix(e["source_id"] as string);
       const meta = (e["meta"] as Record<string, unknown>) ?? {};
       const timestamps = Array.isArray(meta["timestamps"])
-        ? (meta["timestamps"] as unknown[]).filter((t): t is number => typeof t === "number")
+        ? (meta["timestamps"] as unknown[]).filter(
+            (t): t is number => typeof t === "number",
+          )
         : [];
-      const confidence = typeof meta["confidence"] === "number" ? (meta["confidence"] as number) : 0.5;
+      const confidence =
+        typeof meta["confidence"] === "number"
+          ? (meta["confidence"] as number)
+          : 0.5;
       // Extraction provenance — the model + date that distilled this contribution.
       // Pre-feature edges lack these; keep them null rather than fabricating a
       // default so the derived models[] and firstExtractedAt stay honest.
-      const model = typeof meta["model"] === "string" ? (meta["model"] as string) : null;
+      const model =
+        typeof meta["model"] === "string" ? (meta["model"] as string) : null;
       const extractedAt =
-        typeof meta["extractedAt"] === "string" ? (meta["extractedAt"] as string) : null;
+        typeof meta["extractedAt"] === "string"
+          ? (meta["extractedAt"] as string)
+          : null;
       sourceMap.set(videoId, { timestamps, confidence, model, extractedAt });
-      const t = typeof meta["trade"] === "string" ? (meta["trade"] as string) : null;
+      const t =
+        typeof meta["trade"] === "string" ? (meta["trade"] as string) : null;
       if (t) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
       const code =
-        typeof meta["competencyCode"] === "string" ? (meta["competencyCode"] as string) : null;
+        typeof meta["competencyCode"] === "string"
+          ? (meta["competencyCode"] as string)
+          : null;
       if (code) compCounts.set(code, (compCounts.get(code) ?? 0) + 1);
     }
 
@@ -1120,13 +1191,17 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
       extractedAt: s.extractedAt,
     }));
     const sourceVideoIds = sources.map((s) => s.videoId);
-    const allTimestamps = [...new Set(sources.flatMap((s) => s.timestamps))].sort((a, b) => a - b);
+    const allTimestamps = [
+      ...new Set(sources.flatMap((s) => s.timestamps)),
+    ].sort((a, b) => a - b);
     const confidence = noisyOrConfidence(sources.map((s) => s.confidence));
 
     const prevMeta = (node["meta"] as Record<string, unknown>) ?? {};
 
     // Extraction provenance aggregates: distinct models + first/last extraction.
-    const models = [...new Set(sources.map((s) => s.model).filter((m): m is string => !!m))];
+    const models = [
+      ...new Set(sources.map((s) => s.model).filter((m): m is string => !!m)),
+    ];
     const extractDates = sources
       .map((s) => s.extractedAt)
       .filter((d): d is string => !!d)
@@ -1139,11 +1214,15 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
     const prevConfHistory = Array.isArray(prevMeta["confidenceHistory"])
       ? (prevMeta["confidenceHistory"] as Array<Record<string, unknown>>)
       : [];
-    const lastConf = prevConfHistory[prevConfHistory.length - 1]?.["confidence"];
+    const lastConf =
+      prevConfHistory[prevConfHistory.length - 1]?.["confidence"];
     const confidenceHistory =
       lastConf === confidence
         ? prevConfHistory
-        : capHistory([...prevConfHistory, { confidence, sourceCount: sources.length, at: nowIso }]);
+        : capHistory([
+            ...prevConfHistory,
+            { confidence, sourceCount: sources.length, at: nowIso },
+          ]);
 
     // Rejected evidence stays derived-consistent: drop any recorded rejection for a
     // video that currently corroborates this concept again (drop-then-reteach).
@@ -1151,7 +1230,9 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
       ? (prevMeta["rejectedEvidence"] as Array<Record<string, unknown>>)
       : [];
     const rejectedEvidence = capHistory(
-      prevRejected.filter((r) => !sourceVideoIds.includes(r["videoId"] as string)),
+      prevRejected.filter(
+        (r) => !sourceVideoIds.includes(r["videoId"] as string),
+      ),
     );
 
     nodeUpserts.push({
@@ -1201,7 +1282,10 @@ async function recomputeKnowledgeAggregates(conceptIds: string[]): Promise<void>
   await upsertNodes(nodeUpserts);
   await upsertEdges(edgeUpserts);
   if (edgeDeleteIds.length > 0) {
-    const { error } = await supabase.from("knowledge_edges").delete().in("id", edgeDeleteIds);
+    const { error } = await supabase
+      .from("knowledge_edges")
+      .delete()
+      .in("id", edgeDeleteIds);
     if (error) throw error;
   }
 }
@@ -1274,20 +1358,28 @@ export async function syncVideoKnowledge(
   if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
-      .select("id, kind, label, trade, description, confidence, verification_status, meta")
+      .select(
+        "id, kind, label, trade, description, confidence, verification_status, meta",
+      )
       .in("id", canonicalIds);
     if (error) throw error;
-    for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
+    for (const r of rows ?? [])
+      existingById.set((r as Record<string, unknown>)["id"] as string, r);
   }
 
   const nodes: NodeUpsert[] = resolved.map((c) => {
     const prev = existingById.get(c.id);
     const prevStatus = prev?.["verification_status"] as string | undefined;
     const prevConfidence =
-      typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : null;
+      typeof prev?.["confidence"] === "number"
+        ? (prev["confidence"] as number)
+        : null;
     const prevDesc = (prev?.["description"] as string | null) ?? "";
     // Keep the most complete description across all contributing videos.
-    const description = c.description.length > prevDesc.length ? c.description : prevDesc || c.description;
+    const description =
+      c.description.length > prevDesc.length
+        ? c.description
+        : prevDesc || c.description;
 
     // Preserve the node's existing meta (confidence/verification history, prior
     // merge and rejected-evidence records) — recomputeKnowledgeAggregates below
@@ -1305,7 +1397,8 @@ export async function syncVideoKnowledge(
     // Record newly merged-in concept identities; the first-seen timestamp wins so
     // replays never rewrite an existing merge record.
     for (const m of c.mergedFrom) {
-      if (!mergedById.has(m.id)) mergedById.set(m.id, { ...m, at: extractedAt });
+      if (!mergedById.has(m.id))
+        mergedById.set(m.id, { ...m, at: extractedAt });
     }
     const mergedFrom = [...mergedById.values()];
 
@@ -1335,7 +1428,9 @@ export async function syncVideoKnowledge(
       // — re-processing a video that also teaches it must never downgrade it.
       // Video-only concepts default to unverified.
       verification_status:
-        prevStatus === "verified" || prevStatus === "rejected" || prevStatus === "mentor_supplied"
+        prevStatus === "verified" ||
+        prevStatus === "rejected" ||
+        prevStatus === "mentor_supplied"
           ? prevStatus
           : "unverified",
       meta: {
@@ -1352,7 +1447,11 @@ export async function syncVideoKnowledge(
   });
 
   // Ensure competency nodes exist for any mapped codes (never clobber seeded rows).
-  const codes = [...new Set(resolved.map((c) => c.competencyCode).filter((c): c is string => !!c))];
+  const codes = [
+    ...new Set(
+      resolved.map((c) => c.competencyCode).filter((c): c is string => !!c),
+    ),
+  ];
   await ensureCompetencyNodes(codes);
   await upsertNodes(nodes);
 
@@ -1435,7 +1534,10 @@ export async function syncVideoKnowledge(
       ]);
       const { error: updErr } = await supabase
         .from("knowledge_nodes")
-        .update({ meta: { ...meta, rejectedEvidence }, updated_at: new Date().toISOString() })
+        .update({
+          meta: { ...meta, rejectedEvidence },
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", r["id"] as string);
       if (updErr) throw updErr;
     }
@@ -1455,7 +1557,9 @@ export async function syncVideoKnowledge(
     sourceNodeId: vNode,
     expectedNodeIds: canonicalIds,
     expectedEdgeIds: provenanceEdges.map((e) => e.id),
-    embeddingNodeIds: resolved.filter((c) => c.embeddingJson !== null).map((c) => c.id),
+    embeddingNodeIds: resolved
+      .filter((c) => c.embeddingJson !== null)
+      .map((c) => c.id),
   };
 }
 
@@ -1480,7 +1584,9 @@ async function ensureMentorNode(
   trade: string | null,
 ): Promise<void> {
   const mNode = mentorNodeId(profileId);
-  const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
+  const nodes: NodeUpsert[] = [
+    { id: GRAPH_CORE_ID, kind: "core", label: "JACK" },
+  ];
   const edges: EdgeUpsert[] = [];
 
   if (trade) {
@@ -1503,7 +1609,12 @@ async function ensureMentorNode(
   });
 
   const parent = trade ? topicNodeId(trade) : GRAPH_CORE_ID;
-  edges.push({ id: edgeKey(parent, mNode), source_id: parent, target_id: mNode, kind: "mentor" });
+  edges.push({
+    id: edgeKey(parent, mNode),
+    source_id: parent,
+    target_id: mNode,
+    kind: "mentor",
+  });
 
   await upsertNodes(nodes);
   await upsertEdges(edges);
@@ -1526,11 +1637,9 @@ async function ensureMentorNode(
  * Replaying the same answer is therefore idempotent — the deterministic edge id
  * plus answerId de-dup keeps the corroboration count stable.
  *
- * Resolution is reinforcement-first (resolveMentorConcepts): concepts that
- * confidently match existing knowledge reinforce it, confidently novel concepts
- * create nodes, and plausible-but-uncertain concepts are queued as pending rows
- * in knowledge_candidates OUTSIDE the live graph. Returns the per-item outcomes
- * so callers can preview reinforced/created/queued to the mentor.
+ * Resolution is review-first (resolveMentorConcepts): exact, semantic, and novel
+ * concepts are all queued in knowledge_candidates OUTSIDE the live graph.
+ * Accept/Merge is the only path that can reinforce or create trusted nodes.
  */
 export async function syncMentorAnswerKnowledge(
   mentorProfileId: string,
@@ -1545,18 +1654,14 @@ export async function syncMentorAnswerKnowledge(
   },
 ): Promise<MentorKnowledgeOutcome[]> {
   const trade = opts.trade ?? null;
-  const model = opts.model ?? null;
-  const extractedAt = opts.extractedAt ?? new Date().toISOString();
   const { answerId } = opts;
 
-  // Always ensure the mentor source node exists and is wired into the graph, even
-  // if this particular answer distilled nothing.
-  await ensureMentorNode(mentorProfileId, mentorName, trade);
   if (items.length === 0) return [];
 
-  // Reinforcement-first resolution: reinforce / create / queue per concept.
+  // Mentor interview evidence is review-first: every extracted item stays in
+  // knowledge_candidates until an administrator explicitly accepts or merges it.
+  // Video ingestion keeps its existing direct graph semantics.
   const { resolved, queued, outcomes } = await resolveMentorConcepts(items);
-  const canonicalIds = resolved.map((c) => c.id);
 
   // Queued candidates live OUTSIDE the live graph until reviewed. The row id is
   // deterministic per (answer, item) and inserted with ignoreDuplicates, so
@@ -1583,14 +1688,9 @@ export async function syncMentorAnswerKnowledge(
     if (error) throw error;
   }
 
-  if (resolved.length === 0) return outcomes;
-
-  await persistMentorResolvedConcepts(mentorProfileId, resolved, {
-    answerId,
-    trade,
-    model,
-    extractedAt,
-  });
+  // Defensive invariant: ingestion must never publish mentor-derived knowledge.
+  if (resolved.length > 0)
+    throw new Error("Mentor ingestion attempted an unreviewed graph write");
   return outcomes;
 }
 
@@ -1623,20 +1723,27 @@ async function persistMentorResolvedConcepts(
   if (canonicalIds.length > 0) {
     const { data: rows, error } = await supabase
       .from("knowledge_nodes")
-      .select("id, kind, label, trade, description, confidence, verification_status, meta")
+      .select(
+        "id, kind, label, trade, description, confidence, verification_status, meta",
+      )
       .in("id", canonicalIds);
     if (error) throw error;
-    for (const r of rows ?? []) existingById.set((r as Record<string, unknown>)["id"] as string, r);
+    for (const r of rows ?? [])
+      existingById.set((r as Record<string, unknown>)["id"] as string, r);
   }
 
   const nodes: NodeUpsert[] = resolved.map((c) => {
     const prev = existingById.get(c.id);
     const prevStatus = prev?.["verification_status"] as string | undefined;
     const prevConfidence =
-      typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : null;
+      typeof prev?.["confidence"] === "number"
+        ? (prev["confidence"] as number)
+        : null;
     const prevDesc = (prev?.["description"] as string | null) ?? "";
     const description =
-      c.description.length > prevDesc.length ? c.description : prevDesc || c.description;
+      c.description.length > prevDesc.length
+        ? c.description
+        : prevDesc || c.description;
 
     // Preserve the node's meta ledger (recompute re-derives corroboration on top)
     // and append any newly merged-in concept identities (first-seen wins).
@@ -1649,7 +1756,8 @@ async function persistMentorResolvedConcepts(
       if (typeof m["id"] === "string") mergedById.set(m["id"] as string, m);
     }
     for (const m of c.mergedFrom) {
-      if (!mergedById.has(m.id)) mergedById.set(m.id, { ...m, at: extractedAt });
+      if (!mergedById.has(m.id))
+        mergedById.set(m.id, { ...m, at: extractedAt });
     }
     const mergedFrom = [...mergedById.values()];
 
@@ -1684,7 +1792,11 @@ async function persistMentorResolvedConcepts(
     return node;
   });
 
-  const codes = [...new Set(resolved.map((c) => c.competencyCode).filter((c): c is string => !!c))];
+  const codes = [
+    ...new Set(
+      resolved.map((c) => c.competencyCode).filter((c): c is string => !!c),
+    ),
+  ];
   await ensureCompetencyNodes(codes);
   await upsertNodes(nodes);
 
@@ -1700,28 +1812,38 @@ async function persistMentorResolvedConcepts(
       .select("id, meta")
       .in("id", edgeIds);
     if (error) throw error;
-    for (const r of rows ?? []) existingEdges.set((r as Record<string, unknown>)["id"] as string, r);
+    for (const r of rows ?? [])
+      existingEdges.set((r as Record<string, unknown>)["id"] as string, r);
   }
 
   const provenanceEdges: EdgeUpsert[] = resolved.map((c) => {
     const id = edgeKey(mNode, c.id);
-    const prevMeta = (existingEdges.get(id)?.["meta"] as Record<string, unknown>) ?? {};
+    const prevMeta =
+      (existingEdges.get(id)?.["meta"] as Record<string, unknown>) ?? {};
     const prevAnswerIds = Array.isArray(prevMeta["answerIds"])
-      ? (prevMeta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      ? (prevMeta["answerIds"] as unknown[]).filter(
+          (a): a is string => typeof a === "string",
+        )
       : [];
     const answerIds = prevAnswerIds.includes(answerId)
       ? prevAnswerIds
       : [...prevAnswerIds, answerId];
     const prevConf =
-      typeof prevMeta["confidence"] === "number" ? (prevMeta["confidence"] as number) : 0;
+      typeof prevMeta["confidence"] === "number"
+        ? (prevMeta["confidence"] as number)
+        : 0;
     // Per-answer confidence ledger keyed by answerId. Recording it here is what
     // lets a later withdrawal recompute the true max over the SURVIVING answers,
     // instead of leaving the edge stuck at a withdrawn answer's high confidence.
     const prevAnswerConfidences =
-      prevMeta["answerConfidences"] && typeof prevMeta["answerConfidences"] === "object"
+      prevMeta["answerConfidences"] &&
+      typeof prevMeta["answerConfidences"] === "object"
         ? (prevMeta["answerConfidences"] as Record<string, number>)
         : {};
-    const answerConfidences = { ...prevAnswerConfidences, [answerId]: c.confidence };
+    const answerConfidences = {
+      ...prevAnswerConfidences,
+      [answerId]: c.confidence,
+    };
     return {
       id,
       source_id: mNode,
@@ -1787,6 +1909,9 @@ export interface KnowledgeCandidateRecord {
   mentorName: string | null;
   answerId: string | null;
   sessionId: string | null;
+  question: string | null;
+  answerText: string | null;
+  sourceValid: boolean;
   bestMatches: CandidateMatch[];
   createdAt: string | null;
   resolvedTargetId: string | null;
@@ -1799,10 +1924,16 @@ export interface KnowledgeCandidateRecord {
 }
 
 /** Map a raw knowledge_candidates row to the API record shape. */
-function mapCandidateRow(row: Record<string, unknown>): KnowledgeCandidateRecord {
-  const rawMatches = Array.isArray(row["best_matches"]) ? row["best_matches"] : [];
+function mapCandidateRow(
+  row: Record<string, unknown>,
+): KnowledgeCandidateRecord {
+  const rawMatches = Array.isArray(row["best_matches"])
+    ? row["best_matches"]
+    : [];
   const bestMatches: CandidateMatch[] = rawMatches
-    .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
+    .filter(
+      (m): m is Record<string, unknown> => typeof m === "object" && m !== null,
+    )
     .map((m) => ({
       nodeId: typeof m["nodeId"] === "string" ? m["nodeId"] : "",
       label: typeof m["label"] === "string" ? m["label"] : "",
@@ -1816,12 +1947,16 @@ function mapCandidateRow(row: Record<string, unknown>): KnowledgeCandidateRecord
     description: (row["description"] as string | null) ?? null,
     category: String(row["category"] ?? "concept"),
     trade: (row["trade"] as string | null) ?? null,
-    confidence: typeof row["confidence"] === "number" ? row["confidence"] : null,
+    confidence:
+      typeof row["confidence"] === "number" ? row["confidence"] : null,
     competencyCode: (row["competency_code"] as string | null) ?? null,
     mentorProfileId: (row["mentor_profile_id"] as string | null) ?? null,
     mentorName: (row["mentor_name"] as string | null) ?? null,
     answerId: (row["answer_id"] as string | null) ?? null,
     sessionId: (row["session_id"] as string | null) ?? null,
+    question: (row["question"] as string | null) ?? null,
+    answerText: (row["answer_text"] as string | null) ?? null,
+    sourceValid: row["source_valid"] !== false,
     bestMatches,
     createdAt: (row["created_at"] as string | null) ?? null,
     resolvedTargetId: (row["resolved_target_id"] as string | null) ?? null,
@@ -1849,7 +1984,10 @@ async function loadLiveKnowledgeIndex(): Promise<LiveKnowledgeIndex> {
     .select("id, kind, label, meta")
     .in("kind", [...KNOWLEDGE_NODE_KINDS]);
   if (error) throw error;
-  const live = new Map<string, { id: string; kind: KnowledgeNodeKind; label: string }>();
+  const live = new Map<
+    string,
+    { id: string; kind: KnowledgeNodeKind; label: string }
+  >();
   const mergedInto = new Map<string, string>();
   for (const row of data ?? []) {
     const r = row as Record<string, unknown>;
@@ -1860,11 +1998,14 @@ async function loadLiveKnowledgeIndex(): Promise<LiveKnowledgeIndex> {
       label: (r["label"] as string) || id,
     });
     const meta = (r["meta"] as Record<string, unknown>) ?? {};
-    const mergedFrom = Array.isArray(meta["mergedFrom"]) ? meta["mergedFrom"] : [];
+    const mergedFrom = Array.isArray(meta["mergedFrom"])
+      ? meta["mergedFrom"]
+      : [];
     for (const m of mergedFrom) {
       const mid = (m as Record<string, unknown> | null)?.["id"];
       // First writer wins — deterministic even if two survivors claim an id.
-      if (typeof mid === "string" && !mergedInto.has(mid)) mergedInto.set(mid, id);
+      if (typeof mid === "string" && !mergedInto.has(mid))
+        mergedInto.set(mid, id);
     }
   }
   return { live, mergedInto };
@@ -1878,7 +2019,10 @@ async function loadLiveKnowledgeIndex(): Promise<LiveKnowledgeIndex> {
 function followMergeChain(
   nodeId: string,
   index: LiveKnowledgeIndex,
-): { survivor: { id: string; kind: KnowledgeNodeKind; label: string }; via: string[] } | null {
+): {
+  survivor: { id: string; kind: KnowledgeNodeKind; label: string };
+  via: string[];
+} | null {
   const via: string[] = [];
   const seen = new Set<string>([nodeId]);
   let cur = nodeId;
@@ -1897,8 +2041,19 @@ function followMergeChain(
 /** How a review-time target id maps onto the CURRENT live graph. */
 export type TargetRevalidation =
   | { state: "live"; targetId: string; label: string; kind: KnowledgeNodeKind }
-  | { state: "merged"; targetId: string; label: string; kind: KnowledgeNodeKind; via: string[] }
-  | { state: "rematched"; targetId: string; label: string; kind: KnowledgeNodeKind }
+  | {
+      state: "merged";
+      targetId: string;
+      label: string;
+      kind: KnowledgeNodeKind;
+      via: string[];
+    }
+  | {
+      state: "rematched";
+      targetId: string;
+      label: string;
+      kind: KnowledgeNodeKind;
+    }
   | { state: "gone"; freshMatches: CandidateMatch[] };
 
 /**
@@ -1926,7 +2081,13 @@ export async function revalidateConceptTarget(
 
   // 1. Live as-is.
   const asIs = index.live.get(nodeId);
-  if (asIs) return { state: "live", targetId: asIs.id, label: asIs.label, kind: asIs.kind };
+  if (asIs)
+    return {
+      state: "live",
+      targetId: asIs.id,
+      label: asIs.label,
+      kind: asIs.kind,
+    };
 
   // 2. Merged away — follow the redirect chain to the final survivor.
   const chain = followMergeChain(nodeId, index);
@@ -1944,14 +2105,25 @@ export async function revalidateConceptTarget(
   const exactId = knowledgeNodeId(content.category, content.title);
   const exact = index.live.get(exactId);
   if (exact) {
-    return { state: "rematched", targetId: exact.id, label: exact.label, kind: exact.kind };
+    return {
+      state: "rematched",
+      targetId: exact.id,
+      label: exact.label,
+      kind: exact.kind,
+    };
   }
 
   const aliasIndex = await buildKnowledgeAliasIndex();
   const aliasHit = aliasIndex.get(normalizeConcept(content.title));
   if (aliasHit) {
     const hit = index.live.get(aliasHit.id);
-    if (hit) return { state: "rematched", targetId: hit.id, label: hit.label, kind: hit.kind };
+    if (hit)
+      return {
+        state: "rematched",
+        targetId: hit.id,
+        label: hit.label,
+        kind: hit.kind,
+      };
   }
 
   const matches: CandidateMatch[] = [];
@@ -1972,9 +2144,17 @@ export async function revalidateConceptTarget(
         exclude_ids: [nodeId],
       });
       if (error) throw error;
-      for (const m of (data ?? []) as Array<{ id?: string; label?: string; similarity?: number }>) {
+      for (const m of (data ?? []) as Array<{
+        id?: string;
+        label?: string;
+        similarity?: number;
+      }>) {
         if (typeof m.id === "string" && typeof m.similarity === "number") {
-          matches.push({ nodeId: m.id, label: m.label ?? m.id, similarity: m.similarity });
+          matches.push({
+            nodeId: m.id,
+            label: m.label ?? m.id,
+            similarity: m.similarity,
+          });
         }
       }
     }
@@ -1982,12 +2162,21 @@ export async function revalidateConceptTarget(
     const best = matches[0];
     if (best && best.similarity >= KNOWLEDGE_MATCH_THRESHOLD) {
       const hit = index.live.get(best.nodeId);
-      if (hit) return { state: "rematched", targetId: hit.id, label: hit.label, kind: hit.kind };
+      if (hit)
+        return {
+          state: "rematched",
+          targetId: hit.id,
+          label: hit.label,
+          kind: hit.kind,
+        };
     }
   }
 
   // 4. Gone — reviewer input required; hand back the current near matches.
-  return { state: "gone", freshMatches: matches.slice(0, MENTOR_NEIGHBOR_COUNT) };
+  return {
+    state: "gone",
+    freshMatches: matches.slice(0, MENTOR_NEIGHBOR_COUNT),
+  };
 }
 
 /**
@@ -2033,7 +2222,40 @@ export async function listKnowledgeCandidates(
     .eq("status", status)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const records = (data ?? []).map((row: Record<string, unknown>) => mapCandidateRow(row));
+  const records = (data ?? []).map((row: Record<string, unknown>) =>
+    mapCandidateRow(row),
+  );
+  const answerIds = [
+    ...new Set(
+      records
+        .map((record) => record.answerId)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  if (answerIds.length > 0) {
+    const { data: answers, error: answerError } = await supabase
+      .from("interview_answers")
+      .select("id,session_id,mentor_profile_id,question,answer_text")
+      .in("id", answerIds);
+    if (answerError) throw answerError;
+    const byId = new Map(
+      (answers ?? []).map((answer) => {
+        const row = answer as Record<string, unknown>;
+        return [String(row["id"]), row] as const;
+      }),
+    );
+    for (const record of records) {
+      const answer = record.answerId ? byId.get(record.answerId) : null;
+      record.question = (answer?.["question"] as string | null) ?? null;
+      record.answerText = (answer?.["answer_text"] as string | null) ?? null;
+      record.sourceValid =
+        !!answer &&
+        answer["mentor_profile_id"] === record.mentorProfileId &&
+        answer["session_id"] === record.sessionId;
+    }
+  } else {
+    for (const record of records) record.sourceValid = false;
+  }
   if (records.some((r) => r.bestMatches.length > 0)) {
     annotateCandidateMatches(records, await loadLiveKnowledgeIndex());
   }
@@ -2077,9 +2299,14 @@ export interface MentorContributionStat {
  * A single edge scan and a single candidate scan keep this O(edges + candidates),
  * which is fine at library scale (mirrors the existing listMentors aggregation).
  */
-export async function getMentorContributionStats(): Promise<MentorContributionStat[]> {
+export async function getMentorContributionStats(): Promise<
+  MentorContributionStat[]
+> {
   const [edgesRes, candsRes] = await Promise.all([
-    supabase.from("knowledge_edges").select("source_id, target_id, meta").eq("kind", "knowledge"),
+    supabase
+      .from("knowledge_edges")
+      .select("source_id, target_id, meta")
+      .eq("kind", "knowledge"),
     supabase.from("knowledge_candidates").select("mentor_profile_id, status"),
   ]);
   if (edgesRes.error) throw edgesRes.error;
@@ -2180,7 +2407,9 @@ function toAnswerExcerpt(text: unknown): string | null {
   if (typeof text !== "string") return null;
   const t = text.trim();
   if (!t) return null;
-  return t.length > ANSWER_EXCERPT_MAX ? `${t.slice(0, ANSWER_EXCERPT_MAX).trimEnd()}…` : t;
+  return t.length > ANSWER_EXCERPT_MAX
+    ? `${t.slice(0, ANSWER_EXCERPT_MAX).trimEnd()}…`
+    : t;
 }
 
 /**
@@ -2209,7 +2438,10 @@ export async function getConceptAnswerContributions(
   // answerId -> {confidence, mentorProfileId}. An answer belongs to exactly one
   // mentor (one mentor→concept edge per concept), so a stray duplicate simply
   // keeps the higher recorded confidence.
-  const byAnswer = new Map<string, { confidence: number | null; mentorProfileId: string }>();
+  const byAnswer = new Map<
+    string,
+    { confidence: number | null; mentorProfileId: string }
+  >();
   for (const row of edges ?? []) {
     const e = row as Record<string, unknown>;
     const source = e["source_id"];
@@ -2220,7 +2452,9 @@ export async function getConceptAnswerContributions(
         ? (meta["mentorProfileId"] as string)
         : source.slice("mentor:".length);
     const answerIds = Array.isArray(meta["answerIds"])
-      ? (meta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      ? (meta["answerIds"] as unknown[]).filter(
+          (a): a is string => typeof a === "string",
+        )
       : [];
     const confidences =
       meta["answerConfidences"] && typeof meta["answerConfidences"] === "object"
@@ -2237,7 +2471,8 @@ export async function getConceptAnswerContributions(
       const prev = byAnswer.get(id);
       if (
         !prev ||
-        (confidence !== null && (prev.confidence === null || confidence > prev.confidence))
+        (confidence !== null &&
+          (prev.confidence === null || confidence > prev.confidence))
       ) {
         byAnswer.set(id, { confidence, mentorProfileId });
       }
@@ -2259,7 +2494,8 @@ export async function getConceptAnswerContributions(
   }
 
   const mentorIds = new Set<string>();
-  for (const { mentorProfileId } of byAnswer.values()) mentorIds.add(mentorProfileId);
+  for (const { mentorProfileId } of byAnswer.values())
+    mentorIds.add(mentorProfileId);
   for (const a of answerById.values()) {
     const pid = a["mentor_profile_id"];
     if (typeof pid === "string" && pid) mentorIds.add(pid);
@@ -2290,9 +2526,12 @@ export async function getConceptAnswerContributions(
       answerId,
       confidence,
       mentorProfileId,
-      mentorName: nameById.get(answerMentorId) ?? nameById.get(mentorProfileId) ?? null,
+      mentorName:
+        nameById.get(answerMentorId) ?? nameById.get(mentorProfileId) ?? null,
       question:
-        answer && typeof answer["question"] === "string" ? (answer["question"] as string) : null,
+        answer && typeof answer["question"] === "string"
+          ? (answer["question"] as string)
+          : null,
       answerExcerpt: toAnswerExcerpt(answer?.["answer_text"]),
     });
   }
@@ -2326,7 +2565,12 @@ export type CandidateResolutionResult =
   | { ok: false; code: "not_found" | "conflict" | "invalid"; message: string }
   /** The requested target no longer exists and nothing confidently replaces it —
    * the candidate STAYS pending; bestMatches are fresh near matches for the reviewer. */
-  | { ok: false; code: "target_gone"; message: string; bestMatches: CandidateMatch[] };
+  | {
+      ok: false;
+      code: "target_gone";
+      message: string;
+      bestMatches: CandidateMatch[];
+    };
 
 const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   accept: "accepted",
@@ -2375,13 +2619,77 @@ export async function resolveKnowledgeCandidate(
   const parked = run.catch(() => undefined);
   resolutionQueues.set(candidateId, parked);
   void parked.finally(() => {
-    if (resolutionQueues.get(candidateId) === parked) resolutionQueues.delete(candidateId);
+    if (resolutionQueues.get(candidateId) === parked)
+      resolutionQueues.delete(candidateId);
   });
   return run;
 }
 
 /** Per-candidate serialization of concurrent resolve requests. */
 const resolutionQueues = new Map<string, Promise<unknown>>();
+
+function sameTrade(left: string | null, right: string | null): boolean {
+  if (!left || !right) return true;
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+async function validateCandidateSource(
+  record: KnowledgeCandidateRecord,
+): Promise<string | null> {
+  if (!record.mentorProfileId || !record.answerId || !record.sessionId) {
+    return "Candidate source provenance is incomplete.";
+  }
+  const [profileResult, answerResult, sessionResult] = await Promise.all([
+    supabase
+      .from("mentor_profiles")
+      .select("id,trade")
+      .eq("id", record.mentorProfileId)
+      .maybeSingle(),
+    supabase
+      .from("interview_answers")
+      .select("id,session_id,mentor_profile_id,answer_text,skipped")
+      .eq("id", record.answerId)
+      .maybeSingle(),
+    supabase
+      .from("interview_sessions")
+      .select("id,mentor_profile_id,trade")
+      .eq("id", record.sessionId)
+      .maybeSingle(),
+  ]);
+  const failed = [profileResult, answerResult, sessionResult].find(
+    (result) => result.error,
+  );
+  if (failed?.error) throw failed.error;
+  const profile = profileResult.data as Record<string, unknown> | null;
+  const answer = answerResult.data as Record<string, unknown> | null;
+  const session = sessionResult.data as Record<string, unknown> | null;
+  if (!profile || !answer || !session)
+    return "Candidate source answer, session, or mentor no longer exists.";
+  if (
+    answer["mentor_profile_id"] !== record.mentorProfileId ||
+    answer["session_id"] !== record.sessionId ||
+    session["mentor_profile_id"] !== record.mentorProfileId
+  ) {
+    return "Candidate source does not belong to the same mentor profile and session.";
+  }
+  if (
+    answer["skipped"] === true ||
+    typeof answer["answer_text"] !== "string" ||
+    !answer["answer_text"].trim()
+  ) {
+    return "Candidate source answer is missing or was skipped.";
+  }
+  const profileTrade = (profile["trade"] as string | null) ?? null;
+  const sessionTrade = (session["trade"] as string | null) ?? null;
+  if (
+    !sameTrade(record.trade, profileTrade) ||
+    !sameTrade(record.trade, sessionTrade) ||
+    !sameTrade(profileTrade, sessionTrade)
+  ) {
+    return "Candidate trade does not match its mentor profile and interview session.";
+  }
+  return null;
+}
 
 async function resolveKnowledgeCandidateInner(
   candidateId: string,
@@ -2395,7 +2703,11 @@ async function resolveKnowledgeCandidateInner(
     .maybeSingle();
   if (error) throw error;
   if (!row) {
-    return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+    return {
+      ok: false,
+      code: "not_found",
+      message: "No knowledge candidate with that id.",
+    };
   }
 
   const cand = row as Record<string, unknown>;
@@ -2429,24 +2741,29 @@ async function resolveKnowledgeCandidateInner(
   // Validate the action's inputs before touching anything.
   let targetNodeId: string | null = null;
   let reason: string | null = null;
+  let acceptAsNew = false;
   if (action === "accept") {
-    targetNodeId = record.bestMatches[0]?.nodeId ?? null;
+    targetNodeId =
+      record.bestMatches[0]?.nodeId ??
+      knowledgeNodeId(record.category as KnowledgeCategory, record.title);
+    acceptAsNew = record.bestMatches.length === 0;
+  } else if (action === "merge") {
+    targetNodeId = opts.targetNodeId?.trim() || null;
     if (!targetNodeId) {
       return {
         ok: false,
         code: "invalid",
-        message: "This candidate has no recorded best match to accept — use merge with a target.",
+        message: "Merge requires a target concept.",
       };
-    }
-  } else if (action === "merge") {
-    targetNodeId = opts.targetNodeId?.trim() || null;
-    if (!targetNodeId) {
-      return { ok: false, code: "invalid", message: "Merge requires a target concept." };
     }
   } else {
     reason = opts.reason?.trim() || null;
     if (!reason) {
-      return { ok: false, code: "invalid", message: "Reject requires a reason." };
+      return {
+        ok: false,
+        code: "invalid",
+        message: "Reject requires a reason.",
+      };
     }
   }
 
@@ -2474,17 +2791,24 @@ async function resolveKnowledgeCandidateInner(
   let redirectReason: string | null = null;
 
   if (action !== "reject") {
+    const sourceError = await validateCandidateSource(record);
+    if (sourceError)
+      return { ok: false, code: "invalid", message: sourceError };
+
     // A target that EXISTS but is a scaffold node (core/topic/competency/
     // video/mentor) is reviewer error, not graph drift — refuse it outright
     // rather than letting content re-matching paper over it.
     const { data: rawTarget, error: tErr } = await supabase
       .from("knowledge_nodes")
-      .select("id, kind")
+      .select("id, kind, trade")
       .eq("id", targetNodeId!)
       .maybeSingle();
     if (tErr) throw tErr;
     const raw = rawTarget as Record<string, unknown> | null;
-    if (raw && !KNOWLEDGE_NODE_KINDS.includes(raw["kind"] as KnowledgeNodeKind)) {
+    if (
+      raw &&
+      !KNOWLEDGE_NODE_KINDS.includes(raw["kind"] as KnowledgeNodeKind)
+    ) {
       return {
         ok: false,
         code: "invalid",
@@ -2510,7 +2834,7 @@ async function resolveKnowledgeCandidateInner(
       description: record.description ?? "",
       category,
     });
-    if (revalidation.state === "gone") {
+    if (revalidation.state === "gone" && !acceptAsNew) {
       return {
         ok: false,
         code: "target_gone",
@@ -2520,49 +2844,95 @@ async function resolveKnowledgeCandidateInner(
         bestMatches: revalidation.freshMatches,
       };
     }
-    actualTargetId = revalidation.targetId;
+    actualTargetId =
+      revalidation.state === "gone" ? targetNodeId : revalidation.targetId;
     redirectReason =
-      revalidation.state === "merged"
-        ? `Requested concept was merged into “${revalidation.label}”.`
-        : revalidation.state === "rematched"
-          ? `Requested concept no longer exists; re-matched by content to “${revalidation.label}”.`
-          : null;
+      revalidation.state === "gone"
+        ? null
+        : revalidation.state === "merged"
+          ? `Requested concept was merged into “${revalidation.label}”.`
+          : revalidation.state === "rematched"
+            ? `Requested concept no longer exists; re-matched by content to “${revalidation.label}”.`
+            : null;
 
+    const { data: actualTarget, error: actualTargetError } = await supabase
+      .from("knowledge_nodes")
+      .select("id,kind,label,trade")
+      .eq("id", actualTargetId)
+      .maybeSingle();
+    if (actualTargetError) throw actualTargetError;
+    const targetTrade =
+      ((actualTarget as Record<string, unknown> | null)?.["trade"] as
+        | string
+        | null) ?? null;
+    if (!sameTrade(record.trade, targetTrade)) {
+      return {
+        ok: false,
+        code: "invalid",
+        message:
+          "Cross-trade knowledge requires a different target and remains pending for review.",
+      };
+    }
+
+    const resolvedTargetId = actualTargetId ?? targetNodeId!;
     const itemId = knowledgeNodeId(category, record.title);
-    const targetLabel = revalidation.label || actualTargetId;
+    const targetLabel =
+      revalidation.state === "gone"
+        ? record.title
+        : revalidation.label || resolvedTargetId;
+    const targetKind =
+      revalidation.state === "gone"
+        ? category
+        : (revalidation.kind as KnowledgeCategory);
+    const embedding =
+      revalidation.state === "gone"
+        ? await createEmbedding(
+            conceptEmbeddingText(record.title, record.description ?? ""),
+          )
+        : [];
     const resolvedConcept: MentorResolvedConcept = {
-      id: actualTargetId,
+      id: resolvedTargetId,
       // Keep the target node's own kind — a slang candidate merged into a
       // concept node must not re-kind the concept.
-      category: revalidation.kind as KnowledgeCategory,
+      category: targetKind,
       title: record.title,
       description: record.description ?? "",
       timestamps: [],
       confidence: record.confidence ?? 0.6,
       competencyCode: record.competencyCode,
       // The target owns its embedding; the candidate never brings one in.
-      embeddingJson: null,
+      embeddingJson: embedding.length > 0 ? JSON.stringify(embedding) : null,
       mergedFrom:
-        itemId !== actualTargetId
+        itemId !== resolvedTargetId
           ? [{ id: itemId, label: record.title, category }]
           : [],
-      reinforced: true,
-      matchedLabel: targetLabel,
+      reinforced: revalidation.state !== "gone",
+      matchedLabel: revalidation.state === "gone" ? null : targetLabel,
       // Record the mentor's wording as an alias when it differs from the label
       // (persistMentorResolvedConcepts dedups against existing aliases).
       newAliases:
-        normalizeConcept(record.title) !== normalizeConcept(targetLabel) ? [record.title] : [],
+        normalizeConcept(record.title) !== normalizeConcept(targetLabel)
+          ? [record.title]
+          : [],
     };
 
-    await ensureMentorNode(record.mentorProfileId, record.mentorName ?? "Mentor", record.trade);
-    await persistMentorResolvedConcepts(record.mentorProfileId, [resolvedConcept], {
-      // Dedup key for the mentor→concept provenance edge: the original answer
-      // when known, otherwise the candidate id (still deterministic per item).
-      answerId: record.answerId ?? record.id,
-      trade: record.trade,
-      model: null,
-      extractedAt: new Date().toISOString(),
-    });
+    await ensureMentorNode(
+      record.mentorProfileId,
+      record.mentorName ?? "Mentor",
+      record.trade,
+    );
+    await persistMentorResolvedConcepts(
+      record.mentorProfileId,
+      [resolvedConcept],
+      {
+        // Dedup key for the mentor→concept provenance edge: the original answer
+        // when known, otherwise the candidate id (still deterministic per item).
+        answerId: record.answerId ?? record.id,
+        trade: record.trade,
+        model: null,
+        extractedAt: new Date().toISOString(),
+      },
+    );
   }
 
   const now = new Date().toISOString();
@@ -2594,7 +2964,11 @@ async function resolveKnowledgeCandidateInner(
       .maybeSingle();
     if (curErr) throw curErr;
     if (!current) {
-      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+      return {
+        ok: false,
+        code: "not_found",
+        message: "No knowledge candidate with that id.",
+      };
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
     const sameOutcome =
@@ -2610,7 +2984,11 @@ async function resolveKnowledgeCandidateInner(
     };
   }
 
-  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+  return {
+    ok: true,
+    candidate: mapCandidateRow(updated as Record<string, unknown>),
+    replayed: false,
+  };
 }
 
 /**
@@ -2672,7 +3050,9 @@ export interface MentorGraphRemoval {
  * The archive write happens BEFORE any deletion so a mid-flight failure never
  * loses concept content; every step is idempotent, so a retry converges.
  */
-export async function removeMentorGraph(profileId: string): Promise<MentorGraphRemoval> {
+export async function removeMentorGraph(
+  profileId: string,
+): Promise<MentorGraphRemoval> {
   const mNode = mentorNodeId(profileId);
 
   // Concepts this mentor corroborates, captured before the node (and, by
@@ -2703,12 +3083,18 @@ export async function removeMentorGraph(profileId: string): Promise<MentorGraphR
   // so a mid-flight failure is retryable without losing the concept content.
   if (orphaned.length > 0) {
     await archiveOrphanedConcepts(orphaned);
-    const { error } = await supabase.from("knowledge_nodes").delete().in("id", orphaned);
+    const { error } = await supabase
+      .from("knowledge_nodes")
+      .delete()
+      .in("id", orphaned);
     if (error) throw error;
   }
 
   // Remove the mentor source node; its provenance + hub edges cascade away.
-  const { error: mErr } = await supabase.from("knowledge_nodes").delete().eq("id", mNode);
+  const { error: mErr } = await supabase
+    .from("knowledge_nodes")
+    .delete()
+    .eq("id", mNode);
   if (mErr) throw mErr;
 
   // A trade hub anchored only by this mentor loses its reason to exist; the
@@ -2767,7 +3153,10 @@ async function archiveOrphanedConcepts(conceptIds: string[]): Promise<void> {
       description: (n["description"] as string | null) ?? null,
       category: n["kind"] as string,
       trade: (n["trade"] as string | null) ?? null,
-      confidence: typeof n["confidence"] === "number" ? (n["confidence"] as number) : null,
+      confidence:
+        typeof n["confidence"] === "number"
+          ? (n["confidence"] as number)
+          : null,
       competency_code: compByConcept.get(id) ?? null,
       mentor_profile_id: null,
       mentor_name: null,
@@ -2821,7 +3210,9 @@ async function restoreArchivedCandidateInner(
   }
 
   // Recover the original deterministic concept id from the arch:<nodeId> row id.
-  const nodeId = record.id.startsWith("arch:") ? record.id.slice("arch:".length) : "";
+  const nodeId = record.id.startsWith("arch:")
+    ? record.id.slice("arch:".length)
+    : "";
   if (!nodeId.startsWith("k:")) {
     return {
       ok: false,
@@ -2857,10 +3248,15 @@ async function restoreArchivedCandidateInner(
       .maybeSingle();
     if (curErr) throw curErr;
     if (!current) {
-      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+      return {
+        ok: false,
+        code: "not_found",
+        message: "No knowledge candidate with that id.",
+      };
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
-    if (winner.status === "restored") return { ok: true, candidate: winner, replayed: true };
+    if (winner.status === "restored")
+      return { ok: true, candidate: winner, replayed: true };
     return {
       ok: false,
       code: "conflict",
@@ -2868,7 +3264,11 @@ async function restoreArchivedCandidateInner(
     };
   }
 
-  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+  return {
+    ok: true,
+    candidate: mapCandidateRow(updated as Record<string, unknown>),
+    replayed: false,
+  };
 }
 
 /**
@@ -2907,7 +3307,9 @@ async function rearchiveRestoredCandidateInner(
   }
 
   // Recover the original deterministic concept id from the arch:<nodeId> row id.
-  const nodeId = record.id.startsWith("arch:") ? record.id.slice("arch:".length) : "";
+  const nodeId = record.id.startsWith("arch:")
+    ? record.id.slice("arch:".length)
+    : "";
   if (!nodeId.startsWith("k:")) {
     return {
       ok: false,
@@ -2943,10 +3345,15 @@ async function rearchiveRestoredCandidateInner(
       .maybeSingle();
     if (curErr) throw curErr;
     if (!current) {
-      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+      return {
+        ok: false,
+        code: "not_found",
+        message: "No knowledge candidate with that id.",
+      };
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
-    if (winner.status === "archived") return { ok: true, candidate: winner, replayed: true };
+    if (winner.status === "archived")
+      return { ok: true, candidate: winner, replayed: true };
     return {
       ok: false,
       code: "conflict",
@@ -2954,7 +3361,11 @@ async function rearchiveRestoredCandidateInner(
     };
   }
 
-  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+  return {
+    ok: true,
+    candidate: mapCandidateRow(updated as Record<string, unknown>),
+    replayed: false,
+  };
 }
 
 /**
@@ -3002,9 +3413,15 @@ async function reverseMentorReinforcement(
   if (error) throw error;
 
   if (edgeRow) {
-    const meta = ((edgeRow as Record<string, unknown>)["meta"] as Record<string, unknown>) ?? {};
+    const meta =
+      ((edgeRow as Record<string, unknown>)["meta"] as Record<
+        string,
+        unknown
+      >) ?? {};
     const prevAnswerIds = Array.isArray(meta["answerIds"])
-      ? (meta["answerIds"] as unknown[]).filter((a): a is string => typeof a === "string")
+      ? (meta["answerIds"] as unknown[]).filter(
+          (a): a is string => typeof a === "string",
+        )
       : [];
     // Only touch the edge when this answer actually contributed to it — otherwise
     // the reversal already happened (idempotent retry) and we must not disturb
@@ -3026,7 +3443,8 @@ async function reverseMentorReinforcement(
         // the per-answer ledger) with any surviving answer whose confidence we do
         // not know is left at its existing confidence — never understated.
         const prevAnswerConfidences =
-          meta["answerConfidences"] && typeof meta["answerConfidences"] === "object"
+          meta["answerConfidences"] &&
+          typeof meta["answerConfidences"] === "object"
             ? (meta["answerConfidences"] as Record<string, number>)
             : {};
         const answerConfidences: Record<string, number> = {};
@@ -3035,12 +3453,17 @@ async function reverseMentorReinforcement(
             answerConfidences[id] = prevAnswerConfidences[id];
           }
         }
-        const prevConf = typeof meta["confidence"] === "number" ? (meta["confidence"] as number) : 0;
+        const prevConf =
+          typeof meta["confidence"] === "number"
+            ? (meta["confidence"] as number)
+            : 0;
         const haveAllSurviving = answerIds.every(
           (id) => typeof prevAnswerConfidences[id] === "number",
         );
         const confidence = haveAllSurviving
-          ? Math.max(...answerIds.map((id) => prevAnswerConfidences[id] as number))
+          ? Math.max(
+              ...answerIds.map((id) => prevAnswerConfidences[id] as number),
+            )
           : prevConf;
         // (knowledge_edges has no updated_at column; only weight + meta change.)
         const { error: updErr } = await supabase
@@ -3062,6 +3485,198 @@ async function reverseMentorReinforcement(
   await pruneOrphanKnowledge();
   await recomputeKnowledgeAggregates([targetNodeId]);
   await demoteStaleMentorSupplied([targetNodeId]);
+}
+
+export interface MentorProvenanceReconciliationAction {
+  edgeId: string;
+  mentorProfileId: string;
+  targetNodeId: string;
+  validAnswerIds: string[];
+  invalidAnswerIds: string[];
+  action: "update_edge" | "delete_edge";
+}
+
+/**
+ * Preview or apply stale mentor provenance repair. An answer contributes only
+ * when the answer, its session, the mentor source node, and the edge metadata
+ * all identify the same mentor profile. Shared concepts are never directly
+ * deleted: only invalid source contributions are removed, then the existing
+ * provenance-based aggregate/pruning machinery re-evaluates affected concepts.
+ */
+export async function reconcileMentorAnswerProvenance(
+  opts: { apply?: boolean } = {},
+): Promise<{
+  applied: boolean;
+  actions: MentorProvenanceReconciliationAction[];
+}> {
+  const { data: edgeRows, error: edgeError } = await supabase
+    .from("knowledge_edges")
+    .select("id,source_id,target_id,weight,meta")
+    .eq("kind", "knowledge");
+  if (edgeError) throw edgeError;
+  const mentorEdges = (edgeRows ?? [])
+    .map((row) => row as Record<string, unknown>)
+    .filter((row) => String(row["source_id"] ?? "").startsWith("mentor:"));
+  const answerIds = [
+    ...new Set(
+      mentorEdges.flatMap((edge) => {
+        const meta = (edge["meta"] as Record<string, unknown>) ?? {};
+        return Array.isArray(meta["answerIds"])
+          ? (meta["answerIds"] as unknown[]).filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [];
+      }),
+    ),
+  ];
+  const profileIds = [
+    ...new Set(
+      mentorEdges.map((edge) =>
+        String(edge["source_id"]).slice("mentor:".length),
+      ),
+    ),
+  ];
+  const [answersResult, profilesResult] = await Promise.all([
+    answerIds.length > 0
+      ? supabase
+          .from("interview_answers")
+          .select("id,session_id,mentor_profile_id")
+          .in("id", answerIds)
+      : Promise.resolve({ data: [], error: null }),
+    profileIds.length > 0
+      ? supabase.from("mentor_profiles").select("id").in("id", profileIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (answersResult.error) throw answersResult.error;
+  if (profilesResult.error) throw profilesResult.error;
+  const answers = new Map(
+    (answersResult.data ?? []).map((answer) => {
+      const row = answer as Record<string, unknown>;
+      return [String(row["id"]), row] as const;
+    }),
+  );
+  const sessionIds = [
+    ...new Set(
+      [...answers.values()]
+        .map((answer) => String(answer["session_id"] ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+  const sessionsResult =
+    sessionIds.length > 0
+      ? await supabase
+          .from("interview_sessions")
+          .select("id,mentor_profile_id")
+          .in("id", sessionIds)
+      : { data: [], error: null };
+  if (sessionsResult.error) throw sessionsResult.error;
+  const sessions = new Map(
+    (sessionsResult.data ?? []).map((session) => {
+      const row = session as Record<string, unknown>;
+      return [String(row["id"]), row] as const;
+    }),
+  );
+  const liveProfiles = new Set(
+    (profilesResult.data ?? []).map((profile) =>
+      String((profile as Record<string, unknown>)["id"]),
+    ),
+  );
+  const actions: MentorProvenanceReconciliationAction[] = [];
+
+  for (const edge of mentorEdges) {
+    const edgeId = String(edge["id"]);
+    const mentorProfileId = String(edge["source_id"]).slice("mentor:".length);
+    const targetNodeId = String(edge["target_id"]);
+    const meta = (edge["meta"] as Record<string, unknown>) ?? {};
+    const edgeProfileId =
+      typeof meta["mentorProfileId"] === "string"
+        ? meta["mentorProfileId"]
+        : mentorProfileId;
+    const previousAnswerIds = Array.isArray(meta["answerIds"])
+      ? (meta["answerIds"] as unknown[]).filter(
+          (id): id is string => typeof id === "string",
+        )
+      : [];
+    const validAnswerIds = previousAnswerIds.filter((answerId) => {
+      const answer = answers.get(answerId);
+      if (
+        !answer ||
+        !liveProfiles.has(mentorProfileId) ||
+        edgeProfileId !== mentorProfileId
+      )
+        return false;
+      const session = sessions.get(String(answer["session_id"] ?? ""));
+      return (
+        answer["mentor_profile_id"] === mentorProfileId &&
+        !!session &&
+        session["mentor_profile_id"] === mentorProfileId
+      );
+    });
+    const invalidAnswerIds = previousAnswerIds.filter(
+      (answerId) => !validAnswerIds.includes(answerId),
+    );
+    if (invalidAnswerIds.length === 0 && previousAnswerIds.length > 0) continue;
+    actions.push({
+      edgeId,
+      mentorProfileId,
+      targetNodeId,
+      validAnswerIds,
+      invalidAnswerIds,
+      action: validAnswerIds.length > 0 ? "update_edge" : "delete_edge",
+    });
+    if (!opts.apply) continue;
+    if (validAnswerIds.length === 0) {
+      const { error } = await supabase
+        .from("knowledge_edges")
+        .delete()
+        .eq("id", edgeId);
+      if (error) throw error;
+      continue;
+    }
+    const previousConfidences =
+      meta["answerConfidences"] && typeof meta["answerConfidences"] === "object"
+        ? (meta["answerConfidences"] as Record<string, number>)
+        : {};
+    const answerConfidences = Object.fromEntries(
+      validAnswerIds
+        .filter((answerId) => typeof previousConfidences[answerId] === "number")
+        .map((answerId) => [answerId, previousConfidences[answerId]]),
+    );
+    const haveAllConfidences = validAnswerIds.every(
+      (answerId) => typeof previousConfidences[answerId] === "number",
+    );
+    const confidence = haveAllConfidences
+      ? Math.max(
+          ...validAnswerIds.map(
+            (answerId) => previousConfidences[answerId] as number,
+          ),
+        )
+      : typeof meta["confidence"] === "number"
+        ? meta["confidence"]
+        : 0;
+    const { error } = await supabase
+      .from("knowledge_edges")
+      .update({
+        weight: validAnswerIds.length,
+        meta: {
+          ...meta,
+          answerIds: validAnswerIds,
+          answerConfidences,
+          confidence,
+        },
+      })
+      .eq("id", edgeId);
+    if (error) throw error;
+  }
+
+  if (opts.apply && actions.length > 0) {
+    const affected = [...new Set(actions.map((action) => action.targetNodeId))];
+    await pruneOrphanKnowledge();
+    await recomputeKnowledgeAggregates(affected);
+    await demoteStaleMentorSupplied(affected);
+    await pruneOrphanTopics();
+  }
+  return { applied: opts.apply === true, actions };
 }
 
 /**
@@ -3161,10 +3776,15 @@ async function reopenResolvedCandidateInner(
       .maybeSingle();
     if (curErr) throw curErr;
     if (!current) {
-      return { ok: false, code: "not_found", message: "No knowledge candidate with that id." };
+      return {
+        ok: false,
+        code: "not_found",
+        message: "No knowledge candidate with that id.",
+      };
     }
     const winner = mapCandidateRow(current as Record<string, unknown>);
-    if (winner.status === "pending") return { ok: true, candidate: winner, replayed: true };
+    if (winner.status === "pending")
+      return { ok: true, candidate: winner, replayed: true };
     // Scrubbed out from under us (still resolved but mentor now null) — report the
     // same strand refusal the pre-read guard would give on retry.
     if (winner.status === record.status && !winner.mentorProfileId) {
@@ -3182,7 +3802,11 @@ async function reopenResolvedCandidateInner(
     };
   }
 
-  return { ok: true, candidate: mapCandidateRow(updated as Record<string, unknown>), replayed: false };
+  return {
+    ok: true,
+    candidate: mapCandidateRow(updated as Record<string, unknown>),
+    replayed: false,
+  };
 }
 
 /**
@@ -3216,7 +3840,10 @@ async function rearchiveConceptNode(nodeId: string): Promise<void> {
     if (error) throw error;
     if (nodeRow) {
       const meta = {
-        ...(((nodeRow as Record<string, unknown>)["meta"] as Record<string, unknown>) ?? {}),
+        ...(((nodeRow as Record<string, unknown>)["meta"] as Record<
+          string,
+          unknown
+        >) ?? {}),
       };
       delete meta["curated"];
       delete meta["restoredAt"];
@@ -3234,7 +3861,10 @@ async function rearchiveConceptNode(nodeId: string): Promise<void> {
   // Sourceless curated node: remove it from the live graph. Its hub edges
   // cascade with the node delete; the arch:<nodeId> candidate row keeps the
   // content snapshot. A trade hub left anchoring nothing is pruned.
-  const { error: delErr } = await supabase.from("knowledge_nodes").delete().eq("id", nodeId);
+  const { error: delErr } = await supabase
+    .from("knowledge_nodes")
+    .delete()
+    .eq("id", nodeId);
   if (delErr) throw delErr;
   await pruneOrphanTopics();
 }
@@ -3254,7 +3884,9 @@ async function restoreConceptNode(
   const now = new Date().toISOString();
   const { data: prevRow, error } = await supabase
     .from("knowledge_nodes")
-    .select("id, kind, label, trade, description, confidence, verification_status, meta")
+    .select(
+      "id, kind, label, trade, description, confidence, verification_status, meta",
+    )
     .eq("id", nodeId)
     .maybeSingle();
   if (error) throw error;
@@ -3267,25 +3899,34 @@ async function restoreConceptNode(
 
   const prevDesc = (prev?.["description"] as string | null) ?? "";
   const recDesc = record.description ?? "";
-  const description = recDesc.length > prevDesc.length ? recDesc : prevDesc || recDesc;
+  const description =
+    recDesc.length > prevDesc.length ? recDesc : prevDesc || recDesc;
 
   // Keep an already-re-sourced confidence; a fresh restore uses the archived
   // snapshot's value so the concept isn't reborn at zero.
   const confidence =
-    typeof prev?.["confidence"] === "number" ? (prev["confidence"] as number) : record.confidence;
+    typeof prev?.["confidence"] === "number"
+      ? (prev["confidence"] as number)
+      : record.confidence;
 
   // Preserve a human decision; otherwise a restored concept is unverified.
   const prevStatus = (prev?.["verification_status"] as string | null) ?? null;
   const verification =
-    prevStatus === "verified" || prevStatus === "rejected" ? prevStatus : "unverified";
+    prevStatus === "verified" || prevStatus === "rejected"
+      ? prevStatus
+      : "unverified";
 
   const aliases = growAliases(
     label,
     prevMeta,
-    normalizeConcept(record.title) === normalizeConcept(label) ? [] : [record.title],
+    normalizeConcept(record.title) === normalizeConcept(label)
+      ? []
+      : [record.title],
   );
 
-  await ensureCompetencyNodes(record.competencyCode ? [record.competencyCode] : []);
+  await ensureCompetencyNodes(
+    record.competencyCode ? [record.competencyCode] : [],
+  );
 
   // Scaffold the concept node plus its trade hub. The topic hub is minted here
   // (consistent with how ingestion scaffolds hubs in writeVideoNode) so that a
@@ -3313,7 +3954,12 @@ async function restoreConceptNode(
     },
   ];
   if (trade) {
-    scaffoldNodes.push({ id: topicNodeId(trade), kind: "topic", label: trade, trade });
+    scaffoldNodes.push({
+      id: topicNodeId(trade),
+      kind: "topic",
+      label: trade,
+      trade,
+    });
   }
   await upsertNodes(scaffoldNodes);
 
@@ -3358,7 +4004,10 @@ async function demoteStaleMentorSupplied(conceptIds: string[]): Promise<void> {
   const ids = [...new Set(conceptIds)];
   if (ids.length === 0) return;
   const [nodesRes, provRes] = await Promise.all([
-    supabase.from("knowledge_nodes").select("id, verification_status").in("id", ids),
+    supabase
+      .from("knowledge_nodes")
+      .select("id, verification_status")
+      .in("id", ids),
     supabase
       .from("knowledge_edges")
       .select("source_id, target_id")
@@ -3379,15 +4028,18 @@ async function demoteStaleMentorSupplied(conceptIds: string[]): Promise<void> {
     .map((r) => r as Record<string, unknown>)
     .filter(
       (n) =>
-        ((n["verification_status"] as string | null) ?? "unverified") === "mentor_supplied" &&
-        !mentorBacked.has(n["id"] as string),
+        ((n["verification_status"] as string | null) ?? "unverified") ===
+          "mentor_supplied" && !mentorBacked.has(n["id"] as string),
     )
     .map((n) => n["id"] as string);
 
   if (demote.length > 0) {
     const { error } = await supabase
       .from("knowledge_nodes")
-      .update({ verification_status: "unverified", updated_at: new Date().toISOString() })
+      .update({
+        verification_status: "unverified",
+        updated_at: new Date().toISOString(),
+      })
       .in("id", demote);
     if (error) throw error;
   }
@@ -3421,7 +4073,9 @@ export type MentorWithdrawalResult =
  * Admin-gated at the route layer — the API holds the service-role key and is
  * otherwise unauthenticated, and this is a destructive action.
  */
-export async function withdrawMentor(profileId: string): Promise<MentorWithdrawalResult> {
+export async function withdrawMentor(
+  profileId: string,
+): Promise<MentorWithdrawalResult> {
   const { data: profile, error: pErr } = await supabase
     .from("mentor_profiles")
     .select("id")
@@ -3441,9 +4095,14 @@ export async function withdrawMentor(profileId: string): Promise<MentorWithdrawa
     .eq("mentor_profile_id", profileId)
     .eq("status", "pending");
   if (listErr) throw listErr;
-  const pendingIds = (pendingRows ?? []).map((r) => (r as Record<string, unknown>)["id"] as string);
+  const pendingIds = (pendingRows ?? []).map(
+    (r) => (r as Record<string, unknown>)["id"] as string,
+  );
   if (pendingIds.length > 0) {
-    const { error } = await supabase.from("knowledge_candidates").delete().in("id", pendingIds);
+    const { error } = await supabase
+      .from("knowledge_candidates")
+      .delete()
+      .in("id", pendingIds);
     if (error) throw error;
   }
 
@@ -3452,7 +4111,9 @@ export async function withdrawMentor(profileId: string): Promise<MentorWithdrawa
     .select("id")
     .eq("mentor_profile_id", profileId);
   if (resErr) throw resErr;
-  const scrubIds = (resolvedRows ?? []).map((r) => (r as Record<string, unknown>)["id"] as string);
+  const scrubIds = (resolvedRows ?? []).map(
+    (r) => (r as Record<string, unknown>)["id"] as string,
+  );
   if (scrubIds.length > 0) {
     const { error } = await supabase
       .from("knowledge_candidates")
@@ -3468,7 +4129,10 @@ export async function withdrawMentor(profileId: string): Promise<MentorWithdrawa
   }
 
   // 3) The person, last: profile row deletion cascades sessions + answers.
-  const { error: dErr } = await supabase.from("mentor_profiles").delete().eq("id", profileId);
+  const { error: dErr } = await supabase
+    .from("mentor_profiles")
+    .delete()
+    .eq("id", profileId);
   if (dErr) throw dErr;
 
   return {
@@ -3611,7 +4275,9 @@ export async function rebuildGraph(): Promise<void> {
 
   const { data: videos, error } = await supabase.from("videos").select("id");
   if (error) throw error;
-  const ids = (videos ?? []).map((r: Record<string, unknown>) => r["id"] as string);
+  const ids = (videos ?? []).map(
+    (r: Record<string, unknown>) => r["id"] as string,
+  );
   for (const id of ids) {
     await writeVideoNode(id);
   }
@@ -3632,7 +4298,10 @@ export async function rebuildGraph(): Promise<void> {
     .map((r) => r.id);
 
   if (stale.length > 0) {
-    const { error: dErr } = await supabase.from("knowledge_nodes").delete().in("id", stale);
+    const { error: dErr } = await supabase
+      .from("knowledge_nodes")
+      .delete()
+      .in("id", stale);
     if (dErr) throw dErr;
   }
 
@@ -3650,12 +4319,18 @@ export async function rebuildGraph(): Promise<void> {
     .select("id")
     .in("kind", [...KNOWLEDGE_NODE_KINDS]);
   if (kErr) throw kErr;
-  const knowledgeIds = (kNodes ?? []).map((r: Record<string, unknown>) => r["id"] as string);
+  const knowledgeIds = (kNodes ?? []).map(
+    (r: Record<string, unknown>) => r["id"] as string,
+  );
   await recomputeKnowledgeAggregates(knowledgeIds);
 }
 
 /** The human review decisions a reviewer may record on a distilled concept. */
-export const VERIFICATION_STATUSES = ["verified", "rejected", "unverified"] as const;
+export const VERIFICATION_STATUSES = [
+  "verified",
+  "rejected",
+  "unverified",
+] as const;
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
 /**
@@ -3690,7 +4365,8 @@ export async function setNodeVerification(
   // records the accountable reviewer (the signed-in human behind the decision),
   // so a "verified" concept carries a name — not just what changed and when.
   // `reviewer` is null for anonymous/legacy sessions that carry no identity.
-  const prevStatus = ((ex["verification_status"] as string | null) ?? "unverified") as VerificationStatus;
+  const prevStatus = ((ex["verification_status"] as string | null) ??
+    "unverified") as VerificationStatus;
   const prevMeta = (ex["meta"] as Record<string, unknown>) ?? {};
   const prevHistory = Array.isArray(prevMeta["verificationHistory"])
     ? (prevMeta["verificationHistory"] as Array<Record<string, unknown>>)
@@ -3700,7 +4376,12 @@ export async function setNodeVerification(
       ? prevHistory
       : capHistory([
           ...prevHistory,
-          { from: prevStatus, to: status, at: new Date().toISOString(), reviewer },
+          {
+            from: prevStatus,
+            to: status,
+            at: new Date().toISOString(),
+            reviewer,
+          },
         ]);
 
   const { data: updated, error: updErr } = await supabase
@@ -3723,7 +4404,8 @@ export async function setNodeVerification(
     trade: (r["trade"] as string | null) ?? null,
     refId: (r["ref_id"] as string | null) ?? null,
     description: (r["description"] as string | null) ?? null,
-    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
+    confidence:
+      typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
     verificationStatus: (r["verification_status"] as string) ?? "unverified",
     meta: (r["meta"] as Record<string, unknown>) ?? {},
     createdAt: r["created_at"] as string,
@@ -3778,7 +4460,11 @@ export async function restoreWithdrawnEvidence(
   const readCurrent = rejectedEvidence.length === prevRejected.length;
 
   const { data: updated, error: updErr } = readCurrent
-    ? await supabase.from("knowledge_nodes").select("*").eq("id", nodeId).single()
+    ? await supabase
+        .from("knowledge_nodes")
+        .select("*")
+        .eq("id", nodeId)
+        .single()
     : await supabase
         .from("knowledge_nodes")
         .update({
@@ -3798,7 +4484,8 @@ export async function restoreWithdrawnEvidence(
     trade: (r["trade"] as string | null) ?? null,
     refId: (r["ref_id"] as string | null) ?? null,
     description: (r["description"] as string | null) ?? null,
-    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
+    confidence:
+      typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
     verificationStatus: (r["verification_status"] as string) ?? "unverified",
     meta: (r["meta"] as Record<string, unknown>) ?? {},
     createdAt: r["created_at"] as string,
@@ -3808,37 +4495,45 @@ export async function restoreWithdrawnEvidence(
 
 /** Read the full persisted graph. */
 export async function getGraph(): Promise<KnowledgeGraph> {
-  const [{ data: nodeRows, error: nErr }, { data: edgeRows, error: eErr }] = await Promise.all([
-    supabase.from("knowledge_nodes").select("*"),
-    supabase.from("knowledge_edges").select("*"),
-  ]);
+  const [{ data: nodeRows, error: nErr }, { data: edgeRows, error: eErr }] =
+    await Promise.all([
+      supabase.from("knowledge_nodes").select("*"),
+      supabase.from("knowledge_edges").select("*"),
+    ]);
   if (nErr) throw nErr;
   if (eErr) throw eErr;
 
   const knowledgeKinds = new Set<string>(KNOWLEDGE_NODE_KINDS);
 
-  const nodes: GraphNode[] = (nodeRows ?? []).map((r: Record<string, unknown>) => ({
-    id: r["id"] as string,
-    kind: r["kind"] as GraphNode["kind"],
-    label: r["label"] as string,
-    trade: (r["trade"] as string | null) ?? null,
-    refId: (r["ref_id"] as string | null) ?? null,
-    description: (r["description"] as string | null) ?? null,
-    confidence: typeof r["confidence"] === "number" ? (r["confidence"] as number) : null,
-    verificationStatus: (r["verification_status"] as string) ?? "unverified",
-    meta: (r["meta"] as Record<string, unknown>) ?? {},
-    createdAt: r["created_at"] as string,
-    updatedAt: (r["updated_at"] as string) ?? (r["created_at"] as string),
-  }));
+  const nodes: GraphNode[] = (nodeRows ?? []).map(
+    (r: Record<string, unknown>) => ({
+      id: r["id"] as string,
+      kind: r["kind"] as GraphNode["kind"],
+      label: r["label"] as string,
+      trade: (r["trade"] as string | null) ?? null,
+      refId: (r["ref_id"] as string | null) ?? null,
+      description: (r["description"] as string | null) ?? null,
+      confidence:
+        typeof r["confidence"] === "number"
+          ? (r["confidence"] as number)
+          : null,
+      verificationStatus: (r["verification_status"] as string) ?? "unverified",
+      meta: (r["meta"] as Record<string, unknown>) ?? {},
+      createdAt: r["created_at"] as string,
+      updatedAt: (r["updated_at"] as string) ?? (r["created_at"] as string),
+    }),
+  );
 
-  const edges: GraphEdge[] = (edgeRows ?? []).map((r: Record<string, unknown>) => ({
-    id: r["id"] as string,
-    source: r["source_id"] as string,
-    target: r["target_id"] as string,
-    kind: r["kind"] as string,
-    weight: (r["weight"] as number) ?? 1,
-    meta: (r["meta"] as Record<string, unknown>) ?? {},
-  }));
+  const edges: GraphEdge[] = (edgeRows ?? []).map(
+    (r: Record<string, unknown>) => ({
+      id: r["id"] as string,
+      source: r["source_id"] as string,
+      target: r["target_id"] as string,
+      kind: r["kind"] as string,
+      weight: (r["weight"] as number) ?? 1,
+      meta: (r["meta"] as Record<string, unknown>) ?? {},
+    }),
+  );
 
   return {
     nodes,
@@ -3923,7 +4618,11 @@ export function buildMentorAnswerManifest(
   const mNode = mentorNodeId(mentorProfileId);
   const landed = outcomes.filter((o) => o.outcome !== "queued");
   const expectedNodeIds = [
-    ...new Set(landed.map((o) => o.canonicalId).filter((id): id is string => id !== null)),
+    ...new Set(
+      landed
+        .map((o) => o.canonicalId)
+        .filter((id): id is string => id !== null),
+    ),
   ];
   const expectedEdgeIds = expectedNodeIds.map((id) => edgeKey(mNode, id));
   const embeddingNodeIds = [
@@ -3967,7 +4666,9 @@ async function verifySearchIndex(
     const withEmbedding = new Set(
       (data ?? []).map((r) => (r as Record<string, unknown>)["id"]),
     );
-    missingNodeEmbeddings = embeddingNodeIds.filter((id) => !withEmbedding.has(id)).length;
+    missingNodeEmbeddings = embeddingNodeIds.filter(
+      (id) => !withEmbedding.has(id),
+    ).length;
   }
 
   if (scope === "video") {
@@ -4005,10 +4706,13 @@ async function verifySearchIndex(
       problems.push(`${unembeddedSegments} transcript segment(s) not embedded`);
     if (!videoEmbedded) problems.push("whole-video embedding missing");
     if (missingNodeEmbeddings > 0)
-      problems.push(`${missingNodeEmbeddings} new concept node(s) not embedded`);
+      problems.push(
+        `${missingNodeEmbeddings} new concept node(s) not embedded`,
+      );
     return {
       ok: problems.length === 0,
-      detail: problems.length === 0 ? "search index up to date" : problems.join("; "),
+      detail:
+        problems.length === 0 ? "search index up to date" : problems.join("; "),
     };
   }
 
@@ -4030,7 +4734,8 @@ async function verifySearchIndex(
 export async function verifyGraphWrite(
   manifest: GraphWriteManifest,
 ): Promise<GraphWriteVerification> {
-  const { scope, refId, expectedNodeIds, expectedEdgeIds, embeddingNodeIds } = manifest;
+  const { scope, refId, expectedNodeIds, expectedEdgeIds, embeddingNodeIds } =
+    manifest;
 
   // Nodes exist + confidence recomputed (one read serves both).
   const nodeRows = new Map<string, Record<string, unknown>>();
@@ -4041,7 +4746,10 @@ export async function verifyGraphWrite(
       .in("id", expectedNodeIds);
     if (error) throw error;
     for (const r of data ?? [])
-      nodeRows.set((r as Record<string, unknown>)["id"] as string, r as Record<string, unknown>);
+      nodeRows.set(
+        (r as Record<string, unknown>)["id"] as string,
+        r as Record<string, unknown>,
+      );
   }
   const missingNodes = expectedNodeIds.filter((id) => !nodeRows.has(id));
   const nodesExist: WriteCheck = {
@@ -4072,7 +4780,10 @@ export async function verifyGraphWrite(
       .in("id", expectedEdgeIds);
     if (error) throw error;
     for (const r of data ?? [])
-      edgeRows.set((r as Record<string, unknown>)["id"] as string, r as Record<string, unknown>);
+      edgeRows.set(
+        (r as Record<string, unknown>)["id"] as string,
+        r as Record<string, unknown>,
+      );
   }
   const missingEdges = expectedEdgeIds.filter((id) => !edgeRows.has(id));
   const edgesExist: WriteCheck = {
@@ -4094,11 +4805,14 @@ export async function verifyGraphWrite(
     }
     const meta = (row["meta"] as Record<string, unknown>) ?? {};
     if (scope === "mentor_answer") {
-      const answerIds = Array.isArray(meta["answerIds"]) ? (meta["answerIds"] as unknown[]) : [];
+      const answerIds = Array.isArray(meta["answerIds"])
+        ? (meta["answerIds"] as unknown[])
+        : [];
       if (!answerIds.includes(refId)) provenanceBad++;
     } else {
       const hasProv =
-        typeof meta["extractedAt"] === "string" || typeof meta["confidence"] === "number";
+        typeof meta["extractedAt"] === "string" ||
+        typeof meta["confidence"] === "number";
       if (!hasProv) provenanceBad++;
     }
   }
@@ -4110,7 +4824,11 @@ export async function verifyGraphWrite(
         : `${provenanceBad} edge(s) missing provenance metadata`,
   };
 
-  const searchIndexUpdated = await verifySearchIndex(scope, refId, embeddingNodeIds);
+  const searchIndexUpdated = await verifySearchIndex(
+    scope,
+    refId,
+    embeddingNodeIds,
+  );
 
   const checks: GraphWriteChecks = {
     nodesExist,
@@ -4147,7 +4865,8 @@ export async function verifyGraphWrite(
 export function isTransientSchemaCacheError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as { code?: unknown }).code;
-  if (code === "PGRST205" || code === "PGRST204" || code === "PGRST202") return true;
+  if (code === "PGRST205" || code === "PGRST204" || code === "PGRST202")
+    return true;
   const message = (err as { message?: unknown }).message;
   return typeof message === "string" && /schema cache/i.test(message);
 }
@@ -4198,9 +4917,12 @@ async function recordGraphWrite(
           ref_id: manifest.refId,
           status: verification.status,
           checks: verification.checks,
-          error: verification.status === "verified" ? null : verification.summary,
+          error:
+            verification.status === "verified" ? null : verification.summary,
           duration_ms:
-            typeof meta.startedAtMs === "number" ? Date.now() - meta.startedAtMs : null,
+            typeof meta.startedAtMs === "number"
+              ? Date.now() - meta.startedAtMs
+              : null,
           attempts: meta.attempts ?? 1,
           updated_at: new Date().toISOString(),
         },
@@ -4267,7 +4989,13 @@ export interface GraphHealthWrite {
 }
 
 export interface GraphHealthReport {
-  counts: { verified: number; partial: number; failed: number; pending: number; total: number };
+  counts: {
+    verified: number;
+    partial: number;
+    failed: number;
+    pending: number;
+    total: number;
+  };
   /** Work awaiting a retry: videos in the backoff ladder + answers to redistill. */
   retryQueue: { videos: number; answers: number; total: number };
   /** Mean duration of verified writes (ms), or null when none recorded yet. */
@@ -4284,7 +5012,8 @@ function normalizeChecks(raw: unknown): Record<string, WriteCheck> {
         const v = val as Record<string, unknown>;
         out[name] = {
           ok: Boolean(v["ok"]),
-          detail: typeof v["detail"] === "string" ? (v["detail"] as string) : "",
+          detail:
+            typeof v["detail"] === "string" ? (v["detail"] as string) : "",
         };
       }
     }
@@ -4293,15 +5022,25 @@ function normalizeChecks(raw: unknown): Record<string, WriteCheck> {
 }
 
 /** Assemble the admin Graph Health report from the write log + retry sources. */
-export async function getGraphHealth(recentLimit = 25): Promise<GraphHealthReport> {
+export async function getGraphHealth(
+  recentLimit = 25,
+): Promise<GraphHealthReport> {
   const { data: logs, error } = await supabase
     .from("knowledge_write_log")
-    .select("id, scope, ref_id, status, error, duration_ms, attempts, checks, updated_at")
+    .select(
+      "id, scope, ref_id, status, error, duration_ms, attempts, checks, updated_at",
+    )
     .order("updated_at", { ascending: false });
   if (error) throw error;
   const rows = (logs ?? []) as Array<Record<string, unknown>>;
 
-  const counts = { verified: 0, partial: 0, failed: 0, pending: 0, total: rows.length };
+  const counts = {
+    verified: 0,
+    partial: 0,
+    failed: 0,
+    pending: 0,
+    total: rows.length,
+  };
   let durSum = 0;
   let durN = 0;
   for (const r of rows) {
@@ -4329,21 +5068,31 @@ export async function getGraphHealth(recentLimit = 25): Promise<GraphHealthRepor
   const videoQueue = (vids ?? []).length;
   const answerQueue = (ans ?? []).length;
 
-  const recentWrites: GraphHealthWrite[] = rows.slice(0, recentLimit).map((r) => ({
-    id: String(r["id"] ?? ""),
-    scope: String(r["scope"] ?? ""),
-    refId: String(r["ref_id"] ?? ""),
-    status: String(r["status"] ?? "pending"),
-    error: (r["error"] as string | null) ?? null,
-    durationMs: typeof r["duration_ms"] === "number" ? (r["duration_ms"] as number) : null,
-    attempts: typeof r["attempts"] === "number" ? (r["attempts"] as number) : 0,
-    updatedAt: (r["updated_at"] as string | null) ?? null,
-    checks: normalizeChecks(r["checks"]),
-  }));
+  const recentWrites: GraphHealthWrite[] = rows
+    .slice(0, recentLimit)
+    .map((r) => ({
+      id: String(r["id"] ?? ""),
+      scope: String(r["scope"] ?? ""),
+      refId: String(r["ref_id"] ?? ""),
+      status: String(r["status"] ?? "pending"),
+      error: (r["error"] as string | null) ?? null,
+      durationMs:
+        typeof r["duration_ms"] === "number"
+          ? (r["duration_ms"] as number)
+          : null,
+      attempts:
+        typeof r["attempts"] === "number" ? (r["attempts"] as number) : 0,
+      updatedAt: (r["updated_at"] as string | null) ?? null,
+      checks: normalizeChecks(r["checks"]),
+    }));
 
   return {
     counts,
-    retryQueue: { videos: videoQueue, answers: answerQueue, total: videoQueue + answerQueue },
+    retryQueue: {
+      videos: videoQueue,
+      answers: answerQueue,
+      total: videoQueue + answerQueue,
+    },
     avgProcessingMs: durN > 0 ? Math.round(durSum / durN) : null,
     recentWrites,
   };

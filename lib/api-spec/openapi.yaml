@@ -489,10 +489,8 @@ paths:
             enum: [pending, accepted, rejected, merged, archived, restored]
             default: pending
           description: >-
-            pending is publicly readable; every other status (including
-            archived — mentor-withdrawn concepts held out of the live graph,
-            and restored — archived concepts a reviewer re-minted into the
-            graph) requires an admin session.
+            Admin-only review queue status. Pending rows include contributor
+            identity and verbatim interview evidence and are never public.
       responses:
         "200":
           description: Queued knowledge candidates
@@ -1828,7 +1826,17 @@ components:
 
     KnowledgeCandidate:
       type: object
-      required: [id, status, title, category, bestMatches]
+      required:
+        [
+          id,
+          status,
+          title,
+          category,
+          question,
+          answerText,
+          sourceValid,
+          bestMatches,
+        ]
       properties:
         id:
           type: string
@@ -1855,6 +1863,15 @@ components:
           type: ["string", "null"]
         sessionId:
           type: ["string", "null"]
+        question:
+          type: ["string", "null"]
+          description: Verbatim interview question loaded from the source answer.
+        answerText:
+          type: ["string", "null"]
+          description: Verbatim mentor answer retained outside the trusted graph until review.
+        sourceValid:
+          type: boolean
+          description: True only when the answer belongs to the candidate mentor and session.
         bestMatches:
           type: array
           items:

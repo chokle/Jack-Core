@@ -145,6 +145,22 @@ export class FakeSupabase {
     knowledge_edges: [],
     chat_messages: [],
   };
+  private failures = new Set<string>();
+
+  failNext(table: string, operation: "select" | "insert" | "delete"): void {
+    this.failures.add(`${table}:${operation}`);
+  }
+
+  consumeFailure(table: string, operation: string): boolean {
+    const key = `${table}:${operation}`;
+    if (!this.failures.has(key)) return false;
+    this.failures.delete(key);
+    return true;
+  }
+
+  resetFailures(): void {
+    this.failures.clear();
+  }
 
   from(table: string): QueryBuilder {
     if (!this.tables[table]) this.tables[table] = [];
@@ -371,6 +387,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private run(): Result<unknown> {
+    if (this.db.consumeFailure(this.table, this.op)) {
+      return {
+        data: null,
+        error: { message: `forced ${this.op} failure for ${this.table}` },
+      };
+    }
     if (this.op === "upsert") return this.runUpsert();
     if (this.op === "insert") return this.runInsert();
     if (this.op === "update") return this.runUpdate();

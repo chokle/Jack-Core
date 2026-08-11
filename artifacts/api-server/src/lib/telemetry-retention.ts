@@ -3,7 +3,11 @@ import { logger } from "./logger.js";
 
 const db = supabase as unknown as {
   from: (table: string) => any;
-  storage: { from: (bucket: string) => { remove: (paths: string[]) => Promise<{ error: unknown }> } };
+  storage: {
+    from: (bucket: string) => {
+      remove: (paths: string[]) => Promise<{ error: unknown }>;
+    };
+  };
 };
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // Supabase Storage accepts at most 1,000 paths per remove call. Keep batches
@@ -25,7 +29,10 @@ async function expiredRows(
   if (limit !== undefined) retainedQuery = retainedQuery.limit(limit);
   const retained = await retainedQuery;
   if (retained.error) throw retained.error;
-  let due = { data: [] as Array<Record<string, unknown>>, error: null as unknown };
+  let due = {
+    data: [] as Array<Record<string, unknown>>,
+    error: null as unknown,
+  };
   if (includeDeletionDue) {
     let dueQuery = db.from(table).select(fields).lt("deletion_due_at", now);
     if (limit !== undefined) dueQuery = dueQuery.limit(limit);
@@ -39,9 +46,14 @@ async function expiredRows(
   return [...byId.values()];
 }
 
-async function deleteExpiredRows(table: string, includeDeletionDue = false): Promise<number> {
+async function deleteExpiredRows(
+  table: string,
+  includeDeletionDue = false,
+): Promise<number> {
   const rows = await expiredRows(table, "id", includeDeletionDue);
-  const ids = rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  const ids = rows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === "string");
   if (ids.length === 0) return 0;
   const removed = await db.from(table).delete().in("id", ids);
   if (removed.error) throw removed.error;
@@ -77,18 +89,24 @@ async function deleteExpiredRecordings(): Promise<number> {
         true,
         RECORDING_DELETE_BATCH_SIZE,
       )
-      ).slice(0, RECORDING_DELETE_BATCH_SIZE);
+    ).slice(0, RECORDING_DELETE_BATCH_SIZE);
     if (rows.length === 0) return total;
     const validRows = rows.filter((row) => typeof row["id"] === "string");
     const ids = validRows.map((row) => row["id"] as string);
     if (ids.length === 0) {
-      throw new Error("Recording rows are missing identifiers required for safe deletion.");
+      throw new Error(
+        "Recording rows are missing identifiers required for safe deletion.",
+      );
     }
     const paths = validRows
       .map((row) => row["storage_path"])
-      .filter((path): path is string => typeof path === "string" && path.length > 0);
+      .filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      );
     if (paths.length > 0) {
-      const removedObjects = await db.storage.from("jack-test-recordings").remove(paths);
+      const removedObjects = await db.storage
+        .from("jack-test-recordings")
+        .remove(paths);
       if (removedObjects.error) throw removedObjects.error;
     }
     const removedRows = await db.from("test_recordings").delete().in("id", ids);
@@ -98,7 +116,10 @@ async function deleteExpiredRecordings(): Promise<number> {
 }
 
 async function scheduleCompletedPilotFeedback(): Promise<number> {
-  const pilots = await db.from("pilots").select("id,ends_at").eq("status", "completed");
+  const pilots = await db
+    .from("pilots")
+    .select("id,ends_at")
+    .eq("status", "completed");
   if (pilots.error) throw pilots.error;
   let scheduled = 0;
   for (const pilot of pilots.data ?? []) {
@@ -133,35 +154,45 @@ async function scheduleCompletedPilotFeedback(): Promise<number> {
 }
 
 async function scheduleCompletedPilotConsents(): Promise<number> {
-  const pilots = await db.from("pilots").select("id,ends_at").eq("status", "completed");
+  const pilots = await db
+    .from("pilots")
+    .select("id,ends_at")
+    .eq("status", "completed");
   if (pilots.error) throw pilots.error;
   let scheduled = 0;
   for (const pilot of pilots.data ?? []) {
     const base = pilot.ends_at ? new Date(String(pilot.ends_at)) : new Date();
     if (Number.isNaN(base.getTime())) continue;
     base.setUTCMonth(base.getUTCMonth() + 24);
-    const consents = await db
-      .from("telemetry_consents")
-      .select("id")
-      .eq("pilot_id", pilot.id)
-      .lt("retained_until", base.toISOString());
-    if (consents.error) throw consents.error;
-    const ids = (consents.data ?? [])
-      .map((row: Record<string, unknown>) => row["id"])
-      .filter((id: unknown): id is string => typeof id === "string");
-    if (ids.length > 0) {
-      const update = await db
-        .from("telemetry_consents")
-        .update({ retained_until: base.toISOString() })
-        .in("id", ids);
-      if (update.error) throw update.error;
-      scheduled += ids.length;
+    for (const table of [
+      "telemetry_consents",
+      "conversation_review_consents",
+    ]) {
+      const consents = await db
+        .from(table)
+        .select("id")
+        .eq("pilot_id", pilot.id)
+        .lt("retained_until", base.toISOString());
+      if (consents.error) throw consents.error;
+      const ids = (consents.data ?? [])
+        .map((row: Record<string, unknown>) => row["id"])
+        .filter((id: unknown): id is string => typeof id === "string");
+      if (ids.length > 0) {
+        const update = await db
+          .from(table)
+          .update({ retained_until: base.toISOString() })
+          .in("id", ids);
+        if (update.error) throw update.error;
+        scheduled += ids.length;
+      }
     }
   }
   return scheduled;
 }
 
-export async function runTelemetryRetentionSweep(): Promise<Record<string, number>> {
+export async function runTelemetryRetentionSweep(): Promise<
+  Record<string, number>
+> {
   const feedbackScheduled = await scheduleCompletedPilotFeedback();
   const consentsScheduled = await scheduleCompletedPilotConsents();
   const [
@@ -169,6 +200,7 @@ export async function runTelemetryRetentionSweep(): Promise<Record<string, numbe
     failures,
     reports,
     consents,
+    conversationReviewConsents,
     audit,
     feedback,
     recordings,
@@ -178,6 +210,7 @@ export async function runTelemetryRetentionSweep(): Promise<Record<string, numbe
     deleteExpiredRows("activity_ingest_failures"),
     deleteExpiredRows("activity_report_runs"),
     deleteExpiredRows("telemetry_consents"),
+    deleteExpiredRows("conversation_review_consents"),
     deleteExpiredRows("admin_access_audit"),
     deleteExpiredRows("test_feedback", true),
     deleteExpiredRecordings(),
@@ -190,13 +223,13 @@ export async function runTelemetryRetentionSweep(): Promise<Record<string, numbe
     failures,
     reports,
     consents,
+    conversationReviewConsents,
     audit,
     feedback,
     recordings,
     sessions,
   };
 }
-
 
 export function startTelemetryRetentionWorker(): { stop: () => void } {
   if (process.env["TELEMETRY_RETENTION_ENABLED"] !== "true") {
@@ -205,8 +238,12 @@ export function startTelemetryRetentionWorker(): { stop: () => void } {
   }
   const sweep = () => {
     void runTelemetryRetentionSweep()
-      .then((counts) => logger.info({ counts }, "telemetry retention sweep completed"))
-      .catch((error) => logger.error({ err: error }, "telemetry retention sweep failed"));
+      .then((counts) =>
+        logger.info({ counts }, "telemetry retention sweep completed"),
+      )
+      .catch((error) =>
+        logger.error({ err: error }, "telemetry retention sweep failed"),
+      );
   };
   sweep();
   const timer = setInterval(sweep, SWEEP_INTERVAL_MS);

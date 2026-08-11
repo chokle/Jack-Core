@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './analyticsEventAccepted';
 export * from './answerContribution';
 export * from './answerContributionList';
 export * from './candidateResolutionConflict';
@@ -59,6 +60,14 @@ export * from './listParkedThoughtsParams';
 export * from './listParkedThoughtsStatus';
 export * from './listVideosParams';
 export * from './listVideosStatus';
+export * from './memoryGraphOnboardingEvent';
+export * from './memoryGraphOnboardingEventEvent';
+export * from './memoryGraphOnboardingEventSource';
+export * from './memoryGraphOnboardingEventVersion';
+export * from './memoryGraphOnboardingPreference';
+export * from './memoryGraphOnboardingPreferenceResponse';
+export * from './memoryGraphOnboardingPreferenceStatus';
+export * from './memoryGraphOnboardingPreferenceVersion';
 export * from './mentorActiveSession';
 export * from './mentorContribution';
 export * from './mentorContributionList';
@@ -104,12 +113,3 @@ export * from './videoStatus';
 export * from './videoUpdate';
 export * from './videoUpdateStatus';
 export * from './writeCheck';
-export * from './analyticsEventAccepted';
-export * from './memoryGraphOnboardingEvent';
-export * from './memoryGraphOnboardingEventEvent';
-export * from './memoryGraphOnboardingEventSource';
-export * from './memoryGraphOnboardingEventVersion';
-export * from './memoryGraphOnboardingPreference';
-export * from './memoryGraphOnboardingPreferenceResponse';
-export * from './memoryGraphOnboardingPreferenceStatus';
-export * from './memoryGraphOnboardingPreferenceVersion';

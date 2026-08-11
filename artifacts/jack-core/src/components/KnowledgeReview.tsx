@@ -38,7 +38,13 @@ import { GraphHealth } from "./GraphHealth";
 import { useToast } from "@/hooks/use-toast";
 
 /** Scaffold kinds that can never be a merge target. */
-const SCAFFOLD_KINDS = new Set(["core", "topic", "competency", "video", "mentor"]);
+const SCAFFOLD_KINDS = new Set([
+  "core",
+  "topic",
+  "competency",
+  "video",
+  "mentor",
+]);
 
 const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
   { value: "pending", label: "Pending" },
@@ -53,7 +59,11 @@ const STATUS_TABS: { value: ListKnowledgeCandidatesStatus; label: string }[] = [
 type MentorSort = "queue" | "trusted" | "risky";
 
 const MENTOR_SORTS: { value: MentorSort; label: string; title: string }[] = [
-  { value: "queue", label: "Queue order", title: "Newest-first, as Jack queued them" },
+  {
+    value: "queue",
+    label: "Queue order",
+    title: "Newest-first, as Jack queued them",
+  },
   {
     value: "trusted",
     label: "Trusted mentors first",
@@ -82,14 +92,20 @@ function sortCandidatesByMentor(
 ): KnowledgeCandidate[] {
   if (sort === "queue") return candidates;
   const contributionFor = (c: KnowledgeCandidate) =>
-    c.mentorProfileId ? contributionByMentor.get(c.mentorProfileId) ?? null : null;
+    c.mentorProfileId
+      ? (contributionByMentor.get(c.mentorProfileId) ?? null)
+      : null;
   // Primary signal per mode; unknown mentors score below any real mentor.
   const score = (contribution: MentorContribution | null) => {
     if (!contribution) return -1;
     return sort === "trusted" ? contribution.accepted : contribution.rejected;
   };
   return candidates
-    .map((candidate, index) => ({ candidate, index, contribution: contributionFor(candidate) }))
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      contribution: contributionFor(candidate),
+    }))
     .sort((a, b) => {
       const diff = score(b.contribution) - score(a.contribution);
       if (diff !== 0) return diff;
@@ -133,7 +149,8 @@ export function KnowledgeReview() {
     ? null
     : (meQuery.data?.isAdmin ?? false);
 
-  const [statusTab, setStatusTab] = useState<ListKnowledgeCandidatesStatus>("pending");
+  const [statusTab, setStatusTab] =
+    useState<ListKnowledgeCandidatesStatus>("pending");
   const [mentorSort, setMentorSort] = useState<MentorSort>("queue");
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -152,7 +169,10 @@ export function KnowledgeReview() {
   });
   const contributionsQuery = useGetMentorContributions({
     request: { credentials: "include" },
-    query: { enabled: isAdmin === true, queryKey: getGetMentorContributionsQueryKey() },
+    query: {
+      enabled: isAdmin === true,
+      queryKey: getGetMentorContributionsQueryKey(),
+    },
   });
 
   // mentorProfileId → contribution track record, so each card can show the
@@ -166,7 +186,8 @@ export function KnowledgeReview() {
   }, [contributionsQuery.data]);
 
   const conceptNodes = useMemo(
-    () => (graphQuery.data?.nodes ?? []).filter((n) => !SCAFFOLD_KINDS.has(n.kind)),
+    () =>
+      (graphQuery.data?.nodes ?? []).filter((n) => !SCAFFOLD_KINDS.has(n.kind)),
     [graphQuery.data],
   );
 
@@ -191,26 +212,39 @@ export function KnowledgeReview() {
         // Invalidate the whole candidates key (prefix-matches every status tab)
         // plus the mentor track record and graph, so the resolved card leaves
         // this tab AND is fresh under its destination tab without a manual reload.
-        void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey() });
-        void queryClient.invalidateQueries({ queryKey: getGetMentorContributionsQueryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: getListKnowledgeCandidatesQueryKey(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: getGetMentorContributionsQueryKey(),
+        });
         void queryClient.invalidateQueries({ queryKey: getGetGraphQueryKey() });
         const dest = ACTION_DESTINATION[variables.data.action];
         if (dest) {
-          toast({ title: dest.label, description: `Moved to the ${dest.label} tab.` });
+          toast({
+            title: dest.label,
+            description: `Moved to the ${dest.label} tab.`,
+          });
         }
       },
       onError: (error, variables) => {
-        const body = (error as { data?: { code?: string; error?: string } | null }).data;
+        const body = (
+          error as { data?: { code?: string; error?: string } | null }
+        ).data;
         if (body?.code === "target_gone") {
           setGoneCandidateId(variables.id);
           // Refresh the listing so match chips show current validity.
-          void queryClient.invalidateQueries({ queryKey: getListKnowledgeCandidatesQueryKey() });
+          void queryClient.invalidateQueries({
+            queryKey: getListKnowledgeCandidatesQueryKey(),
+          });
           return;
         }
         toast({
           variant: "destructive",
           title: "Couldn't complete that action",
-          description: body?.error ?? "The candidate may have already been resolved elsewhere.",
+          description:
+            body?.error ??
+            "The candidate may have already been resolved elsewhere.",
         });
       },
     },
@@ -222,12 +256,15 @@ export function KnowledgeReview() {
         <div className="mx-auto w-full max-w-4xl px-4 py-8 md:px-8">
           <div className="mb-1 flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            <h1 className="text-xl font-bold tracking-tight">Knowledge Review</h1>
+            <h1 className="text-xl font-bold tracking-tight">
+              Knowledge Review
+            </h1>
           </div>
           <p className="mb-6 text-sm text-muted-foreground">
-            These mentor-taught concepts are waiting for a reviewer to place them
-            in the Living Memory. You can follow the queue below — accepting,
-            merging, or rejecting entries is limited to administrators.
+            These mentor-taught concepts are waiting for a reviewer to place
+            them in the Living Memory. You can follow the queue below —
+            accepting, merging, or rejecting entries is limited to
+            administrators.
           </p>
 
           <PendingKnowledgePanel limit={Infinity} />
@@ -252,10 +289,10 @@ export function KnowledgeReview() {
         </div>
         <p className="mb-6 text-sm text-muted-foreground">
           Mentor-taught concepts Jack wasn't sure about. Accept to reinforce the
-          suggested match, merge into a concept you choose, or reject with a reason.
-          The Archived tab holds knowledge demoted when a mentor was withdrawn —
-          restore it to bring it back as unverified knowledge, or re-archive a
-          restore from the Restored tab if it was a mistake.
+          suggested match, merge into a concept you choose, or reject with a
+          reason. The Archived tab holds knowledge demoted when a mentor was
+          withdrawn — restore it to bring it back as unverified knowledge, or
+          re-archive a restore from the Restored tab if it was a mistake.
         </p>
 
         {/* Status tabs */}
@@ -308,7 +345,8 @@ export function KnowledgeReview() {
           </div>
         ) : candidatesQuery.isError ? (
           <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            Could not load candidates. The knowledge queue table may not be applied yet.
+            Could not load candidates. The knowledge queue table may not be
+            applied yet.
           </div>
         ) : candidates.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-16 text-muted-foreground">
@@ -334,7 +372,7 @@ export function KnowledgeReview() {
                   nodeLabelById={nodeLabelById}
                   mentorContribution={
                     cand.mentorProfileId
-                      ? contributionByMentor.get(cand.mentorProfileId) ?? null
+                      ? (contributionByMentor.get(cand.mentorProfileId) ?? null)
                       : null
                   }
                   busy={resolve.isPending}
@@ -363,8 +401,13 @@ export function KnowledgeReview() {
  * candidates were resolved. All counts are read-only aggregations from the
  * server — nothing here mutates the graph.
  */
-function MentorTrackRecord({ contribution }: { contribution: MentorContribution }) {
-  const { conceptsCreated, conceptsReinforced, accepted, rejected, pending } = contribution;
+function MentorTrackRecord({
+  contribution,
+}: {
+  contribution: MentorContribution;
+}) {
+  const { conceptsCreated, conceptsReinforced, accepted, rejected, pending } =
+    contribution;
   const conceptTotal = conceptsCreated + conceptsReinforced;
   return (
     <div
@@ -375,7 +418,8 @@ function MentorTrackRecord({ contribution }: { contribution: MentorContribution 
         Track record
       </span>
       <span title="Live concepts this mentor sources">
-        <span className="font-semibold text-foreground">{conceptTotal}</span> concept
+        <span className="font-semibold text-foreground">{conceptTotal}</span>{" "}
+        concept
         {conceptTotal === 1 ? "" : "s"}
         {conceptTotal > 0 && (
           <span className="text-muted-foreground/70">
@@ -384,14 +428,20 @@ function MentorTrackRecord({ contribution }: { contribution: MentorContribution 
           </span>
         )}
       </span>
-      <span className="text-emerald-400/90" title="Prior candidates accepted or merged">
+      <span
+        className="text-emerald-400/90"
+        title="Prior candidates accepted or merged"
+      >
         {accepted} accepted
       </span>
       <span className="text-red-400/90" title="Prior candidates rejected">
         {rejected} rejected
       </span>
       {pending > 0 && (
-        <span className="text-amber-400/90" title="Candidates still awaiting review">
+        <span
+          className="text-amber-400/90"
+          title="Candidates still awaiting review"
+        >
           {pending} pending
         </span>
       )}
@@ -492,7 +542,40 @@ function CandidateCard({
             )}
           </div>
           {candidate.description && (
-            <p className="mt-1 text-sm text-muted-foreground">{candidate.description}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {candidate.description}
+            </p>
+          )}
+          <dl className="mt-3 grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Question
+              </dt>
+              <dd>{candidate.question ?? "Source question unavailable"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Verbatim answer
+              </dt>
+              <dd className="whitespace-pre-wrap">
+                {candidate.answerText ?? "Source answer unavailable"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Proposed competency
+              </dt>
+              <dd>{candidate.competencyCode ?? "Not proposed"}</dd>
+            </div>
+          </dl>
+          {!candidate.sourceValid && (
+            <p
+              role="alert"
+              className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-300"
+            >
+              Source provenance is missing or mismatched. Promotion is blocked;
+              reject remains available.
+            </p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {candidate.mentorName && (
@@ -530,7 +613,9 @@ function CandidateCard({
                       : "border-border bg-muted/30 text-muted-foreground"
                 }`}
               >
-                <span className={m.validity === "gone" ? "line-through" : undefined}>
+                <span
+                  className={m.validity === "gone" ? "line-through" : undefined}
+                >
                   {m.label}
                 </span>
                 <span className="ml-1.5 font-mono opacity-70">
@@ -570,15 +655,17 @@ function CandidateCard({
               Re-archive it if this restore was a mistake.
             </span>
           )}
-          {candidate.status !== "rejected" && !isArchived && !isRestored && candidate.resolvedTargetId && (
+          {candidate.status !== "rejected" &&
+            !isArchived &&
+            !isRestored &&
+            candidate.resolvedTargetId &&
             (() => {
               const resolvedId = candidate.resolvedTargetId;
               const requestedId = candidate.requestedTargetId;
               const resolvedName = nodeLabelById.get(resolvedId) ?? resolvedId;
-              const wasRedirected =
-                !!requestedId && requestedId !== resolvedId;
+              const wasRedirected = !!requestedId && requestedId !== resolvedId;
               const requestedName = requestedId
-                ? nodeLabelById.get(requestedId) ?? requestedId
+                ? (nodeLabelById.get(requestedId) ?? requestedId)
                 : null;
               return (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -602,8 +689,7 @@ function CandidateCard({
                   )}
                 </div>
               );
-            })()
-          )}
+            })()}
         </div>
       )}
 
@@ -673,24 +759,28 @@ function CandidateCard({
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={busy || !topMatch || topMatchGone}
+                disabled={busy || !candidate.sourceValid || topMatchGone}
                 onClick={() => onResolve("accept")}
                 className="min-h-10 md:min-h-8 bg-emerald-600 text-white hover:bg-emerald-500"
                 title={
-                  !topMatch
-                    ? "No suggested match — use merge instead"
-                    : topMatchGone
-                      ? "The suggested match no longer exists — use merge instead"
-                      : `Reinforce “${topMatch.currentLabel ?? topMatch.label}”`
+                  !candidate.sourceValid
+                    ? "Source provenance must be valid before promotion"
+                    : !topMatch
+                      ? "Accept as a new reviewed concept"
+                      : topMatchGone
+                        ? "The suggested match no longer exists — use merge instead"
+                        : `Reinforce “${topMatch.currentLabel ?? topMatch.label}”`
                 }
               >
                 <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                Accept{topMatch && !topMatchGone ? ` as “${topMatch.currentLabel ?? topMatch.label}”` : ""}
+                {topMatch && !topMatchGone
+                  ? `Accept as “${topMatch.currentLabel ?? topMatch.label}”`
+                  : "Accept as new concept"}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || !candidate.sourceValid}
                 onClick={() => setMode("merge")}
                 className="min-h-10 md:min-h-8 border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
               >

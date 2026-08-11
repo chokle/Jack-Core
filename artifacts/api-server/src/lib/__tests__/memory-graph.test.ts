@@ -8,15 +8,24 @@ vi.mock("../supabase.js", async () => {
 
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
-  return { createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
+  return {
+    createEmbedding: m.createEmbedding,
+    MODELS: m.MODELS,
+    openai: m.openai,
+  };
 });
 
-import { fake, embedRegistry, defaultEmbed, resetMocks, MODELS } from "./mocks.js";
+import {
+  fake,
+  embedRegistry,
+  defaultEmbed,
+  resetMocks,
+  MODELS,
+} from "./mocks.js";
 import {
   ensureBaseGraph,
   syncVideoGraph,
   syncVideoKnowledge,
-  syncMentorAnswerKnowledge,
   removeVideoGraph,
   removeMentorGraph,
   withdrawMentor,
@@ -28,6 +37,7 @@ import {
   getConceptAnswerContributions,
   GRAPH_CORE_ID,
 } from "../memory-graph.js";
+import { syncReviewedMentorAnswerKnowledge as syncMentorAnswerKnowledge } from "./reviewed-mentor-helper.js";
 
 const TRADE = "Welder";
 
@@ -64,8 +74,18 @@ async function seedVideo(id: string, trade: string = TRADE): Promise<void> {
 
 function seedBaseTables(): void {
   fake.tables["competencies"].push(
-    { code: "W-2", name: "Shielded Metal Arc Welding", trade: "Welder", description: null },
-    { code: "W-3", name: "Gas Metal Arc Welding", trade: "Welder", description: null },
+    {
+      code: "W-2",
+      name: "Shielded Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
+    {
+      code: "W-3",
+      name: "Gas Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
   );
 }
 
@@ -74,9 +94,13 @@ const nodes = () => fake.tables["knowledge_nodes"];
 const edges = () => fake.tables["knowledge_edges"];
 const nodeById = (id: string) => nodes().find((n) => n["id"] === id);
 const provFrom = (videoId: string) =>
-  edges().filter((e) => e["source_id"] === `video:${videoId}` && e["kind"] === "knowledge");
+  edges().filter(
+    (e) => e["source_id"] === `video:${videoId}` && e["kind"] === "knowledge",
+  );
 const provTo = (conceptId: string) =>
-  edges().filter((e) => e["target_id"] === conceptId && e["kind"] === "knowledge");
+  edges().filter(
+    (e) => e["target_id"] === conceptId && e["kind"] === "knowledge",
+  );
 const hubEdge = (source: string, target: string) =>
   edges().find((e) => e["source_id"] === source && e["target_id"] === target);
 const topicId = (trade: string) => `topic:${trade}`;
@@ -108,12 +132,18 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
     // Re-run the exact same distillation output.
     await syncVideoKnowledge(v, items);
 
-    const knowledgeNodes = nodes().filter((n) => n["id"]!.toString().startsWith("k:"));
+    const knowledgeNodes = nodes().filter((n) =>
+      n["id"]!.toString().startsWith("k:"),
+    );
     expect(knowledgeNodes).toHaveLength(2);
     expect(provFrom(v)).toHaveLength(2);
     // Each concept is corroborated by exactly one source video after the replay.
-    expect((nodeById(speedId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
-    expect((nodeById(blowId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(
+      (nodeById(speedId)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
+    expect(
+      (nodeById(blowId)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
   });
 
   it("two videos teaching the same concept share one node with both provenance edges", async () => {
@@ -123,8 +153,12 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
     await seedVideo(v2);
 
     const conceptId = knowledgeNodeId("concept", "Root Opening");
-    await syncVideoKnowledge(v1, [makeItem("concept", "Root Opening", { confidence: 0.6, timestamps: [5] })]);
-    await syncVideoKnowledge(v2, [makeItem("concept", "Root Opening", { confidence: 0.6, timestamps: [9] })]);
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Root Opening", { confidence: 0.6, timestamps: [5] }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Root Opening", { confidence: 0.6, timestamps: [9] }),
+    ]);
 
     const shared = nodes().filter((n) => n["id"] === conceptId);
     expect(shared).toHaveLength(1);
@@ -132,7 +166,9 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
     expect(provTo(conceptId)).toHaveLength(2);
     const meta = nodeById(conceptId)!["meta"] as Record<string, unknown>;
     expect(meta["sourceCount"]).toBe(2);
-    expect((meta["sourceVideoIds"] as string[]).sort()).toEqual([v1, v2].sort());
+    expect((meta["sourceVideoIds"] as string[]).sort()).toEqual(
+      [v1, v2].sort(),
+    );
     // Corroboration (noisy-OR) makes a twice-taught concept more confident than once.
     expect(nodeById(conceptId)!["confidence"] as number).toBeGreaterThan(0.6);
   });
@@ -159,7 +195,11 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
     const hazardNodes = nodes().filter((n) => n["kind"] === "hazard");
     expect(hazardNodes).toHaveLength(1);
     expect(provTo(canonicalId)).toHaveLength(2);
-    expect((nodeById(canonicalId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(2);
+    expect(
+      (nodeById(canonicalId)!["meta"] as Record<string, unknown>)[
+        "sourceCount"
+      ],
+    ).toBe(2);
   });
 
   it("preserves a human 'verified'/'rejected' status across re-processing", async () => {
@@ -167,7 +207,10 @@ describe("syncVideoKnowledge — idempotent, collapsing distillation", () => {
     await seedVideo(v);
     const verifiedId = knowledgeNodeId("concept", "Preheat");
     const rejectedId = knowledgeNodeId("concept", "Porosity");
-    const items = [makeItem("concept", "Preheat"), makeItem("concept", "Porosity")];
+    const items = [
+      makeItem("concept", "Preheat"),
+      makeItem("concept", "Porosity"),
+    ];
 
     await syncVideoKnowledge(v, items);
 
@@ -195,13 +238,18 @@ describe("syncVideoKnowledge — alias-index matching (re-uploads can't split co
 
     // A mentor (or reviewer) already recorded an alternate wording as an alias.
     const node = nodeById(canonicalId)!;
-    node["meta"] = { ...(node["meta"] as Record<string, unknown>), aliases: ["First Pass Bead"] };
+    node["meta"] = {
+      ...(node["meta"] as Record<string, unknown>),
+      aliases: ["First Pass Bead"],
+    };
 
     // A second video teaches the same concept using the alias wording. Default
     // hash embeddings are dissimilar, so only the alias index can match this.
     await syncVideoKnowledge(v2, [makeItem("concept", "First Pass Bead")]);
 
-    expect(nodeById(knowledgeNodeId("concept", "First Pass Bead"))).toBeUndefined();
+    expect(
+      nodeById(knowledgeNodeId("concept", "First Pass Bead")),
+    ).toBeUndefined();
     expect(provTo(canonicalId)).toHaveLength(2);
     const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
     expect(meta["sourceCount"]).toBe(2);
@@ -220,7 +268,9 @@ describe("syncVideoKnowledge — alias-index matching (re-uploads can't split co
     // ...and another video's distillation categorizes the same wording as a concept.
     await syncVideoKnowledge(v2, [makeItem("concept", "Stick Welding")]);
 
-    expect(nodeById(knowledgeNodeId("concept", "Stick Welding"))).toBeUndefined();
+    expect(
+      nodeById(knowledgeNodeId("concept", "Stick Welding")),
+    ).toBeUndefined();
     expect(nodeById(canonicalId)!["kind"]).toBe("procedure");
     expect(provTo(canonicalId)).toHaveLength(2);
   });
@@ -283,16 +333,24 @@ describe("syncVideoKnowledge — alias-index matching (re-uploads can't split co
 
     // Similarity ~0.78 — inside the mentor queue band, below the merge threshold.
     const base = [1, ...Array(15).fill(0)] as number[];
-    const mid = [0.78, Math.sqrt(1 - 0.78 * 0.78), ...Array(14).fill(0)] as number[];
+    const mid = [
+      0.78,
+      Math.sqrt(1 - 0.78 * 0.78),
+      ...Array(14).fill(0),
+    ] as number[];
     embedRegistry.set("Heat Input", base);
     embedRegistry.set("Thermal Energy Applied", mid);
 
     await syncVideoKnowledge(v1, [makeItem("concept", "Heat Input")]);
-    await syncVideoKnowledge(v2, [makeItem("concept", "Thermal Energy Applied")]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Thermal Energy Applied"),
+    ]);
 
     // Both nodes exist — the ambiguous wording was NOT queued or merged.
     expect(nodeById(knowledgeNodeId("concept", "Heat Input"))).toBeDefined();
-    expect(nodeById(knowledgeNodeId("concept", "Thermal Energy Applied"))).toBeDefined();
+    expect(
+      nodeById(knowledgeNodeId("concept", "Thermal Energy Applied")),
+    ).toBeDefined();
     expect(fake.tables["knowledge_candidates"] ?? []).toHaveLength(0);
   });
 });
@@ -305,20 +363,30 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     await seedVideo(v3);
 
     const id = knowledgeNodeId("concept", "Amperage Setting");
-    await syncVideoKnowledge(v1, [makeItem("concept", "Amperage Setting", { confidence: 0.5 })]);
-    await syncVideoKnowledge(v2, [makeItem("concept", "Amperage Setting", { confidence: 0.4 })]);
-    await syncVideoKnowledge(v3, [makeItem("concept", "Amperage Setting", { confidence: 0.8 })]);
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Amperage Setting", { confidence: 0.5 }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Amperage Setting", { confidence: 0.4 }),
+    ]);
+    await syncVideoKnowledge(v3, [
+      makeItem("concept", "Amperage Setting", { confidence: 0.8 }),
+    ]);
 
     // noisy-OR = 1 - (1-0.5)(1-0.4)(1-0.8) = 1 - 0.5*0.6*0.2 = 0.94.
     expect(nodeById(id)!["confidence"] as number).toBeCloseTo(0.94, 10);
-    expect((nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(3);
+    expect(
+      (nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(3);
   });
 
   it("a single weak source keeps confidence exactly at its own extraction value", async () => {
     const v = "vid-solo";
     await seedVideo(v);
     const id = knowledgeNodeId("concept", "Backstep Technique");
-    await syncVideoKnowledge(v, [makeItem("concept", "Backstep Technique", { confidence: 0.3 })]);
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Backstep Technique", { confidence: 0.3 }),
+    ]);
 
     // noisy-OR of a single source is just that source's confidence.
     expect(nodeById(id)!["confidence"] as number).toBeCloseTo(0.3, 10);
@@ -336,7 +404,9 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
 
     // One distinct source video, so confidence stays exactly 0.7 regardless of replays.
     expect(nodeById(id)!["confidence"] as number).toBeCloseTo(0.7, 10);
-    expect((nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(
+      (nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
   });
 
   it("computes the exact timestamp union and sourceVideoIds across videos", async () => {
@@ -345,16 +415,25 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     await seedVideo(v2);
 
     const id = knowledgeNodeId("concept", "Root Gap");
-    await syncVideoKnowledge(v1, [makeItem("concept", "Root Gap", { timestamps: [30, 10] })]);
-    await syncVideoKnowledge(v2, [makeItem("concept", "Root Gap", { timestamps: [20, 30] })]);
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Root Gap", { timestamps: [30, 10] }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Root Gap", { timestamps: [20, 30] }),
+    ]);
 
     const meta = nodeById(id)!["meta"] as Record<string, unknown>;
     // Union is de-duplicated (30 appears in both) and sorted ascending.
     expect(meta["timestamps"]).toEqual([10, 20, 30]);
-    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual(
+      [v1, v2].sort(),
+    );
     expect(meta["sourceCount"]).toBe(2);
     // Per-source records preserve each video's own timestamps.
-    const sources = meta["sources"] as Array<{ videoId: string; timestamps: number[] }>;
+    const sources = meta["sources"] as Array<{
+      videoId: string;
+      timestamps: number[];
+    }>;
     const byId = new Map(sources.map((s) => [s.videoId, s.timestamps]));
     expect(byId.get(v1)).toEqual([10, 30]);
     expect(byId.get(v2)).toEqual([20, 30]);
@@ -366,13 +445,17 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     await seedVideo(v2);
 
     const id = knowledgeNodeId("concept", "Bevel Angle");
-    await syncVideoKnowledge(v1, [makeItem("concept", "Bevel Angle", { competencyCode: "W-2" })]);
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Bevel Angle", { competencyCode: "W-2" }),
+    ]);
 
     // After one video: both hub edges weigh exactly 1.
     expect(hubEdge(id, topicId(TRADE))!["weight"]).toBe(1);
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(1);
 
-    await syncVideoKnowledge(v2, [makeItem("concept", "Bevel Angle", { competencyCode: "W-2" })]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Bevel Angle", { competencyCode: "W-2" }),
+    ]);
 
     // Two distinct videos corroborate the same trade + competency → weight 2.
     expect(hubEdge(id, topicId(TRADE))!["weight"]).toBe(2);
@@ -394,10 +477,18 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     const wordedId = knowledgeNodeId("concept", "Pre-Heating");
 
     await syncVideoKnowledge(v1, [
-      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+      makeItem("concept", "Preheat", {
+        confidence: 0.5,
+        timestamps: [30, 10],
+        competencyCode: "W-2",
+      }),
     ]);
     await syncVideoKnowledge(v2, [
-      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+      makeItem("concept", "Pre-Heating", {
+        confidence: 0.4,
+        timestamps: [20, 30],
+        competencyCode: "W-2",
+      }),
     ]);
 
     // The two videos funnel onto one canonical node.
@@ -412,7 +503,9 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
     // Timestamp union is de-duplicated (30 appears in both) and sorted ascending.
     expect(meta["timestamps"]).toEqual([10, 20, 30]);
-    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual(
+      [v1, v2].sort(),
+    );
     expect(meta["sourceCount"]).toBe(2);
 
     // Both videos map the merged concept to the same trade + competency → weight 2.
@@ -427,13 +520,21 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     const id = knowledgeNodeId("concept", "Duty Cycle");
     // The same concept appears twice in one video's distillation output.
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Duty Cycle", { competencyCode: "W-2", timestamps: [5] }),
-      makeItem("concept", "Duty Cycle", { competencyCode: "W-2", timestamps: [9] }),
+      makeItem("concept", "Duty Cycle", {
+        competencyCode: "W-2",
+        timestamps: [5],
+      }),
+      makeItem("concept", "Duty Cycle", {
+        competencyCode: "W-2",
+        timestamps: [9],
+      }),
     ]);
 
     // Still one distinct source video → hub-edge weight 1, not 2.
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(1);
-    expect((nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(
+      (nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
   });
 
   it("deletes a competency hub edge once no video maps the concept to it anymore", async () => {
@@ -441,11 +542,15 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     await seedVideo(v);
 
     const id = knowledgeNodeId("concept", "Shielding Gas");
-    await syncVideoKnowledge(v, [makeItem("concept", "Shielding Gas", { competencyCode: "W-2" })]);
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Shielding Gas", { competencyCode: "W-2" }),
+    ]);
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(1);
 
     // Re-process the video, now mapping the concept to a different competency.
-    await syncVideoKnowledge(v, [makeItem("concept", "Shielding Gas", { competencyCode: "W-3" })]);
+    await syncVideoKnowledge(v, [
+      makeItem("concept", "Shielding Gas", { competencyCode: "W-3" }),
+    ]);
 
     // The stale W-2 hub edge drops to weight 0 and is removed; W-3 takes over.
     expect(hubEdge(id, compId("W-2"))).toBeUndefined();
@@ -458,8 +563,12 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     await seedVideo(v2);
 
     const id = knowledgeNodeId("concept", "Contact Tip");
-    await syncVideoKnowledge(v1, [makeItem("concept", "Contact Tip", { competencyCode: "W-2" })]);
-    await syncVideoKnowledge(v2, [makeItem("concept", "Contact Tip", { competencyCode: "W-2" })]);
+    await syncVideoKnowledge(v1, [
+      makeItem("concept", "Contact Tip", { competencyCode: "W-2" }),
+    ]);
+    await syncVideoKnowledge(v2, [
+      makeItem("concept", "Contact Tip", { competencyCode: "W-2" }),
+    ]);
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(2);
 
     // Remove one source video; the concept survives on the other's provenance.
@@ -469,7 +578,9 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     expect(nodeById(id)).toBeDefined();
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(1);
     expect(hubEdge(id, topicId(TRADE))!["weight"]).toBe(1);
-    expect((nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(
+      (nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
   });
 });
 
@@ -490,17 +601,29 @@ describe("removeVideoGraph — embedding-merged concepts reconverge on removal",
 
     // v1 mints the canonical node; v2's differently-worded item merges onto it.
     await syncVideoKnowledge(v1, [
-      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+      makeItem("concept", "Preheat", {
+        confidence: 0.5,
+        timestamps: [30, 10],
+        competencyCode: "W-2",
+      }),
     ]);
     await syncVideoKnowledge(v2, [
-      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+      makeItem("concept", "Pre-Heating", {
+        confidence: 0.4,
+        timestamps: [20, 30],
+        competencyCode: "W-2",
+      }),
     ]);
 
     // Both videos funnel onto one canonical node before removal.
     expect(nodeById(canonicalId)).toBeDefined();
     expect(nodeById(wordedId)).toBeUndefined();
     expect(provTo(canonicalId)).toHaveLength(2);
-    expect((nodeById(canonicalId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(2);
+    expect(
+      (nodeById(canonicalId)!["meta"] as Record<string, unknown>)[
+        "sourceCount"
+      ],
+    ).toBe(2);
 
     // Remove v1 — the node's original minter — and reconverge on v2 alone.
     fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v1);
@@ -560,10 +683,17 @@ describe("removeVideoGraph — embedding-merged concepts reconverge on removal",
     const before = nodeById(canonicalId)!;
     const beforeMeta = before["meta"] as Record<string, unknown>;
     expect(before["verification_status"]).toBe("verified");
-    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeHistory).toHaveLength(1);
-    expect(beforeHistory[0]).toMatchObject({ from: "unverified", to: "verified" });
-    const beforeMerged = beforeMeta["mergedFrom"] as Array<Record<string, unknown>>;
+    expect(beforeHistory[0]).toMatchObject({
+      from: "unverified",
+      to: "verified",
+    });
+    const beforeMerged = beforeMeta["mergedFrom"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeMerged).toHaveLength(1);
     expect(beforeMerged[0]).toMatchObject({
       id: wordedId,
@@ -616,10 +746,16 @@ describe("removeVideoGraph — embedding-merged concepts reconverge on removal",
     const canonicalId = knowledgeNodeId("concept", "Interpass Temperature");
 
     await syncVideoKnowledge(v1, [
-      makeItem("concept", "Interpass Temperature", { confidence: 0.5, competencyCode: "W-2" }),
+      makeItem("concept", "Interpass Temperature", {
+        confidence: 0.5,
+        competencyCode: "W-2",
+      }),
     ]);
     await syncVideoKnowledge(v2, [
-      makeItem("concept", "Inter-Pass Temp", { confidence: 0.4, competencyCode: "W-2" }),
+      makeItem("concept", "Inter-Pass Temp", {
+        confidence: 0.4,
+        competencyCode: "W-2",
+      }),
     ]);
 
     expect(nodeById(canonicalId)).toBeDefined();
@@ -660,10 +796,18 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
     // Two differently-worded videos merge onto one canonical node — the same
     // fixture as a fresh ingestion, so its aggregates are the ground truth.
     await syncVideoKnowledge(v1, [
-      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+      makeItem("concept", "Preheat", {
+        confidence: 0.5,
+        timestamps: [30, 10],
+        competencyCode: "W-2",
+      }),
     ]);
     await syncVideoKnowledge(v2, [
-      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
+      makeItem("concept", "Pre-Heating", {
+        confidence: 0.4,
+        timestamps: [20, 30],
+        competencyCode: "W-2",
+      }),
     ]);
 
     expect(nodeById(canonicalId)).toBeDefined();
@@ -688,7 +832,9 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
     const meta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
     // Timestamp union is de-duplicated (30 appears in both) and sorted ascending.
     expect(meta["timestamps"]).toEqual([10, 20, 30]);
-    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect((meta["sourceVideoIds"] as string[]).slice().sort()).toEqual(
+      [v1, v2].sort(),
+    );
     expect(meta["sourceCount"]).toBe(2);
 
     // Hub-edge weights are recomputed to the distinct corroborating video count.
@@ -723,15 +869,30 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
     const wordedId = knowledgeNodeId("concept", "Pre-Heating");
 
     await syncVideoKnowledge(v1, [
-      makeItem("concept", "Preheat", { confidence: 0.5, timestamps: [30, 10], competencyCode: "W-2" }),
+      makeItem("concept", "Preheat", {
+        confidence: 0.5,
+        timestamps: [30, 10],
+        competencyCode: "W-2",
+      }),
     ]);
-    await syncVideoKnowledge(v2, [
-      makeItem("concept", "Pre-Heating", { confidence: 0.4, timestamps: [20, 30], competencyCode: "W-2" }),
-    ], { extractedAt: "2026-06-02T00:00:00.000Z" });
+    await syncVideoKnowledge(
+      v2,
+      [
+        makeItem("concept", "Pre-Heating", {
+          confidence: 0.4,
+          timestamps: [20, 30],
+          competencyCode: "W-2",
+        }),
+      ],
+      { extractedAt: "2026-06-02T00:00:00.000Z" },
+    );
     // v3 briefly corroborates the concept too, then a re-process withdraws it —
     // this is what records a rejectedEvidence entry for the withdrawn source.
     await syncVideoKnowledge(v3, [
-      makeItem("concept", "Preheat", { confidence: 0.7, competencyCode: "W-2" }),
+      makeItem("concept", "Preheat", {
+        confidence: 0.7,
+        competencyCode: "W-2",
+      }),
     ]);
     await syncVideoKnowledge(v3, [makeItem("concept", "Bevel Angle")], {
       extractedAt: "2026-06-04T00:00:00.000Z",
@@ -744,15 +905,31 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
     const before = nodeById(canonicalId)!;
     const beforeMeta = before["meta"] as Record<string, unknown>;
     expect(before["verification_status"]).toBe("verified");
-    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeHistory).toHaveLength(1);
-    expect(beforeHistory[0]).toMatchObject({ from: "unverified", to: "verified" });
-    const beforeMerged = beforeMeta["mergedFrom"] as Array<Record<string, unknown>>;
+    expect(beforeHistory[0]).toMatchObject({
+      from: "unverified",
+      to: "verified",
+    });
+    const beforeMerged = beforeMeta["mergedFrom"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeMerged).toHaveLength(1);
-    expect(beforeMerged[0]).toMatchObject({ id: wordedId, label: "Pre-Heating", category: "concept" });
-    const beforeRejected = beforeMeta["rejectedEvidence"] as Array<Record<string, unknown>>;
+    expect(beforeMerged[0]).toMatchObject({
+      id: wordedId,
+      label: "Pre-Heating",
+      category: "concept",
+    });
+    const beforeRejected = beforeMeta["rejectedEvidence"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeRejected).toHaveLength(1);
-    expect(beforeRejected[0]).toMatchObject({ videoId: v3, reason: "no-longer-extracted" });
+    expect(beforeRejected[0]).toMatchObject({
+      videoId: v3,
+      reason: "no-longer-extracted",
+    });
     // Only v1 + v2 currently corroborate it (v3 withdrew).
     expect(provTo(canonicalId)).toHaveLength(2);
 
@@ -772,13 +949,20 @@ describe("rebuildGraph — reconverges merged concepts from provenance", () => {
 
     // rejectedEvidence for the withdrawn source is preserved — not dropped (v3 is
     // not a current source) and not recreated (still exactly one entry).
-    const afterRejected = afterMeta["rejectedEvidence"] as Array<Record<string, unknown>>;
+    const afterRejected = afterMeta["rejectedEvidence"] as Array<
+      Record<string, unknown>
+    >;
     expect(afterRejected).toHaveLength(1);
-    expect(afterRejected[0]).toMatchObject({ videoId: v3, reason: "no-longer-extracted" });
+    expect(afterRejected[0]).toMatchObject({
+      videoId: v3,
+      reason: "no-longer-extracted",
+    });
 
     // Derived corroboration is still correct: noisy-OR of v1 (0.5) + v2 (0.4) = 0.7.
     expect(after["confidence"] as number).toBeCloseTo(0.7, 10);
-    expect((afterMeta["sourceVideoIds"] as string[]).slice().sort()).toEqual([v1, v2].sort());
+    expect((afterMeta["sourceVideoIds"] as string[]).slice().sort()).toEqual(
+      [v1, v2].sort(),
+    );
     expect(afterMeta["sourceCount"]).toBe(2);
     expect(afterMeta["timestamps"]).toEqual([10, 20, 30]);
 
@@ -805,7 +989,12 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
     const outcomes = await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Reading the Puddle by Sound", { confidence: 0.8, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Reading the Puddle by Sound", {
+          confidence: 0.8,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_1, trade: TRADE },
     );
     expect(outcomes[0]!.outcome).toBe("created");
@@ -814,11 +1003,14 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
 
     // A reviewer then verifies the mentor's concept.
     await setNodeVerification(conceptId, "verified");
-    const beforeHistory = (nodeById(conceptId)!["meta"] as Record<string, unknown>)[
-      "verificationHistory"
-    ] as Array<Record<string, unknown>>;
+    const beforeHistory = (
+      nodeById(conceptId)!["meta"] as Record<string, unknown>
+    )["verificationHistory"] as Array<Record<string, unknown>>;
     expect(beforeHistory).toHaveLength(1);
-    expect(beforeHistory[0]).toMatchObject({ from: "mentor_supplied", to: "verified" });
+    expect(beforeHistory[0]).toMatchObject({
+      from: "mentor_supplied",
+      to: "verified",
+    });
 
     // Routine self-heal: a full rebuild re-syncs videos and prunes orphans.
     await rebuildGraph();
@@ -872,7 +1064,12 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
     const outcomes = await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Pacing the Bead", { confidence: 0.8, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Pacing the Bead", {
+          confidence: 0.8,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_2, trade: TRADE },
     );
     expect(outcomes[0]!.outcome).toBe("reinforced");
@@ -884,12 +1081,16 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
     // Preconditions: one video + one mentor source, alias recorded, verified.
     const before = nodeById(canonicalId)!;
     const beforeMeta = before["meta"] as Record<string, unknown>;
-    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<
+      Record<string, unknown>
+    >;
     expect(before["verification_status"]).toBe("verified");
     expect(beforeMeta["aliases"]).toEqual(["Pacing the Bead"]);
-    expect(provTo(canonicalId).map((e) => e["source_id"]).sort()).toEqual(
-      [mentorSourceId, `video:${v}`].sort(),
-    );
+    expect(
+      provTo(canonicalId)
+        .map((e) => e["source_id"])
+        .sort(),
+    ).toEqual([mentorSourceId, `video:${v}`].sort());
 
     // Simulate stale/corrupted derived state (e.g. a DB written before the
     // Graph Intelligence layer): blank the node aggregates and hub weights,
@@ -944,13 +1145,20 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
 
     // Mixed concept: video + mentor teach the exact same wording.
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Tack Spacing", { confidence: 0.6, timestamps: [15], competencyCode: "W-3" }),
+      makeItem("concept", "Tack Spacing", {
+        confidence: 0.6,
+        timestamps: [15],
+        competencyCode: "W-3",
+      }),
     ]);
     await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
       [
-        makeItem("concept", "Tack Spacing", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Tack Spacing", {
+          confidence: 0.7,
+          competencyCode: "W-3",
+        }),
         makeItem("concept", "Field Fit-Up Tricks", { confidence: 0.9 }),
       ],
       { answerId: ANSWER_1, trade: TRADE },
@@ -964,7 +1172,8 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
       mentorOnlyStatus: nodeById(mentorOnlyId)!["verification_status"],
       mentorOnlyConfidence: nodeById(mentorOnlyId)!["confidence"],
       mentorOnlyProv: provTo(mentorOnlyId).length,
-      mentorEdges: edges().filter((e) => e["source_id"] === mentorSourceId).length,
+      mentorEdges: edges().filter((e) => e["source_id"] === mentorSourceId)
+        .length,
       nodeCount: nodes().length,
       edgeCount: edges().length,
     });
@@ -1016,7 +1225,9 @@ describe("removeVideoGraph — orphan pruning", () => {
     expect(nodeById(sharedId)).toBeDefined();
     expect(nodeById(soloId)).toBeUndefined();
     expect(provTo(sharedId)).toHaveLength(1);
-    expect((nodeById(sharedId)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+    expect(
+      (nodeById(sharedId)!["meta"] as Record<string, unknown>)["sourceCount"],
+    ).toBe(1);
   });
 });
 
@@ -1052,7 +1263,12 @@ describe("removeVideoGraph — mentor-backed concepts survive video deletion", (
     const outcomes = await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Keeping a Tight Arc", { confidence: 0.8, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Keeping a Tight Arc", {
+          confidence: 0.8,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_1, trade: TRADE },
     );
     expect(outcomes[0]!.outcome).toBe("reinforced");
@@ -1065,13 +1281,20 @@ describe("removeVideoGraph — mentor-backed concepts survive video deletion", (
     const before = nodeById(canonicalId)!;
     const beforeMeta = before["meta"] as Record<string, unknown>;
     expect(before["verification_status"]).toBe("verified");
-    const beforeHistory = beforeMeta["verificationHistory"] as Array<Record<string, unknown>>;
+    const beforeHistory = beforeMeta["verificationHistory"] as Array<
+      Record<string, unknown>
+    >;
     expect(beforeHistory).toHaveLength(1);
-    expect(beforeHistory[0]).toMatchObject({ from: "mentor_supplied", to: "verified" });
+    expect(beforeHistory[0]).toMatchObject({
+      from: "mentor_supplied",
+      to: "verified",
+    });
     expect(beforeMeta["aliases"]).toEqual(["Keeping a Tight Arc"]);
-    expect(provTo(canonicalId).map((e) => e["source_id"]).sort()).toEqual(
-      [mentorSourceId, `video:${v}`].sort(),
-    );
+    expect(
+      provTo(canonicalId)
+        .map((e) => e["source_id"])
+        .sort(),
+    ).toEqual([mentorSourceId, `video:${v}`].sort());
     expect(beforeMeta["sourceCount"]).toBe(2);
     // Two sources (video + mentor) corroborate trade + competency → weight 2.
     expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(2);
@@ -1108,7 +1331,10 @@ describe("removeVideoGraph — mentor-backed concepts survive video deletion", (
     expect(afterMeta["timestamps"]).toEqual([]);
     const sources = afterMeta["sources"] as Array<Record<string, unknown>>;
     expect(sources).toHaveLength(1);
-    expect(sources[0]).toMatchObject({ videoId: mentorSourceId, confidence: 0.8 });
+    expect(sources[0]).toMatchObject({
+      videoId: mentorSourceId,
+      confidence: 0.8,
+    });
 
     // Hub-edge weights drop to the single surviving (mentor) corroborator.
     expect(hubEdge(canonicalId, topicId(TRADE))!["weight"]).toBe(1);
@@ -1123,7 +1349,10 @@ describe("removeVideoGraph — mentor-backed concepts survive video deletion", (
 
     // Video and mentor teach the exact same wording (deterministic-id reinforce).
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Puddle Watching", { confidence: 0.6, timestamps: [15] }),
+      makeItem("concept", "Puddle Watching", {
+        confidence: 0.6,
+        timestamps: [15],
+      }),
     ]);
     await syncMentorAnswerKnowledge(
       MENTOR,
@@ -1133,7 +1362,9 @@ describe("removeVideoGraph — mentor-backed concepts survive video deletion", (
     );
 
     // Mentor corroboration marked the node mentor_supplied (no human decision).
-    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
+    expect(nodeById(canonicalId)!["verification_status"]).toBe(
+      "mentor_supplied",
+    );
     expect(provTo(canonicalId)).toHaveLength(2);
 
     fake.tables["videos"] = fake.tables["videos"].filter((r) => r["id"] !== v);
@@ -1183,7 +1414,9 @@ describe("setNodeVerification — reviewer decisions", () => {
     expect(await setNodeVerification(`topic:${TRADE}`, "verified")).toBeNull();
     expect(await setNodeVerification("comp:W-2", "verified")).toBeNull();
     expect(await setNodeVerification(`video:${v}`, "verified")).toBeNull();
-    expect(await setNodeVerification("k:concept:does-not-exist", "verified")).toBeNull();
+    expect(
+      await setNodeVerification("k:concept:does-not-exist", "verified"),
+    ).toBeNull();
 
     // The scaffold node is untouched (no verification_status written).
     expect(nodeById(`topic:${TRADE}`)!["verification_status"]).toBeUndefined();
@@ -1248,7 +1481,10 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       });
 
       const m = meta(id);
-      expect((m["models"] as string[]).slice().sort()).toEqual(["gpt-4o", "gpt-4o-mini"]);
+      expect((m["models"] as string[]).slice().sort()).toEqual([
+        "gpt-4o",
+        "gpt-4o-mini",
+      ]);
       expect(m["firstExtractedAt"]).toBe("2026-05-01T00:00:00.000Z");
       expect(m["lastExtractedAt"]).toBe("2026-05-10T00:00:00.000Z");
     });
@@ -1282,13 +1518,19 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       await seedVideo(v2);
       const id = knowledgeNodeId("concept", "Wire Feed Speed");
 
-      await syncVideoKnowledge(v1, [makeItem("concept", "Wire Feed Speed", { confidence: 0.6 })]);
-      let history = meta(id)["confidenceHistory"] as Array<Record<string, unknown>>;
+      await syncVideoKnowledge(v1, [
+        makeItem("concept", "Wire Feed Speed", { confidence: 0.6 }),
+      ]);
+      let history = meta(id)["confidenceHistory"] as Array<
+        Record<string, unknown>
+      >;
       expect(history).toHaveLength(1);
       expect(history[0]!["confidence"]).toBeCloseTo(0.6, 10);
 
       // A second corroborating video raises the noisy-OR confidence → new point.
-      await syncVideoKnowledge(v2, [makeItem("concept", "Wire Feed Speed", { confidence: 0.6 })]);
+      await syncVideoKnowledge(v2, [
+        makeItem("concept", "Wire Feed Speed", { confidence: 0.6 }),
+      ]);
       history = meta(id)["confidenceHistory"] as Array<Record<string, unknown>>;
       expect(history).toHaveLength(2);
       expect(history[1]!["confidence"] as number).toBeGreaterThan(0.6);
@@ -1312,7 +1554,9 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       const v = "vid-ch-rebuild";
       await seedVideo(v);
       const id = knowledgeNodeId("concept", "Tack Weld");
-      await syncVideoKnowledge(v, [makeItem("concept", "Tack Weld", { confidence: 0.55 })]);
+      await syncVideoKnowledge(v, [
+        makeItem("concept", "Tack Weld", { confidence: 0.55 }),
+      ]);
       expect(meta(id)["confidenceHistory"]).toHaveLength(1);
 
       await rebuildGraph();
@@ -1333,7 +1577,9 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       await setNodeVerification(id, "verified", "Dana the Welder"); // re-affirm — no new entry
       await setNodeVerification(id, "rejected", "Sam the Inspector");
 
-      const history = meta(id)["verificationHistory"] as Array<Record<string, unknown>>;
+      const history = meta(id)["verificationHistory"] as Array<
+        Record<string, unknown>
+      >;
       expect(history).toHaveLength(2);
       expect(history[0]).toMatchObject({
         from: "unverified",
@@ -1356,7 +1602,9 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
 
       await setNodeVerification(id, "verified");
 
-      const history = meta(id)["verificationHistory"] as Array<Record<string, unknown>>;
+      const history = meta(id)["verificationHistory"] as Array<
+        Record<string, unknown>
+      >;
       expect(history).toHaveLength(1);
       expect(history[0]!["reviewer"]).toBeNull();
     });
@@ -1397,9 +1645,15 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
         extractedAt: "2026-06-02T00:00:00.000Z",
       });
 
-      const mergedFrom = meta(canonicalId)["mergedFrom"] as Array<Record<string, unknown>>;
+      const mergedFrom = meta(canonicalId)["mergedFrom"] as Array<
+        Record<string, unknown>
+      >;
       expect(mergedFrom).toHaveLength(1);
-      expect(mergedFrom[0]).toMatchObject({ id: mergedId, label: "Drag Angle", category: "concept" });
+      expect(mergedFrom[0]).toMatchObject({
+        id: mergedId,
+        label: "Drag Angle",
+        category: "concept",
+      });
       expect(mergedFrom[0]!["at"]).toBe("2026-06-02T00:00:00.000Z");
     });
 
@@ -1432,9 +1686,14 @@ describe("Knowledge Provenance Engine — every knowledge object remembers WHY i
       await syncVideoKnowledge(v1, [makeItem("concept", "Weave Width")], {
         extractedAt: "2026-06-03T00:00:00.000Z",
       });
-      let rejected = meta(conceptB)["rejectedEvidence"] as Array<Record<string, unknown>>;
+      let rejected = meta(conceptB)["rejectedEvidence"] as Array<
+        Record<string, unknown>
+      >;
       expect(rejected).toHaveLength(1);
-      expect(rejected[0]).toMatchObject({ videoId: "vid-re1", reason: "no-longer-extracted" });
+      expect(rejected[0]).toMatchObject({
+        videoId: "vid-re1",
+        reason: "no-longer-extracted",
+      });
 
       // Replaying the same reduced distillation must not duplicate the rejection.
       await syncVideoKnowledge(v1, [makeItem("concept", "Weave Width")]);
@@ -1461,11 +1720,19 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
   const candidates = () => fake.tables["knowledge_candidates"] ?? [];
 
   /** Seed the interview-side rows the person's withdrawal must erase. */
-  function seedMentorRows(profileId: string, sessionId: string, answerIds: string[]): void {
+  function seedMentorRows(
+    profileId: string,
+    sessionId: string,
+    answerIds: string[],
+  ): void {
     fake.tables["mentor_profiles"] ??= [];
     fake.tables["interview_sessions"] ??= [];
     fake.tables["interview_answers"] ??= [];
-    fake.tables["mentor_profiles"]!.push({ id: profileId, name: "Alice", trade: TRADE });
+    fake.tables["mentor_profiles"]!.push({
+      id: profileId,
+      name: "Alice",
+      trade: TRADE,
+    });
     fake.tables["interview_sessions"]!.push({
       id: sessionId,
       mentor_profile_id: profileId,
@@ -1491,12 +1758,21 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     embedRegistry.set("Tack Spacing", defaultEmbed("shared-tack-vector"));
     embedRegistry.set("Tack Gapping", defaultEmbed("shared-tack-vector"));
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Tack Spacing", { confidence: 0.6, timestamps: [15], competencyCode: "W-3" }),
+      makeItem("concept", "Tack Spacing", {
+        confidence: 0.6,
+        timestamps: [15],
+        competencyCode: "W-3",
+      }),
     ]);
     const outcomes = await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Tack Gapping", { confidence: 0.7, competencyCode: "W-3" })],
+      [
+        makeItem("concept", "Tack Gapping", {
+          confidence: 0.7,
+          competencyCode: "W-3",
+        }),
+      ],
       { answerId: ANSWER_1, trade: TRADE },
     );
     expect(outcomes[0]!.outcome).toBe("reinforced");
@@ -1506,9 +1782,15 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     await setNodeVerification(canonicalId, "verified");
 
     // Sanity: both sources are currently counted.
-    const beforeMeta = nodeById(canonicalId)!["meta"] as Record<string, unknown>;
+    const beforeMeta = nodeById(canonicalId)!["meta"] as Record<
+      string,
+      unknown
+    >;
     expect(beforeMeta["sourceCount"]).toBe(2);
-    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(0.88, 10);
+    expect(nodeById(canonicalId)!["confidence"] as number).toBeCloseTo(
+      0.88,
+      10,
+    );
 
     const result = await removeMentorGraph(MENTOR);
     expect(result.retainedConceptIds).toEqual([canonicalId]);
@@ -1532,7 +1814,9 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
 
     // The mentor's footprint is fully gone: node, provenance, hub edges.
     expect(nodeById(mentorSourceId)).toBeUndefined();
-    expect(edges().filter((e) => e["source_id"] === mentorSourceId)).toHaveLength(0);
+    expect(
+      edges().filter((e) => e["source_id"] === mentorSourceId),
+    ).toHaveLength(0);
     expect(provTo(canonicalId)).toHaveLength(1);
     expect(provTo(canonicalId)[0]!["source_id"]).toBe(`video:${v}`);
 
@@ -1547,13 +1831,23 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Ground Clamp Placement", { confidence: 0.7, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Ground Clamp Placement", {
+          confidence: 0.7,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_1, trade: TRADE },
     );
     const second = await syncMentorAnswerKnowledge(
       MENTOR_B,
       "Bob",
-      [makeItem("concept", "Ground Clamp Placement", { confidence: 0.8, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Ground Clamp Placement", {
+          confidence: 0.8,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_B1, trade: TRADE },
     );
     expect(second[0]!.outcome).toBe("reinforced");
@@ -1576,13 +1870,19 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     const v = "vid-withdraw-2";
     await seedVideo(v);
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Ground Clamp Placement", { confidence: 0.5, timestamps: [30], competencyCode: "W-2" }),
+      makeItem("concept", "Ground Clamp Placement", {
+        confidence: 0.5,
+        timestamps: [30],
+        competencyCode: "W-2",
+      }),
     ]);
     const secondRemoval = await removeMentorGraph(MENTOR_B);
     expect(secondRemoval.retainedConceptIds).toEqual([conceptId]);
     const after = nodeById(conceptId)!;
     expect(after["verification_status"]).toBe("unverified");
-    const history = ((after["meta"] as Record<string, unknown>)["verificationHistory"] ?? []) as unknown[];
+    const history = ((after["meta"] as Record<string, unknown>)[
+      "verificationHistory"
+    ] ?? []) as unknown[];
     expect(history).toHaveLength(0);
     expect(after["confidence"] as number).toBeCloseTo(0.5, 10);
   });
@@ -1610,7 +1910,9 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     // OUT of the live graph entirely — node and every edge that touched it.
     expect(nodeById(conceptId)).toBeUndefined();
     expect(
-      edges().filter((e) => e["source_id"] === conceptId || e["target_id"] === conceptId),
+      edges().filter(
+        (e) => e["source_id"] === conceptId || e["target_id"] === conceptId,
+      ),
     ).toHaveLength(0);
     expect(nodeById(mentorSourceId)).toBeUndefined();
 
@@ -1620,7 +1922,9 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     expect(arch["id"]).toBe(`arch:${conceptId}`);
     expect(arch["status"]).toBe("archived");
     expect(arch["title"]).toBe("Reading Heat by Color");
-    expect(arch["description"]).toBe("Judge base-metal temperature by its color bands.");
+    expect(arch["description"]).toBe(
+      "Judge base-metal temperature by its color bands.",
+    );
     expect(arch["category"]).toBe("concept");
     expect(arch["trade"]).toBe(TRADE);
     expect(arch["competency_code"]).toBe("W-2");
@@ -1645,13 +1949,20 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     await seedVideo(v);
     const sharedId = knowledgeNodeId("concept", "Travel Speed Control");
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Travel Speed Control", { confidence: 0.6, timestamps: [10], competencyCode: "W-3" }),
+      makeItem("concept", "Travel Speed Control", {
+        confidence: 0.6,
+        timestamps: [10],
+        competencyCode: "W-3",
+      }),
     ]);
     await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
       [
-        makeItem("concept", "Travel Speed Control", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Travel Speed Control", {
+          confidence: 0.7,
+          competencyCode: "W-3",
+        }),
         makeItem("concept", "Stick Whip Timing", { confidence: 0.8 }),
       ],
       { answerId: ANSWER_1, trade: TRADE },
@@ -1738,15 +2049,25 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     await seedVideo(v);
     const sharedId = knowledgeNodeId("concept", "Travel Speed Control");
     await syncVideoKnowledge(v, [
-      makeItem("concept", "Travel Speed Control", { confidence: 0.6, timestamps: [10], competencyCode: "W-3" }),
+      makeItem("concept", "Travel Speed Control", {
+        confidence: 0.6,
+        timestamps: [10],
+        competencyCode: "W-3",
+      }),
     ]);
     await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
       [
-        makeItem("concept", "Travel Speed Control", { confidence: 0.7, competencyCode: "W-3" }),
+        makeItem("concept", "Travel Speed Control", {
+          confidence: 0.7,
+          competencyCode: "W-3",
+        }),
         makeItem("concept", "Stick Whip Timing", { confidence: 0.8 }),
-        makeItem("concept", "Reading Heat by Color", { confidence: 0.9, competencyCode: "W-2" }),
+        makeItem("concept", "Reading Heat by Color", {
+          confidence: 0.9,
+          competencyCode: "W-2",
+        }),
       ],
       { answerId: ANSWER_1, trade: TRADE },
     );
@@ -1785,7 +2106,11 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     // a pure read (no drift can hide behind a mutation the preview performed).
     // The preview writes nothing, so a plain stable-sorted JSON dump suffices.
     const dump = (rows: Record<string, unknown>[]): string =>
-      JSON.stringify([...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"]))));
+      JSON.stringify(
+        [...rows].sort((a, b) =>
+          String(a["id"]).localeCompare(String(b["id"])),
+        ),
+      );
     const beforeNodes = dump(nodes());
     const beforeEdges = dump(edges());
     const beforeCandidates = dump(candidates());
@@ -1807,7 +2132,10 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     expect(preview.candidatesDeleted).toBe(1);
     expect(preview.candidatesScrubbed).toBe(1);
     const previewArchivedLabels = preview.archivedConcepts.map((c) => c.label);
-    expect(previewArchivedLabels).toEqual(["Reading Heat by Color", "Stick Whip Timing"]);
+    expect(previewArchivedLabels).toEqual([
+      "Reading Heat by Color",
+      "Stick Whip Timing",
+    ]);
 
     // Now do the REAL withdrawal and demand parity with the preview.
     const result = await withdrawMentor(MENTOR);
@@ -1838,7 +2166,12 @@ describe("mentor withdrawal — removeMentorGraph / withdrawMentor", () => {
     await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Arc Blow Workarounds", { confidence: 0.8, competencyCode: "W-2" })],
+      [
+        makeItem("concept", "Arc Blow Workarounds", {
+          confidence: 0.8,
+          competencyCode: "W-2",
+        }),
+      ],
       { answerId: ANSWER_1, trade: TRADE },
     );
 
@@ -1910,9 +2243,17 @@ describe("getMentorContributionStats — read-only per-mentor track record", () 
     });
   }
 
-  function candidate(mentorProfileId: string, status: string, id: string): void {
+  function candidate(
+    mentorProfileId: string,
+    status: string,
+    id: string,
+  ): void {
     fake.tables["knowledge_candidates"] ??= [];
-    fake.tables["knowledge_candidates"]!.push({ id, status, mentor_profile_id: mentorProfileId });
+    fake.tables["knowledge_candidates"]!.push({
+      id,
+      status,
+      mentor_profile_id: mentorProfileId,
+    });
   }
 
   it("splits created (sole source) from reinforced (co-sourced) concepts", async () => {
@@ -2026,9 +2367,24 @@ describe("getConceptAnswerContributions — per-answer confidence ledger", () =>
 
     const longAnswer = "A".repeat(250);
     fake.tables["interview_answers"] = [
-      { id: "ans-hi", question: "How do you prevent porosity?", answer_text: longAnswer, mentor_profile_id: MENTOR },
-      { id: "ans-lo", question: "What causes porosity?", answer_text: "Moisture or contamination.", mentor_profile_id: MENTOR },
-      { id: "ans-legacy", question: "Old question", answer_text: "Old answer text", mentor_profile_id: MENTOR },
+      {
+        id: "ans-hi",
+        question: "How do you prevent porosity?",
+        answer_text: longAnswer,
+        mentor_profile_id: MENTOR,
+      },
+      {
+        id: "ans-lo",
+        question: "What causes porosity?",
+        answer_text: "Moisture or contamination.",
+        mentor_profile_id: MENTOR,
+      },
+      {
+        id: "ans-legacy",
+        question: "Old question",
+        answer_text: "Old answer text",
+        mentor_profile_id: MENTOR,
+      },
     ];
     fake.tables["mentor_profiles"] = [{ id: MENTOR, name: "Dana Smith" }];
 
@@ -2075,6 +2431,8 @@ describe("getConceptAnswerContributions — per-answer confidence ledger", () =>
     });
 
     expect(await getConceptAnswerContributions(CONCEPT)).toEqual([]);
-    expect(await getConceptAnswerContributions("k:concept:does-not-exist")).toEqual([]);
+    expect(
+      await getConceptAnswerContributions("k:concept:does-not-exist"),
+    ).toEqual([]);
   });
 });

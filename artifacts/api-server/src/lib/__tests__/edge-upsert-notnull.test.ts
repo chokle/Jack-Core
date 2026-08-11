@@ -25,11 +25,16 @@ vi.mock("../supabase.js", async () => {
 
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
-  return { createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
+  return {
+    createEmbedding: m.createEmbedding,
+    MODELS: m.MODELS,
+    openai: m.openai,
+  };
 });
 
 import { fake, resetMocks } from "./mocks.js";
-import { ensureBaseGraph, syncMentorAnswerKnowledge, knowledgeNodeId } from "../memory-graph.js";
+import { ensureBaseGraph, knowledgeNodeId } from "../memory-graph.js";
+import { syncReviewedMentorAnswerKnowledge as syncMentorAnswerKnowledge } from "./reviewed-mentor-helper.js";
 
 const TRADE = "Welder";
 const MENTOR = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -56,8 +61,18 @@ const edges = () => fake.tables["knowledge_edges"];
 beforeEach(async () => {
   resetMocks();
   fake.tables["competencies"].push(
-    { code: "W-2", name: "Shielded Metal Arc Welding", trade: "Welder", description: null },
-    { code: "W-3", name: "Gas Metal Arc Welding", trade: "Welder", description: null },
+    {
+      code: "W-2",
+      name: "Shielded Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
+    {
+      code: "W-3",
+      name: "Gas Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
   );
   await ensureBaseGraph();
 });
@@ -81,7 +96,14 @@ describe("knowledge_edges NOT NULL / mixed-batch upsert modeling", () => {
     // exactly the PostgREST behavior that failed silently in production.
     const { error } = await fake.from("knowledge_edges").upsert(
       [
-        { id: "e:mixed-a", source_id: "s", target_id: "t", kind: "knowledge", weight: 3, meta: { a: 1 } },
+        {
+          id: "e:mixed-a",
+          source_id: "s",
+          target_id: "t",
+          kind: "knowledge",
+          weight: 3,
+          meta: { a: 1 },
+        },
         { id: "e:mixed-b", source_id: "s", target_id: "u", kind: "topic" },
       ],
       { onConflict: "id" },
@@ -96,8 +118,22 @@ describe("knowledge_edges NOT NULL / mixed-batch upsert modeling", () => {
   it("the fake accepts a batch where every row sets the NOT NULL columns explicitly", async () => {
     const { error } = await fake.from("knowledge_edges").upsert(
       [
-        { id: "e:ok-a", source_id: "s", target_id: "t", kind: "knowledge", weight: 3, meta: { a: 1 } },
-        { id: "e:ok-b", source_id: "s", target_id: "u", kind: "topic", weight: 1, meta: {} },
+        {
+          id: "e:ok-a",
+          source_id: "s",
+          target_id: "t",
+          kind: "knowledge",
+          weight: 3,
+          meta: { a: 1 },
+        },
+        {
+          id: "e:ok-b",
+          source_id: "s",
+          target_id: "u",
+          kind: "topic",
+          weight: 1,
+          meta: {},
+        },
       ],
       { onConflict: "id" },
     );
@@ -129,23 +165,45 @@ describe("knowledge_edges foreign-key modeling", () => {
   it("rejects an edge whose source_id has no matching knowledge_nodes row", async () => {
     fake.tables["knowledge_nodes"].push({ id: "t", kind: "topic", label: "t" });
     const { error } = await fake.from("knowledge_edges").upsert(
-      { id: "e:fk-src", source_id: "missing", target_id: "t", kind: "topic", weight: 1, meta: {} },
+      {
+        id: "e:fk-src",
+        source_id: "missing",
+        target_id: "t",
+        kind: "topic",
+        weight: 1,
+        meta: {},
+      },
       { onConflict: "id" },
     );
     expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/foreign key constraint "knowledge_edges_source_id_fkey"/);
+    expect(error!.message).toMatch(
+      /foreign key constraint "knowledge_edges_source_id_fkey"/,
+    );
     expect(error!.message).toMatch(/is not present in table "knowledge_nodes"/);
     expect(edges().some((e) => e["id"] === "e:fk-src")).toBe(false);
   });
 
   it("rejects an edge whose target_id has no matching knowledge_nodes row", async () => {
-    fake.tables["knowledge_nodes"].push({ id: "s", kind: "concept", label: "s" });
+    fake.tables["knowledge_nodes"].push({
+      id: "s",
+      kind: "concept",
+      label: "s",
+    });
     const { error } = await fake.from("knowledge_edges").upsert(
-      { id: "e:fk-tgt", source_id: "s", target_id: "missing", kind: "topic", weight: 1, meta: {} },
+      {
+        id: "e:fk-tgt",
+        source_id: "s",
+        target_id: "missing",
+        kind: "topic",
+        weight: 1,
+        meta: {},
+      },
       { onConflict: "id" },
     );
     expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/foreign key constraint "knowledge_edges_target_id_fkey"/);
+    expect(error!.message).toMatch(
+      /foreign key constraint "knowledge_edges_target_id_fkey"/,
+    );
     expect(edges().some((e) => e["id"] === "e:fk-tgt")).toBe(false);
   });
 
@@ -155,7 +213,14 @@ describe("knowledge_edges foreign-key modeling", () => {
       { id: "t", kind: "topic", label: "t" },
     );
     const { error } = await fake.from("knowledge_edges").upsert(
-      { id: "e:fk-ok", source_id: "s", target_id: "t", kind: "topic", weight: 1, meta: {} },
+      {
+        id: "e:fk-ok",
+        source_id: "s",
+        target_id: "t",
+        kind: "topic",
+        weight: 1,
+        meta: {},
+      },
       { onConflict: "id" },
     );
     expect(error).toBeNull();
@@ -173,7 +238,12 @@ describe("mentor ingestion — no silent knowledge-write loss on mixed edge batc
     const outcomes = await syncMentorAnswerKnowledge(
       MENTOR,
       "Alice",
-      [makeItem("concept", "Travel Speed", { competencyCode: "W-2", confidence: 0.8 })],
+      [
+        makeItem("concept", "Travel Speed", {
+          competencyCode: "W-2",
+          confidence: 0.8,
+        }),
+      ],
       { answerId: ANSWER, trade: TRADE },
     );
 
@@ -183,10 +253,12 @@ describe("mentor ingestion — no silent knowledge-write loss on mixed edge batc
 
     const conceptId = knowledgeNodeId("concept", "Travel Speed");
     const provEdge = edges().find(
-      (e) => e["source_id"] === `mentor:${MENTOR}` && e["target_id"] === conceptId,
+      (e) =>
+        e["source_id"] === `mentor:${MENTOR}` && e["target_id"] === conceptId,
     );
     const topicEdge = edges().find(
-      (e) => e["source_id"] === conceptId && e["target_id"] === `topic:${TRADE}`,
+      (e) =>
+        e["source_id"] === conceptId && e["target_id"] === `topic:${TRADE}`,
     );
     const compEdge = edges().find(
       (e) => e["source_id"] === conceptId && e["target_id"] === "comp:W-2",

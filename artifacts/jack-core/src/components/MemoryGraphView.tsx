@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -85,6 +86,7 @@ import {
   KNOWLEDGE_KIND_META,
   CORE_ID,
   type MemoryNode,
+  type NodeKind,
   type NodeSource,
   type ConfidencePoint,
   type RGB,
@@ -106,6 +108,94 @@ interface MemoryGraphViewProps {
   onResumeChat: (thought: ParkedThought) => void;
   /** Start a fresh interview — offered on an empty ("virgin") trade cluster. */
   onStartInterview: () => void;
+}
+
+export type InspectorVisibility = "expanded" | "minimized" | "closed";
+
+export interface GraphInspectorState {
+  /** Highlighted node on the graph; independent from inspector visibility. */
+  activeGraphId: string | null;
+  /** Root whose branch layout is currently open. */
+  branchId: string;
+  /** Last node shown by the inspector, retained across minimize/close. */
+  inspectorNodeId: string | null;
+  visibility: InspectorVisibility;
+}
+
+export const INITIAL_GRAPH_INSPECTOR_STATE: GraphInspectorState = {
+  activeGraphId: null,
+  branchId: CORE_ID,
+  inspectorNodeId: null,
+  visibility: "closed",
+};
+
+export type GraphInspectorAction =
+  | { type: "open-graph-node"; id: string; kind: NodeKind }
+  | { type: "open-in-current-branch"; id: string }
+  | { type: "minimize" }
+  | { type: "restore" }
+  | { type: "close" }
+  | { type: "prune"; liveIds: Set<string> };
+
+function isBranchRoot(kind: NodeKind): boolean {
+  return (
+    kind === "core" ||
+    kind === "topic" ||
+    kind === "mentor" ||
+    kind === "contributor"
+  );
+}
+
+/**
+ * Keeps graph navigation durable while the inspector independently expands,
+ * minimizes, closes, restores, or switches to another node in the same branch.
+ */
+export function graphInspectorReducer(
+  state: GraphInspectorState,
+  action: GraphInspectorAction,
+): GraphInspectorState {
+  switch (action.type) {
+    case "open-graph-node":
+      return {
+        activeGraphId: action.id,
+        branchId: isBranchRoot(action.kind) ? action.id : state.branchId,
+        inspectorNodeId: action.id,
+        visibility: "expanded",
+      };
+    case "open-in-current-branch":
+      return {
+        ...state,
+        activeGraphId: action.id,
+        inspectorNodeId: action.id,
+        visibility: "expanded",
+      };
+    case "minimize":
+      return state.inspectorNodeId
+        ? { ...state, visibility: "minimized" }
+        : state;
+    case "restore":
+      return state.inspectorNodeId
+        ? { ...state, visibility: "expanded" }
+        : state;
+    case "close":
+      return { ...state, visibility: "closed" };
+    case "prune": {
+      const activeGraphId =
+        state.activeGraphId && action.liveIds.has(state.activeGraphId)
+          ? state.activeGraphId
+          : null;
+      const inspectorNodeId =
+        state.inspectorNodeId && action.liveIds.has(state.inspectorNodeId)
+          ? state.inspectorNodeId
+          : null;
+      return {
+        activeGraphId,
+        branchId: action.liveIds.has(state.branchId) ? state.branchId : CORE_ID,
+        inspectorNodeId,
+        visibility: inspectorNodeId ? state.visibility : "closed",
+      };
+    }
+  }
 }
 
 /**
@@ -200,7 +290,10 @@ export function MemoryGraphView({
   const onboardingGrowthRef = useRef<HTMLDivElement>(null);
   const hoverCardRef = useRef<HTMLDivElement>(null);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [graphInspector, dispatchGraphInspector] = useReducer(
+    graphInspectorReducer,
+    INITIAL_GRAPH_INSPECTOR_STATE,
+  );
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
@@ -440,17 +533,37 @@ export function MemoryGraphView({
         e.preventDefault();
         const id = matchIds[Math.min(activeMatch, matchIds.length - 1)];
         if (id) {
-          setSelectedId(id);
+          const node = nodeById.get(id);
+          if (node) {
+            dispatchGraphInspector({
+              type: "open-graph-node",
+              id,
+              kind: node.kind,
+            });
+          }
           canvasRef.current?.focusNode(id);
         }
       }
     },
-    [matchIds, activeMatch, search],
+    [matchIds, activeMatch, search, nodeById],
   );
 
-  // Drop selection / hover / pins that point at nodes no longer in the graph.
+  // Drop graph/inspector identities that no longer exist without conflating an
+  // intentionally closed inspector with a cleared graph branch.
   useEffect(() => {
-    if (selectedId && !nodeById.has(selectedId)) setSelectedId(null);
+    const graphNodeMissing =
+      !!graphInspector.activeGraphId &&
+      !nodeById.has(graphInspector.activeGraphId);
+    const inspectorNodeMissing =
+      !!graphInspector.inspectorNodeId &&
+      !nodeById.has(graphInspector.inspectorNodeId);
+    const branchMissing = !nodeById.has(graphInspector.branchId);
+    if (graphNodeMissing || inspectorNodeMissing || branchMissing) {
+      dispatchGraphInspector({
+        type: "prune",
+        liveIds: new Set(nodeById.keys()),
+      });
+    }
     if (hoveredId && !nodeById.has(hoveredId)) setHoveredId(null);
     setPinnedIds((prev) => {
       let changed = false;
@@ -461,29 +574,47 @@ export function MemoryGraphView({
       }
       return changed ? next : prev;
     });
-  }, [selectedId, hoveredId, nodeById]);
+  }, [graphInspector, hoveredId, nodeById]);
 
-  const selected = selectedId ? (nodeById.get(selectedId) ?? null) : null;
+  const activeGraphNode = graphInspector.activeGraphId
+    ? (nodeById.get(graphInspector.activeGraphId) ?? null)
+    : null;
+  const inspected = graphInspector.inspectorNodeId
+    ? (nodeById.get(graphInspector.inspectorNodeId) ?? null)
+    : null;
   const hovered = hoveredId ? (nodeById.get(hoveredId) ?? null) : null;
+
+  const openGraphNode = useCallback(
+    (id: string) => {
+      const node = nodeById.get(id);
+      if (!node) return;
+      dispatchGraphInspector({ type: "open-graph-node", id, kind: node.kind });
+    },
+    [nodeById],
+  );
+
+  const openNodeInCurrentBranch = useCallback((id: string) => {
+    dispatchGraphInspector({ type: "open-in-current-branch", id });
+  }, []);
 
   // Breadcrumb trail for the current selection: Jack › Trade hub › Node. Each
   // crumb is a live node the reviewer can jump back to, so exploration always
   // has an "up" path even after diving deep into a cluster.
   const trail = useMemo(() => {
-    if (!selected) return [] as { id: string; label: string }[];
+    if (!activeGraphNode) return [] as { id: string; label: string }[];
     const items: { id: string; label: string }[] = [
       { id: CORE_ID, label: "Jack" },
     ];
-    if (selected.kind !== "core") {
-      const topicId = selected.topicId;
-      if (topicId && topicId !== selected.id) {
+    if (activeGraphNode.kind !== "core") {
+      const topicId = activeGraphNode.topicId;
+      if (topicId && topicId !== activeGraphNode.id) {
         const t = nodeById.get(topicId);
         if (t) items.push({ id: t.id, label: t.label });
       }
-      items.push({ id: selected.id, label: selected.label });
+      items.push({ id: activeGraphNode.id, label: activeGraphNode.label });
     }
     return items;
-  }, [selected, nodeById]);
+  }, [activeGraphNode, nodeById]);
 
   const togglePin = useCallback((id: string) => {
     setPinnedIds((prev) => {
@@ -494,21 +625,22 @@ export function MemoryGraphView({
     });
   }, []);
 
-  // Escape closes the inspector — a familiar, always-available exit.
+  // Escape closes only the inspector. The active graph node, branch, camera,
+  // and zoom remain untouched so returning to the details never resets context.
   useEffect(() => {
-    if (!selectedId) return;
+    if (graphInspector.visibility === "closed") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedId(null);
+      if (e.key === "Escape") dispatchGraphInspector({ type: "close" });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId]);
+  }, [graphInspector.visibility]);
 
   // Anchor the lightweight hover preview to the hovered node and follow it live.
   // Positioned imperatively (transform on a ref) so node drift never re-renders
   // React. Suppressed while the inspector is open to avoid clutter.
   useEffect(() => {
-    if (!hoveredId || selectedId) return;
+    if (!hoveredId || graphInspector.visibility === "expanded") return;
     let raf = 0;
     const place = () => {
       const el = hoverCardRef.current;
@@ -535,15 +667,15 @@ export function MemoryGraphView({
     };
     raf = requestAnimationFrame(place);
     return () => cancelAnimationFrame(raf);
-  }, [hoveredId, selectedId]);
+  }, [hoveredId, graphInspector.visibility]);
 
   // Gently pan a freshly-selected node into view when it sits too close to an
   // edge (the canvas no-ops when it's already comfortably framed), so following
   // a search hit or breadcrumb never leaves the target under the inspector.
   useEffect(() => {
-    if (!selectedId) return;
-    canvasRef.current?.ensureVisible(selectedId);
-  }, [selectedId]);
+    if (!graphInspector.activeGraphId) return;
+    canvasRef.current?.ensureVisible(graphInspector.activeGraphId);
+  }, [graphInspector.activeGraphId]);
 
   const toggleFullscreen = () => {
     // Fullscreen the whole app (not just the graph container) so the left nav
@@ -556,15 +688,15 @@ export function MemoryGraphView({
   };
 
   // Detail props shared by the desktop floating card and the mobile bottom sheet.
-  const detailProps: NodeDetailProps | null = selected
+  const detailProps: NodeDetailProps | null = inspected
     ? {
-        node: selected,
-        degree: model.degree[selected.id] ?? 0,
-        videoCount: inspectorVideoCount(selected, model),
-        relatedVideoCount: relatedVideoCount(selected, model),
+        node: inspected,
+        degree: model.degree[inspected.id] ?? 0,
+        videoCount: inspectorVideoCount(inspected, model),
+        relatedVideoCount: relatedVideoCount(inspected, model),
         clusterMetrics:
-          selected.kind === "topic"
-            ? metricsByTopicId.get(selected.id)
+          inspected.kind === "topic"
+            ? metricsByTopicId.get(inspected.id)
             : undefined,
         nodeById,
         adjacency,
@@ -573,7 +705,7 @@ export function MemoryGraphView({
         competencies,
         onOpenVideo,
         onJumpToTimestamp,
-        onSelectNode: setSelectedId,
+        onSelectNode: openNodeInCurrentBranch,
         onResumeInterview,
         onResumeChat,
         onStartInterview,
@@ -597,8 +729,11 @@ export function MemoryGraphView({
         <SpatialBrainCanvas
           ref={canvasRef}
           model={model}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedId={graphInspector.activeGraphId}
+          branchId={graphInspector.branchId}
+          onSelect={(id) => {
+            if (id) openGraphNode(id);
+          }}
           onHover={setHoveredId}
           onTogglePin={togglePin}
           pinnedIds={pinnedIds}
@@ -702,7 +837,7 @@ export function MemoryGraphView({
 
         {/* Breadcrumb trail — the "you are here" path for the current selection.
             Desktop overlay only; mobile gets context from the bottom-sheet header. */}
-        {selected && trail.length > 1 && (
+        {activeGraphNode && trail.length > 1 && (
           <div className="pointer-events-auto absolute left-1/2 top-6 z-20 hidden -translate-x-1/2 md:block">
             <Breadcrumb className="rounded-lg border border-white/10 bg-black/50 px-3 py-1.5 backdrop-blur">
               <BreadcrumbList className="text-white/60">
@@ -719,7 +854,7 @@ export function MemoryGraphView({
                           <BreadcrumbLink asChild>
                             <button
                               type="button"
-                              onClick={() => setSelectedId(item.id)}
+                              onClick={() => openGraphNode(item.id)}
                               className="max-w-[10rem] truncate text-white/60 transition-colors hover:text-white"
                             >
                               {item.label}
@@ -815,115 +950,130 @@ export function MemoryGraphView({
         </div>
 
         {/* Hover preview — a quick glance before committing to the full inspector */}
-        {hovered && !selectedId && hovered.kind !== "core" && (
-          <div
-            ref={hoverCardRef}
-            style={{ visibility: "hidden" }}
-            className="pointer-events-none absolute left-0 top-0 z-20 w-[min(80vw,17rem)] rounded-lg border border-white/10 bg-black/85 p-2.5 shadow-xl shadow-black/50 backdrop-blur"
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{
-                  background: rgbCss(hovered.color),
-                  boxShadow: `0 0 6px ${rgba(hovered.color, 0.9)}`,
-                }}
-              />
-              <span className="truncate text-sm font-semibold text-white">
-                {hovered.label}
-              </span>
-            </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-4.5">
-              <span
-                className="font-mono text-[10px] uppercase tracking-wide"
-                style={{ color: rgba(hovered.color, 0.95) }}
-              >
-                {kindLabelFor(hovered.kind)}
-              </span>
-              {hovered.kind !== "topic" && (
-                <FreshnessBadge info={nodeFreshness(hovered)} />
+        {hovered &&
+          graphInspector.visibility !== "expanded" &&
+          hovered.kind !== "core" && (
+            <div
+              ref={hoverCardRef}
+              style={{ visibility: "hidden" }}
+              className="pointer-events-none absolute left-0 top-0 z-20 w-[min(80vw,17rem)] rounded-lg border border-white/10 bg-black/85 p-2.5 shadow-xl shadow-black/50 backdrop-blur"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{
+                    background: rgbCss(hovered.color),
+                    boxShadow: `0 0 6px ${rgba(hovered.color, 0.9)}`,
+                  }}
+                />
+                <span className="truncate text-sm font-semibold text-white">
+                  {hovered.label}
+                </span>
+              </div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-4.5">
+                <span
+                  className="font-mono text-[10px] uppercase tracking-wide"
+                  style={{ color: rgba(hovered.color, 0.95) }}
+                >
+                  {kindLabelFor(hovered.kind)}
+                </span>
+                {hovered.kind !== "topic" && (
+                  <FreshnessBadge info={nodeFreshness(hovered)} />
+                )}
+              </div>
+              <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-white/70">
+                {describeNode(hovered)}
+              </p>
+              {hovered.kind === "topic" ? (
+                <div className="mt-2 border-t border-white/10 pt-2">
+                  <ClusterMetricsRow
+                    metrics={metricsByTopicId.get(hovered.id)}
+                    tone="light"
+                  />
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-white/60">
+                  {hovered.meta.trade && (
+                    <span className="max-w-[8rem] truncate">
+                      {hovered.meta.trade}
+                    </span>
+                  )}
+                  <span>
+                    <b className="font-semibold tabular-nums text-white/85">
+                      {model.degree[hovered.id] ?? 0}
+                    </b>{" "}
+                    conn
+                  </span>
+                  <span>
+                    <b className="font-semibold tabular-nums text-white/85">
+                      {inspectorVideoCount(hovered, model)}
+                    </b>{" "}
+                    vid
+                  </span>
+                  {hovered.meta.updatedAt && (
+                    <span>Updated {timeAgo(hovered.meta.updatedAt)}</span>
+                  )}
+                </div>
               )}
             </div>
-            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-white/70">
-              {describeNode(hovered)}
-            </p>
-            {hovered.kind === "topic" ? (
-              <div className="mt-2 border-t border-white/10 pt-2">
-                <ClusterMetricsRow
-                  metrics={metricsByTopicId.get(hovered.id)}
-                  tone="light"
-                />
-              </div>
-            ) : (
-              <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-white/10 pt-2 text-[10px] text-white/60">
-                {hovered.meta.trade && (
-                  <span className="max-w-[8rem] truncate">
-                    {hovered.meta.trade}
-                  </span>
-                )}
-                <span>
-                  <b className="font-semibold tabular-nums text-white/85">
-                    {model.degree[hovered.id] ?? 0}
-                  </b>{" "}
-                  conn
-                </span>
-                <span>
-                  <b className="font-semibold tabular-nums text-white/85">
-                    {inspectorVideoCount(hovered, model)}
-                  </b>{" "}
-                  vid
-                </span>
-                {hovered.meta.updatedAt && (
-                  <span>Updated {timeAgo(hovered.meta.updatedAt)}</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+          )}
 
         {/* Node inspector — a draggable floating window (never a blocking modal):
             drag it by the header, it stays where you leave it (remembered for the
             session), and the graph stays fully pannable/zoomable while it's open.
             A single component serves desktop and mobile; only the first-open
             placement differs. */}
-        {selected && detailProps && (
+        {inspected && detailProps && graphInspector.visibility !== "closed" && (
           <FloatingPanel
             positionKey="node-inspector"
             stageRef={stageRef}
-            onClose={() => setSelectedId(null)}
-            ariaLabel={`${selected.label} details`}
+            state={graphInspector.visibility}
+            onMinimize={() => dispatchGraphInspector({ type: "minimize" })}
+            onRestore={() => dispatchGraphInspector({ type: "restore" })}
+            onClose={() => dispatchGraphInspector({ type: "close" })}
+            ariaLabel={`${inspected.label} details`}
             defaultPlacement={isDesktop ? "top-right" : "bottom"}
             maxHeight={isDesktop ? "70vh" : "80dvh"}
             isDesktop={isDesktop}
-            bodyKey={selected.id}
+            bodyKey={inspected.id}
+            minimizedContent={
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: rgbCss(inspected.color) }}
+                  aria-hidden
+                />
+                <span className="truncate">{inspected.label}</span>
+              </span>
+            }
             headerContent={
               <InspectorHeaderContent
-                node={selected}
+                node={inspected}
                 degree={detailProps.degree}
                 videoCount={detailProps.videoCount}
               />
             }
             headerActions={
-              selected.kind !== "core" ? (
+              inspected.kind !== "core" ? (
                 <button
-                  onClick={() => togglePin(selected.id)}
+                  onClick={() => togglePin(inspected.id)}
                   title={
-                    pinnedIds.has(selected.id)
+                    pinnedIds.has(inspected.id)
                       ? "Unpin node from graph"
                       : "Pin node in place in graph"
                   }
                   aria-label={
-                    pinnedIds.has(selected.id)
+                    pinnedIds.has(inspected.id)
                       ? "Unpin node from graph"
                       : "Pin node in place in graph"
                   }
                   className={`-mt-1 flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                    pinnedIds.has(selected.id)
+                    pinnedIds.has(inspected.id)
                       ? "bg-primary/20 text-primary"
                       : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
                   }`}
                 >
-                  {pinnedIds.has(selected.id) ? (
+                  {pinnedIds.has(inspected.id) ? (
                     <PinOff className="h-4 w-4" />
                   ) : (
                     <Pin className="h-4 w-4" />
@@ -951,14 +1101,14 @@ export function MemoryGraphView({
       <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-sidebar/85 backdrop-blur-md lg:flex">
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
           <VitalityPanel vitality={vitality} reducedMotion={reducedMotion} />
-          <HubMaturityPanel topics={model.topics} onSelect={setSelectedId} />
+          <HubMaturityPanel topics={model.topics} onSelect={openGraphNode} />
           <LiveFeed
             recent={recent}
             colorByTrade={colorByTrade}
             onSelect={(id) => {
               // Prefer opening the node in-graph; fall back to the video page for
               // items not yet materialized as graph nodes (e.g. still processing).
-              if (nodeById.has(`video:${id}`)) setSelectedId(`video:${id}`);
+              if (nodeById.has(`video:${id}`)) openGraphNode(`video:${id}`);
               else onOpenVideo(id);
             }}
           />
@@ -990,7 +1140,7 @@ export function MemoryGraphView({
                   onClick={
                     t.nodeId
                       ? () => {
-                          setSelectedId(t.nodeId!);
+                          openGraphNode(t.nodeId!);
                           canvasRef.current?.focusNode(t.nodeId!);
                           dismissToast(t.id);
                         }
@@ -1019,7 +1169,7 @@ export function MemoryGraphView({
                 onClick={
                   t.nodeId
                     ? () => {
-                        setSelectedId(t.nodeId!);
+                        openGraphNode(t.nodeId!);
                         canvasRef.current?.focusNode(t.nodeId!);
                         dismissToast(t.id);
                       }

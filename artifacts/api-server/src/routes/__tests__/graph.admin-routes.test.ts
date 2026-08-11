@@ -144,6 +144,9 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
         competencyCode: null,
         mentorProfileId: "mentor-1",
         mentorName: "Dana",
+        question: null,
+        answerText: null,
+        sourceValid: false,
         answerId: null,
         sessionId: null,
         bestMatches: [],
@@ -162,10 +165,14 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: CANDIDATE_ID, status: "accepted" });
-    expect(resolveKnowledgeCandidate).toHaveBeenCalledWith(CANDIDATE_ID, "accept", {
-      targetNodeId: null,
-      reason: null,
-    });
+    expect(resolveKnowledgeCandidate).toHaveBeenCalledWith(
+      CANDIDATE_ID,
+      "accept",
+      {
+        targetNodeId: null,
+        reason: null,
+      },
+    );
   });
 });
 
@@ -301,36 +308,38 @@ describe("GET /graph/health — authorization", () => {
   });
 });
 
-describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
-  it("allows an anonymous caller to read the default pending list", async () => {
-    listKnowledgeCandidates.mockResolvedValue([]);
-
+describe("GET /graph/candidates — authorization", () => {
+  it("rejects an anonymous caller reading the default pending list", async () => {
     const res = await request(app).get("/api/graph/candidates");
 
-    expect(res.status).toBe(200);
-    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending");
+    expect(res.status).toBe(401);
+    expect(listKnowledgeCandidates).not.toHaveBeenCalled();
   });
 
-  it("allows an anonymous caller to explicitly request status=pending", async () => {
-    listKnowledgeCandidates.mockResolvedValue([]);
+  it("rejects an anonymous caller explicitly requesting status=pending", async () => {
+    const res = await request(app)
+      .get("/api/graph/candidates")
+      .query({ status: "pending" });
 
-    const res = await request(app).get("/api/graph/candidates").query({ status: "pending" });
-
-    expect(res.status).toBe(200);
-    expect(listKnowledgeCandidates).toHaveBeenCalledWith("pending");
+    expect(res.status).toBe(401);
+    expect(listKnowledgeCandidates).not.toHaveBeenCalled();
   });
 
-  it("rejects an anonymous caller requesting a non-pending status with 403", async () => {
-    const res = await request(app).get("/api/graph/candidates").query({ status: "accepted" });
+  it("rejects an anonymous caller requesting a non-pending status with 401", async () => {
+    const res = await request(app)
+      .get("/api/graph/candidates")
+      .query({ status: "accepted" });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(listKnowledgeCandidates).not.toHaveBeenCalled();
   });
 
   it("rejects a signed-in non-admin requesting a non-pending status with 403", async () => {
     signInAs("user");
 
-    const res = await request(app).get("/api/graph/candidates").query({ status: "rejected" });
+    const res = await request(app)
+      .get("/api/graph/candidates")
+      .query({ status: "rejected" });
 
     expect(res.status).toBe(403);
     expect(listKnowledgeCandidates).not.toHaveBeenCalled();
@@ -340,7 +349,9 @@ describe("GET /graph/candidates?status=<non-pending> — authorization", () => {
     signInAs("admin");
     listKnowledgeCandidates.mockResolvedValue([]);
 
-    const res = await request(app).get("/api/graph/candidates").query({ status: "archived" });
+    const res = await request(app)
+      .get("/api/graph/candidates")
+      .query({ status: "archived" });
 
     expect(res.status).toBe(200);
     expect(listKnowledgeCandidates).toHaveBeenCalledWith("archived");

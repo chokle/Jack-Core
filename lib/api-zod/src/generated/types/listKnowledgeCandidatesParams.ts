@@ -9,7 +9,7 @@ import type { ListKnowledgeCandidatesStatus } from './listKnowledgeCandidatesSta
 
 export type ListKnowledgeCandidatesParams = {
 /**
- * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
+ * Admin-only review queue status. Pending rows include contributor identity and verbatim interview evidence and are never public.
  */
 status?: ListKnowledgeCandidatesStatus;
 };

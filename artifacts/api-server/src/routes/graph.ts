@@ -25,12 +25,9 @@ import {
   getConceptAnswerContributions,
   resolveKnowledgeCandidate,
   getGraphHealth,
+  reconcileMentorAnswerProvenance,
 } from "../lib/memory-graph.js";
-import {
-  requireAdmin,
-  resolveAdminIdentity,
-  getAdminReviewer,
-} from "../lib/admin-auth.js";
+import { requireAdmin, getAdminReviewer } from "../lib/admin-auth.js";
 
 const router = Router();
 
@@ -65,28 +62,56 @@ router.get("/graph", async (req, res) => {
 // is awaiting Knowledge Review, so mentors trust queued concepts aren't lost.
 // Non-pending statuses carry resolution details (rejection reasons, merge
 // targets) and stay behind the same admin boundary as the resolve route.
-router.get("/graph/candidates", async (req, res) => {
+router.get("/graph/candidates", requireAdmin, async (req, res) => {
   const parsed = ListKnowledgeCandidatesQueryParams.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid status filter" });
-
-  if (parsed.data.status !== "pending" && !(await resolveAdminIdentity(req))) {
-    req.log.warn(
-      { url: req.url, status: parsed.data.status },
-      "non-pending candidate list requires admin access",
-    );
-    return res.status(403).json({ error: "Forbidden — admin access required." });
-  }
+  if (!parsed.success)
+    return res.status(400).json({ error: "Invalid status filter" });
 
   try {
     const candidates = await listKnowledgeCandidates(parsed.data.status);
     return res.json(
-      ListKnowledgeCandidatesResponse.parse({ candidates, total: candidates.length }),
+      ListKnowledgeCandidatesResponse.parse({
+        candidates,
+        total: candidates.length,
+      }),
     );
   } catch (err) {
     req.log.error({ err }, "listKnowledgeCandidates error");
-    return res.status(500).json({ error: "Failed to load knowledge candidates" });
+    return res
+      .status(500)
+      .json({ error: "Failed to load knowledge candidates" });
   }
 });
+
+router.get(
+  "/graph/reconcile/mentor-provenance",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      return res.json(await reconcileMentorAnswerProvenance());
+    } catch (err) {
+      req.log.error({ err }, "preview mentor provenance reconciliation error");
+      return res
+        .status(500)
+        .json({ error: "Failed to preview mentor provenance reconciliation" });
+    }
+  },
+);
+
+router.post(
+  "/graph/reconcile/mentor-provenance",
+  requireAdmin,
+  async (req, res) => {
+    try {
+      return res.json(await reconcileMentorAnswerProvenance({ apply: true }));
+    } catch (err) {
+      req.log.error({ err }, "apply mentor provenance reconciliation error");
+      return res
+        .status(500)
+        .json({ error: "Failed to reconcile mentor provenance" });
+    }
+  },
+);
 
 // Per-mentor contribution counts — a read-only track record (concepts created /
 // reinforced in the live graph, plus accepted / rejected / pending candidates)
@@ -97,11 +122,16 @@ router.get("/graph/mentor-contributions", requireAdmin, async (req, res) => {
   try {
     const contributions = await getMentorContributionStats();
     return res.json(
-      GetMentorContributionsResponse.parse({ contributions, total: contributions.length }),
+      GetMentorContributionsResponse.parse({
+        contributions,
+        total: contributions.length,
+      }),
     );
   } catch (err) {
     req.log.error({ err }, "getMentorContributions error");
-    return res.status(500).json({ error: "Failed to load mentor contributions" });
+    return res
+      .status(500)
+      .json({ error: "Failed to load mentor contributions" });
   }
 });
 
@@ -111,16 +141,22 @@ router.get("/graph/mentor-contributions", requireAdmin, async (req, res) => {
 // verification — this mutates the shared Living Memory graph.
 router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
   const paramsParsed = ResolveKnowledgeCandidateParams.safeParse(req.params);
-  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid candidate id" });
+  if (!paramsParsed.success)
+    return res.status(400).json({ error: "Invalid candidate id" });
 
   const bodyParsed = ResolveKnowledgeCandidateBody.safeParse(req.body);
-  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+  if (!bodyParsed.success)
+    return res.status(400).json({ error: bodyParsed.error.message });
 
   try {
-    const result = await resolveKnowledgeCandidate(paramsParsed.data.id, bodyParsed.data.action, {
-      targetNodeId: bodyParsed.data.targetNodeId ?? null,
-      reason: bodyParsed.data.reason ?? null,
-    });
+    const result = await resolveKnowledgeCandidate(
+      paramsParsed.data.id,
+      bodyParsed.data.action,
+      {
+        targetNodeId: bodyParsed.data.targetNodeId ?? null,
+        reason: bodyParsed.data.reason ?? null,
+      },
+    );
     if (!result.ok) {
       // target_gone is a STRUCTURED conflict: the candidate stays pending and
       // the body carries fresh near matches so the reviewer can re-aim.
@@ -132,7 +168,11 @@ router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
         });
       }
       const status =
-        result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 400;
+        result.code === "not_found"
+          ? 404
+          : result.code === "conflict"
+            ? 409
+            : 400;
       return res.status(status).json({
         error: result.message,
         ...(result.code === "conflict" ? { code: "already_resolved" } : {}),
@@ -141,7 +181,9 @@ router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
     return res.json(ResolveKnowledgeCandidateResponse.parse(result.candidate));
   } catch (err) {
     req.log.error({ err }, "resolveKnowledgeCandidate error");
-    return res.status(500).json({ error: "Failed to resolve knowledge candidate" });
+    return res
+      .status(500)
+      .json({ error: "Failed to resolve knowledge candidate" });
   }
 });
 
@@ -149,54 +191,77 @@ router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
 // distilled concept node. This is the only route that mutates the graph, so it
 // is gated behind the same signed admin session used for library management —
 // the API uses the Supabase service-role key and has no other auth boundary.
-router.patch("/graph/nodes/:id/verification", requireAdmin, async (req, res) => {
-  const paramsParsed = SetNodeVerificationParams.safeParse(req.params);
-  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
+router.patch(
+  "/graph/nodes/:id/verification",
+  requireAdmin,
+  async (req, res) => {
+    const paramsParsed = SetNodeVerificationParams.safeParse(req.params);
+    if (!paramsParsed.success)
+      return res.status(400).json({ error: "Invalid node id" });
 
-  const bodyParsed = SetNodeVerificationBody.safeParse(req.body);
-  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+    const bodyParsed = SetNodeVerificationBody.safeParse(req.body);
+    if (!bodyParsed.success)
+      return res.status(400).json({ error: bodyParsed.error.message });
 
-  try {
-    // Attribute the decision to the signed-in reviewer carried in the session
-    // cookie — never a client-supplied field — so the recorded identity cannot
-    // be spoofed by the request body.
-    const node = await setNodeVerification(
-      paramsParsed.data.id,
-      bodyParsed.data.status,
-      getAdminReviewer(req),
-    );
-    if (!node) {
-      return res.status(404).json({ error: "No distilled knowledge node with that id." });
+    try {
+      // Attribute the decision to the signed-in reviewer carried in the session
+      // cookie — never a client-supplied field — so the recorded identity cannot
+      // be spoofed by the request body.
+      const node = await setNodeVerification(
+        paramsParsed.data.id,
+        bodyParsed.data.status,
+        getAdminReviewer(req),
+      );
+      if (!node) {
+        return res
+          .status(404)
+          .json({ error: "No distilled knowledge node with that id." });
+      }
+      return res.json(node);
+    } catch (err) {
+      req.log.error({ err }, "setNodeVerification error");
+      return res
+        .status(500)
+        .json({ error: "Failed to update verification status" });
     }
-    return res.json(node);
-  } catch (err) {
-    req.log.error({ err }, "setNodeVerification error");
-    return res.status(500).json({ error: "Failed to update verification status" });
-  }
-});
+  },
+);
 
 // Admin-only: clear a reviewed withdrawn-evidence entry from a concept's
 // provenance. Gated identically to node verification — this mutates the shared
 // Living Memory graph and the API holds the Supabase service-role key with no
 // other auth boundary. Idempotent: a missing entry returns the node unchanged.
-router.post("/graph/nodes/:id/restore-evidence", requireAdmin, async (req, res) => {
-  const paramsParsed = RestoreWithdrawnEvidenceParams.safeParse(req.params);
-  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
+router.post(
+  "/graph/nodes/:id/restore-evidence",
+  requireAdmin,
+  async (req, res) => {
+    const paramsParsed = RestoreWithdrawnEvidenceParams.safeParse(req.params);
+    if (!paramsParsed.success)
+      return res.status(400).json({ error: "Invalid node id" });
 
-  const bodyParsed = RestoreWithdrawnEvidenceBody.safeParse(req.body);
-  if (!bodyParsed.success) return res.status(400).json({ error: bodyParsed.error.message });
+    const bodyParsed = RestoreWithdrawnEvidenceBody.safeParse(req.body);
+    if (!bodyParsed.success)
+      return res.status(400).json({ error: bodyParsed.error.message });
 
-  try {
-    const node = await restoreWithdrawnEvidence(paramsParsed.data.id, bodyParsed.data.videoId);
-    if (!node) {
-      return res.status(404).json({ error: "No distilled knowledge node with that id." });
+    try {
+      const node = await restoreWithdrawnEvidence(
+        paramsParsed.data.id,
+        bodyParsed.data.videoId,
+      );
+      if (!node) {
+        return res
+          .status(404)
+          .json({ error: "No distilled knowledge node with that id." });
+      }
+      return res.json(node);
+    } catch (err) {
+      req.log.error({ err }, "restoreWithdrawnEvidence error");
+      return res
+        .status(500)
+        .json({ error: "Failed to restore withdrawn evidence" });
     }
-    return res.json(node);
-  } catch (err) {
-    req.log.error({ err }, "restoreWithdrawnEvidence error");
-    return res.status(500).json({ error: "Failed to restore withdrawn evidence" });
-  }
-});
+  },
+);
 
 // Admin-only, read-only: for a mentor-supported concept, the per-answer
 // confidence each contributing mentor answer recorded on the mentor→concept
@@ -204,23 +269,34 @@ router.post("/graph/nodes/:id/restore-evidence", requireAdmin, async (req, res) 
 // excerpt and the mentor's name. Admin-gated like the rest of the mentor
 // surface because it exposes verbatim interview content (personal data); the
 // public product only ever shows aggregate confidence. Mutates nothing.
-router.get("/graph/nodes/:id/answer-contributions", requireAdmin, async (req, res) => {
-  const paramsParsed = GetConceptAnswerContributionsParams.safeParse(req.params);
-  if (!paramsParsed.success) return res.status(400).json({ error: "Invalid node id" });
-
-  try {
-    const contributions = await getConceptAnswerContributions(paramsParsed.data.id);
-    return res.json(
-      GetConceptAnswerContributionsResponse.parse({
-        contributions,
-        total: contributions.length,
-      }),
+router.get(
+  "/graph/nodes/:id/answer-contributions",
+  requireAdmin,
+  async (req, res) => {
+    const paramsParsed = GetConceptAnswerContributionsParams.safeParse(
+      req.params,
     );
-  } catch (err) {
-    req.log.error({ err }, "getConceptAnswerContributions error");
-    return res.status(500).json({ error: "Failed to load answer contributions" });
-  }
-});
+    if (!paramsParsed.success)
+      return res.status(400).json({ error: "Invalid node id" });
+
+    try {
+      const contributions = await getConceptAnswerContributions(
+        paramsParsed.data.id,
+      );
+      return res.json(
+        GetConceptAnswerContributionsResponse.parse({
+          contributions,
+          total: contributions.length,
+        }),
+      );
+    } catch (err) {
+      req.log.error({ err }, "getConceptAnswerContributions error");
+      return res
+        .status(500)
+        .json({ error: "Failed to load answer contributions" });
+    }
+  },
+);
 
 // Admin-only Graph Health dashboard: knowledge-write verification counts
 // (verified/partial/failed), the retry queue (videos + answers awaiting a

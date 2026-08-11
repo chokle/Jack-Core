@@ -14,6 +14,7 @@ import testingRouter from "./testing.js";
 import testSessionsRouter from "./test-sessions.js";
 import telemetryConsentRouter from "./telemetry-consent.js";
 import telemetryReportsRouter from "./telemetry-reports.js";
+import conversationReviewRouter from "./conversation-review.js";
 import accountRouter from "./account.js";
 
 const router: IRouter = Router();
@@ -33,6 +34,7 @@ router.use(testingRouter);
 router.use(testSessionsRouter);
 router.use(telemetryConsentRouter);
 router.use(telemetryReportsRouter);
+router.use(conversationReviewRouter);
 router.use(accountRouter);
 
 export default router;

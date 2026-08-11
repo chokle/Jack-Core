@@ -16,7 +16,11 @@ vi.mock("../supabase.js", async () => {
 
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
-  return { createEmbedding: m.createEmbedding, MODELS: m.MODELS, openai: m.openai };
+  return {
+    createEmbedding: m.createEmbedding,
+    MODELS: m.MODELS,
+    openai: m.openai,
+  };
 });
 
 import { fake, embedRegistry, resetMocks } from "./mocks.js";
@@ -67,8 +71,18 @@ async function seedVideo(id: string, trade: string = TRADE): Promise<void> {
 
 function seedBaseTables(): void {
   fake.tables["competencies"].push(
-    { code: "W-2", name: "Shielded Metal Arc Welding", trade: "Welder", description: null },
-    { code: "W-3", name: "Gas Metal Arc Welding", trade: "Welder", description: null },
+    {
+      code: "W-2",
+      name: "Shielded Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
+    {
+      code: "W-3",
+      name: "Gas Metal Arc Welding",
+      trade: "Welder",
+      description: null,
+    },
   );
 }
 
@@ -76,12 +90,17 @@ const nodes = () => fake.tables["knowledge_nodes"];
 const edges = () => fake.tables["knowledge_edges"];
 const candidates = () => fake.tables["knowledge_candidates"] ?? [];
 const nodeById = (id: string) => nodes().find((n) => n["id"] === id);
-const knowledgeNodes = () => nodes().filter((n) => (n["id"] as string).startsWith("k:"));
+const knowledgeNodes = () =>
+  nodes().filter((n) => (n["id"] as string).startsWith("k:"));
 const edgeBetween = (source: string, target: string) =>
   edges().find((e) => e["source_id"] === source && e["target_id"] === target);
 
 const BASE_VEC = [1, ...Array(15).fill(0)] as number[];
-const atSimilarity = (s: number): number[] => [s, Math.sqrt(1 - s * s), ...Array(14).fill(0)];
+const atSimilarity = (s: number): number[] => [
+  s,
+  Math.sqrt(1 - s * s),
+  ...Array(14).fill(0),
+];
 
 /** Stable graph snapshot ignoring write-time bookkeeping fields. */
 const TIME_KEYS = new Set([
@@ -105,7 +124,9 @@ function stripTimes(value: unknown): unknown {
 }
 const snapshot = (rows: Record<string, unknown>[]): string =>
   JSON.stringify(
-    stripTimes([...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"])))),
+    stripTimes(
+      [...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"]))),
+    ),
   );
 const graphSnapshot = () => snapshot(nodes()) + "|" + snapshot(edges());
 
@@ -125,6 +146,28 @@ async function seedPendingCandidate(): Promise<void> {
   await syncVideoKnowledge("vid-1", [makeItem("concept", CANONICAL_TITLE)]);
 
   embedRegistry.set(UNCERTAIN_TITLE, atSimilarity(0.75));
+  fake.tables["mentor_profiles"] ??= [];
+  fake.tables["interview_sessions"] ??= [];
+  fake.tables["interview_answers"] ??= [];
+  fake.tables["mentor_profiles"].push({
+    id: MENTOR_A,
+    name: "Alice",
+    trade: TRADE,
+  });
+  fake.tables["interview_sessions"].push({
+    id: SESSION,
+    mentor_profile_id: MENTOR_A,
+    trade: TRADE,
+    status: "active",
+  });
+  fake.tables["interview_answers"].push({
+    id: ANSWER_1,
+    session_id: SESSION,
+    mentor_profile_id: MENTOR_A,
+    question: "How do you keep gas coverage clean?",
+    answer_text: "Keep the cup close and shield the puddle from wind.",
+    skipped: false,
+  });
   await syncMentorAnswerKnowledge(
     MENTOR_A,
     "Alice",
@@ -155,7 +198,9 @@ describe("Knowledge Review — accept", () => {
 
     // Exactly one canonical node was reinforced — no new node minted.
     expect(knowledgeNodes().length).toBe(before);
-    expect(nodeById(knowledgeNodeId("concept", UNCERTAIN_TITLE))).toBeUndefined();
+    expect(
+      nodeById(knowledgeNodeId("concept", UNCERTAIN_TITLE)),
+    ).toBeUndefined();
 
     // Mentor provenance edge, deduped by the original answer id.
     const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
@@ -175,7 +220,9 @@ describe("Knowledge Review — accept", () => {
 
     // Resolved candidates leave the pending list.
     expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
-    expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(candidateId);
+    expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(
+      candidateId,
+    );
   });
 
   it("replaying an accept is a strict no-op", async () => {
@@ -227,12 +274,16 @@ describe("Knowledge Review — merge", () => {
     expect(knowledgeNodes().length).toBe(before);
     const edge = edgeBetween(`mentor:${MENTOR_A}`, other.id)!;
     expect(edge).toBeDefined();
-    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_1,
+    ]);
     expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeUndefined();
 
     const node = nodeById(other.id)!;
     expect(node["verification_status"]).toBe("mentor_supplied");
-    expect((node["meta"] as Record<string, unknown>)["aliases"]).toContain(UNCERTAIN_TITLE);
+    expect((node["meta"] as Record<string, unknown>)["aliases"]).toContain(
+      UNCERTAIN_TITLE,
+    );
 
     expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
     expect((await listKnowledgeCandidates("merged"))[0]!.id).toBe(candidateId);
@@ -272,9 +323,14 @@ describe("Knowledge Review — merge", () => {
   it("replaying a merge with the same target is a no-op; a different target conflicts", async () => {
     await seedPendingCandidate();
     const other = makeItem("concept", "Shielding Gas Discipline");
-    await syncVideoKnowledge("vid-1", [makeItem("concept", CANONICAL_TITLE), other]);
+    await syncVideoKnowledge("vid-1", [
+      makeItem("concept", CANONICAL_TITLE),
+      other,
+    ]);
 
-    await resolveKnowledgeCandidate(candidateId, "merge", { targetNodeId: other.id });
+    await resolveKnowledgeCandidate(candidateId, "merge", {
+      targetNodeId: other.id,
+    });
     const snap = graphSnapshot();
 
     const replay = await resolveKnowledgeCandidate(candidateId, "merge", {
@@ -297,7 +353,10 @@ describe("Knowledge Review — reject", () => {
     await seedPendingCandidate();
     const snap = graphSnapshot();
 
-    const missingReason = await resolveKnowledgeCandidate(candidateId, "reject");
+    const missingReason = await resolveKnowledgeCandidate(
+      candidateId,
+      "reject",
+    );
     expect(missingReason.ok).toBe(false);
     if (!missingReason.ok) expect(missingReason.code).toBe("invalid");
     expect(candidates()[0]!["status"]).toBe("pending");
@@ -319,14 +378,16 @@ describe("Knowledge Review — reject", () => {
     expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeUndefined();
 
     expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
-    expect((await listKnowledgeCandidates("rejected"))[0]!.resolutionReason).toContain(
-      "Duplicate",
-    );
+    expect(
+      (await listKnowledgeCandidates("rejected"))[0]!.resolutionReason,
+    ).toContain("Duplicate");
   });
 
   it("replaying a reject is a no-op that keeps the original reason", async () => {
     await seedPendingCandidate();
-    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "original reason" });
+    await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "original reason",
+    });
 
     const replay = await resolveKnowledgeCandidate(candidateId, "reject", {
       reason: "different reason",
@@ -347,7 +408,9 @@ describe("Knowledge Review — reject", () => {
 describe("Knowledge Review — reopen", () => {
   it("returns a rejected candidate to pending, clearing every resolution field", async () => {
     await seedPendingCandidate();
-    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "premature reject" });
+    await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "premature reject",
+    });
     const snap = graphSnapshot();
 
     const result = await resolveKnowledgeCandidate(candidateId, "reopen");
@@ -395,7 +458,9 @@ describe("Knowledge Review — reopen", () => {
 
   it("refuses to reopen a rejected candidate whose mentor was withdrawn (scrubbed)", async () => {
     await seedPendingCandidate();
-    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "will revisit" });
+    await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "will revisit",
+    });
     // Simulate mentor withdrawal scrubbing the resolved candidate's provenance.
     candidates()[0]!["mentor_profile_id"] = null;
 
@@ -408,7 +473,9 @@ describe("Knowledge Review — reopen", () => {
 
   it("a reject → reopen → accept cycle reinforces the concept like a direct accept", async () => {
     await seedPendingCandidate();
-    await resolveKnowledgeCandidate(candidateId, "reject", { reason: "reconsidering" });
+    await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "reconsidering",
+    });
     const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
     expect(reopened.ok).toBe(true);
 
@@ -421,10 +488,14 @@ describe("Knowledge Review — reopen", () => {
     // The mentor provenance edge exists, deduped by the original answer id.
     const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
     expect(edge).toBeDefined();
-    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_1,
+    ]);
 
     expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
-    expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(candidateId);
+    expect((await listKnowledgeCandidates("accepted"))[0]!.id).toBe(
+      candidateId,
+    );
   });
 });
 
@@ -474,9 +545,14 @@ describe("Knowledge Review — reopen (undo accept/merge)", () => {
   it("undoes a merged reinforcement onto the reviewer-chosen node", async () => {
     await seedPendingCandidate();
     const other = makeItem("concept", "Shielding Gas Discipline");
-    await syncVideoKnowledge("vid-1", [makeItem("concept", CANONICAL_TITLE), other]);
+    await syncVideoKnowledge("vid-1", [
+      makeItem("concept", CANONICAL_TITLE),
+      other,
+    ]);
 
-    await resolveKnowledgeCandidate(candidateId, "merge", { targetNodeId: other.id });
+    await resolveKnowledgeCandidate(candidateId, "merge", {
+      targetNodeId: other.id,
+    });
     expect(edgeBetween(`mentor:${MENTOR_A}`, other.id)).toBeDefined();
     expect(nodeById(other.id)!["verification_status"]).toBe("mentor_supplied");
 
@@ -502,7 +578,10 @@ describe("Knowledge Review — reopen (undo accept/merge)", () => {
     // (accept dedups by answerId; a real multi-answer mentor edge carries both).
     const ANSWER_2 = "22222222-0000-0000-0000-000000000002";
     const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
-    (edge["meta"] as Record<string, unknown>)["answerIds"] = [ANSWER_1, ANSWER_2];
+    (edge["meta"] as Record<string, unknown>)["answerIds"] = [
+      ANSWER_1,
+      ANSWER_2,
+    ];
     edge["weight"] = 2;
 
     const reopened = await resolveKnowledgeCandidate(candidateId, "reopen");
@@ -511,10 +590,14 @@ describe("Knowledge Review — reopen (undo accept/merge)", () => {
     // The edge lives on for the other answer; only THIS answer's contribution left.
     const after = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
     expect(after).toBeDefined();
-    expect((after["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_2]);
+    expect((after["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_2,
+    ]);
     expect(after["weight"]).toBe(1);
     // Still mentor-corroborated, so the status stays mentor_supplied.
-    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
+    expect(nodeById(canonicalId)!["verification_status"]).toBe(
+      "mentor_supplied",
+    );
   });
 
   it("recomputes edge confidence from the surviving answers when a high-confidence answer is withdrawn", async () => {
@@ -610,8 +693,12 @@ describe("Knowledge Review — reopen (undo accept/merge)", () => {
     // The mentor provenance edge is back, deduped by the original answer id.
     const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
     expect(edge).toBeDefined();
-    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
-    expect(nodeById(canonicalId)!["verification_status"]).toBe("mentor_supplied");
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_1,
+    ]);
+    expect(nodeById(canonicalId)!["verification_status"]).toBe(
+      "mentor_supplied",
+    );
   });
 });
 
@@ -671,7 +758,9 @@ describe("Knowledge Review — resilient targets", () => {
 
     const edge = edgeBetween(`mentor:${MENTOR_A}`, survivorId)!;
     expect(edge).toBeDefined();
-    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_1,
+    ]);
     expect(edgeBetween(`mentor:${MENTOR_A}`, canonicalId)).toBeUndefined();
     // No zombie node was resurrected for the vanished id.
     expect(nodeById(canonicalId)).toBeUndefined();
@@ -717,7 +806,10 @@ describe("Knowledge Review — resilient targets", () => {
     fake.tables["knowledge_nodes"] = fake.tables["knowledge_nodes"].filter(
       (n) => n["id"] !== canonicalId,
     );
-    const replacementId = knowledgeNodeId("concept", "Clean Gas Coverage Habits");
+    const replacementId = knowledgeNodeId(
+      "concept",
+      "Clean Gas Coverage Habits",
+    );
     fake.tables["knowledge_nodes"].push({
       id: replacementId,
       kind: "concept",
@@ -801,7 +893,10 @@ describe("Knowledge Review — resilient targets", () => {
 
 describe("Knowledge Review — misc", () => {
   it("returns not_found for an unknown candidate", async () => {
-    const result = await resolveKnowledgeCandidate("cand:nope:k:concept:nothing", "accept");
+    const result = await resolveKnowledgeCandidate(
+      "cand:nope:k:concept:nothing",
+      "accept",
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("not_found");
   });
@@ -811,14 +906,19 @@ describe("Knowledge Review — concurrency", () => {
   it("two conflicting concurrent resolutions produce exactly one graph reinforcement", async () => {
     await seedPendingCandidate();
     const other = makeItem("concept", "Shielding Gas Discipline");
-    await syncVideoKnowledge("vid-1", [makeItem("concept", CANONICAL_TITLE), other]);
+    await syncVideoKnowledge("vid-1", [
+      makeItem("concept", CANONICAL_TITLE),
+      other,
+    ]);
 
     // Fire an accept (→ canonical top match) and a merge (→ reviewer-chosen
     // node) at the SAME pending candidate simultaneously. Serialization must
     // let exactly one win; the loser must see a conflict and write nothing.
     const [a, b] = await Promise.all([
       resolveKnowledgeCandidate(candidateId, "accept"),
-      resolveKnowledgeCandidate(candidateId, "merge", { targetNodeId: other.id }),
+      resolveKnowledgeCandidate(candidateId, "merge", {
+        targetNodeId: other.id,
+      }),
     ]);
 
     const winners = [a, b].filter((r) => r.ok);
@@ -859,7 +959,9 @@ describe("Knowledge Review — concurrency", () => {
     // A single mentor edge with the answer id recorded once.
     const edge = edgeBetween(`mentor:${MENTOR_A}`, canonicalId)!;
     expect(edge).toBeDefined();
-    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([ANSWER_1]);
+    expect((edge["meta"] as Record<string, unknown>)["answerIds"]).toEqual([
+      ANSWER_1,
+    ]);
   });
 
   it("compare-and-set refuses a status flip when the row is no longer pending", async () => {
