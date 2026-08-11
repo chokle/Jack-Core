@@ -233,7 +233,7 @@ describe("Ask Jack telemetry presentation denial", () => {
     }
   });
 
-  it("does not reuse an older cookie grant after another cookie supersedes it", async () => {
+  it("does not reuse an older cookie grant when a same-timestamp save supersedes it", async () => {
     fake.tables.conversation_review_consents = [
       {
         id: "review-consent-old-cookie",
@@ -245,6 +245,7 @@ describe("Ask Jack telemetry presentation denial", () => {
         privacy_notice_version: "jack-pilot-privacy-2026-07-25",
         consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
         occurred_at: "2026-08-11T00:00:00.000Z",
+        created_at: "2026-08-11T00:00:00.000Z",
       },
       {
         id: "review-consent-new-cookie",
@@ -255,7 +256,8 @@ describe("Ask Jack telemetry presentation denial", () => {
         state: "granted",
         privacy_notice_version: "jack-pilot-privacy-2026-07-25",
         consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
-        occurred_at: "2026-08-11T01:00:00.000Z",
+        occurred_at: "2026-08-11T00:00:00.000Z",
+        created_at: "2026-08-11T00:00:01.000Z",
       },
     ];
 

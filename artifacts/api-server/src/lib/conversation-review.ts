@@ -38,6 +38,8 @@ export async function latestConversationReviewConsent(
     .eq("actor_user_id", userId)
     .eq("pilot_id", pilotId)
     .order("occurred_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (result.error) throw result.error;
@@ -74,6 +76,8 @@ export async function currentConversationReviewLinkage(
     )
     .eq("actor_user_id", userId)
     .order("occurred_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(1000);
   if (history.error) throw history.error;
 

@@ -267,7 +267,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
   private updateValues: Row = {};
   private singleMode: "none" | "maybe" | "single" = "none";
-  private orderBy: { col: string; ascending: boolean } | null = null;
+  private orderBy: Array<{ col: string; ascending: boolean }> = [];
   private limitCount: number | null = null;
 
   constructor(
@@ -353,7 +353,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   order(col: string, opts: { ascending?: boolean } = {}): this {
-    this.orderBy = { col, ascending: opts.ascending ?? true };
+    this.orderBy.push({ col, ascending: opts.ascending ?? true });
     return this;
   }
 
@@ -471,9 +471,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let matched = this.rows
       .filter((r) => this.matches(r))
       .map((r) => ({ ...r }));
-    if (this.orderBy) {
-      const { col, ascending } = this.orderBy;
-      const compareValues = (left: unknown, right: unknown): number => {
+    if (this.orderBy.length > 0) {
+      const compareValues = (
+        left: unknown,
+        right: unknown,
+        ascending: boolean,
+      ): number => {
         if (left == null && right == null) return 0;
         if (left == null) return ascending ? 1 : -1;
         if (right == null) return ascending ? -1 : 1;
@@ -505,8 +508,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       };
 
       matched = matched.sort((a, b) => {
-        const order = compareValues(a[col], b[col]);
-        return ascending ? order : -order;
+        for (const { col, ascending } of this.orderBy) {
+          const order = compareValues(a[col], b[col], ascending);
+          if (order !== 0) return ascending ? order : -order;
+        }
+        return 0;
       });
     }
     if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
