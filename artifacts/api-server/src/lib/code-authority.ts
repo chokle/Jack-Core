@@ -812,9 +812,10 @@ export function evaluateCodeSafetyGate(input: {
     missing.push("Governing primary-source section evidence");
   }
 
-  const citationSources = snapshot?.sources.length
-    ? snapshot.sources
-    : candidateSources(resolved, input.sources);
+  // Only cite sources selected by the date-and-edition-aware snapshot. A
+  // current primary is not evidence for unresolved historical, transition,
+  // missing-context, edition-conflict, or special-authority applicability.
+  const citationSources = snapshot?.sources ?? [];
   const citations = citationSources.map((item) =>
     buildCitation(
       item,
@@ -1056,28 +1057,6 @@ function buildCitation(
     contentAvailability: evidence ? "licensed_section" : "metadata_only",
     citationLabel: item.citationLabel,
   };
-}
-
-function candidateSources(
-  resolved: JurisdictionResolution,
-  sources: AuthoritativeSource[],
-): AuthoritativeSource[] {
-  if (
-    resolved.jurisdiction !== "BC_GENERAL" &&
-    resolved.jurisdiction !== "VANCOUVER"
-  ) {
-    return [];
-  }
-  const type =
-    resolved.jurisdiction === "VANCOUVER" ? "municipal_bylaw" : "adopted_code";
-  return sources
-    .filter(
-      (item) =>
-        item.jurisdiction === resolved.jurisdiction &&
-        item.sourceType === type &&
-        item.status === "current",
-    )
-    .slice(0, 1);
 }
 
 function buildNextSteps(

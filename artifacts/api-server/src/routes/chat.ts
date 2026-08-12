@@ -139,40 +139,14 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
             };
       const answer = formatCodeSafetyRefusal(codeSafety);
       const citations = codeSafety.citations.map(toChatAuthorityCitation);
-      const { data: userMessage, error: userMessageError } = await supabase
-        .from("chat_messages")
-        .insert({
-          session_id: session,
-          user_id: userId,
-          role: "user",
-          content: message,
-          citations: [],
-        })
-        .select("id")
-        .single();
-      if (userMessageError) throw userMessageError;
-      const chatMessageId =
-        userMessage &&
-        typeof (userMessage as Record<string, unknown>)["id"] === "string"
-          ? String((userMessage as Record<string, unknown>)["id"])
-          : session;
-
-      const { error: assistantMessageError } = await supabase
-        .from("chat_messages")
-        .insert({
-          session_id: session,
-          user_id: userId,
-          role: "assistant",
-          content: answer,
-          citations,
-        });
-      if (assistantMessageError) throw assistantMessageError;
-
+      // Phase 1 has no authorized section-level, revision-reconciled answer
+      // path. Do not persist the request, refusal, or citations until that path
+      // exists; the content must also remain outside retrieval and learning.
       await recordServerAskJackEvent({
         req,
         actorIdentity: await resolveIdentity(req),
         eventType: "ask_jack_completed",
-        correlationId: chatMessageId,
+        correlationId: session,
         citationCount: citations.length,
       });
 

@@ -571,6 +571,58 @@ describe("licensing and code safety gate", () => {
     });
   });
 
+  it.each([
+    {
+      label: "historical BC/Burnaby applicability",
+      context: { ...bcContext, permitApplicationDate: "2023-12-01" },
+      expectedStatus: "historical_source_required",
+      expectedEdition: null,
+    },
+    {
+      label: "unresolved transition applicability",
+      context: {
+        ...bcContext,
+        projectType: "renovation",
+        knownConditions: ["Existing permit; transition rule unresolved"],
+      },
+      expectedStatus: "transition_context_required",
+      expectedEdition: null,
+    },
+    {
+      label: "missing date context",
+      context: { ...bcContext, permitApplicationDate: undefined },
+      expectedStatus: "missing_context",
+      expectedEdition: null,
+    },
+    {
+      label: "explicit edition conflict",
+      context: { ...bcContext, explicitCodeEdition: "2018" },
+      expectedStatus: "edition_conflict",
+      expectedEdition: "2024",
+    },
+    {
+      label: "unknown special authority",
+      context: { ...bcContext, specialAuthority: true },
+      expectedStatus: "unknown_special_authority",
+      expectedEdition: null,
+    },
+  ])(
+    "does not cite a current primary for $label",
+    ({ context, expectedStatus, expectedEdition }) => {
+      expect(resolveJurisdiction(context).status).toBe(expectedStatus);
+      const result = evaluateCodeSafetyGate({
+        question: "Is this venting to code?",
+        context,
+        sources: INITIAL_AUTHORITY_SOURCES,
+      });
+
+      expect(result.outcome).toBe("blocked");
+      expect(result.applicableEdition).toBe(expectedEdition);
+      expect(result.authoritySnapshotId).toBeNull();
+      expect(result.citations).toEqual([]);
+    },
+  );
+
   it("requires measurements for dimensional questions", () => {
     const result = evaluateCodeSafetyGate({
       question: "What slope is required for this drain pipe?",

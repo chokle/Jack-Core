@@ -13,6 +13,7 @@ const openAiMocks = vi.hoisted(() => ({
 const learningMock = vi.hoisted(() =>
   vi.fn(async () => ({ status: "discarded", extractedCount: 0 })),
 );
+const publishMock = vi.hoisted(() => vi.fn());
 const codeAuthorityMocks = vi.hoisted(() => ({
   evaluateCodeSafetyGate: vi.fn(),
   reconcileRevisionFeedObservations: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("../../lib/openai.js", () => ({
 vi.mock("../../lib/ask-learning.js", () => ({
   learnFromAskInteraction: learningMock,
 }));
+vi.mock("../../lib/vitality.js", () => ({ publish: publishMock }));
 vi.mock("../../lib/code-authority.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../lib/code-authority.js")>();
@@ -80,6 +82,7 @@ beforeEach(() => {
   openAiMocks.createEmbedding.mockClear();
   openAiMocks.chatCompletion.mockClear();
   learningMock.mockClear();
+  publishMock.mockClear();
   codeAuthorityMocks.evaluateCodeSafetyGate.mockClear();
   codeAuthorityMocks.reconcileRevisionFeedObservations.mockClear();
   fake.tables["authoritative_sources"] = INITIAL_AUTHORITY_SOURCES.map(
@@ -128,8 +131,72 @@ describe("Ask Jack code authority safety gate", () => {
     expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
     expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
     expect(learningMock).not.toHaveBeenCalled();
-    expect(fake.tables["chat_messages"]).toHaveLength(2);
+    expect(fake.tables["chat_messages"]).toHaveLength(0);
+    expect(publishMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: "historical BC/Burnaby request",
+      authorityContext: {
+        province: "BC",
+        municipality: "Burnaby",
+        permitApplicationDate: "2023-12-01",
+        projectType: "new construction",
+        knownConditions: [
+          "New permit application; no delayed provisions apply",
+        ],
+      },
+    },
+    {
+      label: "unresolved transition request",
+      authorityContext: {
+        province: "BC",
+        municipality: "Burnaby",
+        permitApplicationDate: "2026-08-11",
+        projectType: "renovation",
+        knownConditions: ["Existing permit; transition rule unresolved"],
+      },
+    },
+  ])(
+    "suppresses inapplicable citations and all content processing for a $label",
+    async ({ authorityContext }) => {
+      const rpcSpy = vi.spyOn(fake, "rpc");
+      const fromSpy = vi.spyOn(fake, "from");
+
+      const res = await request(app).post("/api/chat").send({
+        message: "Is this venting to code?",
+        authorityContext,
+      });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.codeSafety).toMatchObject({
+        outcome: "blocked",
+        applicableEdition: null,
+        authoritySnapshotId: null,
+      });
+      expect(res.body.citations).toEqual([]);
+      expect(fake.tables["chat_messages"]).toHaveLength(0);
+      expect(openAiMocks.createEmbedding).not.toHaveBeenCalled();
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
+      expect(learningMock).not.toHaveBeenCalled();
+      expect(publishMock).not.toHaveBeenCalled();
+      expect(
+        fromSpy.mock.calls.some(([table]) =>
+          [
+            "chat_messages",
+            "knowledge_entries",
+            "knowledge_nodes",
+            "videos",
+          ].includes(table),
+        ),
+      ).toBe(false);
+
+      rpcSpy.mockRestore();
+      fromSpy.mockRestore();
+    },
+  );
 
   it("persists a changed upstream revision fingerprint before answering", async () => {
     fake.tables["authoritative_sources"] = INITIAL_AUTHORITY_SOURCES.map(
@@ -323,6 +390,8 @@ describe("Ask Jack code authority safety gate", () => {
       expect(rpcSpy).not.toHaveBeenCalled();
       expect(openAiMocks.chatCompletion).not.toHaveBeenCalled();
       expect(learningMock).not.toHaveBeenCalled();
+      expect(fake.tables["chat_messages"]).toHaveLength(0);
+      expect(publishMock).not.toHaveBeenCalled();
       rpcSpy.mockRestore();
     },
   );
