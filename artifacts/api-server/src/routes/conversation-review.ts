@@ -154,11 +154,13 @@ router.get("/testing/conversation-review", async (req, res) => {
     const consents = await db
       .from("conversation_review_consents")
       .select(
-        "id,actor_user_id,state,privacy_notice_version,consent_version,occurred_at,chat_session_id",
+        "id,actor_user_id,state,privacy_notice_version,consent_version,occurred_at,created_at,chat_session_id",
       )
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId)
       .order("occurred_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(2_000);
     if (consents.error) throw consents.error;
     const consentedParticipants = currentConsentedParticipants(

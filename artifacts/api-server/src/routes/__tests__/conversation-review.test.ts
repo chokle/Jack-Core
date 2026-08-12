@@ -90,6 +90,7 @@ beforeEach(() => {
       privacy_notice_version: "jack-pilot-privacy-2026-07-25",
       consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
       occurred_at: "2026-08-11T10:00:00.000Z",
+      created_at: "2026-08-11T10:00:00.000Z",
     },
   ];
   fake.tables.test_sessions = [];
@@ -162,7 +163,7 @@ describe("pilot conversation review", () => {
     });
   });
 
-  it("removes access immediately when the participant's latest scoped choice is withdrawal", async () => {
+  it("removes access immediately when a same-timestamp withdrawal is the latest scoped choice", async () => {
     fake.tables.conversation_review_consents.push({
       id: "66666666-6666-4666-8666-666666666666",
       actor_user_id: "tester-1",
@@ -172,7 +173,8 @@ describe("pilot conversation review", () => {
       state: "withdrawn",
       privacy_notice_version: "jack-pilot-privacy-2026-07-25",
       consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
-      occurred_at: "2026-08-11T11:00:00.000Z",
+      occurred_at: "2026-08-11T10:00:00.000Z",
+      created_at: "2026-08-11T10:00:01.000Z",
     });
 
     const response = await request(app()).get(

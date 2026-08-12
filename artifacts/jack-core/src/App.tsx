@@ -381,6 +381,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [telemetryContext, setTelemetryContext] =
     useState<TelemetryContext | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
+  const [telemetryConsentPurpose, setTelemetryConsentPurpose] = useState<
+    "start" | "review"
+  >("start");
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
     restricted: boolean;
@@ -567,6 +570,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       testingOverlayRef.current?.open();
       return;
     }
+    setTelemetryConsentPurpose("start");
     setTelemetryConsentOpen(true);
   };
 
@@ -606,8 +610,23 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     testStartPendingRef.current = true;
     setTestStartPending(true);
     try {
+      const pilotId = telemetryContext.scope.pilotId;
+      const downgradedScopes = (
+        ["telemetry", "screen", "microphone", "conversationReview"] as const
+      ).filter(
+        (scope) =>
+          telemetryContext.consents[scope]?.state === "granted" &&
+          choices[scope] === "declined",
+      );
+      if (downgradedScopes.length > 0) {
+        // Withdrawal dispatches the local stop event before its request so an
+        // active capture ends immediately, then the API schedules attributable
+        // data for deletion. The full choice bundle is saved only after that
+        // fail-closed withdrawal succeeds.
+        await withdrawTelemetry(pilotId, downgradedScopes);
+      }
       const context = await saveTelemetryConsents({
-        pilotId: telemetryContext.scope.pilotId,
+        pilotId,
         ...choices,
         privacyNoticeVersion: telemetryContext.privacyNoticeVersion,
         consentVersion: telemetryContext.consentVersion,
@@ -616,11 +635,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       });
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
-      if (choices.telemetry === "granted") {
+      if (
+        telemetryConsentPurpose === "start" &&
+        choices.telemetry === "granted"
+      ) {
         testStartPendingRef.current = false;
         setTestStartPending(false);
         await launchTestSession(context.scope?.pilotId);
-      } else {
+      } else if (choices.telemetry === "declined") {
         persistUserTestingDeclined(me?.userId);
         clearUserTestingAccepted(me?.userId);
         setTestingGate({ accepted: false, restricted: false });
@@ -855,7 +877,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => setTelemetryConsentOpen(true)}
+                  onClick={() => {
+                    setTelemetryConsentPurpose("review");
+                    setTelemetryConsentOpen(true);
+                  }}
                 >
                   Review consent choices
                 </Button>

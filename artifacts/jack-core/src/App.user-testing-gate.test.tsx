@@ -90,10 +90,16 @@ const testSessionServiceState = {
         privacyNoticeVersion: "privacy-v1",
         consentVersion: "consent-v1",
       },
+      conversationReview: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "conversation-review-v1",
+      },
     },
     session: null,
     privacyNoticeVersion: "privacy-v1",
     consentVersion: "consent-v1",
+    conversationReviewConsentVersion: "conversation-review-v1",
   },
   saveTelemetryResult: {
     enrolled: true,
@@ -120,10 +126,16 @@ const testSessionServiceState = {
         privacyNoticeVersion: "privacy-v1",
         consentVersion: "consent-v1",
       },
+      conversationReview: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "conversation-review-v1",
+      },
     },
     session: null,
     privacyNoticeVersion: "privacy-v1",
     consentVersion: "consent-v1",
+    conversationReviewConsentVersion: "conversation-review-v1",
   },
 };
 
@@ -345,6 +357,7 @@ const mockedLoadTelemetryContext = vi.mocked(testSessionService.loadTelemetryCon
 const mockedSaveTelemetryConsents = vi.mocked(testSessionService.saveTelemetryConsents);
 const mockedStartTestSession = vi.mocked(testSessionService.startTestSession);
 const mockedTrackTestEvent = vi.mocked(testSessionService.trackTestEvent);
+const mockedWithdrawTelemetry = vi.mocked(testSessionService.withdrawTelemetry);
 
 async function renderAuthenticatedApp(path = "/app?test=true") {
   window.history.replaceState({}, "", path);
@@ -403,6 +416,7 @@ function resetServiceState() {
   mockedSaveTelemetryConsents.mockClear();
   mockedStartTestSession.mockClear();
   mockedTrackTestEvent.mockClear();
+  mockedWithdrawTelemetry.mockClear();
 }
 
 describe("user-testing gate transition", () => {
@@ -631,6 +645,28 @@ describe("user-testing gate transition", () => {
     });
     expect(screen.queryByTestId("user-test-feedback")).toBeTruthy();
     expect(userConsented()).toBe("true");
+  });
+
+  it("routes reviewed consent downgrades through withdrawal without starting another session", async () => {
+    await renderAuthenticatedApp("/app");
+    fireEvent.click(await screen.findByTestId("account-settings"));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review consent choices" }),
+    );
+
+    const microphone = await screen.findByRole("checkbox", {
+      name: /Allow optional microphone recording/i,
+    });
+    fireEvent.click(microphone);
+    fireEvent.click(screen.getByRole("button", { name: "Save choices" }));
+
+    await waitFor(() => {
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith("pilot-test-1", [
+        "microphone",
+      ]);
+      expect(mockedSaveTelemetryConsents).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
   });
 });
 
