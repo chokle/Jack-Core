@@ -30,6 +30,7 @@ import type {
   Competency,
   CurrentInterviewProfile,
   CurrentUser,
+  GetPilotReportSummaryParams,
   GraphHealthReport,
   HealthStatus,
   InterviewSession,
@@ -55,6 +56,7 @@ import type {
   ParkThoughtInput,
   ParkedThought,
   ParkedThoughtList,
+  PilotReportSummaryResponse,
   RedistillAnswerResult,
   RestoreEvidenceInput,
   SearchInput,
@@ -170,13 +172,6 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
-
-
-
 export const getGetSystemHealthUrl = () => {
 
 
@@ -248,13 +243,6 @@ export function useGetSystemHealth<TData = Awaited<ReturnType<typeof getSystemHe
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
-
-
-
 export const getGetMeUrl = () => {
 
 
@@ -326,10 +314,6 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
 
 
 
@@ -3590,3 +3574,81 @@ export const useArchiveParkedThought = <TError = ErrorType<void>,
       return useMutation(getArchiveParkedThoughtMutationOptions(options));
     }
 
+export const getGetPilotReportSummaryUrl = (params: GetPilotReportSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/testing/reports/summary?${stringifiedParams}` : `/api/testing/reports/summary`
+}
+
+/**
+ * Returns minimized activity aggregates, participant/session summaries, and identity reconciliation for an actively authorized organization and pilot scope. Ask Jack message content is not included.
+ * @summary Get the protected pilot activity summary
+ */
+export const getPilotReportSummary = async (params: GetPilotReportSummaryParams, options?: RequestInit): Promise<PilotReportSummaryResponse> => {
+
+  return customFetch<PilotReportSummaryResponse>(getGetPilotReportSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPilotReportSummaryQueryKey = (params?: GetPilotReportSummaryParams,) => {
+    return [
+    `/api/testing/reports/summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPilotReportSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getPilotReportSummary>>, TError = ErrorType<void>>(params: GetPilotReportSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPilotReportSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPilotReportSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPilotReportSummary>>> = ({ signal }) => getPilotReportSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPilotReportSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPilotReportSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getPilotReportSummary>>>
+export type GetPilotReportSummaryQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the protected pilot activity summary
+ */
+
+export function useGetPilotReportSummary<TData = Awaited<ReturnType<typeof getPilotReportSummary>>, TError = ErrorType<void>>(
+ params: GetPilotReportSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPilotReportSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPilotReportSummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}

@@ -24,6 +24,8 @@ tags:
     description: Park an interrupted thought during a chat or interview and resume it later
   - name: system
     description: Live Systems Health telemetry (heartbeat widget)
+  - name: pilot-reports
+    description: Protected, organization-scoped pilot reporting
 
 paths:
   /healthz:
@@ -979,6 +981,42 @@ paths:
         "404":
           description: Not found (or a chat-sourced thought owned by a different session)
 
+  /testing/reports/summary:
+    get:
+      operationId: getPilotReportSummary
+      tags: [pilot-reports]
+      summary: Get the protected pilot activity summary
+      description: >-
+        Returns minimized activity aggregates, participant/session summaries,
+        and identity reconciliation for an actively authorized organization and
+        pilot scope. Ask Jack message content is not included.
+      parameters:
+        - name: organizationId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: pilotId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Scoped pilot activity summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PilotReportSummaryResponse"
+        "401":
+          description: Authenticated identity required
+        "403":
+          description: No active report role for the requested scope
+        "503":
+          description: Pilot report temporarily unavailable
+
 components:
   schemas:
     CurrentUser:
@@ -995,6 +1033,218 @@ components:
           type: boolean
         canViewPilotReports:
           type: boolean
+
+    PilotReportScope:
+      type: object
+      additionalProperties: false
+      required: [organizationId, pilotId]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        pilotId:
+          type: string
+          format: uuid
+
+    PilotReportAggregate:
+      type: object
+      additionalProperties: false
+      required:
+        - aggregateUnit
+        - participantCount
+        - sessionCount
+        - activeSessions
+        - completedSessions
+        - completionRate
+        - onboardingCompletionRate
+        - recordingOptInRate
+        - feedbackCount
+        - droppedEventCount
+        - rejectedEventCount
+        - eventCounts
+      properties:
+        aggregateUnit:
+          type: string
+          enum: [sessions]
+        participantCount:
+          type: integer
+        sessionCount:
+          type: integer
+        activeSessions:
+          type: integer
+        completedSessions:
+          type: integer
+        completionRate:
+          type: number
+        onboardingCompletionRate:
+          type: number
+        recordingOptInRate:
+          type: number
+        feedbackCount:
+          type: integer
+        droppedEventCount:
+          type: integer
+        rejectedEventCount:
+          type: integer
+        eventCounts:
+          type: object
+          additionalProperties:
+            type: integer
+
+    PilotReportSession:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - actorUserId
+        - status
+        - startedAt
+        - resumedAt
+        - lastActivityAt
+        - onboardingStatus
+        - onboardingStep
+        - questionCount
+        - screenConsentState
+        - microphoneConsentState
+        - recordingStatus
+        - feedbackStatus
+        - completedAt
+        - errorCount
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorUserId:
+          type: string
+        status:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        resumedAt:
+          type: [string, "null"]
+          format: date-time
+        lastActivityAt:
+          type: [string, "null"]
+          format: date-time
+        onboardingStatus:
+          type: string
+        onboardingStep:
+          type: integer
+        questionCount:
+          type: integer
+        screenConsentState:
+          type: string
+        microphoneConsentState:
+          type: string
+        recordingStatus:
+          type: string
+        feedbackStatus:
+          type: string
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        errorCount:
+          type: integer
+
+    PilotReportParticipant:
+      type: object
+      additionalProperties: false
+      required:
+        - actorUserId
+        - sessionCount
+        - askJackUseCount
+        - latestStatus
+        - latestOnboardingStatus
+        - lastActivityAt
+        - sessions
+      properties:
+        actorUserId:
+          type: string
+        sessionCount:
+          type: integer
+        askJackUseCount:
+          type: integer
+        latestStatus:
+          type: string
+        latestOnboardingStatus:
+          type: string
+        lastActivityAt:
+          type: [string, "null"]
+          format: date-time
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportSession"
+
+    PilotReportReconciliation:
+      type: object
+      additionalProperties: false
+      required:
+        - enrolledTesterIds
+        - observedSessionActorIds
+        - sessionCountsByActor
+        - chatActivityCountsByActor
+        - likelyMismatches
+      properties:
+        enrolledTesterIds:
+          type: array
+          items:
+            type: string
+        observedSessionActorIds:
+          type: array
+          items:
+            type: string
+        sessionCountsByActor:
+          type: object
+          additionalProperties:
+            type: integer
+        chatActivityCountsByActor:
+          type: object
+          additionalProperties:
+            type: integer
+        likelyMismatches:
+          type: object
+          additionalProperties: false
+          required: [observedNotEnrolled, enrolledWithoutActivity]
+          properties:
+            observedNotEnrolled:
+              type: array
+              items:
+                type: string
+            enrolledWithoutActivity:
+              type: array
+              items:
+                type: string
+
+    PilotReportSummaryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - scope
+        - summary
+        - participants
+        - sessions
+        - reconciliation
+        - generatedAt
+      properties:
+        scope:
+          $ref: "#/components/schemas/PilotReportScope"
+        summary:
+          $ref: "#/components/schemas/PilotReportAggregate"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportParticipant"
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportSession"
+        reconciliation:
+          $ref: "#/components/schemas/PilotReportReconciliation"
+        generatedAt:
+          type: string
+          format: date-time
 
     MemoryGraphOnboardingPreference:
       type: object

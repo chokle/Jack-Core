@@ -455,22 +455,30 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     // The approved retention window is 24 months after withdrawal (or pilot
     // end), so extend the complete consent audit chain rather than retaining
     // only the newly appended withdrawal rows.
-    const consentHistory = await db
-      .from("telemetry_consents")
-      .update({ retained_until: retainedUntil })
-      .eq("actor_user_id", identity.userId)
-      .eq("pilot_id", scope.pilotId)
-      .lt("retained_until", retainedUntil);
-    if (consentHistory.error) throw consentHistory.error;
-    if (reviewWithdrawalId) {
-      const reviewHistory = await db
-        .from("conversation_review_consents")
-        .update({ retained_until: retainedUntil })
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId)
-        .lt("retained_until", retainedUntil);
-      if (reviewHistory.error) throw reviewHistory.error;
+    const historyUpdates = [];
+    if (rows.length > 0) {
+      historyUpdates.push(
+        db
+          .from("telemetry_consents")
+          .update({ retained_until: retainedUntil })
+          .eq("actor_user_id", identity.userId)
+          .eq("pilot_id", scope.pilotId)
+          .lt("retained_until", retainedUntil),
+      );
     }
+    if (reviewWithdrawalId) {
+      historyUpdates.push(
+        db
+          .from("conversation_review_consents")
+          .update({ retained_until: retainedUntil })
+          .eq("actor_user_id", identity.userId)
+          .eq("pilot_id", scope.pilotId)
+          .lt("retained_until", retainedUntil),
+      );
+    }
+    const historyResults = await Promise.all(historyUpdates);
+    const failedHistoryUpdate = historyResults.find((result) => result.error);
+    if (failedHistoryUpdate?.error) throw failedHistoryUpdate.error;
 
     const deletionDueAt = isoAfterDays(WITHDRAWAL_DELETION_DAYS);
     if (scopes.has("telemetry")) {

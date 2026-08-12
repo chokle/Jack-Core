@@ -33,8 +33,8 @@ Changed in this follow-up:
 
 ## Verification
 
-- API focused conversation-review tests: 3/3 passed.
-- Frontend focused consent-downgrade regression: 1/1 passed.
+- API-focused conversation-review tests: 3/3 passed.
+- Frontend-focused consent-downgrade regression: 1/1 passed.
 - Full API: 46 files, 519/519 tests passed.
 - Full frontend: 36 files, 251/251 tests passed using the threads pool and a 15-second per-test limit after the default fork worker failed to start in this Windows environment.
 - API and frontend package typechecks: passed.

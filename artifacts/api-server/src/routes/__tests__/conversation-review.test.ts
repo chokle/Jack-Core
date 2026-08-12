@@ -185,6 +185,167 @@ describe("pilot conversation review", () => {
     expect(response.body.conversations).toEqual([]);
   });
 
+  it("pages through all consent rows instead of silently truncating participants", async () => {
+    fake.tables.conversation_review_consents = [
+      ...Array.from({ length: 2_000 }, (_, index) => ({
+        id: `recent-decline-${String(index).padStart(4, "0")}`,
+        actor_user_id: `declined-tester-${index}`,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: `declined-session-${index}`,
+        state: "declined",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-12T10:00:00.000Z",
+        created_at: "2026-08-12T10:00:00.000Z",
+      })),
+      {
+        id: "paged-grant",
+        actor_user_id: "tester-paged",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "paged-session",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-11T09:00:00.000Z",
+        created_at: "2026-08-11T09:00:00.000Z",
+      },
+    ];
+    fake.tables.chat_messages = [
+      {
+        id: "paged-question",
+        user_id: "tester-paged",
+        session_id: "paged-session",
+        role: "user",
+        content: "Question beyond the old consent cap",
+        citations: [],
+        created_at: "2026-08-11T09:01:00.000Z",
+      },
+    ];
+
+    const response = await request(app()).get(
+      `/api/testing/conversation-review?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.body.conversations).toEqual([
+      expect.objectContaining({
+        participantId: "tester-paged",
+        question: "Question beyond the old consent cap",
+      }),
+    ]);
+  });
+
+  it("keeps expired-consent messages as product history but excludes detached rows from review", async () => {
+    fake.tables.conversation_review_consents = [
+      {
+        id: "expired-review-grant",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "old-scoped-session",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-01T10:00:00.000Z",
+        created_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "current-review-grant",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "current-session",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-12T10:00:00.000Z",
+        created_at: "2026-08-12T10:00:00.000Z",
+      },
+    ];
+    fake.tables.chat_messages = [
+      {
+        id: "detached-question",
+        user_id: "tester-1",
+        session_id: "old-scoped-session",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        conversation_review_consent_id: "expired-review-grant",
+        role: "user",
+        content: "Canonical history no longer reviewable",
+        citations: [],
+        created_at: "2026-08-01T10:01:00.000Z",
+      },
+    ];
+
+    await fake
+      .from("conversation_review_consents")
+      .delete()
+      .eq("id", "expired-review-grant");
+    const response = await request(app()).get(
+      `/api/testing/conversation-review?${query}`,
+    );
+
+    expect(
+      fake.tables.conversation_review_consents.some(
+        (row) => row["id"] === "expired-review-grant",
+      ),
+    ).toBe(false);
+    expect(
+      fake.tables.conversation_review_consents.some(
+        (row) => row["id"] === "current-review-grant",
+      ),
+    ).toBe(true);
+    expect(fake.tables.chat_messages).toEqual([
+      expect.objectContaining({
+        id: "detached-question",
+        conversation_review_consent_id: null,
+        content: "Canonical history no longer reviewable",
+      }),
+    ]);
+    expect(response.status).toBe(200);
+    expect(response.body.conversations).toEqual([]);
+  });
+
+  it("orders merged historical and scoped rows by parsed timestamps", async () => {
+    fake.tables.chat_messages = [
+      {
+        id: "offset-question",
+        user_id: "tester-1",
+        session_id: "historic-session",
+        role: "user",
+        content: "Offset-aware question",
+        citations: [],
+        created_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "offset-answer",
+        user_id: "tester-1",
+        session_id: "historic-session",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        conversation_review_consent_id: "55555555-5555-4555-8555-555555555555",
+        role: "assistant",
+        content: "Offset-aware answer",
+        citations: [],
+        created_at: "2026-08-01T09:00:01.000-01:00",
+      },
+    ];
+
+    const response = await request(app()).get(
+      `/api/testing/conversation-review?${query}`,
+    );
+
+    expect(response.body.conversations).toEqual([
+      expect.objectContaining({
+        question: "Offset-aware question",
+        response: "Offset-aware answer",
+      }),
+    ]);
+  });
+
   it("allows organization and platform admins only through existing scoped report authorization", async () => {
     fake.tables.pilot_memberships[0] = {
       ...fake.tables.pilot_memberships[0],

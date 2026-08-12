@@ -88,11 +88,17 @@ export async function syncReviewedMentorAnswerKnowledge(
       throw new Error(
         `Reviewed mentor fixture could not be accepted: ${resolution.message}`,
       );
+    const resolvedTarget = fake.tables["knowledge_nodes"].find(
+      (row) => row["id"] === resolution.candidate.resolvedTargetId,
+    );
     results.push({
       ...queued[index]!,
       canonicalId: resolution.candidate.resolvedTargetId,
       outcome: hadMatch ? "reinforced" : "created",
-      matchedLabel: hadMatch ? resolution.candidate.title : null,
+      matchedLabel:
+        hadMatch && typeof resolvedTarget?.["label"] === "string"
+          ? resolvedTarget["label"]
+          : null,
     });
     // These legacy graph fixtures predate the durable review ledger and assert
     // graph/withdrawal behavior only. Dedicated review tests retain the row.

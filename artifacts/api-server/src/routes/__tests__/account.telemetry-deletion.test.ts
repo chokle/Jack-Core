@@ -18,7 +18,11 @@ const updates = vi.hoisted(
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
   () =>
-    [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
+    [] as Array<{
+      id: unknown;
+      tester_user_id: string;
+      storage_path: string;
+    }>,
 );
 const removeRecordingObjects = vi.hoisted(() =>
   vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({
@@ -207,5 +211,27 @@ describe("account deletion telemetry coverage", () => {
     expect(retried.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("validates every recording row id before deleting any storage object", async () => {
+    recordingRows.push(
+      {
+        id: "recording-valid",
+        tester_user_id: "user-1",
+        storage_path: "recordings/valid.webm",
+      },
+      {
+        id: null,
+        tester_user_id: "user-1",
+        storage_path: "recordings/malformed.webm",
+      },
+    );
+
+    const response = await request(app()).delete("/api/account");
+
+    expect(response.status).toBe(500);
+    expect(removeRecordingObjects).not.toHaveBeenCalled();
+    expect(recordingRows).toHaveLength(2);
+    expect(deleteUser).not.toHaveBeenCalled();
   });
 });

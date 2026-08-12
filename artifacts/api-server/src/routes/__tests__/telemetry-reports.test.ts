@@ -214,6 +214,64 @@ describe("pilot activity reports", () => {
     });
   });
 
+  it("selects the latest participant session by parsed activity time with null oldest", async () => {
+    fake.tables.test_sessions.push(
+      {
+        ...fake.tables.test_sessions[0],
+        id: SECOND_SESSION_ID,
+        status: "active",
+        onboarding_status: "not_started",
+        question_count: 2,
+        last_activity_at: null,
+      },
+      {
+        ...fake.tables.test_sessions[0],
+        id: THIRD_SESSION_ID,
+        status: "active",
+        onboarding_status: "in_progress",
+        question_count: 3,
+        last_activity_at: "2026-07-25T03:00:00.000Z",
+      },
+    );
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.participants[0]).toMatchObject({
+      latestStatus: "active",
+      latestOnboardingStatus: "in_progress",
+      lastActivityAt: "2026-07-25T03:00:00.000Z",
+    });
+    expect(response.body.participants[0].sessions[0].lastActivityAt).toBeNull();
+  });
+
+  it("fails closed for malformed administrator and tester membership dates", async () => {
+    fake.tables.pilot_memberships[0]!.valid_from = "not-a-date";
+
+    const denied = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(denied.status).toBe(403);
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      decision: "denied",
+    });
+
+    fake.tables.pilot_memberships[0]!.valid_from = null;
+    fake.tables.pilot_memberships[1]!.valid_until = "not-a-date";
+    const allowed = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.reconciliation.enrolledTesterIds).toEqual([]);
+    expect(allowed.body.reconciliation.observedSessionActorIds).toEqual([
+      USER_ID,
+    ]);
+  });
+
   it("returns minimized scoped identity reconciliation without chat content", async () => {
     const enrolledWithoutActivity = "tester-2";
     const observedNotEnrolled = "tester-observed-only";
@@ -309,6 +367,28 @@ describe("pilot activity reports", () => {
       "private personal activity",
     );
     expect(JSON.stringify(response.body)).not.toContain("unrelated-user");
+  });
+
+  it("uses exact bounded chat counts beyond typical PostgREST row caps", async () => {
+    fake.tables.chat_messages = Array.from({ length: 1_501 }, (_, index) => ({
+      id: `scoped-chat-${index}`,
+      user_id: USER_ID,
+      session_id: "pilot-chat-session-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `private-${index}`,
+    }));
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation.chatActivityCountsByActor).toEqual({
+      [USER_ID]: 1_501,
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private-1500");
   });
 
   it("denies cross-organization access and presentation mode", async () => {

@@ -561,6 +561,7 @@ function MinimizedPill({
   }, [stageRef]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    suppressClickRef.current = false;
     const bounds = measure();
     if (!bounds || xRef.current == null) return;
     dragRef.current = {

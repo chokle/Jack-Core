@@ -103,6 +103,19 @@ describe("FloatingPanel mobile inspector states", () => {
     expect(screen.getByTestId("state").textContent).toBe("minimized");
   });
 
+  it("clears stale drag-click suppression at the next pointer interaction", () => {
+    render(<MobileHarness start="minimized" />);
+    const pill = screen.getByLabelText("Restore Root Pass details");
+
+    fireEvent.pointerDown(pill, { pointerId: 1, clientX: 200 });
+    fireEvent.pointerMove(pill, { pointerId: 1, clientX: 140 });
+    fireEvent.pointerCancel(pill, { pointerId: 1, clientX: 140 });
+    fireEvent.pointerDown(pill, { pointerId: 2, clientX: 140 });
+    fireEvent.click(pill);
+
+    expect(screen.getByTestId("state").textContent).toBe("expanded");
+  });
+
   it("remeasures the desktop panel after minimize/restore and mobile rotation", async () => {
     render(<ResponsiveHarness />);
     await waitFor(() =>

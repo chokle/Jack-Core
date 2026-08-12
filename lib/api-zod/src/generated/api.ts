@@ -1894,3 +1894,92 @@ export const ArchiveParkedThoughtResponse = zod.object({
       "True only when the current caller may resume or archive this thought.",
     ),
 });
+
+/**
+ * Returns minimized activity aggregates, participant/session summaries, and identity reconciliation for an actively authorized organization and pilot scope. Ask Jack message content is not included.
+ * @summary Get the protected pilot activity summary
+ */
+export const GetPilotReportSummaryQueryParams = zod.object({
+  organizationId: zod.coerce.string().uuid(),
+  pilotId: zod.coerce.string().uuid(),
+});
+
+export const GetPilotReportSummaryResponse = zod.object({
+  scope: zod.object({
+    organizationId: zod.string().uuid(),
+    pilotId: zod.string().uuid(),
+  }),
+  summary: zod.object({
+    aggregateUnit: zod.enum(["sessions"]),
+    participantCount: zod.number(),
+    sessionCount: zod.number(),
+    activeSessions: zod.number(),
+    completedSessions: zod.number(),
+    completionRate: zod.number(),
+    onboardingCompletionRate: zod.number(),
+    recordingOptInRate: zod.number(),
+    feedbackCount: zod.number(),
+    droppedEventCount: zod.number(),
+    rejectedEventCount: zod.number(),
+    eventCounts: zod.record(zod.string(), zod.number()),
+  }),
+  participants: zod.array(
+    zod.object({
+      actorUserId: zod.string(),
+      sessionCount: zod.number(),
+      askJackUseCount: zod.number(),
+      latestStatus: zod.string(),
+      latestOnboardingStatus: zod.string(),
+      lastActivityAt: zod.coerce.date().nullable(),
+      sessions: zod.array(
+        zod.object({
+          id: zod.string().uuid(),
+          actorUserId: zod.string(),
+          status: zod.string(),
+          startedAt: zod.coerce.date(),
+          resumedAt: zod.coerce.date().nullable(),
+          lastActivityAt: zod.coerce.date().nullable(),
+          onboardingStatus: zod.string(),
+          onboardingStep: zod.number(),
+          questionCount: zod.number(),
+          screenConsentState: zod.string(),
+          microphoneConsentState: zod.string(),
+          recordingStatus: zod.string(),
+          feedbackStatus: zod.string(),
+          completedAt: zod.coerce.date().nullable(),
+          errorCount: zod.number(),
+        }),
+      ),
+    }),
+  ),
+  sessions: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      actorUserId: zod.string(),
+      status: zod.string(),
+      startedAt: zod.coerce.date(),
+      resumedAt: zod.coerce.date().nullable(),
+      lastActivityAt: zod.coerce.date().nullable(),
+      onboardingStatus: zod.string(),
+      onboardingStep: zod.number(),
+      questionCount: zod.number(),
+      screenConsentState: zod.string(),
+      microphoneConsentState: zod.string(),
+      recordingStatus: zod.string(),
+      feedbackStatus: zod.string(),
+      completedAt: zod.coerce.date().nullable(),
+      errorCount: zod.number(),
+    }),
+  ),
+  reconciliation: zod.object({
+    enrolledTesterIds: zod.array(zod.string()),
+    observedSessionActorIds: zod.array(zod.string()),
+    sessionCountsByActor: zod.record(zod.string(), zod.number()),
+    chatActivityCountsByActor: zod.record(zod.string(), zod.number()),
+    likelyMismatches: zod.object({
+      observedNotEnrolled: zod.array(zod.string()),
+      enrolledWithoutActivity: zod.array(zod.string()),
+    }),
+  }),
+  generatedAt: zod.coerce.date(),
+});

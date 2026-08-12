@@ -18,6 +18,13 @@ async function deleteAccountRecordings(userId: string): Promise<void> {
     if (recordingReadError) throw recordingReadError;
     if (!recordings || recordings.length === 0) return;
 
+    const ids = recordings.map((row) => (row as Record<string, unknown>)["id"]);
+    if (ids.some((id) => typeof id !== "string" || id.trim().length === 0)) {
+      throw new Error(
+        "Recording rows are missing identifiers required for safe deletion.",
+      );
+    }
+
     const paths = recordings
       .map((row) => (row as Record<string, unknown>)["storage_path"])
       .filter(
@@ -30,18 +37,10 @@ async function deleteAccountRecordings(userId: string): Promise<void> {
       if (error) throw error;
     }
 
-    const ids = recordings
-      .map((row) => (row as Record<string, unknown>)["id"])
-      .filter((id): id is string => typeof id === "string");
-    if (ids.length === 0) {
-      throw new Error(
-        "Recording rows are missing identifiers required for safe deletion.",
-      );
-    }
     const { error: recordingDeleteError } = await supabase
       .from("test_recordings")
       .delete()
-      .in("id", ids);
+      .in("id", ids as string[]);
     if (recordingDeleteError) throw recordingDeleteError;
   }
 }

@@ -175,8 +175,9 @@ export function PilotActivityReports() {
             </p>
             <h1 className="text-2xl font-bold">Pilot activity reports</h1>
             <p className="text-sm text-muted-foreground">
-              Organization-isolated, minimized telemetry. Ask Jack content is
-              never shown here.
+              Organization-isolated, minimized telemetry. Activity metrics
+              exclude Ask Jack content; consented Q/A appears only in the
+              separate Conversation Review section.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">

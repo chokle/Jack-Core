@@ -1074,6 +1074,7 @@ describe("rebuildGraph — mentor-taught knowledge survives a full rebuild", () 
     );
     expect(outcomes[0]!.outcome).toBe("reinforced");
     expect(outcomes[0]!.canonicalId).toBe(canonicalId);
+    expect(outcomes[0]!.matchedLabel).toBe("Travel Speed Control");
 
     // A reviewer verifies the mixed-provenance concept.
     await setNodeVerification(canonicalId, "verified");

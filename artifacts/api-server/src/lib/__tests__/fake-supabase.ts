@@ -32,6 +32,7 @@ type Filter =
 interface Result<T> {
   data: T;
   error: { message: string } | null;
+  count?: number | null;
 }
 
 /**
@@ -147,7 +148,10 @@ export class FakeSupabase {
   };
   private failures = new Set<string>();
 
-  failNext(table: string, operation: "select" | "insert" | "delete"): void {
+  failNext(
+    table: string,
+    operation: "select" | "insert" | "update" | "delete",
+  ): void {
     this.failures.add(`${table}:${operation}`);
   }
 
@@ -269,6 +273,10 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private singleMode: "none" | "maybe" | "single" = "none";
   private orderBy: Array<{ col: string; ascending: boolean }> = [];
   private limitCount: number | null = null;
+  private rangeStart: number | null = null;
+  private rangeEnd: number | null = null;
+  private countMode: "exact" | null = null;
+  private headOnly = false;
 
   constructor(
     private db: FakeSupabase,
@@ -279,10 +287,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this.db.tables[this.table]!;
   }
 
-  select(_cols?: string): this {
+  select(_cols?: string, opts: { count?: "exact"; head?: boolean } = {}): this {
     // `.select()` is a return-columns modifier, not an op switch: after
     // `.update()`/`.upsert()`/`.delete()` it just asks for the affected rows
     // back. The default op is already "select", so we never need to set it here.
+    this.countMode = opts.count ?? null;
+    this.headOnly = opts.head ?? false;
     return this;
   }
 
@@ -361,6 +371,13 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   // history/search read paths in chat.ts and search.ts.
   limit(n: number): this {
     this.limitCount = n;
+    return this;
+  }
+
+  // PostgREST ranges are inclusive and are applied after filtering/ordering.
+  range(from: number, to: number): this {
+    this.rangeStart = from;
+    this.rangeEnd = to;
     return this;
   }
 
@@ -472,14 +489,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       .filter((r) => this.matches(r))
       .map((r) => ({ ...r }));
     if (this.orderBy.length > 0) {
-      const compareValues = (
-        left: unknown,
-        right: unknown,
-        ascending: boolean,
-      ): number => {
+      const compareValues = (left: unknown, right: unknown): number => {
         if (left == null && right == null) return 0;
-        if (left == null) return ascending ? 1 : -1;
-        if (right == null) return ascending ? -1 : 1;
+        // PostgreSQL defaults to NULLS LAST for ASC and NULLS FIRST for DESC;
+        // the direction flip below supplies the corresponding descending case.
+        if (left == null) return 1;
+        if (right == null) return -1;
 
         if (typeof left === "number" && typeof right === "number") {
           return left - right;
@@ -509,17 +524,23 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
       matched = matched.sort((a, b) => {
         for (const { col, ascending } of this.orderBy) {
-          const order = compareValues(a[col], b[col], ascending);
+          const order = compareValues(a[col], b[col]);
           if (order !== 0) return ascending ? order : -order;
         }
         return 0;
       });
     }
-    if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
-    if (this.singleMode !== "none") {
-      return { data: matched[0] ?? null, error: null };
+    const count = this.countMode === "exact" ? matched.length : undefined;
+    if (this.rangeStart != null && this.rangeEnd != null) {
+      matched = matched.slice(this.rangeStart, this.rangeEnd + 1);
+    } else if (this.limitCount != null) {
+      matched = matched.slice(0, this.limitCount);
     }
-    return { data: matched, error: null };
+    if (this.headOnly) return { data: null, error: null, count };
+    if (this.singleMode !== "none") {
+      return { data: matched[0] ?? null, error: null, count };
+    }
+    return { data: matched, error: null, count };
   }
 
   private runUpsert(): Result<unknown> {
@@ -607,6 +628,16 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       this.db.tables["interview_answers"] = (
         this.db.tables["interview_answers"] ?? []
       ).filter((a) => !goneIds.has(a["mentor_profile_id"]));
+    }
+
+    // Emulate chat_messages.conversation_review_consent_id ON DELETE SET NULL.
+    if (this.table === "conversation_review_consents" && deleted.length > 0) {
+      const goneIds = new Set(deleted.map((r) => r["id"]));
+      for (const message of this.db.tables["chat_messages"] ?? []) {
+        if (goneIds.has(message["conversation_review_consent_id"])) {
+          message["conversation_review_consent_id"] = null;
+        }
+      }
     }
     return { data: null, error: null };
   }

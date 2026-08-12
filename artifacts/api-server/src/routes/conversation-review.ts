@@ -17,6 +17,7 @@ const router = Router();
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_CHAT_ROWS = 1_000;
+const CONSENT_PAGE_SIZE = 1_000;
 const ACTION = "conversation_review.read";
 
 interface AuthorizedScope extends PilotScope {
@@ -146,12 +147,10 @@ function serializeExchanges(rows: Array<Record<string, unknown>>) {
   return exchanges;
 }
 
-router.get("/testing/conversation-review", async (req, res) => {
-  try {
-    const scope = await requireConversationReviewScope(req, res);
-    if (!scope) return;
-
-    const consents = await db
+async function loadConversationReviewConsents(scope: PilotScope) {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let offset = 0; ; offset += CONSENT_PAGE_SIZE) {
+    const page = await db
       .from("conversation_review_consents")
       .select(
         "id,actor_user_id,state,privacy_notice_version,consent_version,occurred_at,created_at,chat_session_id",
@@ -161,16 +160,32 @@ router.get("/testing/conversation-review", async (req, res) => {
       .order("occurred_at", { ascending: false })
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(2_000);
-    if (consents.error) throw consents.error;
+      .range(offset, offset + CONSENT_PAGE_SIZE - 1);
+    if (page.error) throw page.error;
+    const pageRows = (page.data ?? []) as Array<Record<string, unknown>>;
+    rows.push(...pageRows);
+    if (pageRows.length < CONSENT_PAGE_SIZE) return rows;
+  }
+}
+
+function parsedTimestamp(value: unknown): number {
+  const timestamp = Date.parse(String(value ?? ""));
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+router.get("/testing/conversation-review", async (req, res) => {
+  try {
+    const scope = await requireConversationReviewScope(req, res);
+    if (!scope) return;
+    res.setHeader("Cache-Control", "private, no-store");
+
     const consentedParticipants = currentConsentedParticipants(
-      (consents.data ?? []) as Array<Record<string, unknown>>,
+      await loadConversationReviewConsents(scope),
     );
     const participantIds = consentedParticipants.map(
       (entry) => entry.participantId,
     );
     if (participantIds.length === 0) {
-      res.setHeader("Cache-Control", "no-store");
       return res.json({ conversations: [], truncated: false });
     }
 
@@ -205,6 +220,7 @@ router.get("/testing/conversation-review", async (req, res) => {
         .in("user_id", participantIds)
         .eq("organization_id", scope.organizationId)
         .eq("pilot_id", scope.pilotId)
+        .not("conversation_review_consent_id", "is", null)
         .order("created_at", { ascending: true })
         .limit(MAX_CHAT_ROWS + 1),
     ]);
@@ -219,12 +235,11 @@ router.get("/testing/conversation-review", async (req, res) => {
         ),
       ),
       ...((scopedMessages.data ?? []) as Array<Record<string, unknown>>),
-    ].sort((left, right) =>
-      String(left["created_at"] ?? "").localeCompare(
-        String(right["created_at"] ?? ""),
-      ),
+    ].sort(
+      (left, right) =>
+        parsedTimestamp(left["created_at"]) -
+        parsedTimestamp(right["created_at"]),
     );
-    res.setHeader("Cache-Control", "private, no-store");
     return res.json({
       conversations: serializeExchanges(rows.slice(0, MAX_CHAT_ROWS)),
       truncated: rows.length > MAX_CHAT_ROWS,

@@ -15,6 +15,97 @@ export interface CurrentUser {
   canViewPilotReports: boolean;
 }
 
+export interface PilotReportScope {
+  organizationId: string;
+  pilotId: string;
+}
+
+export type PilotReportAggregateAggregateUnit =
+  (typeof PilotReportAggregateAggregateUnit)[keyof typeof PilotReportAggregateAggregateUnit];
+
+export const PilotReportAggregateAggregateUnit = {
+  sessions: "sessions",
+} as const;
+
+export type PilotReportAggregateEventCounts = { [key: string]: number };
+
+export interface PilotReportAggregate {
+  aggregateUnit: PilotReportAggregateAggregateUnit;
+  participantCount: number;
+  sessionCount: number;
+  activeSessions: number;
+  completedSessions: number;
+  completionRate: number;
+  onboardingCompletionRate: number;
+  recordingOptInRate: number;
+  feedbackCount: number;
+  droppedEventCount: number;
+  rejectedEventCount: number;
+  eventCounts: PilotReportAggregateEventCounts;
+}
+
+export interface PilotReportSession {
+  id: string;
+  actorUserId: string;
+  status: string;
+  startedAt: string;
+  /** @nullable */
+  resumedAt: string | null;
+  /** @nullable */
+  lastActivityAt: string | null;
+  onboardingStatus: string;
+  onboardingStep: number;
+  questionCount: number;
+  screenConsentState: string;
+  microphoneConsentState: string;
+  recordingStatus: string;
+  feedbackStatus: string;
+  /** @nullable */
+  completedAt: string | null;
+  errorCount: number;
+}
+
+export interface PilotReportParticipant {
+  actorUserId: string;
+  sessionCount: number;
+  askJackUseCount: number;
+  latestStatus: string;
+  latestOnboardingStatus: string;
+  /** @nullable */
+  lastActivityAt: string | null;
+  sessions: PilotReportSession[];
+}
+
+export type PilotReportReconciliationSessionCountsByActor = {
+  [key: string]: number;
+};
+
+export type PilotReportReconciliationChatActivityCountsByActor = {
+  [key: string]: number;
+};
+
+export type PilotReportReconciliationLikelyMismatches = {
+  observedNotEnrolled: string[];
+  enrolledWithoutActivity: string[];
+};
+
+export interface PilotReportReconciliation {
+  enrolledTesterIds: string[];
+  observedSessionActorIds: string[];
+  sessionCountsByActor: PilotReportReconciliationSessionCountsByActor;
+  chatActivityCountsByActor: PilotReportReconciliationChatActivityCountsByActor;
+  likelyMismatches: PilotReportReconciliationLikelyMismatches;
+}
+
+export interface PilotReportSummaryResponse {
+  scope: PilotReportScope;
+  summary: PilotReportAggregate;
+  participants: PilotReportParticipant[];
+  sessions: PilotReportSession[];
+  reconciliation: PilotReportReconciliation;
+  generatedAt: string;
+}
+
 export type MemoryGraphOnboardingPreferenceVersion =
   (typeof MemoryGraphOnboardingPreferenceVersion)[keyof typeof MemoryGraphOnboardingPreferenceVersion];
 
@@ -1147,3 +1238,8 @@ export const ListParkedThoughtsStatus = {
   resumed: "resumed",
   resolved: "resolved",
 } as const;
+
+export type GetPilotReportSummaryParams = {
+  organizationId: string;
+  pilotId: string;
+};

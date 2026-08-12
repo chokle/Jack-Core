@@ -6,6 +6,7 @@ import {
   activityDb as db,
   auditReportAccess,
   authorizeReportScope,
+  isActiveMembershipWindow,
   listReportScopes,
   requestIdentifier,
   type PilotScope,
@@ -135,21 +136,6 @@ function buildSummary(
   };
 }
 
-function isCurrentMembership(
-  row: Record<string, unknown>,
-  now = Date.now(),
-): boolean {
-  if (row["active"] !== true) return false;
-  const validFrom = Date.parse(String(row["valid_from"] ?? ""));
-  const validUntil = row["valid_until"]
-    ? Date.parse(String(row["valid_until"]))
-    : Number.POSITIVE_INFINITY;
-  return (
-    (!Number.isFinite(validFrom) || validFrom <= now) &&
-    (!Number.isFinite(validUntil) || validUntil > now)
-  );
-}
-
 function uniqueSortedIds(
   rows: Array<Record<string, unknown>>,
   column: string,
@@ -168,7 +154,14 @@ function buildParticipants(sessions: Array<Record<string, unknown>>) {
     grouped.set(actorUserId, actorSessions);
   }
   return [...grouped.entries()].map(([actorUserId, actorSessions]) => {
-    const latestSession = actorSessions[0];
+    const latestSession = actorSessions.reduce<
+      ReturnType<typeof serializeSession> | undefined
+    >((latest, session) => {
+      if (!latest) return session;
+      const currentTime = activityTimestamp(session.lastActivityAt);
+      const latestTime = activityTimestamp(latest.lastActivityAt);
+      return currentTime > latestTime ? session : latest;
+    }, undefined);
     return {
       actorUserId,
       sessionCount: actorSessions.length,
@@ -187,10 +180,10 @@ function buildParticipants(sessions: Array<Record<string, unknown>>) {
 function buildReconciliation(
   sessions: Array<Record<string, unknown>>,
   memberships: Array<Record<string, unknown>>,
-  chatActivity: Array<Record<string, unknown>>,
+  chatActivityCountsByActor: Record<string, number>,
 ) {
   const enrolledTesterIds = uniqueSortedIds(
-    memberships.filter((membership) => isCurrentMembership(membership)),
+    memberships.filter((membership) => isActiveMembershipWindow(membership)),
     "user_id",
   );
   const observedSessionActorIds = uniqueSortedIds(sessions, "actor_user_id");
@@ -201,8 +194,8 @@ function buildReconciliation(
   const sessionCountsByActor = Object.fromEntries(
     scopedActorIds.map((id) => [id, 0]),
   );
-  const chatActivityCountsByActor = Object.fromEntries(
-    scopedActorIds.map((id) => [id, 0]),
+  const scopedChatActivityCountsByActor = Object.fromEntries(
+    scopedActorIds.map((id) => [id, chatActivityCountsByActor[id] ?? 0]),
   );
   for (const session of sessions) {
     const actorUserId = String(session["actor_user_id"] ?? "");
@@ -211,19 +204,12 @@ function buildReconciliation(
         (sessionCountsByActor[actorUserId] ?? 0) + 1;
     }
   }
-  for (const message of chatActivity) {
-    const actorUserId = String(message["user_id"] ?? "");
-    if (scopedActorIdSet.has(actorUserId)) {
-      chatActivityCountsByActor[actorUserId] =
-        (chatActivityCountsByActor[actorUserId] ?? 0) + 1;
-    }
-  }
   const enrolled = new Set(enrolledTesterIds);
   return {
     enrolledTesterIds,
     observedSessionActorIds,
     sessionCountsByActor,
-    chatActivityCountsByActor,
+    chatActivityCountsByActor: scopedChatActivityCountsByActor,
     likelyMismatches: {
       observedNotEnrolled: observedSessionActorIds.filter(
         (id) => !enrolled.has(id),
@@ -231,7 +217,7 @@ function buildReconciliation(
       enrolledWithoutActivity: enrolledTesterIds.filter(
         (id) =>
           (sessionCountsByActor[id] ?? 0) === 0 &&
-          (chatActivityCountsByActor[id] ?? 0) === 0,
+          (scopedChatActivityCountsByActor[id] ?? 0) === 0,
       ),
     },
   };
@@ -283,55 +269,47 @@ async function loadScopeRows(scope: PilotScope) {
     ...new Set([
       ...uniqueSortedIds(sessionRows, "actor_user_id"),
       ...uniqueSortedIds(
-        membershipRows.filter((membership) => isCurrentMembership(membership)),
+        membershipRows.filter((membership) =>
+          isActiveMembershipWindow(membership),
+        ),
         "user_id",
       ),
     ]),
   ];
-  const legacyPairs = new Set(
-    sessionRows
-      .map((row) => ({
-        actorUserId: String(row["actor_user_id"] ?? ""),
-        chatSessionId: String(row["chat_session_id"] ?? ""),
-      }))
-      .filter((entry) => entry.actorUserId && entry.chatSessionId)
-      .map((entry) => `${entry.actorUserId}:${entry.chatSessionId}`),
-  );
-  const legacySessionIds = [
-    ...new Set(
-      sessionRows
-        .map((row) => String(row["chat_session_id"] ?? ""))
-        .filter(Boolean),
-    ),
-  ];
-  const [scopedChatActivity, legacyChatActivity] = scopedActorIds.length
-    ? await Promise.all([
+  const chatCountEntries = await Promise.all(
+    scopedActorIds.map(async (actorUserId) => {
+      const legacySessionIds = [
+        ...new Set(
+          sessionRows
+            .filter((row) => String(row["actor_user_id"] ?? "") === actorUserId)
+            .map((row) => String(row["chat_session_id"] ?? ""))
+            .filter(Boolean),
+        ),
+      ];
+      const [scopedCount, legacyCount] = await Promise.all([
         db
           .from("chat_messages")
-          .select("user_id,session_id")
-          .in("user_id", scopedActorIds)
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", actorUserId)
           .eq("organization_id", scope.organizationId)
           .eq("pilot_id", scope.pilotId),
         legacySessionIds.length > 0
           ? db
               .from("chat_messages")
-              .select("user_id,session_id")
-              .in("user_id", scopedActorIds)
+              .select("id", { count: "exact", head: true })
+              .eq("user_id", actorUserId)
               .in("session_id", legacySessionIds)
               .is("organization_id", null)
               .is("pilot_id", null)
-          : Promise.resolve({ data: [], error: null }),
-      ])
-    : [
-        { data: [], error: null },
-        { data: [], error: null },
-      ];
-  if (scopedChatActivity.error) throw scopedChatActivity.error;
-  if (legacyChatActivity.error) throw legacyChatActivity.error;
-  const legacyRows = (
-    (legacyChatActivity.data ?? []) as Array<Record<string, unknown>>
-  ).filter((row) =>
-    legacyPairs.has(`${String(row["user_id"])}:${String(row["session_id"])}`),
+          : Promise.resolve({ count: 0, error: null }),
+      ]);
+      if (scopedCount.error) throw scopedCount.error;
+      if (legacyCount.error) throw legacyCount.error;
+      return [
+        actorUserId,
+        (scopedCount.count ?? 0) + (legacyCount.count ?? 0),
+      ] as const;
+    }),
   );
   return {
     sessions: sessionRows,
@@ -339,11 +317,14 @@ async function loadScopeRows(scope: PilotScope) {
     feedback: (feedback.data ?? []) as Array<Record<string, unknown>>,
     failures: (failures.data ?? []) as Array<Record<string, unknown>>,
     memberships: membershipRows,
-    chatActivity: [
-      ...((scopedChatActivity.data ?? []) as Array<Record<string, unknown>>),
-      ...legacyRows,
-    ],
+    chatActivityCountsByActor: Object.fromEntries(chatCountEntries),
   };
+}
+
+function activityTimestamp(value: unknown): number {
+  if (value == null) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
 function serializeSession(row: Record<string, unknown>) {
@@ -411,7 +392,7 @@ router.get("/testing/reports/summary", async (req, res) => {
       reconciliation: buildReconciliation(
         rows.sessions,
         rows.memberships,
-        rows.chatActivity,
+        rows.chatActivityCountsByActor,
       ),
       generatedAt: new Date().toISOString(),
     });
