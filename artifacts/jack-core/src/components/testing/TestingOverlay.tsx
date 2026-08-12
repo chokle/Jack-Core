@@ -178,6 +178,10 @@ export const TestingOverlay = forwardRef<
       setPhase("idle");
       return;
     }
+    if (serviceRef.current !== service) {
+      service.cancel();
+      return;
+    }
     void trackTestEvent("recording_started", {
       microphone_included: service.micIncluded,
     });

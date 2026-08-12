@@ -14,6 +14,7 @@ import { TestingOverlay, type TestingOverlayHandle } from "./TestingOverlay";
 const state = vi.hoisted(() => ({
   cachedSession: null as null | Record<string, unknown>,
   currentSession: null as null | Record<string, unknown>,
+  startGate: null as Promise<void> | null,
 }));
 
 const recordingServiceCtorSpy = vi.fn();
@@ -34,6 +35,7 @@ vi.mock("@/lib/user-testing/recording-service", () => ({
     }
     async start() {
       recordingServiceStartSpy();
+      await state.startGate;
     }
     stop() {
       return Promise.resolve();
@@ -81,6 +83,7 @@ describe("TestingOverlay consent boundary", () => {
   beforeEach(() => {
     state.cachedSession = null;
     state.currentSession = null;
+    state.startGate = null;
     recordingServiceCtorSpy.mockClear();
     recordingServiceStartSpy.mockClear();
     recordingServiceCancelSpy.mockClear();
@@ -189,5 +192,54 @@ describe("TestingOverlay consent boundary", () => {
       );
     });
     expect(recordingServiceCancelSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot enter recording state after withdrawal while start is pending", async () => {
+    let releaseStart: (() => void) | undefined;
+    state.startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    state.cachedSession = {
+      id: "11111111-1111-4111-8111-111111111111",
+      organizationId: "org",
+      pilotId: "pilot",
+      appSessionId: "app",
+      status: "active",
+      telemetryStatus: "granted",
+      screenConsentState: "granted",
+      microphoneConsentState: "granted",
+      onboardingStatus: "completed",
+      onboardingStep: 3,
+      recordingStatus: "not_started",
+      feedbackStatus: "not_started",
+      questionCount: 0,
+      startedAt: "2026-07-31T00:00:00Z",
+      lastActivityAt: "2026-07-31T00:00:00Z",
+      expiresAt: "2026-07-31T12:00:00Z",
+    };
+    const onEvent = vi.fn();
+    const ref = createRef<TestingOverlayHandle>();
+    render(<TestingOverlay ref={ref} onEvent={onEvent} />);
+
+    act(() => ref.current?.open());
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1),
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("jack:telemetry-withdrawn", {
+          detail: { withdrawn: ["screen"] },
+        }),
+      );
+    });
+    await act(async () => {
+      releaseStart?.();
+      await state.startGate;
+    });
+
+    expect(recordingServiceCancelSpy).toHaveBeenCalledTimes(2);
+    expect(onEvent).not.toHaveBeenCalledWith("started");
   });
 });
