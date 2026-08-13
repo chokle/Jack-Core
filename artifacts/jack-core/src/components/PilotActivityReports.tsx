@@ -160,6 +160,7 @@ export function PilotActivityReports() {
   const loadEndOfDay = async () => {
     setLoadingEndOfDay(true);
     setError(null);
+    setEndOfDay(null);
     try {
       setEndOfDay(await json<EndOfDayResponse>(
         `/api/testing/reports/end-of-day?${query}&date=${encodeURIComponent(reportDate)}`,
@@ -252,7 +253,10 @@ export function PilotActivityReports() {
                 type="date"
                 className="mt-1 block rounded-md border border-border bg-background p-2"
                 value={reportDate}
-                onChange={(event) => setReportDate(event.target.value)}
+                onChange={(event) => {
+                  setReportDate(event.target.value);
+                  setEndOfDay(null);
+                }}
               />
             </label>
             <Button disabled={!query || !reportDate || loadingEndOfDay} onClick={() => void loadEndOfDay()}>

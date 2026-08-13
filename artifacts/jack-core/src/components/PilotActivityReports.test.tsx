@@ -151,4 +151,35 @@ describe("pilot end-of-day report UI", () => {
       expect(screen.getByText(/2026-08-12T00:00:00.000Z/)).toBeTruthy();
     });
   });
+
+  it("clears a loaded report immediately when the requested date changes", async () => {
+    await renderReport("VERIFIED_ZERO_ACTIVITY");
+    expect(screen.getByTestId("end-of-day-report")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("End-of-day report date (UTC)"), {
+      target: { value: "2026-08-11" },
+    });
+    expect(screen.queryByTestId("end-of-day-report")).toBeNull();
+  });
+
+  it("does not retain stale totals after a failed reload", async () => {
+    await renderReport("VERIFIED_ZERO_ACTIVITY");
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/testing/reports/end-of-day?")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "Telemetry unavailable." }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load end-of-day report" }),
+    );
+    expect(screen.queryByTestId("end-of-day-report")).toBeNull();
+    expect(await screen.findByText("Telemetry unavailable.")).toBeTruthy();
+  });
 });
