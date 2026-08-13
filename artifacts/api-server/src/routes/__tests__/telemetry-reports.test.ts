@@ -144,6 +144,16 @@ describe("pilot activity reports", () => {
   });
 
   it("returns an authorized bounded end-of-day report with fail-closed provenance", async () => {
+    fake.tables.pilot_memberships.push({
+      id: "historical-membership",
+      user_id: "historical-user",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: false,
+      valid_from: "2026-07-20T00:00:00.000Z",
+      valid_until: "2026-07-26T00:00:00.000Z",
+    });
     fake.tables.test_events.push({
       event_id: "99999999-9999-4999-8999-999999999999",
       actor_user_id: USER_ID,
@@ -165,6 +175,8 @@ describe("pilot activity reports", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.report).toMatchObject({
       reportState: "INCOMPLETE_TELEMETRY",
+      assignedParticipantCount: 2,
+      inactiveAssignedUserCount: 1,
       eventCounts: { ask_jack_completed: 1 },
       telemetryHealth: { complete: false, telemetryPathObserved: false },
       provenance: {

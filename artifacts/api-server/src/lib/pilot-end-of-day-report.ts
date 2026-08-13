@@ -135,7 +135,7 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
 
   const assigned = new Set(
     input.memberships
-      .filter((row) => row["role"] === "tester" && row["active"] !== false)
+      .filter((row) => row["role"] === "tester")
       .map((row) => String(row["user_id"] ?? ""))
       .filter(Boolean),
   );

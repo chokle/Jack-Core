@@ -153,7 +153,7 @@ async function loadEndOfDayRows(scope: PilotScope, windowStart: string, windowEn
   const [memberships, sessions, events, feedback, failures] = await Promise.all([
     db.from("pilot_memberships").select("user_id,role,active,valid_from,valid_until")
       .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
-      .eq("role", "tester").eq("active", true),
+      .eq("role", "tester"),
     db.from("test_sessions").select("*")
       .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
       .gte("last_activity_at", windowStart).lt("started_at", windowEnd),
