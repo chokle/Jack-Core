@@ -22,6 +22,29 @@ interface AuthorizedScope extends PilotScope {
   userId: string;
 }
 
+type ChatActivityEvidence =
+  | { status: "available" }
+  | { status: "unavailable"; reason: "schema_capability_missing" };
+
+const REQUIRED_CHAT_CAPABILITIES = [
+  ["test_sessions", "chat_session_id"],
+  ["chat_messages", "organization_id"],
+  ["chat_messages", "pilot_id"],
+] as const;
+
+function isExpectedMissingChatCapability(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as Record<string, unknown>;
+  const code = String(value["code"] ?? "");
+  if (code !== "42703" && code !== "PGRST204") return false;
+  const text = [value["message"], value["details"], value["hint"]]
+    .map((part) => String(part ?? "").toLowerCase())
+    .join(" ");
+  return REQUIRED_CHAT_CAPABILITIES.some(
+    ([table, column]) => text.includes(table) && text.includes(column),
+  );
+}
+
 async function requireReportScope(
   req: Request,
   res: Response,
@@ -180,7 +203,8 @@ function buildParticipants(sessions: Array<Record<string, unknown>>) {
 function buildReconciliation(
   sessions: Array<Record<string, unknown>>,
   memberships: Array<Record<string, unknown>>,
-  chatActivityCountsByActor: Record<string, number>,
+  chatActivityCountsByActor: Record<string, number> | null,
+  chatActivityEvidence: ChatActivityEvidence,
 ) {
   const enrolledTesterIds = uniqueSortedIds(
     memberships.filter((membership) => isActiveMembershipWindow(membership)),
@@ -194,9 +218,11 @@ function buildReconciliation(
   const sessionCountsByActor = Object.fromEntries(
     scopedActorIds.map((id) => [id, 0]),
   );
-  const scopedChatActivityCountsByActor = Object.fromEntries(
-    scopedActorIds.map((id) => [id, chatActivityCountsByActor[id] ?? 0]),
-  );
+  const scopedChatActivityCountsByActor = chatActivityCountsByActor
+    ? Object.fromEntries(
+        scopedActorIds.map((id) => [id, chatActivityCountsByActor[id] ?? 0]),
+      )
+    : null;
   for (const session of sessions) {
     const actorUserId = String(session["actor_user_id"] ?? "");
     if (scopedActorIdSet.has(actorUserId)) {
@@ -205,58 +231,80 @@ function buildReconciliation(
     }
   }
   const enrolled = new Set(enrolledTesterIds);
+  const enrolledWithoutSessionEvidence = enrolledTesterIds.filter(
+    (id) => (sessionCountsByActor[id] ?? 0) === 0,
+  );
   return {
     enrolledTesterIds,
     observedSessionActorIds,
     sessionCountsByActor,
+    chatActivityEvidence,
     chatActivityCountsByActor: scopedChatActivityCountsByActor,
     likelyMismatches: {
       observedNotEnrolled: observedSessionActorIds.filter(
         (id) => !enrolled.has(id),
       ),
-      enrolledWithoutActivity: enrolledTesterIds.filter(
-        (id) =>
-          (sessionCountsByActor[id] ?? 0) === 0 &&
-          (scopedChatActivityCountsByActor[id] ?? 0) === 0,
-      ),
+      enrolledWithoutSessionEvidence,
+      enrolledWithoutActivity: scopedChatActivityCountsByActor
+        ? enrolledWithoutSessionEvidence.filter(
+            (id) => (scopedChatActivityCountsByActor[id] ?? 0) === 0,
+          )
+        : null,
     },
   };
 }
 
 async function loadScopeRows(scope: PilotScope) {
-  const [sessions, events, feedback, failures, memberships] = await Promise.all(
-    [
-      db
-        .from("test_sessions")
-        .select("*")
-        .eq("organization_id", scope.organizationId)
-        .eq("pilot_id", scope.pilotId)
-        .order("last_activity_at", { ascending: false }),
-      db
-        .from("test_events")
-        .select("*")
-        .eq("organization_id", scope.organizationId)
-        .eq("pilot_id", scope.pilotId)
-        .order("occurred_at", { ascending: true }),
-      db
-        .from("test_feedback")
-        .select("*")
-        .eq("organization_id", scope.organizationId)
-        .eq("pilot_id", scope.pilotId),
-      db
-        .from("activity_ingest_failures")
-        .select("*")
-        .eq("organization_id", scope.organizationId)
-        .eq("pilot_id", scope.pilotId),
-      db
-        .from("pilot_memberships")
-        .select("user_id,active,valid_from,valid_until")
-        .eq("organization_id", scope.organizationId)
-        .eq("pilot_id", scope.pilotId)
-        .eq("role", "tester")
-        .eq("active", true),
-    ],
-  );
+  const [
+    chatSessionCapability,
+    sessions,
+    events,
+    feedback,
+    failures,
+    memberships,
+  ] = await Promise.all([
+    db
+      .from("test_sessions")
+      .select("chat_session_id", { head: true })
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .limit(1),
+    db
+      .from("test_sessions")
+      .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .order("last_activity_at", { ascending: false }),
+    db
+      .from("test_events")
+      .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .order("occurred_at", { ascending: true }),
+    db
+      .from("test_feedback")
+      .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId),
+    db
+      .from("activity_ingest_failures")
+      .select("*")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId),
+    db
+      .from("pilot_memberships")
+      .select("user_id,active,valid_from,valid_until")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .eq("role", "tester")
+      .eq("active", true),
+  ]);
+  if (
+    chatSessionCapability.error &&
+    !isExpectedMissingChatCapability(chatSessionCapability.error)
+  ) {
+    throw chatSessionCapability.error;
+  }
   const failed = [sessions, events, feedback, failures, memberships].find(
     (result) => result.error,
   );
@@ -276,48 +324,73 @@ async function loadScopeRows(scope: PilotScope) {
       ),
     ]),
   ];
-  const chatCountEntries = await Promise.all(
-    scopedActorIds.map(async (actorUserId) => {
-      const legacySessionIds = [
-        ...new Set(
-          sessionRows
-            .filter((row) => String(row["actor_user_id"] ?? "") === actorUserId)
-            .map((row) => String(row["chat_session_id"] ?? ""))
-            .filter(Boolean),
+  let chatActivityEvidence: ChatActivityEvidence = chatSessionCapability.error
+    ? { status: "unavailable", reason: "schema_capability_missing" }
+    : { status: "available" };
+  let chatActivityCountsByActor: Record<string, number> | null = null;
+  if (chatActivityEvidence.status === "available") {
+    const chatCountEntries = await Promise.all(
+      scopedActorIds.map(async (actorUserId) => {
+        const legacySessionIds = [
+          ...new Set(
+            sessionRows
+              .filter(
+                (row) => String(row["actor_user_id"] ?? "") === actorUserId,
+              )
+              .map((row) => String(row["chat_session_id"] ?? ""))
+              .filter(Boolean),
+          ),
+        ];
+        const [scopedCount, legacyCount] = await Promise.all([
+          db
+            .from("chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", actorUserId)
+            .eq("organization_id", scope.organizationId)
+            .eq("pilot_id", scope.pilotId),
+          legacySessionIds.length > 0
+            ? db
+                .from("chat_messages")
+                .select("id", { count: "exact", head: true })
+                .eq("user_id", actorUserId)
+                .in("session_id", legacySessionIds)
+                .is("organization_id", null)
+                .is("pilot_id", null)
+            : Promise.resolve({ count: 0, error: null }),
+        ]);
+        const missingCapability = [scopedCount.error, legacyCount.error].find(
+          (error) => error && isExpectedMissingChatCapability(error),
+        );
+        if (missingCapability) return null;
+        if (scopedCount.error) throw scopedCount.error;
+        if (legacyCount.error) throw legacyCount.error;
+        return [
+          actorUserId,
+          (scopedCount.count ?? 0) + (legacyCount.count ?? 0),
+        ] as const;
+      }),
+    );
+    if (chatCountEntries.some((entry) => entry === null)) {
+      chatActivityEvidence = {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      };
+    } else {
+      chatActivityCountsByActor = Object.fromEntries(
+        chatCountEntries.filter(
+          (entry): entry is readonly [string, number] => entry !== null,
         ),
-      ];
-      const [scopedCount, legacyCount] = await Promise.all([
-        db
-          .from("chat_messages")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", actorUserId)
-          .eq("organization_id", scope.organizationId)
-          .eq("pilot_id", scope.pilotId),
-        legacySessionIds.length > 0
-          ? db
-              .from("chat_messages")
-              .select("id", { count: "exact", head: true })
-              .eq("user_id", actorUserId)
-              .in("session_id", legacySessionIds)
-              .is("organization_id", null)
-              .is("pilot_id", null)
-          : Promise.resolve({ count: 0, error: null }),
-      ]);
-      if (scopedCount.error) throw scopedCount.error;
-      if (legacyCount.error) throw legacyCount.error;
-      return [
-        actorUserId,
-        (scopedCount.count ?? 0) + (legacyCount.count ?? 0),
-      ] as const;
-    }),
-  );
+      );
+    }
+  }
   return {
     sessions: sessionRows,
     events: (events.data ?? []) as Array<Record<string, unknown>>,
     feedback: (feedback.data ?? []) as Array<Record<string, unknown>>,
     failures: (failures.data ?? []) as Array<Record<string, unknown>>,
     memberships: membershipRows,
-    chatActivityCountsByActor: Object.fromEntries(chatCountEntries),
+    chatActivityEvidence,
+    chatActivityCountsByActor,
   };
 }
 
@@ -393,6 +466,7 @@ router.get("/testing/reports/summary", async (req, res) => {
         rows.sessions,
         rows.memberships,
         rows.chatActivityCountsByActor,
+        rows.chatActivityEvidence,
       ),
       generatedAt: new Date().toISOString(),
     });

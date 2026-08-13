@@ -80,19 +80,30 @@ export type PilotReportReconciliationSessionCountsByActor = {
   [key: string]: number;
 };
 
+export type PilotReportReconciliationChatActivityEvidence =
+  | {
+      status: "available";
+    }
+  | {
+      status: "unavailable";
+      reason: "schema_capability_missing";
+    };
+
 export type PilotReportReconciliationChatActivityCountsByActor = {
   [key: string]: number;
-};
+} | null;
 
 export type PilotReportReconciliationLikelyMismatches = {
   observedNotEnrolled: string[];
-  enrolledWithoutActivity: string[];
+  enrolledWithoutSessionEvidence: string[];
+  enrolledWithoutActivity: string[] | null;
 };
 
 export interface PilotReportReconciliation {
   enrolledTesterIds: string[];
   observedSessionActorIds: string[];
   sessionCountsByActor: PilotReportReconciliationSessionCountsByActor;
+  chatActivityEvidence: PilotReportReconciliationChatActivityEvidence;
   chatActivityCountsByActor: PilotReportReconciliationChatActivityCountsByActor;
   likelyMismatches: PilotReportReconciliationLikelyMismatches;
 }

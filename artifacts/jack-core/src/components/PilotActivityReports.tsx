@@ -38,10 +38,14 @@ interface Reconciliation {
   enrolledTesterIds: string[];
   observedSessionActorIds: string[];
   sessionCountsByActor: Record<string, number>;
-  chatActivityCountsByActor: Record<string, number>;
+  chatActivityEvidence:
+    | { status: "available" }
+    | { status: "unavailable"; reason: "schema_capability_missing" };
+  chatActivityCountsByActor: Record<string, number> | null;
   likelyMismatches: {
     observedNotEnrolled: string[];
-    enrolledWithoutActivity: string[];
+    enrolledWithoutSessionEvidence: string[];
+    enrolledWithoutActivity: string[] | null;
   };
 }
 
@@ -378,6 +382,14 @@ export function PilotActivityReports() {
                   Counts only for enrolled testers or actors observed in this
                   pilot. Chat content is never loaded or shown.
                 </p>
+                {report.reconciliation.chatActivityEvidence.status ===
+                  "unavailable" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Chat activity evidence is unavailable until the required
+                    schema capability is present. Session evidence remains
+                    available.
+                  </p>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -413,11 +425,15 @@ export function PilotActivityReports() {
                             actorUserId,
                           )
                             ? "Observed, not enrolled"
-                            : report.reconciliation.likelyMismatches.enrolledWithoutActivity.includes(
+                            : report.reconciliation.likelyMismatches.enrolledWithoutActivity?.includes(
                                   actorUserId,
                                 )
-                              ? "Enrolled, no activity"
-                              : "—";
+                              ? "No observed activity"
+                              : report.reconciliation.likelyMismatches.enrolledWithoutSessionEvidence.includes(
+                                    actorUserId,
+                                  )
+                                ? "No session evidence"
+                                : "—";
                         return (
                           <tr
                             key={actorUserId}
@@ -434,9 +450,11 @@ export function PilotActivityReports() {
                               ] ?? 0}
                             </td>
                             <td className="p-3">
-                              {report.reconciliation.chatActivityCountsByActor[
-                                actorUserId
-                              ] ?? 0}
+                              {report.reconciliation.chatActivityCountsByActor
+                                ? (report.reconciliation
+                                    .chatActivityCountsByActor[actorUserId] ??
+                                  0)
+                                : "Unavailable"}
                             </td>
                             <td className="p-3">{mismatch}</td>
                           </tr>

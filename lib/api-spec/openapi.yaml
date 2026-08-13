@@ -1184,6 +1184,7 @@ components:
         - enrolledTesterIds
         - observedSessionActorIds
         - sessionCountsByActor
+        - chatActivityEvidence
         - chatActivityCountsByActor
         - likelyMismatches
       properties:
@@ -1199,23 +1200,53 @@ components:
           type: object
           additionalProperties:
             type: integer
+        chatActivityEvidence:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [available]
+            - type: object
+              additionalProperties: false
+              required: [status, reason]
+              properties:
+                status:
+                  type: string
+                  enum: [unavailable]
+                reason:
+                  type: string
+                  enum: [schema_capability_missing]
         chatActivityCountsByActor:
-          type: object
-          additionalProperties:
-            type: integer
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: integer
+            - type: "null"
         likelyMismatches:
           type: object
           additionalProperties: false
-          required: [observedNotEnrolled, enrolledWithoutActivity]
+          required:
+            - observedNotEnrolled
+            - enrolledWithoutSessionEvidence
+            - enrolledWithoutActivity
           properties:
             observedNotEnrolled:
               type: array
               items:
                 type: string
-            enrolledWithoutActivity:
+            enrolledWithoutSessionEvidence:
               type: array
               items:
                 type: string
+            enrolledWithoutActivity:
+              oneOf:
+                - type: array
+                  items:
+                    type: string
+                - type: "null"
 
     PilotReportSummaryResponse:
       type: object

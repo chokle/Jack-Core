@@ -352,6 +352,7 @@ describe("pilot activity reports", () => {
         [enrolledWithoutActivity]: 0,
         [observedNotEnrolled]: 1,
       },
+      chatActivityEvidence: { status: "available" },
       chatActivityCountsByActor: {
         [USER_ID]: 2,
         [enrolledWithoutActivity]: 0,
@@ -359,6 +360,7 @@ describe("pilot activity reports", () => {
       },
       likelyMismatches: {
         observedNotEnrolled: [observedNotEnrolled],
+        enrolledWithoutSessionEvidence: [enrolledWithoutActivity],
         enrolledWithoutActivity: [enrolledWithoutActivity],
       },
     });
@@ -385,10 +387,103 @@ describe("pilot activity reports", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.body.reconciliation.chatActivityEvidence).toEqual({
+      status: "available",
+    });
     expect(response.body.reconciliation.chatActivityCountsByActor).toEqual({
       [USER_ID]: 1_501,
     });
     expect(JSON.stringify(response.body)).not.toContain("private-1500");
+  });
+
+  it("returns session evidence with globally unavailable chat counts when a chat scope column is missing", async () => {
+    const enrolledWithoutSessionEvidence = "tester-2";
+    fake.tables.pilot_memberships.push({
+      id: "second-tester-membership",
+      user_id: enrolledWithoutSessionEvidence,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    });
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.organization_id does not exist",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation).toMatchObject({
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [enrolledWithoutSessionEvidence],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
+  it("returns session evidence when test session chat linkage is absent from the schema cache", async () => {
+    fake.failNext("test_sessions", "select", {
+      code: "PGRST204",
+      message:
+        "Could not find the 'chat_session_id' column of 'test_sessions' in the schema cache",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.sessionCount).toBe(1);
+    expect(response.body.reconciliation).toMatchObject({
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
+  it("fails closed for unrelated chat count errors", async () => {
+    fake.failNext("chat_messages", "select", {
+      code: "42501",
+      message: "permission denied for table chat_messages",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "Pilot report could not be generated.",
+    });
+  });
+
+  it("does not degrade for a missing column outside the required capability set", async () => {
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.content does not exist",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
   });
 
   it("denies cross-organization access and presentation mode", async () => {

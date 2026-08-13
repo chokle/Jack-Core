@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PilotReportReconciliationChatActivityCountsByActor } from './pilotReportReconciliationChatActivityCountsByActor';
+import type { PilotReportReconciliationChatActivityEvidence } from './pilotReportReconciliationChatActivityEvidence';
 import type { PilotReportReconciliationLikelyMismatches } from './pilotReportReconciliationLikelyMismatches';
 import type { PilotReportReconciliationSessionCountsByActor } from './pilotReportReconciliationSessionCountsByActor';
 
@@ -13,6 +14,7 @@ export interface PilotReportReconciliation {
   enrolledTesterIds: string[];
   observedSessionActorIds: string[];
   sessionCountsByActor: PilotReportReconciliationSessionCountsByActor;
+  chatActivityEvidence: PilotReportReconciliationChatActivityEvidence;
   chatActivityCountsByActor: PilotReportReconciliationChatActivityCountsByActor;
   likelyMismatches: PilotReportReconciliationLikelyMismatches;
 }

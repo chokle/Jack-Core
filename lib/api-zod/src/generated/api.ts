@@ -1975,10 +1975,23 @@ export const GetPilotReportSummaryResponse = zod.object({
     enrolledTesterIds: zod.array(zod.string()),
     observedSessionActorIds: zod.array(zod.string()),
     sessionCountsByActor: zod.record(zod.string(), zod.number()),
-    chatActivityCountsByActor: zod.record(zod.string(), zod.number()),
+    chatActivityEvidence: zod.union([
+      zod.object({
+        status: zod.enum(["available"]),
+      }),
+      zod.object({
+        status: zod.enum(["unavailable"]),
+        reason: zod.enum(["schema_capability_missing"]),
+      }),
+    ]),
+    chatActivityCountsByActor: zod.union([
+      zod.record(zod.string(), zod.number()),
+      zod.null(),
+    ]),
     likelyMismatches: zod.object({
       observedNotEnrolled: zod.array(zod.string()),
-      enrolledWithoutActivity: zod.array(zod.string()),
+      enrolledWithoutSessionEvidence: zod.array(zod.string()),
+      enrolledWithoutActivity: zod.union([zod.array(zod.string()), zod.null()]),
     }),
   }),
   generatedAt: zod.coerce.date(),

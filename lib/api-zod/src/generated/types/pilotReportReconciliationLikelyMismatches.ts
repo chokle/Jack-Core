@@ -8,5 +8,6 @@
 
 export type PilotReportReconciliationLikelyMismatches = {
   observedNotEnrolled: string[];
-  enrolledWithoutActivity: string[];
+  enrolledWithoutSessionEvidence: string[];
+  enrolledWithoutActivity: string[] | null;
 };

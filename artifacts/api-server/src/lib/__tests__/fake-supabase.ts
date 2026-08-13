@@ -31,8 +31,15 @@ type Filter =
 
 interface Result<T> {
   data: T;
-  error: { message: string } | null;
+  error: QueryError | null;
   count?: number | null;
+}
+
+interface QueryError {
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  message: string;
 }
 
 /**
@@ -146,20 +153,24 @@ export class FakeSupabase {
     knowledge_edges: [],
     chat_messages: [],
   };
-  private failures = new Set<string>();
+  private failures = new Map<string, QueryError>();
 
   failNext(
     table: string,
     operation: "select" | "insert" | "update" | "delete",
+    error: QueryError = {
+      message: `forced ${operation} failure for ${table}`,
+    },
   ): void {
-    this.failures.add(`${table}:${operation}`);
+    this.failures.set(`${table}:${operation}`, error);
   }
 
-  consumeFailure(table: string, operation: string): boolean {
+  consumeFailure(table: string, operation: string): QueryError | null {
     const key = `${table}:${operation}`;
-    if (!this.failures.has(key)) return false;
+    const error = this.failures.get(key);
+    if (!error) return null;
     this.failures.delete(key);
-    return true;
+    return error;
   }
 
   resetFailures(): void {
@@ -404,10 +415,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private run(): Result<unknown> {
-    if (this.db.consumeFailure(this.table, this.op)) {
+    const forcedError = this.db.consumeFailure(this.table, this.op);
+    if (forcedError) {
       return {
         data: null,
-        error: { message: `forced ${this.op} failure for ${this.table}` },
+        error: forcedError,
       };
     }
     if (this.op === "upsert") return this.runUpsert();

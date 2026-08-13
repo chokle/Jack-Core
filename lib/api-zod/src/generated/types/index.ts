@@ -92,6 +92,7 @@ export * from './pilotReportAggregateEventCounts';
 export * from './pilotReportParticipant';
 export * from './pilotReportReconciliation';
 export * from './pilotReportReconciliationChatActivityCountsByActor';
+export * from './pilotReportReconciliationChatActivityEvidence';
 export * from './pilotReportReconciliationLikelyMismatches';
 export * from './pilotReportReconciliationSessionCountsByActor';
 export * from './pilotReportScope';
