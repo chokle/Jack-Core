@@ -2114,7 +2114,7 @@ export const getResolveKnowledgeCandidateUrl = (id: string,) => {
 }
 
 /**
- * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ * @summary Resolve a pending knowledge candidate — Accept / Edit / Merge / Reject (admin only)
  */
 export const resolveKnowledgeCandidate = async (id: string,
     candidateResolutionInput: CandidateResolutionInput, options?: RequestInit): Promise<KnowledgeCandidate> => {
@@ -2163,7 +2163,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResolveKnowledgeCandidateMutationError = ErrorType<void | CandidateResolutionConflict>
 
     /**
- * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ * @summary Resolve a pending knowledge candidate — Accept / Edit / Merge / Reject (admin only)
  */
 export const useResolveKnowledgeCandidate = <TError = ErrorType<void | CandidateResolutionConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveKnowledgeCandidate>>, TError,{id: string;data: BodyType<CandidateResolutionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

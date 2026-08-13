@@ -13,10 +13,32 @@ Delivery status: Daz APPROVED for feature-branch delivery; metadata commit and p
 - Branch: `codex/jack-pilot-hardening`
 - Pull request: #41 — Harden Jack pilot trust, reporting, provenance, and review
 - Pre-sprint SHA: `36e1da8dfbf830fcceb0d781b43175ce39213e6c`
-- Current implementation SHA before this metadata commit: `fc3f3013e59c542f94ca07cb143ed829491f4233`
+- PR head before the mentor Edit delivery commit: `2c4c3b081adbf6d7cf181180c923d364f23780ce`
 - Review classification: `APPROVED` after independent Daz review and remediation
 
 ## Outcomes and commits
+
+### Mentor knowledge Edit review action
+
+- Commit: this implementation and handoff delivery commit — `feat: add safe mentor knowledge editing`
+- Adds the missing admin-only Accept / Edit / Merge / Reject review flow. Edit requires corrected title and description, preserves the original mentor answer provenance, and promotes only through the existing validated mentor-to-concept trusted-write path.
+- The pending candidate is claimed in Postgres before graph mutation. The deterministic SHA-256 decision claim excludes competing content across API instances while allowing an identical retry to reconverge after a crash between graph persistence and candidate finalization.
+- Historical pending rows with legacy requested-target/redirect metadata remain resolvable by compare-and-set against their exact pre-read values. An active `resolution-claim:` cannot be stolen by Reject.
+- Application-managed append-only Edit audit evidence stores the server-derived reviewer plus original title and description in the existing resolution history. It survives Reopen and is retained/appended through later Edit, Accept, Merge, or Reject decisions.
+- Pending and rejected candidates remain outside trusted retrieval; an unreviewed or losing correction cannot create a trusted node or mentor contribution.
+- Files:
+  - `artifacts/api-server/src/lib/memory-graph.ts`
+  - `artifacts/api-server/src/lib/__tests__/knowledge-review.test.ts`
+  - `artifacts/api-server/src/routes/graph.ts`
+  - `artifacts/api-server/src/routes/__tests__/graph.admin-routes.test.ts`
+  - `artifacts/jack-core/src/components/KnowledgeReview.tsx`
+  - `artifacts/jack-core/src/components/KnowledgeReview.edit.test.tsx`
+  - `lib/api-spec/openapi.yaml`
+  - `lib/api-client-react/src/generated/api.schemas.ts`
+  - `lib/api-client-react/src/generated/api.ts`
+  - `lib/api-zod/src/generated/api.ts`
+  - `lib/api-zod/src/generated/types/candidateResolutionInput.ts`
+  - `lib/api-zod/src/generated/types/candidateResolutionInputAction.ts`
 
 ### Current-consent conversation review
 
@@ -51,6 +73,17 @@ Delivery status: Daz APPROVED for feature-branch delivery; metadata commit and p
 
 ## Verification
 
+Current mentor Edit release checkpoint:
+
+- Focused API and authorization suite: 2 files, 59/59 passed.
+- Focused Edit UI regression: 1/1 passed.
+- Full API suite: 46 files, 546/546 passed.
+- Full Jack frontend suite: 38 files, 257/257 passed. One earlier full run had a single unrelated five-second user-testing-gate timeout; that file then passed 14/14 and the final full suite passed.
+- API and Jack frontend typechecks: passed.
+- Root typecheck and production build: passed. Existing non-fatal Vite sourcemap and large-chunk warnings remain.
+- Focused Prettier and `git diff --check`: passed.
+- Independent skeptical Daz review: `APPROVED` after remediation loops covering cross-process exclusion, crash retry convergence and audit idempotency, legacy pending rows, active-claim Reject exclusion, and append-only Edit audit lifecycle.
+
 - Focused conversation-review regression: 7/7 passed.
 - Focused identity API suite after remediation: 18/18 passed, including authorization and tenant isolation coverage.
 - Focused identity UI suite: 2/2 passed.
@@ -78,7 +111,7 @@ No raw user identifiers were copied into this handoff. Missing test-session evid
 ## Scanner availability
 
 - Codex Security: intentionally not invoked, per the run mandate.
-- Local Semgrep, Aikido, and CodeRabbit executables were unavailable for this implementation cycle.
+- Local Semgrep, Aikido, and CodeRabbit executables were unavailable for this implementation cycle. CodeRabbit's installer did not support the available Windows runtime; it was not retried because optional scanners do not block this mandate.
 - Scanner results from an older commit are not represented as verification of the approved identity commits; live GitHub checks must be assessed on the pushed head.
 
 ## Repository hygiene
@@ -89,6 +122,8 @@ No raw user identifiers were copied into this handoff. Missing test-session evid
 - Trailing spaces in `DAZ-HANDOFF-2026-08-11.md` were removed so the full branch diff check can pass after this commit.
 
 ## Protected boundaries and blockers
+
+- The named Railway staging service was positively identified, but its Supabase URL points to the production project ref `mdqdswhzkocglbnxvxth` and its Clerk configuration is live rather than isolated. Therefore it is not an approved data/auth-isolated migration target. Migration `20260811190035_add_conversation_review_consent.sql` was not executed anywhere; staging migration and authenticated mutation acceptance remain blocked until an approved isolated staging database/auth environment is provided.
 
 - Production lacks migration `20260811190035`; the conversation-review consent table and required scoped chat/test-session columns were absent in the read-only schema check. Migration execution and production schema mutation remain protected and were not performed.
 - Authenticated staging acceptance requires valid authorized credentials and remains blocked where founder-only credentials are required. No auth control was weakened or bypassed.

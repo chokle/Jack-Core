@@ -833,7 +833,7 @@ export const GetMentorContributionsResponse = zod.object({
 });
 
 /**
- * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ * @summary Resolve a pending knowledge candidate — Accept / Edit / Merge / Reject (admin only)
  */
 export const ResolveKnowledgeCandidateParams = zod.object({
   id: zod.coerce.string(),
@@ -841,9 +841,17 @@ export const ResolveKnowledgeCandidateParams = zod.object({
 
 export const ResolveKnowledgeCandidateBody = zod.object({
   action: zod
-    .enum(["accept", "merge", "reject", "restore", "rearchive", "reopen"])
+    .enum([
+      "accept",
+      "edit",
+      "merge",
+      "reject",
+      "restore",
+      "rearchive",
+      "reopen",
+    ])
     .describe(
-      "accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video\/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept\/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.",
+      "accept — reinforce the top best-match concept; edit — promote a reviewer-corrected title and description as a new reviewed concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video\/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept\/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.",
     ),
   targetNodeId: zod
     .string()
@@ -853,6 +861,17 @@ export const ResolveKnowledgeCandidateBody = zod.object({
     .string()
     .optional()
     .describe("Why the candidate was rejected (required for reject)."),
+  editedTitle: zod
+    .string()
+    .min(1)
+    .optional()
+    .describe("Reviewer-corrected concept title (required for edit)."),
+  editedDescription: zod
+    .string()
+    .optional()
+    .describe(
+      "Reviewer-corrected concept description (required for edit; may be empty).",
+    ),
 });
 
 export const ResolveKnowledgeCandidateResponse = zod.object({

@@ -11,6 +11,7 @@
  * (nodes before edges) and video edges are reconciled by delete-then-reinsert.
  * A brief poll-visible inconsistency is acceptable for a derived view.
  */
+import { createHash } from "node:crypto";
 import { supabase } from "./supabase.js";
 import { createEmbedding } from "./openai.js";
 import { logger } from "./logger.js";
@@ -2554,6 +2555,7 @@ export async function getConceptAnswerContributions(
  */
 export type CandidateResolutionAction =
   | "accept"
+  | "edit"
   | "merge"
   | "reject"
   | "restore"
@@ -2574,6 +2576,7 @@ export type CandidateResolutionResult =
 
 const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
   accept: "accepted",
+  edit: "accepted",
   merge: "merged",
   reject: "rejected",
   restore: "restored",
@@ -2587,6 +2590,8 @@ const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
  * - **accept** reinforces the candidate's top best-match concept exactly like
  *   ingestion-time mentor reinforcement (alias, additive mentor→concept
  *   provenance edge deduped by answerId, aggregate recompute).
+ * - **edit** promotes reviewer-corrected content as a new reviewed concept while
+ *   preserving the original answer provenance and candidate resolution audit.
  * - **merge** does the same onto a reviewer-chosen existing concept node.
  * - **reject** records the required reason on the row; the graph is untouched.
  *
@@ -2607,7 +2612,13 @@ const CANDIDATE_STATUS_FOR_ACTION: Record<CandidateResolutionAction, string> = {
 export async function resolveKnowledgeCandidate(
   candidateId: string,
   action: CandidateResolutionAction,
-  opts: { targetNodeId?: string | null; reason?: string | null } = {},
+  opts: {
+    targetNodeId?: string | null;
+    reason?: string | null;
+    editedTitle?: string | null;
+    editedDescription?: string | null;
+    reviewer?: string | null;
+  } = {},
 ): Promise<CandidateResolutionResult> {
   const prior = resolutionQueues.get(candidateId) ?? Promise.resolve();
   const run = prior.then(
@@ -2694,7 +2705,13 @@ async function validateCandidateSource(
 async function resolveKnowledgeCandidateInner(
   candidateId: string,
   action: CandidateResolutionAction,
-  opts: { targetNodeId?: string | null; reason?: string | null } = {},
+  opts: {
+    targetNodeId?: string | null;
+    reason?: string | null;
+    editedTitle?: string | null;
+    editedDescription?: string | null;
+    reviewer?: string | null;
+  } = {},
 ): Promise<CandidateResolutionResult> {
   const { data: row, error } = await supabase
     .from("knowledge_candidates")
@@ -2737,16 +2754,59 @@ async function resolveKnowledgeCandidateInner(
   }
 
   const nextStatus = CANDIDATE_STATUS_FOR_ACTION[action];
+  const priorResolutionHistory = record.resolutionReason?.includes(
+    "Edit audit:",
+  )
+    ? record.resolutionReason
+    : null;
+  const hasActiveResolutionClaim =
+    record.redirectReason?.startsWith("resolution-claim:");
 
   // Validate the action's inputs before touching anything.
   let targetNodeId: string | null = null;
   let reason: string | null = null;
   let acceptAsNew = false;
+  let resolutionRecord = record;
   if (action === "accept") {
     targetNodeId =
       record.bestMatches[0]?.nodeId ??
       knowledgeNodeId(record.category as KnowledgeCategory, record.title);
     acceptAsNew = record.bestMatches.length === 0;
+  } else if (action === "edit") {
+    const editedTitle = opts.editedTitle?.trim() || null;
+    if (
+      !editedTitle ||
+      opts.editedDescription === null ||
+      opts.editedDescription === undefined
+    ) {
+      return {
+        ok: false,
+        code: "invalid",
+        message: "Edit requires a title and description.",
+      };
+    }
+    resolutionRecord = {
+      ...record,
+      title: editedTitle,
+      description: opts.editedDescription.trim() || null,
+      bestMatches: [],
+    };
+    targetNodeId = knowledgeNodeId(
+      resolutionRecord.category as KnowledgeCategory,
+      resolutionRecord.title,
+    );
+    acceptAsNew = true;
+    const editAudit = `Edit audit: ${JSON.stringify({
+      reviewer: opts.reviewer?.trim() || "an administrator",
+      originalTitle: record.title,
+      originalDescription: record.description,
+    })}`;
+    // The claim write already persisted this action's audit before any graph
+    // mutation. An identical crash retry resumes the same action; appending the
+    // line again would falsely represent one reviewer decision as two edits.
+    reason = hasActiveResolutionClaim
+      ? record.resolutionReason || editAudit
+      : [priorResolutionHistory, editAudit].filter(Boolean).join("\n");
   } else if (action === "merge") {
     targetNodeId = opts.targetNodeId?.trim() || null;
     if (!targetNodeId) {
@@ -2789,9 +2849,21 @@ async function resolveKnowledgeCandidateInner(
   // The reviewer's requested target vs. what the live graph resolves it to.
   let actualTargetId: string | null = null;
   let redirectReason: string | null = null;
+  let claimToken: string | null = null;
+
+  if (
+    action === "reject" &&
+    record.redirectReason?.startsWith("resolution-claim:")
+  ) {
+    return {
+      ok: false,
+      code: "conflict",
+      message: "Candidate resolution is already in progress.",
+    };
+  }
 
   if (action !== "reject") {
-    const sourceError = await validateCandidateSource(record);
+    const sourceError = await validateCandidateSource(resolutionRecord);
     if (sourceError)
       return { ok: false, code: "invalid", message: sourceError };
 
@@ -2816,7 +2888,7 @@ async function resolveKnowledgeCandidateInner(
       };
     }
 
-    if (!record.mentorProfileId) {
+    if (!resolutionRecord.mentorProfileId) {
       return {
         ok: false,
         code: "invalid",
@@ -2824,14 +2896,14 @@ async function resolveKnowledgeCandidateInner(
       };
     }
 
-    const category = record.category as KnowledgeCategory;
+    const category = resolutionRecord.category as KnowledgeCategory;
 
     // Re-validate the target against the live graph INSIDE the serialized
     // section — the graph may have moved while the candidate sat in review
     // (video deletion, mentor withdrawal, re-processing merges).
     const revalidation = await revalidateConceptTarget(targetNodeId!, {
-      title: record.title,
-      description: record.description ?? "",
+      title: resolutionRecord.title,
+      description: resolutionRecord.description ?? "",
       category,
     });
     if (revalidation.state === "gone" && !acceptAsNew) {
@@ -2865,7 +2937,7 @@ async function resolveKnowledgeCandidateInner(
       ((actualTarget as Record<string, unknown> | null)?.["trade"] as
         | string
         | null) ?? null;
-    if (!sameTrade(record.trade, targetTrade)) {
+    if (!sameTrade(resolutionRecord.trade, targetTrade)) {
       return {
         ok: false,
         code: "invalid",
@@ -2875,10 +2947,10 @@ async function resolveKnowledgeCandidateInner(
     }
 
     const resolvedTargetId = actualTargetId ?? targetNodeId!;
-    const itemId = knowledgeNodeId(category, record.title);
+    const itemId = knowledgeNodeId(category, resolutionRecord.title);
     const targetLabel =
       revalidation.state === "gone"
-        ? record.title
+        ? resolutionRecord.title
         : revalidation.label || resolvedTargetId;
     const targetKind =
       revalidation.state === "gone"
@@ -2887,7 +2959,10 @@ async function resolveKnowledgeCandidateInner(
     const embedding =
       revalidation.state === "gone"
         ? await createEmbedding(
-            conceptEmbeddingText(record.title, record.description ?? ""),
+            conceptEmbeddingText(
+              resolutionRecord.title,
+              resolutionRecord.description ?? "",
+            ),
           )
         : [];
     const resolvedConcept: MentorResolvedConcept = {
@@ -2895,40 +2970,138 @@ async function resolveKnowledgeCandidateInner(
       // Keep the target node's own kind — a slang candidate merged into a
       // concept node must not re-kind the concept.
       category: targetKind,
-      title: record.title,
-      description: record.description ?? "",
+      title: resolutionRecord.title,
+      description: resolutionRecord.description ?? "",
       timestamps: [],
-      confidence: record.confidence ?? 0.6,
-      competencyCode: record.competencyCode,
+      confidence: resolutionRecord.confidence ?? 0.6,
+      competencyCode: resolutionRecord.competencyCode,
       // The target owns its embedding; the candidate never brings one in.
       embeddingJson: embedding.length > 0 ? JSON.stringify(embedding) : null,
       mergedFrom:
         itemId !== resolvedTargetId
-          ? [{ id: itemId, label: record.title, category }]
+          ? [{ id: itemId, label: resolutionRecord.title, category }]
           : [],
       reinforced: revalidation.state !== "gone",
       matchedLabel: revalidation.state === "gone" ? null : targetLabel,
       // Record the mentor's wording as an alias when it differs from the label
       // (persistMentorResolvedConcepts dedups against existing aliases).
       newAliases:
-        normalizeConcept(record.title) !== normalizeConcept(targetLabel)
-          ? [record.title]
+        normalizeConcept(resolutionRecord.title) !==
+        normalizeConcept(targetLabel)
+          ? [resolutionRecord.title]
           : [],
     };
 
+    // Claim the pending row in Postgres BEFORE touching the shared graph. The
+    // process-local queue above only serializes requests handled by this Node
+    // process; this CAS is what excludes a second API instance. requested_target
+    // records the reviewer's intent while redirect_reason carries a deterministic
+    // decision fingerprint until the successful final update replaces it with
+    // the durable redirect audit. An identical retry can safely reconverge after
+    // a crash; different inputs cannot create a second trusted node.
+    const claimFingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          action,
+          targetNodeId,
+          editedTitle: action === "edit" ? resolutionRecord.title : undefined,
+          editedDescription:
+            action === "edit" ? resolutionRecord.description : undefined,
+          reviewer:
+            action === "edit" ? opts.reviewer?.trim() || null : undefined,
+        }),
+      )
+      .digest("hex");
+    claimToken = `resolution-claim:${claimFingerprint}`;
+    const claimNow = new Date().toISOString();
+    const existingClaim = hasActiveResolutionClaim;
+    if (
+      existingClaim &&
+      (record.requestedTargetId !== targetNodeId ||
+        record.redirectReason !== claimToken)
+    ) {
+      return {
+        ok: false,
+        code: "conflict",
+        message: "Candidate resolution is already in progress.",
+      };
+    }
+    let claimQuery = supabase
+      .from("knowledge_candidates")
+      .update({
+        requested_target_id: targetNodeId,
+        redirect_reason: claimToken,
+        ...(action === "edit" ? { resolution_reason: reason } : {}),
+        updated_at: claimNow,
+      })
+      .eq("id", candidateId)
+      .eq("status", "pending")
+      .is("resolved_at", null);
+    claimQuery =
+      record.requestedTargetId !== null
+        ? claimQuery.eq("requested_target_id", record.requestedTargetId)
+        : claimQuery.is("requested_target_id", null);
+    claimQuery =
+      record.redirectReason !== null
+        ? claimQuery.eq("redirect_reason", record.redirectReason)
+        : claimQuery.is("redirect_reason", null);
+    const { data: claimed, error: claimError } = existingClaim
+      ? { data: row, error: null }
+      : await claimQuery.select("*").maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) {
+      const { data: current, error: currentError } = await supabase
+        .from("knowledge_candidates")
+        .select("*")
+        .eq("id", candidateId)
+        .maybeSingle();
+      if (currentError) throw currentError;
+      if (!current) {
+        return {
+          ok: false,
+          code: "not_found",
+          message: "No knowledge candidate with that id.",
+        };
+      }
+      const winner = mapCandidateRow(current as Record<string, unknown>);
+      const samePendingClaim =
+        winner.status === "pending" &&
+        winner.requestedTargetId === targetNodeId &&
+        winner.redirectReason === claimToken;
+      if (samePendingClaim) {
+        // A prior identical request may have crashed after the claim or after
+        // its idempotent graph upserts. Resume and reconverge the same decision;
+        // a different action/content hashes differently and remains excluded.
+      } else {
+        const sameOutcome =
+          winner.status === nextStatus &&
+          (winner.resolvedTargetId === targetNodeId ||
+            winner.requestedTargetId === targetNodeId);
+        if (sameOutcome) return { ok: true, candidate: winner, replayed: true };
+        return {
+          ok: false,
+          code: "conflict",
+          message:
+            winner.status === "pending"
+              ? "Candidate resolution is already in progress."
+              : `Candidate was already resolved as '${winner.status}'.`,
+        };
+      }
+    }
+
     await ensureMentorNode(
-      record.mentorProfileId,
-      record.mentorName ?? "Mentor",
-      record.trade,
+      resolutionRecord.mentorProfileId,
+      resolutionRecord.mentorName ?? "Mentor",
+      resolutionRecord.trade,
     );
     await persistMentorResolvedConcepts(
-      record.mentorProfileId,
+      resolutionRecord.mentorProfileId,
       [resolvedConcept],
       {
         // Dedup key for the mentor→concept provenance edge: the original answer
         // when known, otherwise the candidate id (still deterministic per item).
-        answerId: record.answerId ?? record.id,
-        trade: record.trade,
+        answerId: resolutionRecord.answerId ?? resolutionRecord.id,
+        trade: resolutionRecord.trade,
         model: null,
         extractedAt: new Date().toISOString(),
       },
@@ -2939,19 +3112,51 @@ async function resolveKnowledgeCandidateInner(
   // Compare-and-set: only flip the status if the row is still pending. If an
   // external writer resolved it in the meantime, re-read and report the
   // winner's outcome as replay (same) or conflict (different).
-  const { data: updated, error: updErr } = await supabase
+  let updateQuery = supabase
     .from("knowledge_candidates")
     .update({
       status: nextStatus,
+      ...(action === "edit"
+        ? {
+            title: resolutionRecord.title,
+            description: resolutionRecord.description,
+          }
+        : {}),
       resolved_target_id: action === "reject" ? null : actualTargetId,
       requested_target_id: action === "reject" ? null : targetNodeId,
       redirect_reason: action === "reject" ? null : redirectReason,
-      resolution_reason: action === "reject" ? reason : null,
+      resolution_reason:
+        action === "edit"
+          ? reason
+          : action === "reject"
+            ? priorResolutionHistory
+              ? `${priorResolutionHistory}\nReject reason: ${reason}`
+              : reason
+            : priorResolutionHistory,
       resolved_at: now,
       updated_at: now,
     })
     .eq("id", candidateId)
-    .eq("status", "pending")
+    .eq("status", "pending");
+  if (action !== "reject") {
+    updateQuery = updateQuery
+      .eq("requested_target_id", targetNodeId)
+      .eq("redirect_reason", claimToken);
+  } else {
+    // A graph-writing resolution may already own this still-pending row. Reject
+    // is graph-free, but it must not steal that durable claim while its owner is
+    // publishing the reviewed contribution.
+    updateQuery =
+      record.requestedTargetId !== null
+        ? updateQuery.eq("requested_target_id", record.requestedTargetId)
+        : updateQuery.is("requested_target_id", null);
+    updateQuery =
+      record.redirectReason !== null
+        ? updateQuery.eq("redirect_reason", record.redirectReason)
+        : updateQuery.is("redirect_reason", null);
+    updateQuery = updateQuery.is("resolved_at", null);
+  }
+  const { data: updated, error: updErr } = await updateQuery
     .select("*")
     .maybeSingle();
   if (updErr) throw updErr;
@@ -3744,13 +3949,16 @@ async function reopenResolvedCandidateInner(
 
   const now = new Date().toISOString();
   // Compare-and-set: only reopen if the row is still in the state we reversed.
-  // Clear every resolution field so the row is indistinguishable from a fresh
-  // pending candidate for the accept/merge/reject path.
+  // Clear active resolution fields so the row can be reviewed again. Edit audit
+  // history is application-managed append-only evidence and survives reopen;
+  // ordinary reject reasons retain the legacy clear-on-reopen behavior.
   const { data: updated, error: updErr } = await supabase
     .from("knowledge_candidates")
     .update({
       status: "pending",
-      resolution_reason: null,
+      resolution_reason: record.resolutionReason?.includes("Edit audit:")
+        ? record.resolutionReason
+        : null,
       resolved_target_id: null,
       requested_target_id: null,
       redirect_reason: null,

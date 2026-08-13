@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   GitMerge,
+  Pencil,
   XCircle,
   Loader2,
   Inbox,
@@ -131,6 +132,7 @@ function sortCandidatesByMentor(
  *  reviewer which tab to find it under. */
 const ACTION_DESTINATION: Record<string, { label: string }> = {
   accept: { label: "Accepted" },
+  edit: { label: "Accepted" },
   merge: { label: "Merged" },
   reject: { label: "Rejected" },
   reopen: { label: "Pending" },
@@ -468,11 +470,29 @@ function CandidateCard({
   /** The last resolve attempt failed because the target vanished — open the merge picker. */
   targetGone: boolean;
   onResolve: (
-    action: "accept" | "merge" | "reject" | "restore" | "rearchive" | "reopen",
-    extra?: { targetNodeId?: string; reason?: string },
+    action:
+      | "accept"
+      | "edit"
+      | "merge"
+      | "reject"
+      | "restore"
+      | "rearchive"
+      | "reopen",
+    extra?: {
+      targetNodeId?: string;
+      reason?: string;
+      editedTitle?: string;
+      editedDescription?: string;
+    },
   ) => void;
 }) {
-  const [mode, setMode] = useState<"idle" | "merge" | "reject">("idle");
+  const [mode, setMode] = useState<"idle" | "edit" | "merge" | "reject">(
+    "idle",
+  );
+  const [editedTitle, setEditedTitle] = useState(candidate.title);
+  const [editedDescription, setEditedDescription] = useState(
+    candidate.description ?? "",
+  );
   const [mergeSearch, setMergeSearch] = useState("");
   const [mergeTarget, setMergeTarget] = useState<KnowledgeNode | null>(null);
   const [reason, setReason] = useState("");
@@ -781,6 +801,16 @@ function CandidateCard({
                 size="sm"
                 variant="outline"
                 disabled={busy || !candidate.sourceValid}
+                onClick={() => setMode("edit")}
+                className="min-h-10 md:min-h-8 border-sky-500/50 text-sky-400 hover:bg-sky-500/10 hover:text-sky-300"
+              >
+                <Pencil className="mr-1.5 h-4 w-4" />
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !candidate.sourceValid}
                 onClick={() => setMode("merge")}
                 className="min-h-10 md:min-h-8 border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
               >
@@ -797,6 +827,55 @@ function CandidateCard({
                 <XCircle className="mr-1.5 h-4 w-4" />
                 Reject
               </Button>
+            </div>
+          )}
+
+          {mode === "edit" && (
+            <div className="space-y-2">
+              <Input
+                aria-label="Edited concept title"
+                value={editedTitle}
+                onChange={(e) => setEditedTitle(e.target.value)}
+                placeholder="Corrected concept title"
+                className="bg-background h-11 text-base md:h-9 md:text-sm"
+                autoFocus
+              />
+              <Input
+                aria-label="Edited concept description"
+                value={editedDescription}
+                onChange={(e) => setEditedDescription(e.target.value)}
+                placeholder="Corrected concept description (may be empty)"
+                className="bg-background h-11 text-base md:h-9 md:text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                The correction is accepted as a reviewed concept and keeps the
+                original mentor answer as provenance.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={busy || !editedTitle.trim()}
+                  onClick={() =>
+                    onResolve("edit", {
+                      editedTitle: editedTitle.trim(),
+                      editedDescription: editedDescription.trim(),
+                    })
+                  }
+                  className="min-h-10 md:min-h-8 bg-sky-600 text-white hover:bg-sky-500"
+                >
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                  Save &amp; accept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setMode("idle")}
+                  className="min-h-10 md:min-h-8"
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           )}
 

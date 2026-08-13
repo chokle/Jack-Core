@@ -855,13 +855,14 @@ export interface KnowledgeCandidate {
 }
 
 /**
- * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.
+ * accept — reinforce the top best-match concept; edit — promote a reviewer-corrected title and description as a new reviewed concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.
  */
 export type CandidateResolutionInputAction =
   (typeof CandidateResolutionInputAction)[keyof typeof CandidateResolutionInputAction];
 
 export const CandidateResolutionInputAction = {
   accept: "accept",
+  edit: "edit",
   merge: "merge",
   reject: "reject",
   restore: "restore",
@@ -870,12 +871,19 @@ export const CandidateResolutionInputAction = {
 } as const;
 
 export interface CandidateResolutionInput {
-  /** accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened. */
+  /** accept — reinforce the top best-match concept; edit — promote a reviewer-corrected title and description as a new reviewed concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened. */
   action: CandidateResolutionInputAction;
   /** The existing concept to merge into (required for merge). */
   targetNodeId?: string;
   /** Why the candidate was rejected (required for reject). */
   reason?: string;
+  /**
+   * Reviewer-corrected concept title (required for edit).
+   * @minLength 1
+   */
+  editedTitle?: string;
+  /** Reviewer-corrected concept description (required for edit; may be empty). */
+  editedDescription?: string;
 }
 
 export type CandidateResolutionConflictCode =

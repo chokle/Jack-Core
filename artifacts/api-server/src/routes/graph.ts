@@ -136,8 +136,9 @@ router.get("/graph/mentor-contributions", requireAdmin, async (req, res) => {
 });
 
 // Knowledge Review write path: resolve a pending candidate as Accept (reinforce
-// its top best match), Merge (reinforce a reviewer-chosen concept), or Reject
-// (record a required reason; graph untouched). Admin-gated like node
+// its top best match), Edit (promote reviewer-corrected content as a new reviewed
+// concept), Merge (reinforce a reviewer-chosen concept), or Reject (record a
+// required reason; graph untouched). Admin-gated like node
 // verification — this mutates the shared Living Memory graph.
 router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
   const paramsParsed = ResolveKnowledgeCandidateParams.safeParse(req.params);
@@ -155,6 +156,9 @@ router.post("/graph/candidates/:id/resolve", requireAdmin, async (req, res) => {
       {
         targetNodeId: bodyParsed.data.targetNodeId ?? null,
         reason: bodyParsed.data.reason ?? null,
+        editedTitle: bodyParsed.data.editedTitle ?? null,
+        editedDescription: bodyParsed.data.editedDescription ?? null,
+        reviewer: getAdminReviewer(req),
       },
     );
     if (!result.ok) {

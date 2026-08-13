@@ -163,7 +163,7 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
       .post(`/api/graph/candidates/${CANDIDATE_ID}/resolve`)
       .send({ action: "accept" });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ id: CANDIDATE_ID, status: "accepted" });
     expect(resolveKnowledgeCandidate).toHaveBeenCalledWith(
       CANDIDATE_ID,
@@ -171,7 +171,61 @@ describe("POST /graph/candidates/:id/resolve — authorization", () => {
       {
         targetNodeId: null,
         reason: null,
+        editedTitle: null,
+        editedDescription: null,
+        reviewer: "admin@torchlabs.ca",
       },
+    );
+  });
+
+  it("passes an admin-attributed edit through the protected resolution path", async () => {
+    signInAs("admin");
+    resolveKnowledgeCandidate.mockResolvedValue({
+      ok: true,
+      replayed: false,
+      candidate: {
+        id: CANDIDATE_ID,
+        status: "accepted",
+        title: "Edited porosity control",
+        description: "Clean and dry the joint before welding.",
+        category: "concept",
+        trade: "Welder",
+        confidence: 0.8,
+        competencyCode: null,
+        mentorProfileId: "mentor-1",
+        mentorName: "Dana",
+        question: null,
+        answerText: null,
+        sourceValid: true,
+        answerId: "answer-1",
+        sessionId: "session-1",
+        bestMatches: [],
+        createdAt: null,
+        resolvedTargetId: "k:concept:edited-porosity-control",
+        resolutionReason: "Edited by admin@torchlabs.ca before acceptance.",
+        resolvedAt: null,
+        requestedTargetId: "k:concept:edited-porosity-control",
+        redirectReason: null,
+      },
+    });
+
+    const res = await request(app)
+      .post(`/api/graph/candidates/${CANDIDATE_ID}/resolve`)
+      .send({
+        action: "edit",
+        editedTitle: "Edited porosity control",
+        editedDescription: "Clean and dry the joint before welding.",
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(resolveKnowledgeCandidate).toHaveBeenCalledWith(
+      CANDIDATE_ID,
+      "edit",
+      expect.objectContaining({
+        editedTitle: "Edited porosity control",
+        editedDescription: "Clean and dry the joint before welding.",
+        reviewer: "admin@torchlabs.ca",
+      }),
     );
   });
 });

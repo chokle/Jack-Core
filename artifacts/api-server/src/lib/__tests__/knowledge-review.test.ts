@@ -1,6 +1,7 @@
 /**
  * Guard tests for Knowledge Review — resolving queued mentor-concept candidates
- * with Accept / Merge / Reject. Accept and merge must reinforce exactly one
+ * with Accept / Edit / Merge / Reject. Accept, edit, and merge must promote
+ * through the same trusted mentor-provenance path; accept and merge reinforce one
  * canonical node through the SAME mentor-reinforcement machinery as ingestion
  * (mentor provenance edge, alias recording, aggregate recompute); reject must
  * never touch the live graph and must persist its reason; replaying any
@@ -248,6 +249,297 @@ describe("Knowledge Review — accept", () => {
     expect(conflict.ok).toBe(false);
     if (!conflict.ok) expect(conflict.code).toBe("conflict");
     expect(candidates()[0]!["status"]).toBe("accepted");
+  });
+});
+
+describe("Knowledge Review — edit", () => {
+  it("promotes only the reviewer-corrected concept and preserves source provenance and audit", async () => {
+    await seedPendingCandidate();
+    candidates()[0]!["description"] = "Original shielding-gas wording.";
+    const editedTitle = "Protecting GMAW Shielding Gas";
+    const editedDescription =
+      "Keep the nozzle close and protect the arc from drafts.";
+    const editedId = knowledgeNodeId("concept", editedTitle);
+
+    expect(nodeById(editedId)).toBeUndefined();
+    expect(edgeBetween(`mentor:${MENTOR_A}`, editedId)).toBeUndefined();
+
+    const result = await resolveKnowledgeCandidate(candidateId, "edit", {
+      editedTitle,
+      editedDescription,
+      reviewer: "Admin Reviewer",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate).toMatchObject({
+      status: "accepted",
+      title: editedTitle,
+      description: editedDescription,
+      resolvedTargetId: editedId,
+      requestedTargetId: editedId,
+    });
+    expect(result.candidate.resolutionReason).toContain("Admin Reviewer");
+    expect(result.candidate.resolutionReason).toContain(UNCERTAIN_TITLE);
+    expect(result.candidate.resolutionReason).toContain(
+      "Original shielding-gas wording.",
+    );
+
+    // The unedited pending proposal never enters the trusted graph. The edited
+    // node is promoted through the normal mentor provenance edge keyed to the
+    // original answer, so retrieval can trust only the reviewed correction.
+    expect(
+      nodeById(knowledgeNodeId("concept", UNCERTAIN_TITLE)),
+    ).toBeUndefined();
+    expect(nodeById(editedId)).toMatchObject({
+      label: editedTitle,
+      description: editedDescription,
+      verification_status: "mentor_supplied",
+    });
+    expect(
+      (
+        edgeBetween(`mentor:${MENTOR_A}`, editedId)?.["meta"] as Record<
+          string,
+          unknown
+        >
+      )["answerIds"],
+    ).toEqual([ANSWER_1]);
+    expect(await listKnowledgeCandidates("pending")).toHaveLength(0);
+  });
+
+  it("fails closed when edited content is incomplete and leaves the graph untouched", async () => {
+    await seedPendingCandidate();
+    const before = graphSnapshot();
+
+    const missingDescription = await resolveKnowledgeCandidate(
+      candidateId,
+      "edit",
+      { editedTitle: "Corrected title" },
+    );
+    expect(missingDescription).toMatchObject({ ok: false, code: "invalid" });
+    expect(graphSnapshot()).toBe(before);
+    expect(candidates()[0]).toMatchObject({
+      status: "pending",
+      title: UNCERTAIN_TITLE,
+    });
+  });
+
+  it("lets an external database winner exclude a competing edit before any trusted write", async () => {
+    await seedPendingCandidate();
+    const winnerTitle = "External winner shielding practice";
+    const loserTitle = "Competing shielding practice";
+    const winnerId = knowledgeNodeId("concept", winnerTitle);
+    const loserId = knowledgeNodeId("concept", loserTitle);
+    const now = new Date().toISOString();
+    let injected = false;
+    const originalFrom = fake.from.bind(fake);
+    const fromSpy = vi.spyOn(fake, "from").mockImplementation((table) => {
+      const query = originalFrom(table);
+      if (table !== "knowledge_candidates") return query;
+      const mutable = query as unknown as {
+        update: (values: Record<string, unknown>) => unknown;
+      };
+      const originalUpdate = mutable.update.bind(query);
+      mutable.update = (values) => {
+        if (
+          !injected &&
+          typeof values["redirect_reason"] === "string" &&
+          values["redirect_reason"].startsWith("resolution-claim:")
+        ) {
+          injected = true;
+          // Simulate another API instance completing its own DB decision and
+          // trusted graph write immediately before this instance's claim CAS.
+          Object.assign(candidates()[0]!, {
+            status: "accepted",
+            title: winnerTitle,
+            description: "The external reviewer's correction.",
+            resolved_target_id: winnerId,
+            requested_target_id: winnerId,
+            resolution_reason: "external winner audit",
+            redirect_reason: null,
+            resolved_at: now,
+            updated_at: now,
+          });
+          nodes().push({
+            id: winnerId,
+            kind: "concept",
+            label: winnerTitle,
+            description: "The external reviewer's correction.",
+            trade: TRADE,
+            verification_status: "mentor_supplied",
+            confidence: 0.8,
+            embedding: JSON.stringify(BASE_VEC),
+            aliases: [],
+            created_at: now,
+            updated_at: now,
+          });
+          edges().push({
+            id: `external:${winnerId}`,
+            source_id: `mentor:${MENTOR_A}`,
+            target_id: winnerId,
+            kind: "knowledge",
+            weight: 1,
+            meta: { answerIds: [ANSWER_1] },
+            created_at: now,
+          });
+        }
+        return originalUpdate(values);
+      };
+      return query;
+    });
+
+    try {
+      const result = await resolveKnowledgeCandidate(candidateId, "edit", {
+        editedTitle: loserTitle,
+        editedDescription: "The losing reviewer's correction.",
+        reviewer: "Losing Admin",
+      });
+
+      expect(injected).toBe(true);
+      expect(result).toMatchObject({ ok: false, code: "conflict" });
+      expect(nodeById(loserId)).toBeUndefined();
+      expect(nodeById(winnerId)).toMatchObject({
+        verification_status: "mentor_supplied",
+      });
+      const competingNodes = nodes().filter((node) =>
+        [winnerId, loserId].includes(String(node["id"])),
+      );
+      expect(competingNodes).toHaveLength(1);
+      const competingContributions = edges().filter(
+        (edge) =>
+          edge["source_id"] === `mentor:${MENTOR_A}` &&
+          [winnerId, loserId].includes(String(edge["target_id"])),
+      );
+      expect(competingContributions).toHaveLength(1);
+      expect(
+        (competingContributions[0]!["meta"] as Record<string, unknown>)[
+          "answerIds"
+        ],
+      ).toEqual([ANSWER_1]);
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("retries the same durable claim after finalization crashes and reconverges one trusted contribution", async () => {
+    await seedPendingCandidate();
+    const editedTitle = "Crash-safe shielding practice";
+    const editedDescription = "Protect the arc from drafts.";
+    const editedId = knowledgeNodeId("concept", editedTitle);
+
+    // The claim update succeeds; the candidate finalization update fails after
+    // the deterministic graph upserts have landed.
+    fake.passNext("knowledge_candidates", "update");
+    fake.failNext("knowledge_candidates", "update");
+    await expect(
+      resolveKnowledgeCandidate(candidateId, "edit", {
+        editedTitle,
+        editedDescription,
+        reviewer: "Admin Reviewer",
+      }),
+    ).rejects.toMatchObject({ message: expect.any(String) });
+
+    expect(candidates()[0]).toMatchObject({
+      status: "pending",
+      requested_target_id: editedId,
+    });
+    expect(String(candidates()[0]!["redirect_reason"])).toMatch(
+      /^resolution-claim:[a-f0-9]{64}$/,
+    );
+    expect(nodeById(editedId)).toBeDefined();
+    expect(edgeBetween(`mentor:${MENTOR_A}`, editedId)).toBeDefined();
+
+    const competing = await resolveKnowledgeCandidate(candidateId, "edit", {
+      editedTitle: "Different correction",
+      editedDescription: "A competing decision.",
+      reviewer: "Other Admin",
+    });
+    expect(competing).toMatchObject({ ok: false, code: "conflict" });
+    expect(
+      nodeById(knowledgeNodeId("concept", "Different correction")),
+    ).toBeUndefined();
+
+    const retry = await resolveKnowledgeCandidate(candidateId, "edit", {
+      editedTitle,
+      editedDescription,
+      reviewer: "Admin Reviewer",
+    });
+    expect(retry).toMatchObject({ ok: true, replayed: false });
+    expect(candidates()[0]).toMatchObject({
+      status: "accepted",
+      title: editedTitle,
+      description: editedDescription,
+      resolved_target_id: editedId,
+      requested_target_id: editedId,
+      redirect_reason: null,
+    });
+    expect(nodes().filter((node) => node["id"] === editedId)).toHaveLength(1);
+    const contributions = edges().filter(
+      (edge) =>
+        edge["source_id"] === `mentor:${MENTOR_A}` &&
+        edge["target_id"] === editedId,
+    );
+    expect(contributions).toHaveLength(1);
+    expect(
+      (contributions[0]!["meta"] as Record<string, unknown>)["answerIds"],
+    ).toEqual([ANSWER_1]);
+    expect(
+      retry.ok ? retry.candidate.resolutionReason?.match(/Edit audit:/g) : null,
+    ).toHaveLength(1);
+  });
+
+  it("preserves immutable edit history through reopen and later review decisions", async () => {
+    await seedPendingCandidate();
+    candidates()[0]!["description"] = "The original proposal description.";
+
+    const first = await resolveKnowledgeCandidate(candidateId, "edit", {
+      editedTitle: "First reviewed correction",
+      editedDescription: "First corrected description.",
+      reviewer: "First Admin",
+    });
+    expect(first.ok).toBe(true);
+    const firstAudit = first.ok ? first.candidate.resolutionReason : null;
+    expect(firstAudit).toContain("First Admin");
+    expect(firstAudit).toContain(UNCERTAIN_TITLE);
+    expect(firstAudit).toContain("The original proposal description.");
+
+    const reopenedFirst = await resolveKnowledgeCandidate(
+      candidateId,
+      "reopen",
+    );
+    expect(reopenedFirst.ok).toBe(true);
+    if (!reopenedFirst.ok) return;
+    expect(reopenedFirst.candidate.resolutionReason).toBe(firstAudit);
+
+    const second = await resolveKnowledgeCandidate(candidateId, "edit", {
+      editedTitle: "Second reviewed correction",
+      editedDescription: "Second corrected description.",
+      reviewer: "Second Admin",
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.candidate.resolutionReason).toContain("First Admin");
+    expect(second.candidate.resolutionReason).toContain(UNCERTAIN_TITLE);
+    expect(second.candidate.resolutionReason).toContain("Second Admin");
+    expect(second.candidate.resolutionReason).toContain(
+      "First reviewed correction",
+    );
+
+    const reopenedSecond = await resolveKnowledgeCandidate(
+      candidateId,
+      "reopen",
+    );
+    expect(reopenedSecond.ok).toBe(true);
+    const rejected = await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "Superseded after two corrections.",
+    });
+    expect(rejected.ok).toBe(true);
+    if (!rejected.ok) return;
+    expect(rejected.candidate.resolutionReason).toContain("First Admin");
+    expect(rejected.candidate.resolutionReason).toContain("Second Admin");
+    expect(rejected.candidate.resolutionReason).toContain(
+      "Superseded after two corrections.",
+    );
   });
 });
 
@@ -903,6 +1195,48 @@ describe("Knowledge Review — misc", () => {
 });
 
 describe("Knowledge Review — concurrency", () => {
+  for (const action of ["accept", "edit", "merge", "reject"] as const) {
+    it(`${action} can claim and resolve a historical pending row with legacy target metadata`, async () => {
+      await seedPendingCandidate();
+      candidates()[0]!["requested_target_id"] = "legacy:reviewer-intent";
+      candidates()[0]!["redirect_reason"] = "legacy pending note";
+      const other = makeItem("concept", "Historical merge destination");
+      if (action === "merge") {
+        await syncVideoKnowledge("vid-1", [other]);
+      }
+
+      const result = await resolveKnowledgeCandidate(
+        candidateId,
+        action,
+        action === "edit"
+          ? {
+              editedTitle: "Historically corrected concept",
+              editedDescription: "Corrected after an older review attempt.",
+              reviewer: "Admin Reviewer",
+            }
+          : action === "merge"
+            ? { targetNodeId: other.id }
+            : action === "reject"
+              ? { reason: "Historical proposal rejected." }
+              : {},
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.replayed).toBe(false);
+      expect(result.candidate.status).toBe(
+        action === "merge"
+          ? "merged"
+          : action === "reject"
+            ? "rejected"
+            : "accepted",
+      );
+      expect(String(result.candidate.redirectReason ?? "")).not.toMatch(
+        /^resolution-claim:/,
+      );
+    });
+  }
+
   it("two conflicting concurrent resolutions produce exactly one graph reinforcement", async () => {
     await seedPendingCandidate();
     const other = makeItem("concept", "Shielding Gas Discipline");
@@ -975,5 +1309,24 @@ describe("Knowledge Review — concurrency", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("conflict");
     expect(candidates()[0]!["status"]).toBe("rejected");
+  });
+
+  it("reject cannot steal a pending row durably claimed by a graph writer", async () => {
+    await seedPendingCandidate();
+    candidates()[0]!["requested_target_id"] = canonicalId;
+    candidates()[0]!["redirect_reason"] = "resolution-claim:external";
+    const before = graphSnapshot();
+
+    const result = await resolveKnowledgeCandidate(candidateId, "reject", {
+      reason: "Competing rejection",
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "conflict" });
+    expect(candidates()[0]).toMatchObject({
+      status: "pending",
+      requested_target_id: canonicalId,
+      redirect_reason: "resolution-claim:external",
+    });
+    expect(graphSnapshot()).toBe(before);
   });
 });
