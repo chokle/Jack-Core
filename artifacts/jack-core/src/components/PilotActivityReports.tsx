@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
 
@@ -129,6 +129,7 @@ export function PilotActivityReports() {
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [endOfDay, setEndOfDay] = useState<EndOfDayResponse | null>(null);
   const [loadingEndOfDay, setLoadingEndOfDay] = useState(false);
+  const endOfDayRequestRef = useRef(0);
   const selected = useMemo(
     () => scopes.find((scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey),
     [scopes, selectedKey],
@@ -149,8 +150,10 @@ export function PilotActivityReports() {
 
   useEffect(() => {
     if (!query) return;
+    endOfDayRequestRef.current += 1;
     setTimeline(null);
     setEndOfDay(null);
+    setLoadingEndOfDay(false);
     setError(null);
     void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
       .then(setReport)
@@ -158,17 +161,29 @@ export function PilotActivityReports() {
   }, [query]);
 
   const loadEndOfDay = async () => {
+    const requestId = ++endOfDayRequestRef.current;
+    const requestedDate = reportDate;
+    const requestedQuery = query;
     setLoadingEndOfDay(true);
     setError(null);
     setEndOfDay(null);
     try {
-      setEndOfDay(await json<EndOfDayResponse>(
-        `/api/testing/reports/end-of-day?${query}&date=${encodeURIComponent(reportDate)}`,
-      ));
+      const body = await json<EndOfDayResponse>(
+        `/api/testing/reports/end-of-day?${requestedQuery}&date=${encodeURIComponent(requestedDate)}`,
+      );
+      if (
+        requestId === endOfDayRequestRef.current &&
+        requestedDate === reportDate &&
+        requestedQuery === query
+      ) setEndOfDay(body);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "End-of-day report unavailable.");
+      if (
+        requestId === endOfDayRequestRef.current &&
+        requestedDate === reportDate &&
+        requestedQuery === query
+      ) setError(reason instanceof Error ? reason.message : "End-of-day report unavailable.");
     } finally {
-      setLoadingEndOfDay(false);
+      if (requestId === endOfDayRequestRef.current) setLoadingEndOfDay(false);
     }
   };
 
@@ -254,8 +269,10 @@ export function PilotActivityReports() {
                 className="mt-1 block rounded-md border border-border bg-background p-2"
                 value={reportDate}
                 onChange={(event) => {
+                  endOfDayRequestRef.current += 1;
                   setReportDate(event.target.value);
                   setEndOfDay(null);
+                  setLoadingEndOfDay(false);
                 }}
               />
             </label>

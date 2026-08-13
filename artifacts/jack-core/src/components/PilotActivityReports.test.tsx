@@ -182,4 +182,64 @@ describe("pilot end-of-day report UI", () => {
     expect(screen.queryByTestId("end-of-day-report")).toBeNull();
     expect(await screen.findByText("Telemetry unavailable.")).toBeTruthy();
   });
+
+  it("ignores a slow response after switching to another date", async () => {
+    let resolveSlow!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/testing/reports/scopes")
+          return ok({ scopes: [scope] });
+        if (url.includes("/api/testing/reports/summary?")) {
+          return ok({
+            summary: {
+              participantCount: 0,
+              sessionCount: 0,
+              completedSessions: 0,
+              completionRate: 0,
+              onboardingCompletionRate: 0,
+              recordingOptInRate: 0,
+              feedbackCount: 0,
+              droppedEventCount: 0,
+              rejectedEventCount: 0,
+              eventCounts: {},
+            },
+            users: [],
+            generatedAt: "2026-08-13T00:00:00.000Z",
+          });
+        }
+        if (url.includes("date=2026-08-12")) {
+          return new Promise<Response>((resolve) => {
+            resolveSlow = resolve;
+          });
+        }
+        if (url.includes("date=2026-08-11"))
+          return ok(endOfDay("INCOMPLETE_TELEMETRY"));
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    render(<PilotActivityReports />);
+    const date = screen.getByLabelText("End-of-day report date (UTC)");
+    const load = await screen.findByRole("button", {
+      name: "Load end-of-day report",
+    });
+    fireEvent.change(date, { target: { value: "2026-08-12" } });
+    fireEvent.click(load);
+    fireEvent.change(date, { target: { value: "2026-08-11" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load end-of-day report" }),
+    );
+    expect(await screen.findByText("Incomplete telemetry")).toBeTruthy();
+    resolveSlow(
+      new Response(JSON.stringify(endOfDay("VERIFIED_ZERO_ACTIVITY")), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("Verified zero activity")).toBeNull();
+      expect(screen.getByText("Incomplete telemetry")).toBeTruthy();
+    });
+  });
 });
