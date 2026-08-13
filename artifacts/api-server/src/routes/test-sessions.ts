@@ -58,9 +58,14 @@ function eventProjectionFromRow(
   const metadata = (event["metadata"] ?? {}) as Record<string, unknown>;
   const updates: Record<string, unknown> = {
     app_session_id: event["app_session_id"] ?? session.app_session_id,
-    last_activity_at: now,
-    updated_at: now,
   };
+  const countsAsActivity = canonicalEventType !== "activity_heartbeat" || (
+    metadata["visibility"] === "foreground" && metadata["meaningful_activity"] === true
+  );
+  if (countsAsActivity) {
+    updates.last_activity_at = now;
+    updates.updated_at = now;
+  }
   if (canonicalEventType === "onboarding_started") updates.onboarding_status = "in_progress";
   if (canonicalEventType === "onboarding_step_completed") {
     updates.onboarding_status = "in_progress";
@@ -432,7 +437,7 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
     if (!("error" in prevalidated)) {
       const existingEvent = await db
         .from("test_events")
-        .select("event_id")
+        .select("event_id,event_type,metadata,app_session_id")
         .eq("event_id", prevalidated.value.eventId)
         .eq("test_session_id", req.params.id)
         .eq("actor_user_id", identity.userId)

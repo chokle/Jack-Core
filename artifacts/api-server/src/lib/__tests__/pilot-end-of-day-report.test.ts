@@ -137,6 +137,20 @@ describe("pilot end-of-day report", () => {
     ).toBe("INCOMPLETE_TELEMETRY");
   });
 
+  it("uses a hidden heartbeat as health evidence without inventing activity", () => {
+    const result = report({
+      events: [
+        event("user-1", "tab-1", 1, {
+          visibility: "hidden",
+          meaningful_activity: false,
+        }),
+      ],
+    });
+    expect(result.reportState).toBe("VERIFIED_ZERO_ACTIVITY");
+    expect(result.activeUserCount).toBe(0);
+    expect(result.verifiedActiveMs).toBe(0);
+  });
+
   it("deduplicates stable event IDs before every aggregate", () => {
     const heartbeat1 = event("user-1", "tab-1", 0, {
       visibility: "foreground",

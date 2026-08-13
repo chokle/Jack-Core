@@ -207,6 +207,33 @@ describe("pilot activity reports", () => {
     });
   });
 
+  it("derives exact-window health from a stored hidden heartbeat without counting activity", async () => {
+    fake.tables.test_events = [{
+      event_id: "14141414-1414-4414-8414-141414141414",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: "55555555-5555-4555-8555-555555555555",
+      app_session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      event_type: "activity_heartbeat",
+      occurred_at: "2026-07-25T00:30:00.000Z",
+      surface: "app",
+      result: "success",
+      metadata: { visibility: "hidden", meaningful_activity: false },
+      schema_version: 1,
+    }];
+    const response = await request(app()).get(
+      `/api/testing/reports/end-of-day?${query}&date=2026-07-25`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.report).toMatchObject({
+      reportState: "VERIFIED_ZERO_ACTIVITY",
+      activeUserCount: 0,
+      verifiedActiveMs: 0,
+      telemetryHealth: { complete: true, telemetryPathObserved: true },
+    });
+  });
+
   it("denies cross-organization access and presentation mode", async () => {
     const denied = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,

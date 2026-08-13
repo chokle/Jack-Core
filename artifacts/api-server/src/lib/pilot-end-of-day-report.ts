@@ -41,6 +41,12 @@ function qualifyingHeartbeat(row: Record<string, unknown>): boolean {
   );
 }
 
+function meaningfulActivityEvent(row: Record<string, unknown>): boolean {
+  return row["event_type"] === "activity_heartbeat"
+    ? qualifyingHeartbeat(row)
+    : true;
+}
+
 function activeIntervals(
   events: Array<Record<string, unknown>>,
   windowStart: number,
@@ -158,17 +164,18 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
     const actorEvents = windowEvents.filter(
       (row) => row["actor_user_id"] === actorUserId,
     );
+    const actorActivityEvents = actorEvents.filter(meaningfulActivityEvent);
     const actorSessions = input.sessions.filter(
       (row) => row["actor_user_id"] === actorUserId,
     );
-    const activityTimestamps = actorEvents
+    const activityTimestamps = actorActivityEvents
       .map((row) => timestamp(row["occurred_at"]))
       .filter((value): value is number => value != null)
       .sort((left, right) => left - right);
     return {
       actorUserId,
       authenticated: actorSessions.length > 0,
-      active: actorEvents.length > 0,
+      active: actorActivityEvents.length > 0,
       firstActivityAt: activityTimestamps.length
         ? new Date(activityTimestamps[0]!).toISOString()
         : null,
@@ -199,7 +206,7 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
         canonical.missingEventIdCount > 0 ||
         !telemetryPathObserved
       ? "INCOMPLETE_TELEMETRY"
-      : windowEvents.length === 0
+      : !windowEvents.some(meaningfulActivityEvent)
         ? "VERIFIED_ZERO_ACTIVITY"
         : "VERIFIED_COMPLETE";
 

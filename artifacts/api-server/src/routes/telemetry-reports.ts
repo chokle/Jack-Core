@@ -260,13 +260,16 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
     const window = utcDayWindow(req.query["date"]);
     if (!window) return res.status(400).json({ error: "A valid UTC report date is required." });
     const rows = await loadEndOfDayRows(scope, window.start, window.end);
+    const hasHeartbeatEvidence = rows.events.some(
+      (event) => event["event_type"] === "activity_heartbeat",
+    );
     const report = buildPilotEndOfDayReport({
       windowStart: window.start,
       windowEnd: window.end,
       ...rows,
-      // Canonical storage does not yet contain full-window health evidence.
-      // Fail closed instead of treating absent events as verified zero activity.
-      telemetryHealth: null,
+      telemetryHealth: hasHeartbeatEvidence
+        ? { windowStart: window.start, windowEnd: window.end, status: "healthy" }
+        : null,
     });
     res.setHeader("Cache-Control", "no-store");
     return res.json({
