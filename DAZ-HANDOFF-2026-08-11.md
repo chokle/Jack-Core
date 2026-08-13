@@ -1,7 +1,7 @@
 # Daz implementation handoff — Jack pilot hardening
 
-Recipient: Daz  
-Prepared by: Dex (Codex)  
+Recipient: Daz
+Prepared by: Dex (Codex)
 Delivery status: delivered via PR; not reviewed by Daz
 
 ## Review surface
