@@ -473,6 +473,58 @@ describe("pilot activity reports", () => {
     });
   });
 
+  it("fails closed when concurrent chat counts mix an expected schema error with an unexpected error", async () => {
+    fake.passNext("chat_messages", "select");
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.organization_id does not exist",
+    });
+    fake.failNext("chat_messages", "select", {
+      code: "42501",
+      message: "permission denied for table chat_messages",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "Pilot report could not be generated.",
+    });
+  });
+
+  it("reports chat evidence unavailable for a missing scope column when there are no actors", async () => {
+    fake.tables.test_sessions = [];
+    fake.tables.pilot_memberships = fake.tables.pilot_memberships.filter(
+      (membership) => membership.role !== "tester",
+    );
+    fake.failNext("chat_messages", "select", {
+      code: "PGRST204",
+      message:
+        "Could not find the 'pilot_id' column of 'chat_messages' in the schema cache",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation).toMatchObject({
+      enrolledTesterIds: [],
+      observedSessionActorIds: [],
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
   it("does not degrade for a missing column outside the required capability set", async () => {
     fake.failNext("chat_messages", "select", {
       code: "42703",

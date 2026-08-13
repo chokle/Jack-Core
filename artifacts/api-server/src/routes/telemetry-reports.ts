@@ -257,6 +257,7 @@ function buildReconciliation(
 async function loadScopeRows(scope: PilotScope) {
   const [
     chatSessionCapability,
+    chatScopeCapability,
     sessions,
     events,
     feedback,
@@ -266,6 +267,12 @@ async function loadScopeRows(scope: PilotScope) {
     db
       .from("test_sessions")
       .select("chat_session_id", { head: true })
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .limit(1),
+    db
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId)
       .limit(1),
@@ -299,12 +306,14 @@ async function loadScopeRows(scope: PilotScope) {
       .eq("role", "tester")
       .eq("active", true),
   ]);
-  if (
-    chatSessionCapability.error &&
-    !isExpectedMissingChatCapability(chatSessionCapability.error)
-  ) {
-    throw chatSessionCapability.error;
-  }
+  const capabilityErrors = [
+    chatSessionCapability.error,
+    chatScopeCapability.error,
+  ].filter(Boolean);
+  const unexpectedCapabilityError = capabilityErrors.find(
+    (error) => !isExpectedMissingChatCapability(error),
+  );
+  if (unexpectedCapabilityError) throw unexpectedCapabilityError;
   const failed = [sessions, events, feedback, failures, memberships].find(
     (result) => result.error,
   );
@@ -324,9 +333,10 @@ async function loadScopeRows(scope: PilotScope) {
       ),
     ]),
   ];
-  let chatActivityEvidence: ChatActivityEvidence = chatSessionCapability.error
-    ? { status: "unavailable", reason: "schema_capability_missing" }
-    : { status: "available" };
+  let chatActivityEvidence: ChatActivityEvidence =
+    capabilityErrors.length > 0
+      ? { status: "unavailable", reason: "schema_capability_missing" }
+      : { status: "available" };
   let chatActivityCountsByActor: Record<string, number> | null = null;
   if (chatActivityEvidence.status === "available") {
     const chatCountEntries = await Promise.all(
@@ -358,12 +368,14 @@ async function loadScopeRows(scope: PilotScope) {
                 .is("pilot_id", null)
             : Promise.resolve({ count: 0, error: null }),
         ]);
-        const missingCapability = [scopedCount.error, legacyCount.error].find(
-          (error) => error && isExpectedMissingChatCapability(error),
+        const countErrors = [scopedCount.error, legacyCount.error].filter(
+          Boolean,
         );
-        if (missingCapability) return null;
-        if (scopedCount.error) throw scopedCount.error;
-        if (legacyCount.error) throw legacyCount.error;
+        const unexpectedCountError = countErrors.find(
+          (error) => !isExpectedMissingChatCapability(error),
+        );
+        if (unexpectedCountError) throw unexpectedCountError;
+        if (countErrors.length > 0) return null;
         return [
           actorUserId,
           (scopedCount.count ?? 0) + (legacyCount.count ?? 0),

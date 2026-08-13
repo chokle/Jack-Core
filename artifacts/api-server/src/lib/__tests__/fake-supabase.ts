@@ -153,7 +153,16 @@ export class FakeSupabase {
     knowledge_edges: [],
     chat_messages: [],
   };
-  private failures = new Map<string, QueryError>();
+  private failures = new Map<string, Array<QueryError | null>>();
+
+  private enqueueResult(
+    table: string,
+    operation: "select" | "insert" | "update" | "delete",
+    error: QueryError | null,
+  ): void {
+    const key = `${table}:${operation}`;
+    this.failures.set(key, [...(this.failures.get(key) ?? []), error]);
+  }
 
   failNext(
     table: string,
@@ -162,14 +171,22 @@ export class FakeSupabase {
       message: `forced ${operation} failure for ${table}`,
     },
   ): void {
-    this.failures.set(`${table}:${operation}`, error);
+    this.enqueueResult(table, operation, error);
+  }
+
+  passNext(
+    table: string,
+    operation: "select" | "insert" | "update" | "delete",
+  ): void {
+    this.enqueueResult(table, operation, null);
   }
 
   consumeFailure(table: string, operation: string): QueryError | null {
     const key = `${table}:${operation}`;
-    const error = this.failures.get(key);
-    if (!error) return null;
-    this.failures.delete(key);
+    const queued = this.failures.get(key);
+    if (!queued || queued.length === 0) return null;
+    const error = queued.shift() ?? null;
+    if (queued.length === 0) this.failures.delete(key);
     return error;
   }
 
