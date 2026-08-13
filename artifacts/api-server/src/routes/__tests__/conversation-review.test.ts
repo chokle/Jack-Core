@@ -309,6 +309,101 @@ describe("pilot conversation review", () => {
     expect(response.body.conversations).toEqual([]);
   });
 
+  it("excludes messages linked to an older withdrawn grant after consent is re-granted", async () => {
+    fake.tables.conversation_review_consents = [
+      {
+        id: "old-review-grant",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "old-scoped-session",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-01T10:00:00.000Z",
+        created_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "review-withdrawal",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "old-scoped-session",
+        state: "withdrawn",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-05T10:00:00.000Z",
+        created_at: "2026-08-05T10:00:00.000Z",
+      },
+      {
+        id: "current-review-grant",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        chat_session_id: "current-scoped-session",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-conversation-review-addendum-2026-08-11",
+        occurred_at: "2026-08-12T10:00:00.000Z",
+        created_at: "2026-08-12T10:00:00.000Z",
+      },
+    ];
+    fake.tables.chat_messages = [
+      {
+        id: "old-linked-question",
+        user_id: "tester-1",
+        session_id: "old-scoped-session",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        conversation_review_consent_id: "old-review-grant",
+        role: "user",
+        content: "Question from the withdrawn grant",
+        citations: [],
+        created_at: "2026-08-02T10:00:00.000Z",
+      },
+      {
+        id: "current-linked-question",
+        user_id: "tester-1",
+        session_id: "current-scoped-session",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        conversation_review_consent_id: "current-review-grant",
+        role: "user",
+        content: "Question from the current grant",
+        citations: [],
+        created_at: "2026-08-12T10:01:00.000Z",
+      },
+      {
+        id: "current-linked-answer",
+        user_id: "tester-1",
+        session_id: "current-scoped-session",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        conversation_review_consent_id: "current-review-grant",
+        role: "assistant",
+        content: "Answer under the current grant",
+        citations: [],
+        created_at: "2026-08-12T10:01:01.000Z",
+      },
+    ];
+
+    const response = await request(app()).get(
+      `/api/testing/conversation-review?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.conversations).toEqual([
+      expect.objectContaining({
+        participantId: "tester-1",
+        question: "Question from the current grant",
+        response: "Answer under the current grant",
+      }),
+    ]);
+    expect(JSON.stringify(response.body)).not.toContain(
+      "Question from the withdrawn grant",
+    );
+  });
+
   it("orders merged historical and scoped rows by parsed timestamps", async () => {
     fake.tables.chat_messages = [
       {

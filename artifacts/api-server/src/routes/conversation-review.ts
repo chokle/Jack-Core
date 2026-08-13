@@ -90,7 +90,11 @@ async function requireConversationReviewScope(
 
 function currentConsentedParticipants(
   rows: Array<Record<string, unknown>>,
-): Array<{ participantId: string; chatSessionId: string }> {
+): Array<{
+  participantId: string;
+  chatSessionId: string;
+  consentId: string;
+}> {
   const latest = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
     const userId = String(row["actor_user_id"] ?? "");
@@ -109,8 +113,11 @@ function currentConsentedParticipants(
     .map(([participantId, row]) => ({
       participantId,
       chatSessionId: String(row["chat_session_id"] ?? ""),
+      consentId: String(row["id"] ?? ""),
     }))
-    .filter((entry) => entry.chatSessionId.length > 0);
+    .filter(
+      (entry) => entry.chatSessionId.length > 0 && entry.consentId.length > 0,
+    );
 }
 
 function serializeExchanges(rows: Array<Record<string, unknown>>) {
@@ -185,6 +192,7 @@ router.get("/testing/conversation-review", async (req, res) => {
     const participantIds = consentedParticipants.map(
       (entry) => entry.participantId,
     );
+    const consentIds = consentedParticipants.map((entry) => entry.consentId);
     if (participantIds.length === 0) {
       return res.json({ conversations: [], truncated: false });
     }
@@ -220,7 +228,7 @@ router.get("/testing/conversation-review", async (req, res) => {
         .in("user_id", participantIds)
         .eq("organization_id", scope.organizationId)
         .eq("pilot_id", scope.pilotId)
-        .not("conversation_review_consent_id", "is", null)
+        .in("conversation_review_consent_id", consentIds)
         .order("created_at", { ascending: true })
         .limit(MAX_CHAT_ROWS + 1),
     ]);
