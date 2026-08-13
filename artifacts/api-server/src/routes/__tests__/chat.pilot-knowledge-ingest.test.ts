@@ -63,11 +63,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Measure and confirm square, level, plumb, slope, and drainage requirements before installation; do not rush.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -79,11 +81,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Check rubbers, gaskets, glues, PVC, mechanical connections, manufacturer specifications, and required cure or wait time.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -95,11 +99,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Rob asked how not to scrape knuckles; the intake contains no validated answer, so ask the supervisor to clarify site conditions and tool choice.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -111,11 +117,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Verify broader drainage behavior and check the basin drain before opening a line.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -127,11 +135,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Review drawings and coordinate slab/penetrations before pour.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
       siteSpecificFinancialContext:
         "Rob noted approximately $50K/day in bank financing and line-of-credit capacity for this company's day-to-day operations; this is not a general cost claim.",
@@ -145,11 +155,13 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Double-check dimensions and confirm the approach before cutting; secure material after installation and do not rush.",
     metadata: {
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -160,10 +172,30 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     body: "Ask, clarify, and understand scope before choosing an approach.",
     metadata: {
       sourceType: "inferred reasoning pattern",
-      pilotId: "001",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Rob Field Notes Intake Form",
+      issueId: 39,
+    },
+  },
+  {
+    id: "e1e1e1e1-0013-4001-8001-000000000013",
+    title: "Verify system behavior before acting on first diagnosis",
+    description: "Inferred pattern from Rob's troubleshooting notes.",
+    body: "Verify the larger system behavior before choosing the first controlled correction.",
+    metadata: {
+      sourceType: "inferred reasoning pattern",
+      pilotId: PILOT_ID_001,
+      organizationId: ORGANIZATION_ID_001,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Rob Field Notes Intake Form",
       issueId: 39,
     },
   },
@@ -368,17 +400,33 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
         res.body.citations as Array<{
           sourceType: "video" | "knowledge";
           entryId?: string;
+          contributor?: string;
+          knowledgeNature?: "direct" | "inferred";
+          evidenceType?: string;
+          originalSource?: string;
         }>
       ).filter((c) => c.sourceType === "knowledge");
-      expect(
-        knowledgeCitations.some((c) => c.entryId === expectedEntryId),
-      ).toBe(true);
+      const citation = knowledgeCitations.find(
+        (c) => c.entryId === expectedEntryId,
+      );
+      expect(citation).toMatchObject({
+        contributor: "Rob",
+        knowledgeNature: "direct",
+        evidenceType: "supervisor field notes",
+        originalSource: "Rob Field Notes Intake Form",
+      });
 
       const lastCall = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
       const systemMessage =
         lastCall?.messages?.find((message) => message.role === "system")
           ?.content ?? "";
       expect(systemMessage).toContain(expectedSystemSnippet);
+      expect(systemMessage).toContain(
+        "Source: Rob Field Notes Intake Form · Contributor: Rob",
+      );
+      expect(systemMessage).toContain(
+        "Classification: direct supervisor-provided knowledge",
+      );
     },
   );
 
@@ -394,19 +442,30 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
       res.body.citations as Array<{
         sourceType: "video" | "knowledge";
         entryId?: string;
+        contributor?: string;
+        knowledgeNature?: "direct" | "inferred";
+        evidenceType?: string;
+        originalSource?: string;
       }>
     ).filter((c) => c.sourceType === "knowledge");
-    expect(
-      knowledgeCitations.some(
-        (c) => c.entryId === "e1e1e1e1-0012-4001-8001-000000000012",
-      ),
-    ).toBe(true);
+    const inferredCitation = knowledgeCitations.find(
+      (c) => c.entryId === "e1e1e1e1-0012-4001-8001-000000000012",
+    );
+    expect(inferredCitation).toMatchObject({
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Rob Field Notes Intake Form",
+    });
 
     const lastCall = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
     const systemMessage =
       lastCall?.messages?.find((message) => message.role === "system")
         ?.content ?? "";
     expect(systemMessage).toContain("Ask, clarify, and understand scope");
+    expect(systemMessage).toContain(
+      "Classification: inferred interpretation, not a direct quote",
+    );
   });
 
   it("returns Pilot 001 global entries for unaffiliated users but blocks Pilot 001 entries", async () => {
@@ -433,12 +492,12 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     ).toBe(true);
   });
 
-  it("does not return Pilot 001 entries for an active different pilot user", async () => {
+  it("does not return Pilot 001 entries for a same-name pilot in another organization", async () => {
     seedPilotScope(
       OTHER_PILOT_USER_ID,
       PILOT_ID_002,
       ORGANIZATION_ID_002,
-      "Pilot 002",
+      "Pilot 001",
     );
 
     const res = await request(app)
@@ -563,12 +622,28 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     const pilotRows = rows.filter(
       (row) => row.id !== GLOBAL_KNOWLEDGE_ENTRY.id,
     );
-    expect(pilotRows.every((row) => row.metadata.pilotId === "001")).toBe(true);
+    expect(pilotRows).toHaveLength(8);
+    expect(
+      pilotRows.every((row) => row.metadata.pilotId === PILOT_ID_001),
+    ).toBe(true);
+    expect(
+      pilotRows.every(
+        (row) => row.metadata.organizationId === ORGANIZATION_ID_001,
+      ),
+    ).toBe(true);
     expect(pilotRows.every((row) => row.metadata.contributor === "Rob")).toBe(
       true,
     );
     expect(
-      rows.some((row) => row.metadata.knowledgeNature === "inferred"),
+      pilotRows.filter((row) => row.metadata.knowledgeNature === "direct"),
+    ).toHaveLength(6);
+    expect(
+      pilotRows.filter((row) => row.metadata.knowledgeNature === "inferred"),
+    ).toHaveLength(2);
+    expect(
+      pilotRows.every(
+        (row) => row.metadata.originalSource === "Rob Field Notes Intake Form",
+      ),
     ).toBe(true);
   });
 

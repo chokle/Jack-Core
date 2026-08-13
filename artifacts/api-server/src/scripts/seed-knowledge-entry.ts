@@ -21,6 +21,24 @@ import type { KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
  */
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function requiredUuid(name: string): string {
+  const value = process.env[name]?.trim() ?? "";
+  if (!UUID_RE.test(value)) {
+    throw new Error(`${name} must be the canonical UUID before seeding`);
+  }
+  return value;
+}
+
+// These identifiers are operational configuration, not short labels or names.
+// Requiring the exact pair prevents two organizations with the same pilot name
+// from sharing a retrieval scope.
+const PILOT_001_SCOPE = {
+  pilotId: requiredUuid("PILOT_001_ID"),
+  organizationId: requiredUuid("PILOT_001_ORGANIZATION_ID"),
+};
 
 interface EntryImage {
   /** Absolute path to the source image file. */
@@ -300,12 +318,13 @@ Use accurate clamp thermocouples and a calibrated manifold or probes — small t
       entryNumber: 6,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -338,12 +357,13 @@ The intake notes contain no technical cure time or other numeric value; confirm 
       entryNumber: 7,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -369,12 +389,13 @@ The intake does not contain a validated answer. Ask the supervisor to clarify th
       entryNumber: 8,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -406,12 +427,13 @@ The intake does not contain a validated answer. Ask the supervisor to clarify th
       entryNumber: 9,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -439,12 +461,13 @@ The intake does not contain a validated answer. Ask the supervisor to clarify th
       entryNumber: 10,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
       siteSpecificFinancialContext:
         "Rob noted approximately $50K/day in bank financing/line-of-credit capacity for this company's day-to-day operations. This is attributed Pilot 001 context, not a general cost claim.",
     },
@@ -480,12 +503,13 @@ The intake does not contain a validated answer. Ask the supervisor to clarify th
       entryNumber: 11,
       issueId: 39,
       sourceType: "supervisor field notes",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
       evidenceType: "supervisor field notes",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -516,12 +540,13 @@ This pattern separates observation from conclusion and reduces avoidable rework.
       entryNumber: 12,
       issueId: 39,
       sourceType: "inferred reasoning pattern",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "inferred",
       evidenceType: "pattern inference",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
   {
@@ -548,12 +573,13 @@ This helps distinguish root cause from appearance.`,
       entryNumber: 13,
       issueId: 39,
       sourceType: "inferred reasoning pattern",
-      pilotId: "001",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "inferred",
       evidenceType: "pattern inference",
-      originalSource: "Issue #39: Rob Field Notes Intake Form",
+      originalSource: "Rob Field Notes Intake Form",
     },
   },
 ];
