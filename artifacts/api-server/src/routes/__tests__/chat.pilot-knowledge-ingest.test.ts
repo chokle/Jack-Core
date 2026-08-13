@@ -60,13 +60,14 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     title: "Plumbing layout: install square, level, and plumb",
     description:
       "Field note on how to confirm square, level, and plumb before committing to install.",
-    body: "Measure twice, check square, level, then plumb before install.",
+    body: "Measure and confirm square, level, plumb, slope, and drainage requirements before installation; do not rush.",
     metadata: {
       sourceType: "supervisor field notes",
       pilotId: "001",
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
     },
   },
@@ -75,13 +76,14 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     title: "Keeping connections truly watertight",
     description:
       "Field note on confirming seal and preventing false confidence before a leak shows up.",
-    body: "Inspect surfaces and gasket condition before tightening each connection.",
+    body: "Check rubbers, gaskets, glues, PVC, mechanical connections, manufacturer specifications, and required cure or wait time.",
     metadata: {
       sourceType: "supervisor field notes",
       pilotId: "001",
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
     },
   },
@@ -90,13 +92,14 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     title: "Work safely without scraping knuckles",
     description:
       "Field note on avoiding common hand injuries while handling pipe and fittings.",
-    body: "Use controlled leverage and stable bracing; move carefully instead of forcing.",
+    body: "Rob asked how not to scrape knuckles; the intake contains no validated answer, so ask the supervisor to clarify site conditions and tool choice.",
     metadata: {
       sourceType: "supervisor field notes",
       pilotId: "001",
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
     },
   },
@@ -112,6 +115,7 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
     },
   },
@@ -127,7 +131,10 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
+      siteSpecificFinancialContext:
+        "Rob noted approximately $50K/day in bank financing and line-of-credit capacity for this company's day-to-day operations; this is not a general cost claim.",
     },
   },
   {
@@ -135,16 +142,15 @@ const ROB_PILOT_ENTRIES: PilotKnowledgeEntry[] = [
     title: "Cut length verification and recheck discipline",
     description:
       "Field note on avoiding wrong cuts, dimension mistakes, and avoidable waste.",
-    body: "Recheck dimensions before forcing a wrong cut into final geometry.",
+    body: "Double-check dimensions and confirm the approach before cutting; secure material after installation and do not rush.",
     metadata: {
       sourceType: "supervisor field notes",
       pilotId: "001",
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
       issueId: 39,
-      failureCost:
-        "Rob noted approximately $50K/day in bank financing and line-of-credit capacity for day-to-day operations.",
     },
   },
   {
@@ -319,17 +325,17 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     {
       prompt: "How do I make sure this install is square and level?",
       expectedEntryId: "e1e1e1e1-0006-4001-8001-000000000006",
-      expectedSystemSnippet: "Measure twice, check square, level, then plumb",
+      expectedSystemSnippet: "Measure and confirm square, level, plumb",
     },
     {
       prompt: "How do I know this connection is actually watertight?",
       expectedEntryId: "e1e1e1e1-0007-4001-8001-000000000007",
-      expectedSystemSnippet: "Inspect surfaces and gasket",
+      expectedSystemSnippet: "Check rubbers, gaskets, glues, PVC",
     },
     {
       prompt: "How do I stop scraping my knuckles doing this?",
       expectedEntryId: "e1e1e1e1-0008-4001-8001-000000000008",
-      expectedSystemSnippet: "controlled leverage and stable bracing",
+      expectedSystemSnippet: "contains no validated answer",
     },
     {
       prompt: "The drain is backing up. Is the line plugged?",
@@ -345,7 +351,7 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     {
       prompt: "I already cut it but the measurement is wrong.",
       expectedEntryId: "e1e1e1e1-0011-4001-8001-000000000011",
-      expectedSystemSnippet: "Recheck dimensions",
+      expectedSystemSnippet: "Double-check dimensions and confirm the approach",
     },
   ];
 

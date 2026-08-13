@@ -289,15 +289,12 @@ Use accurate clamp thermocouples and a calibrated manifold or probes — small t
       "inspection",
     ],
     description:
-      "Field note on how to confirm square, level, and plumb before committing to install.",
-    body: `Sequence for a clean plumbing install:
-- Mark the line and identify each anchor point from the plan.
-- Set both level and plumb checks before fastening or gluing.
-- Verify twice in both directions: square, then level, then plumb, then re-check all dimensions.
-- Only then install in one pass.
-
-Common mistake: rushing through layout and assuming a board check is good enough.
-The correction method is to recheck before each major install step.`,
+      "Rob's field note on confirming square, level, and plumb before committing to install.",
+    body: `Rob's intake guidance:
+- Measure and confirm before installation.
+- Use plumbing best practices and the applicable manufacturer specifications.
+- Confirm slope and drainage requirements.
+- Do not rush the installation.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 6,
@@ -307,7 +304,7 @@ The correction method is to recheck before each major install step.`,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
     },
   },
@@ -327,14 +324,15 @@ The correction method is to recheck before each major install step.`,
       "connections",
     ],
     description:
-      "Field note on confirming seal and preventing false confidence before a leak shows up.",
-    body: `When a connection must stay watertight:
-- Make sure every joint is seated and fully tightened evenly.
-- Inspect surfaces and gaskets before final assembly.
-- Confirm each connection can be pressure checked in sequence before it is closed off.
+      "Rob's field-note checklist for sealed and watertight connections.",
+    body: `Connection areas Rob identified for checking:
+- rubbers and gaskets,
+- glues and PVC,
+- mechanical connections,
+- applicable manufacturer specifications,
+- and required cure or wait time.
 
-Do not treat a single visual sign as proof. Ask for a pressure check before handoff when possible.
-If signs are uncertain, stop and confirm the sequence rather than guessing what is wrong.`,
+The intake notes contain no technical cure time or other numeric value; confirm those details from the applicable manufacturer specification.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 7,
@@ -344,7 +342,7 @@ If signs are uncertain, stop and confirm the sequence rather than guessing what 
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
     },
   },
@@ -362,13 +360,10 @@ If signs are uncertain, stop and confirm the sequence rather than guessing what 
       "materials handling",
     ],
     description:
-      "Field note on avoiding common hand injuries while handling pipe and fittings.",
-    body: `Use calm setup and leverage over force:
-- Keep the hand braced, gloves fit correctly, and edges known before moving pipe.
-- Let the tool do the correction, then re-check line and alignment.
-- Move slowly through a task and do not force a part to seat by hand if the geometry is off.
+      "An unresolved field-practice and tool-access question recorded in Rob's intake.",
+    body: `Rob's literal recurring question: "How not to scrape knuckles?"
 
-This is a practical safety-first pattern when working in tight spaces.`,
+The intake does not contain a validated answer. Ask the supervisor to clarify the site conditions, access, and tool choice rather than inventing guidance from this record.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 8,
@@ -378,7 +373,7 @@ This is a practical safety-first pattern when working in tight spaces.`,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
     },
   },
@@ -400,12 +395,12 @@ This is a practical safety-first pattern when working in tight spaces.`,
     ],
     description:
       "Field note on how to confirm the actual block points before choosing a fix.",
-    body: `When a drain appears plugged:
-- First confirm actual blockage signs across the whole drainage behavior.
-- Check the basin drain and nearby connections, not just one symptom.
-- Verify body connections before assuming rework or re-pipe.
-
-The wrong move is to jump from the first observed symptom directly into rework.`,
+    body: `When drains appear plugged or systems back up, Rob's checks are:
+- determine whether material is actually stuck in the drain lines,
+- determine whether the drains are truly plugged,
+- check whether the broader drainage and foundation area drains properly,
+- check the basin drain,
+- and confirm drain bodies are connected properly.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 9,
@@ -415,7 +410,7 @@ The wrong move is to jump from the first observed symptom directly into rework.`
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
     },
   },
@@ -435,12 +430,10 @@ The wrong move is to jump from the first observed symptom directly into rework.`
     ],
     description:
       "Field note on pre-pour coordination to avoid stoppages and expensive exposure.",
-    body: `Coordinate slab and vertical mechanical penetrations before pour with:
-- formwork and reinforcing schedule,
-- mechanical trades,
-- and full drawing review before irreversible work.
-
-Missed coordination can stop or disrupt a pour and create avoidable operational exposure.`,
+    body: `Rob's pre-pour coordination note:
+- Review drawings and identify slab or vertical mechanical penetrations before the pour.
+- Coordinate with formwork, reinforcing, and mechanical trades.
+- Missing this coordination can stop or disrupt a scheduled pour and cause rework or schedule impact.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 10,
@@ -450,8 +443,10 @@ Missed coordination can stop or disrupt a pour and create avoidable operational 
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
+      siteSpecificFinancialContext:
+        "Rob noted approximately $50K/day in bank financing/line-of-credit capacity for this company's day-to-day operations. This is attributed Pilot 001 context, not a general cost claim.",
     },
   },
   {
@@ -471,12 +466,15 @@ Missed coordination can stop or disrupt a pour and create avoidable operational 
     ],
     description:
       "Field note on avoiding wrong cuts, dimension mistakes, and avoidable waste.",
-    body: `If a piece is cut and the measurement is wrong:
-- do not force it into place to hide the error;
-- confirm actual dimensions and decide whether to trim, re-cut, or revise the sequence.
-- keep material controlled and secured after install to prevent losses and callbacks.
-
-This is a common area where rushing causes waste and schedule risk.`,
+    body: `Common apprentice mistakes Rob identified:
+- cutting material to the wrong length,
+- failing to double-check dimensions,
+- committing work before taking enough time to confirm the approach,
+- wasting material and adding cost,
+- failing to secure material after installation,
+- rushing or lacking diligence,
+- improper framing penetrations,
+- and improper coring, layout, or installation on slab.`,
     metadata: {
       origin: "manual-seed",
       entryNumber: 11,
@@ -486,10 +484,8 @@ This is a common area where rushing causes waste and schedule risk.`,
       pilotName: "Pilot 001",
       contributor: "Rob",
       knowledgeNature: "direct",
-      evidenceType: "field note",
+      evidenceType: "supervisor field notes",
       originalSource: "Issue #39: Rob Field Notes Intake Form",
-      failureCost:
-        "Rob noted approximately $50K/day in bank financing/line-of-credit capacity for day-to-day operations.",
     },
   },
   {
