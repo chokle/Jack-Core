@@ -12,8 +12,10 @@ function event(
   appSession: string,
   minute: number,
   metadata?: Record<string, unknown>,
+  eventId = `${actor}-${appSession}-${minute}-${metadata ? "heartbeat" : "feature"}`,
 ) {
   return {
+    event_id: eventId,
     actor_user_id: actor,
     app_session_id: appSession,
     event_type: metadata ? "activity_heartbeat" : "feature_viewed",
@@ -33,6 +35,11 @@ function report(
     events: [],
     feedback: [],
     failures: [],
+    telemetryHealth: {
+      windowStart: START,
+      windowEnd: END,
+      status: "healthy",
+    },
     ...overrides,
   });
 }
@@ -99,16 +106,51 @@ describe("pilot end-of-day report", () => {
     expect(result.users[0]?.verifiedActiveMs).toBe(360_000);
   });
 
+  it("counts non-heartbeat surfaces without treating them as active duration", () => {
+    const result = report({ events: [event("user-1", "tab-1", 1)] });
+    expect(result.users[0]?.eventCounts).toEqual({ feature_viewed: 1 });
+    expect(result.users[0]?.verifiedActiveMs).toBe(0);
+  });
+
   it("does not claim verified zero when the telemetry path was not observed", () => {
-    expect(report({ sessions: [], events: [] }).reportState).toBe(
-      "INCOMPLETE_TELEMETRY",
-    );
+    expect(
+      report({ sessions: [], events: [], telemetryHealth: null }).reportState,
+    ).toBe("INCOMPLETE_TELEMETRY");
     expect(
       report({
         sessions: [{ id: "session-1", actor_user_id: "user-1" }],
         events: [],
       }).reportState,
     ).toBe("VERIFIED_ZERO_ACTIVITY");
+    expect(
+      report({
+        sessions: [
+          {
+            id: "old-session",
+            actor_user_id: "user-1",
+            started_at: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+        events: [],
+        telemetryHealth: null,
+      }).reportState,
+    ).toBe("INCOMPLETE_TELEMETRY");
+  });
+
+  it("deduplicates stable event IDs before every aggregate", () => {
+    const heartbeat1 = event("user-1", "tab-1", 0, {
+      visibility: "foreground",
+      meaningful_activity: true,
+    });
+    const heartbeat2 = event("user-1", "tab-1", 4, {
+      visibility: "foreground",
+      meaningful_activity: true,
+    });
+    const unique = report({ events: [heartbeat1, heartbeat2] });
+    const duplicated = report({
+      events: [heartbeat1, { ...heartbeat1 }, heartbeat2, { ...heartbeat2 }],
+    });
+    expect(duplicated).toEqual(unique);
   });
 
   it("reports ingestion failures and outside-cohort attribution deterministically", () => {

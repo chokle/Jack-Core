@@ -14,6 +14,11 @@ export interface PilotReportInput {
   events: Array<Record<string, unknown>>;
   feedback: Array<Record<string, unknown>>;
   failures: Array<Record<string, unknown>>;
+  telemetryHealth: {
+    windowStart: string;
+    windowEnd: string;
+    status: "healthy" | "incomplete";
+  } | null;
 }
 
 interface ActiveInterval {
@@ -27,8 +32,8 @@ function timestamp(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function meaningfulEvent(row: Record<string, unknown>): boolean {
-  if (row["event_type"] !== "activity_heartbeat") return true;
+function qualifyingHeartbeat(row: Record<string, unknown>): boolean {
+  if (row["event_type"] !== "activity_heartbeat") return false;
   const metadata = row["metadata"] as Record<string, unknown> | null;
   return (
     metadata?.["visibility"] === "foreground" &&
@@ -43,7 +48,7 @@ function activeIntervals(
 ): ActiveInterval[] {
   const byActorAndAppSession = new Map<string, number[]>();
   for (const event of events) {
-    if (!meaningfulEvent(event)) continue;
+    if (!qualifyingHeartbeat(event)) continue;
     const occurredAt = timestamp(event["occurred_at"]);
     if (
       occurredAt == null ||
@@ -107,6 +112,20 @@ function eventCounts(
   return counts;
 }
 
+function dedupeCanonicalEvents(events: Array<Record<string, unknown>>) {
+  const byEventId = new Map<string, Record<string, unknown>>();
+  let missingEventIdCount = 0;
+  for (const event of events) {
+    const eventId = String(event["event_id"] ?? "");
+    if (!eventId) {
+      missingEventIdCount += 1;
+      continue;
+    }
+    if (!byEventId.has(eventId)) byEventId.set(eventId, event);
+  }
+  return { events: [...byEventId.values()], missingEventIdCount };
+}
+
 export function buildPilotEndOfDayReport(input: PilotReportInput) {
   const windowStart = timestamp(input.windowStart);
   const windowEnd = timestamp(input.windowEnd);
@@ -120,7 +139,8 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
       .map((row) => String(row["user_id"] ?? ""))
       .filter(Boolean),
   );
-  const windowEvents = input.events.filter((event) => {
+  const canonical = dedupeCanonicalEvents(input.events);
+  const windowEvents = canonical.events.filter((event) => {
     const occurredAt = timestamp(event["occurred_at"]);
     return (
       occurredAt != null && occurredAt >= windowStart && occurredAt < windowEnd
@@ -168,11 +188,16 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
     (sum, row) => sum + Math.max(0, Number(row["event_count"] ?? 0)),
     0,
   );
-  const telemetryPathObserved =
-    windowEvents.length > 0 || input.sessions.length > 0;
+  const telemetryPathObserved = Boolean(
+    input.telemetryHealth?.status === "healthy" &&
+    timestamp(input.telemetryHealth.windowStart) === windowStart &&
+    timestamp(input.telemetryHealth.windowEnd) === windowEnd,
+  );
   const reportState: PilotReportState = outsideCohort.length
     ? "ATTRIBUTION_ANOMALY"
-    : failureCount > 0 || !telemetryPathObserved
+    : failureCount > 0 ||
+        canonical.missingEventIdCount > 0 ||
+        !telemetryPathObserved
       ? "INCOMPLETE_TELEMETRY"
       : windowEvents.length === 0
         ? "VERIFIED_ZERO_ACTIVITY"
@@ -199,6 +224,7 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
         reportState === "VERIFIED_COMPLETE" ||
         reportState === "VERIFIED_ZERO_ACTIVITY",
       telemetryPathObserved,
+      malformedEventCount: canonical.missingEventIdCount,
       inactivityCutoffMs: ACTIVE_TIME_INACTIVITY_CUTOFF_MS,
     },
     provenance: {
@@ -208,6 +234,7 @@ export function buildPilotEndOfDayReport(input: PilotReportInput) {
         "test_events",
         "test_feedback",
         "activity_ingest_failures",
+        "telemetry_health_evidence",
       ],
       eventTypes: Object.keys(eventCounts(windowEvents)).sort(),
       windowStart: input.windowStart,
