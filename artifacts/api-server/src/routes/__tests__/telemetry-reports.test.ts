@@ -143,6 +143,58 @@ describe("pilot activity reports", () => {
     expect(JSON.stringify(timeline.body)).not.toContain("question");
   });
 
+  it("returns an authorized bounded end-of-day report with fail-closed provenance", async () => {
+    fake.tables.test_events.push({
+      event_id: "99999999-9999-4999-8999-999999999999",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: "55555555-5555-4555-8555-555555555555",
+      app_session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      event_type: "feature_viewed",
+      occurred_at: "2026-07-26T00:30:00.000Z",
+      surface: "app",
+      result: "success",
+      metadata: { feature: "library" },
+      schema_version: 1,
+    });
+    const response = await request(app()).get(
+      `/api/testing/reports/end-of-day?${query}&date=2026-07-25`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body.report).toMatchObject({
+      reportState: "INCOMPLETE_TELEMETRY",
+      eventCounts: { ask_jack_completed: 1 },
+      telemetryHealth: { complete: false, telemetryPathObserved: false },
+      provenance: {
+        windowStart: "2026-07-25T00:00:00.000Z",
+        windowEnd: "2026-07-26T00:00:00.000Z",
+        eventTypes: ["ask_jack_completed"],
+      },
+    });
+    expect(response.body.report.eventCounts.feature_viewed).toBeUndefined();
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      action: "pilot_end_of_day_report",
+      decision: "allowed",
+    });
+  });
+
+  it("validates the report day and preserves report authorization", async () => {
+    const invalid = await request(app()).get(
+      `/api/testing/reports/end-of-day?${query}&date=not-a-day`,
+    );
+    expect(invalid.status).toBe(400);
+    const denied = await request(app()).get(
+      `/api/testing/reports/end-of-day?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}&date=2026-07-25`,
+    );
+    expect(denied.status).toBe(403);
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      action: "pilot_end_of_day_report",
+      decision: "denied",
+    });
+  });
+
   it("denies cross-organization access and presentation mode", async () => {
     const denied = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
