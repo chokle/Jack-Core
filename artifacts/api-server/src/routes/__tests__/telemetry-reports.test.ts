@@ -89,6 +89,7 @@ beforeEach(() => {
     organization_id: ORGANIZATION_ID,
     pilot_id: PILOT_ID,
     status: "completed",
+    telemetry_status: "granted",
     started_at: "2026-07-25T00:00:00.000Z",
     last_activity_at: "2026-07-25T01:00:00.000Z",
     onboarding_status: "completed",
@@ -207,7 +208,7 @@ describe("pilot activity reports", () => {
     });
   });
 
-  it("derives exact-window health from a stored hidden heartbeat without counting activity", async () => {
+  it("does not certify zero from an isolated hidden heartbeat", async () => {
     fake.tables.test_events = [{
       event_id: "14141414-1414-4414-8414-141414141414",
       actor_user_id: USER_ID,
@@ -222,6 +223,40 @@ describe("pilot activity reports", () => {
       metadata: { visibility: "hidden", meaningful_activity: false },
       schema_version: 1,
     }];
+    const response = await request(app()).get(
+      `/api/testing/reports/end-of-day?${query}&date=2026-07-25`,
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.report).toMatchObject({
+      reportState: "INCOMPLETE_TELEMETRY",
+      activeUserCount: 0,
+      verifiedActiveMs: 0,
+      telemetryHealth: { complete: false, telemetryPathObserved: false },
+    });
+  });
+
+  it("certifies zero only with complete heartbeat coverage for applicable sessions", async () => {
+    fake.tables.test_sessions[0] = {
+      ...fake.tables.test_sessions[0],
+      started_at: "2026-07-25T00:00:00.000Z",
+      last_activity_at: "2026-07-25T00:02:00.000Z",
+      completed_at: "2026-07-25T00:02:00.000Z",
+      telemetry_status: "granted",
+    };
+    fake.tables.test_events = [0, 1, 2].map((minute) => ({
+      event_id: `17171717-1717-4717-8717-1717171717${minute}0`,
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: "55555555-5555-4555-8555-555555555555",
+      app_session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      event_type: "activity_heartbeat",
+      occurred_at: `2026-07-25T00:0${minute}:00.000Z`,
+      surface: "app",
+      result: "success",
+      metadata: { visibility: "hidden", meaningful_activity: false },
+      schema_version: 1,
+    }));
     const response = await request(app()).get(
       `/api/testing/reports/end-of-day?${query}&date=2026-07-25`,
     );

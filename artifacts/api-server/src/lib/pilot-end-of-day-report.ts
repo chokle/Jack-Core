@@ -1,4 +1,5 @@
 export const ACTIVE_TIME_INACTIVITY_CUTOFF_MS = 5 * 60 * 1000;
+export const HEARTBEAT_COVERAGE_GAP_MS = 2 * 60 * 1000;
 
 export type PilotReportState =
   | "VERIFIED_COMPLETE"
@@ -30,6 +31,55 @@ interface ActiveInterval {
 function timestamp(value: unknown): number | null {
   const parsed = Date.parse(String(value ?? ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function hasCompleteHeartbeatCoverage(input: {
+  windowStart: string;
+  windowEnd: string;
+  sessions: Array<Record<string, unknown>>;
+  events: Array<Record<string, unknown>>;
+}): boolean {
+  const windowStart = timestamp(input.windowStart);
+  const windowEnd = timestamp(input.windowEnd);
+  if (windowStart == null || windowEnd == null || windowEnd <= windowStart)
+    return false;
+  const applicable = input.sessions.filter(
+    (session) => session["telemetry_status"] === "granted",
+  );
+  if (applicable.length === 0) return false;
+  return applicable.every((session) => {
+    const sessionStart = timestamp(session["started_at"]);
+    const terminalAt =
+      session["status"] === "active"
+        ? windowEnd
+        : timestamp(session["completed_at"] ?? session["last_activity_at"]);
+    if (sessionStart == null) return false;
+    const start = Math.max(windowStart, sessionStart);
+    const end = Math.min(windowEnd, terminalAt ?? windowEnd);
+    if (end < start) return false;
+    const sessionId = String(session["id"] ?? "");
+    const heartbeats = input.events
+      .filter(
+        (event) =>
+          event["event_type"] === "activity_heartbeat" &&
+          event["test_session_id"] === sessionId,
+      )
+      .map((event) => timestamp(event["occurred_at"]))
+      .filter(
+        (value): value is number =>
+          value != null && value >= start && value <= end,
+      )
+      .sort((left, right) => left - right);
+    if (heartbeats.length === 0) return false;
+    if (heartbeats[0]! - start > HEARTBEAT_COVERAGE_GAP_MS) return false;
+    if (end - heartbeats.at(-1)! > HEARTBEAT_COVERAGE_GAP_MS) return false;
+    return heartbeats
+      .slice(1)
+      .every(
+        (heartbeat, index) =>
+          heartbeat - heartbeats[index]! <= HEARTBEAT_COVERAGE_GAP_MS,
+      );
+  });
 }
 
 function qualifyingHeartbeat(row: Record<string, unknown>): boolean {

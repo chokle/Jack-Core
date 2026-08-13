@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
-import { buildPilotEndOfDayReport } from "../lib/pilot-end-of-day-report.js";
+import {
+  buildPilotEndOfDayReport,
+  hasCompleteHeartbeatCoverage,
+} from "../lib/pilot-end-of-day-report.js";
 import {
   activityDb as db,
   auditReportAccess,
@@ -260,9 +263,12 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
     const window = utcDayWindow(req.query["date"]);
     if (!window) return res.status(400).json({ error: "A valid UTC report date is required." });
     const rows = await loadEndOfDayRows(scope, window.start, window.end);
-    const hasHeartbeatEvidence = rows.events.some(
-      (event) => event["event_type"] === "activity_heartbeat",
-    );
+    const hasHeartbeatEvidence = hasCompleteHeartbeatCoverage({
+      windowStart: window.start,
+      windowEnd: window.end,
+      sessions: rows.sessions,
+      events: rows.events,
+    });
     const report = buildPilotEndOfDayReport({
       windowStart: window.start,
       windowEnd: window.end,
