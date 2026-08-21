@@ -15,4 +15,5 @@ export type CitationSourceType = typeof CitationSourceType[keyof typeof Citation
 export const CitationSourceType = {
   video: 'video',
   knowledge: 'knowledge',
+  authority: 'authority',
 } as const;
