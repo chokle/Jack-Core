@@ -29,6 +29,18 @@ export interface KnowledgeCandidate {
   answerId?: string | null;
   /** @nullable */
   sessionId?: string | null;
+  /**
+     * Verbatim interview question loaded from the source answer.
+     * @nullable
+     */
+  question: string | null;
+  /**
+     * Verbatim mentor answer retained outside the trusted graph until review.
+     * @nullable
+     */
+  answerText: string | null;
+  /** True only when the answer belongs to the candidate mentor and session. */
+  sourceValid: boolean;
   bestMatches: KnowledgeCandidateMatch[];
   /** @nullable */
   createdAt?: string | null;

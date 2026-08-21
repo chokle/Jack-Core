@@ -89,7 +89,12 @@ const ERROR_CODES = new Set([
   "invalid_response",
   "queue_overflow",
 ]);
-const STOP_REASONS = new Set(["user", "native_stop_sharing", "withdrawn", "error"]);
+const STOP_REASONS = new Set([
+  "user",
+  "native_stop_sharing",
+  "withdrawn",
+  "error",
+]);
 const SURFACE_BY_EVENT: Record<string, string> = {
   test_started: "pilot",
   test_resumed: "pilot",
@@ -117,7 +122,11 @@ export interface PilotScope {
   pilotId: string;
   organizationName?: string;
   pilotName?: string;
-  authority?: "tester" | "pilot_admin" | "organization_admin" | "platform_superadmin";
+  authority?:
+    | "tester"
+    | "pilot_admin"
+    | "organization_admin"
+    | "platform_superadmin";
 }
 
 export interface ConsentSnapshot {
@@ -127,11 +136,13 @@ export interface ConsentSnapshot {
   consentVersion: string;
 }
 
-export function currentConsentGranted(consent: ConsentSnapshot | null): consent is ConsentSnapshot {
+export function currentConsentGranted(
+  consent: ConsentSnapshot | null,
+): consent is ConsentSnapshot {
   return Boolean(
     consent?.state === "granted" &&
-      consent.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
-      consent.consentVersion === CONSENT_VERSION,
+    consent.privacyNoticeVersion === PRIVACY_NOTICE_VERSION &&
+    consent.consentVersion === CONSENT_VERSION,
   );
 }
 
@@ -154,28 +165,46 @@ function isoAfter(days: number, from = Date.now()): string {
   return new Date(from + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function isActiveWindow(row: Record<string, unknown>, now = Date.now()): boolean {
+export function isActiveMembershipWindow(
+  row: Record<string, unknown>,
+  now = Date.now(),
+): boolean {
   if (row["active"] !== true) return false;
-  const from = Date.parse(String(row["valid_from"] ?? ""));
-  const until = row["valid_until"] ? Date.parse(String(row["valid_until"])) : Number.POSITIVE_INFINITY;
-  return (!Number.isFinite(from) || from <= now) && (!Number.isFinite(until) || until > now);
+  const validFrom = row["valid_from"];
+  const validUntil = row["valid_until"];
+  const from =
+    validFrom == null
+      ? Number.NEGATIVE_INFINITY
+      : Date.parse(String(validFrom));
+  const until =
+    validUntil == null
+      ? Number.POSITIVE_INFINITY
+      : Date.parse(String(validUntil));
+  if (validFrom != null && !Number.isFinite(from)) return false;
+  if (validUntil != null && !Number.isFinite(until)) return false;
+  return from <= now && until > now;
 }
 
 export async function resolveActiveTesterScope(
   userId: string,
   requestedPilotId?: string | null,
-): Promise<{ scope: PilotScope | null; reason?: "not_enrolled" | "ambiguous_pilot" }> {
+): Promise<{
+  scope: PilotScope | null;
+  reason?: "not_enrolled" | "ambiguous_pilot";
+}> {
   let query = db
     .from("pilot_memberships")
-    .select("organization_id,pilot_id,user_id,role,active,valid_from,valid_until")
+    .select(
+      "organization_id,pilot_id,user_id,role,active,valid_from,valid_until",
+    )
     .eq("user_id", userId)
     .eq("role", "tester")
     .eq("active", true);
   if (requestedPilotId) query = query.eq("pilot_id", requestedPilotId);
   const memberships = await query.limit(3);
   if (memberships.error) throw memberships.error;
-  const active = (memberships.data ?? []).filter((row: Record<string, unknown>) =>
-    isActiveWindow(row),
+  const active = (memberships.data ?? []).filter(
+    (row: Record<string, unknown>) => isActiveMembershipWindow(row),
   );
   if (active.length === 0) return { scope: null, reason: "not_enrolled" };
   if (active.length > 1 && !requestedPilotId) {
@@ -230,7 +259,9 @@ export async function latestConsent(
   };
 }
 
-export function browserFamily(userAgent: string | undefined): "Chrome" | "Safari" | "Edge" | "Firefox" | "Other" {
+export function browserFamily(
+  userAgent: string | undefined,
+): "Chrome" | "Safari" | "Edge" | "Firefox" | "Other" {
   const ua = userAgent ?? "";
   if (/\bEdg\//i.test(ua)) return "Edge";
   if (/\bFirefox\//i.test(ua)) return "Firefox";
@@ -253,9 +284,14 @@ export function deviceCategory(
   return "desktop";
 }
 
-function exactKeys(input: Record<string, unknown>, allowed: readonly string[]): boolean {
+function exactKeys(
+  input: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
   const keys = Object.keys(input);
-  return keys.length <= allowed.length && keys.every((key) => allowed.includes(key));
+  return (
+    keys.length <= allowed.length && keys.every((key) => allowed.includes(key))
+  );
 }
 
 export function validateEventMetadata(
@@ -285,40 +321,75 @@ export function validateEventMetadata(
   }
   if (eventType === "onboarding_step_completed") {
     if (!exactKeys(input, ["step", "next_step"])) return null;
-    if (!Number.isInteger(input["step"]) || !Number.isInteger(input["next_step"])) return null;
+    if (
+      !Number.isInteger(input["step"]) ||
+      !Number.isInteger(input["next_step"])
+    )
+      return null;
     const step = Number(input["step"]);
     const next = Number(input["next_step"]);
     if (step < 1 || step > 3 || next < 0 || next > 3) return null;
     return { step, next_step: next };
   }
   if (eventType === "onboarding_skipped") {
-    if (!exactKeys(input, ["step"]) || !Number.isInteger(input["step"])) return null;
+    if (!exactKeys(input, ["step"]) || !Number.isInteger(input["step"]))
+      return null;
     const step = Number(input["step"]);
     return step >= 1 && step <= 3 ? { step } : null;
   }
   if (eventType === "feature_viewed") {
-    if (!exactKeys(input, ["feature"]) || !FEATURES.has(String(input["feature"]))) return null;
+    if (
+      !exactKeys(input, ["feature"]) ||
+      !FEATURES.has(String(input["feature"]))
+    )
+      return null;
     return { feature: String(input["feature"]) };
   }
   if (eventType === "workflow_completed") {
-    if (!exactKeys(input, ["workflow"]) || !WORKFLOWS.has(String(input["workflow"]))) return null;
+    if (
+      !exactKeys(input, ["workflow"]) ||
+      !WORKFLOWS.has(String(input["workflow"]))
+    )
+      return null;
     return { workflow: String(input["workflow"]) };
   }
   if (eventType === "ask_jack_completed") {
-    if (!exactKeys(input, ["citation_count"]) || !Number.isInteger(input["citation_count"])) return null;
+    if (
+      !exactKeys(input, ["citation_count"]) ||
+      !Number.isInteger(input["citation_count"])
+    )
+      return null;
     const count = Number(input["citation_count"]);
     return count >= 0 && count <= 100 ? { citation_count: count } : null;
   }
   if (eventType === "recording_started") {
-    if (!exactKeys(input, ["microphone_included"]) || typeof input["microphone_included"] !== "boolean") return null;
+    if (
+      !exactKeys(input, ["microphone_included"]) ||
+      typeof input["microphone_included"] !== "boolean"
+    )
+      return null;
     return { microphone_included: input["microphone_included"] };
   }
   if (eventType === "recording_stopped") {
-    if (!exactKeys(input, ["stop_reason"]) || !STOP_REASONS.has(String(input["stop_reason"]))) return null;
+    if (
+      !exactKeys(input, ["stop_reason"]) ||
+      !STOP_REASONS.has(String(input["stop_reason"]))
+    )
+      return null;
     return { stop_reason: String(input["stop_reason"]) };
   }
-  if (["ask_jack_failed", "recording_upload_failed", "reliability_error"].includes(eventType)) {
-    if (!exactKeys(input, ["error_code"]) || !ERROR_CODES.has(String(input["error_code"]))) return null;
+  if (
+    [
+      "ask_jack_failed",
+      "recording_upload_failed",
+      "reliability_error",
+    ].includes(eventType)
+  ) {
+    if (
+      !exactKeys(input, ["error_code"]) ||
+      !ERROR_CODES.has(String(input["error_code"]))
+    )
+      return null;
     return { error_code: String(input["error_code"]) };
   }
   return null;
@@ -327,8 +398,27 @@ export function validateEventMetadata(
 export function validateCanonicalEventInput(
   input: CanonicalEventInput,
   clientEvent: boolean,
-): { value: Required<Pick<CanonicalEventInput, "eventId" | "eventType" | "occurredAt" | "appSessionId" | "metadata" | "result" | "deviceCategory">> & CanonicalEventInput } | { error: string } {
-  if (!ALL_EVENT_TYPES.has(input.eventType) || (clientEvent && !CLIENT_EVENT_TYPES.has(input.eventType))) {
+):
+  | {
+      value: Required<
+        Pick<
+          CanonicalEventInput,
+          | "eventId"
+          | "eventType"
+          | "occurredAt"
+          | "appSessionId"
+          | "metadata"
+          | "result"
+          | "deviceCategory"
+        >
+      > &
+        CanonicalEventInput;
+    }
+  | { error: string } {
+  if (
+    !ALL_EVENT_TYPES.has(input.eventType) ||
+    (clientEvent && !CLIENT_EVENT_TYPES.has(input.eventType))
+  ) {
     return { error: "invalid_event_type" };
   }
   const eventId = input.eventId ?? randomUUID();
@@ -337,30 +427,39 @@ export function validateCanonicalEventInput(
   }
   const occurredAt = input.occurredAt ?? new Date().toISOString();
   const occurredMs = Date.parse(occurredAt);
-  if (!Number.isFinite(occurredMs) || Math.abs(Date.now() - occurredMs) > 7 * 24 * 60 * 60 * 1000) {
+  if (
+    !Number.isFinite(occurredMs) ||
+    Math.abs(Date.now() - occurredMs) > 7 * 24 * 60 * 60 * 1000
+  ) {
     return { error: "invalid_occurred_at" };
   }
   const metadata = validateEventMetadata(input.eventType, input.metadata);
   if (!metadata) return { error: "invalid_metadata" };
   const result =
     input.result ??
-    (input.eventType.endsWith("_failed") || input.eventType === "reliability_error"
+    (input.eventType.endsWith("_failed") ||
+    input.eventType === "reliability_error"
       ? "failure"
-      : input.eventType === "test_abandoned" || input.eventType === "onboarding_skipped"
+      : input.eventType === "test_abandoned" ||
+          input.eventType === "onboarding_skipped"
         ? "cancelled"
         : input.eventType === "test_expired"
           ? "unavailable"
           : "success");
   if (!RESULTS.has(result)) return { error: "invalid_result" };
-  const permittedResults = PERMITTED_RESULTS_BY_EVENT[input.eventType] ?? new Set(["success"]);
+  const permittedResults =
+    PERMITTED_RESULTS_BY_EVENT[input.eventType] ?? new Set(["success"]);
   if (!permittedResults.has(result)) return { error: "invalid_result" };
   const deviceCategory = input.deviceCategory ?? "desktop";
-  if (!DEVICE_CATEGORIES.has(deviceCategory)) return { error: "invalid_device_category" };
+  if (!DEVICE_CATEGORIES.has(deviceCategory))
+    return { error: "invalid_device_category" };
   for (const value of [input.correlationId, input.requestId, input.dedupeKey]) {
-    if (value != null && !IDENTIFIER_RE.test(value)) return { error: "invalid_identifier" };
+    if (value != null && !IDENTIFIER_RE.test(value))
+      return { error: "invalid_identifier" };
   }
   for (const value of [input.appVersion, input.deployVersion]) {
-    if (value != null && !VERSION_RE.test(value)) return { error: "invalid_version" };
+    if (value != null && !VERSION_RE.test(value))
+      return { error: "invalid_version" };
   }
   return {
     value: {
@@ -409,7 +508,11 @@ export async function insertCanonicalEvent(input: {
   consent: ConsentSnapshot;
   event: CanonicalEventInput;
   clientEvent: boolean;
-}): Promise<{ duplicate: boolean; row?: Record<string, unknown>; error?: string }> {
+}): Promise<{
+  duplicate: boolean;
+  row?: Record<string, unknown>;
+  error?: string;
+}> {
   const validated = validateCanonicalEventInput(input.event, input.clientEvent);
   if ("error" in validated) return { duplicate: false, error: validated.error };
   const event = validated.value;
@@ -517,7 +620,10 @@ async function platformSuperadmin(userId: string): Promise<boolean> {
   return Boolean(role.data);
 }
 
-async function pilotBelongsToOrganization(pilotId: string, organizationId: string): Promise<boolean> {
+async function pilotBelongsToOrganization(
+  pilotId: string,
+  organizationId: string,
+): Promise<boolean> {
   const pilot = await db
     .from("pilots")
     .select("id")
@@ -533,8 +639,10 @@ export async function authorizeReportScope(
   organizationId: string,
   pilotId: string,
 ): Promise<{ allowed: boolean; authority?: PilotScope["authority"] }> {
-  if (!UUID_RE.test(organizationId) || !UUID_RE.test(pilotId)) return { allowed: false };
-  if (!(await pilotBelongsToOrganization(pilotId, organizationId))) return { allowed: false };
+  if (!UUID_RE.test(organizationId) || !UUID_RE.test(pilotId))
+    return { allowed: false };
+  if (!(await pilotBelongsToOrganization(pilotId, organizationId)))
+    return { allowed: false };
   if (await platformSuperadmin(userId)) {
     return { allowed: true, authority: "platform_superadmin" };
   }
@@ -548,7 +656,7 @@ export async function authorizeReportScope(
     .eq("active", true)
     .maybeSingle();
   if (pilotAdmin.error) throw pilotAdmin.error;
-  if (pilotAdmin.data && isActiveWindow(pilotAdmin.data)) {
+  if (pilotAdmin.data && isActiveMembershipWindow(pilotAdmin.data)) {
     return { allowed: true, authority: "pilot_admin" };
   }
   const organizationAdmin = await db
@@ -560,7 +668,10 @@ export async function authorizeReportScope(
     .eq("active", true)
     .maybeSingle();
   if (organizationAdmin.error) throw organizationAdmin.error;
-  if (organizationAdmin.data && isActiveWindow(organizationAdmin.data)) {
+  if (
+    organizationAdmin.data &&
+    isActiveMembershipWindow(organizationAdmin.data)
+  ) {
     return { allowed: true, authority: "organization_admin" };
   }
   return { allowed: false };
@@ -576,8 +687,9 @@ export async function hasAnyReportScope(userId: string): Promise<boolean> {
   if (memberships.error) throw memberships.error;
   return (memberships.data ?? []).some(
     (membership: Record<string, unknown>) =>
-      (membership["role"] === "pilot_admin" || membership["role"] === "organization_admin") &&
-      isActiveWindow(membership),
+      (membership["role"] === "pilot_admin" ||
+        membership["role"] === "organization_admin") &&
+      isActiveMembershipWindow(membership),
   );
 }
 
@@ -605,7 +717,9 @@ export async function listReportScopes(userId: string): Promise<PilotScope[]> {
     return (pilotsResult.data ?? []).map((pilot: Record<string, unknown>) => ({
       organizationId: String(pilot["organization_id"]),
       pilotId: String(pilot["id"]),
-      organizationName: organizationNames.get(String(pilot["organization_id"])) ?? "Organization",
+      organizationName:
+        organizationNames.get(String(pilot["organization_id"])) ??
+        "Organization",
       pilotName: String(pilot["name"]),
       authority: "platform_superadmin",
     }));
@@ -617,8 +731,8 @@ export async function listReportScopes(userId: string): Promise<PilotScope[]> {
     .eq("user_id", userId)
     .eq("active", true);
   if (memberships.error) throw memberships.error;
-  const active = (memberships.data ?? []).filter((row: Record<string, unknown>) =>
-    isActiveWindow(row),
+  const active = (memberships.data ?? []).filter(
+    (row: Record<string, unknown>) => isActiveMembershipWindow(row),
   );
   const scopes = new Map<string, PilotScope>();
   for (const pilot of pilotsResult.data ?? []) {
@@ -632,7 +746,8 @@ export async function listReportScopes(userId: string): Promise<PilotScope[]> {
     );
     const organization = active.find(
       (row: Record<string, unknown>) =>
-        row["role"] === "organization_admin" && row["organization_id"] === organizationId,
+        row["role"] === "organization_admin" &&
+        row["organization_id"] === organizationId,
     );
     const membership = direct ?? organization;
     if (!membership) continue;
@@ -665,7 +780,7 @@ export async function auditReportAccess(input: {
     pilot_id: input.pilotId ?? null,
     action: input.action,
     decision: input.decision,
-    authority: input.authority === "tester" ? null : input.authority ?? null,
+    authority: input.authority === "tester" ? null : (input.authority ?? null),
     request_id: input.requestId ?? null,
     retained_until: isoAfter(730),
   });
@@ -674,9 +789,12 @@ export async function auditReportAccess(input: {
 
 export function requestIdentifier(req: Request): string {
   const candidate = req.headers["x-request-id"];
-  if (typeof candidate === "string" && IDENTIFIER_RE.test(candidate)) return candidate;
+  if (typeof candidate === "string" && IDENTIFIER_RE.test(candidate))
+    return candidate;
   const pinoId = (req as Request & { id?: unknown }).id;
-  return typeof pinoId === "string" && IDENTIFIER_RE.test(pinoId) ? pinoId : randomUUID();
+  return typeof pinoId === "string" && IDENTIFIER_RE.test(pinoId)
+    ? pinoId
+    : randomUUID();
 }
 
 export async function recordServerAskJackEvent(input: {
@@ -702,7 +820,10 @@ export async function recordServerAskJackEvent(input: {
       .eq("actor_user_id", actorUserId)
       .eq("status", "active")
       .eq("telemetry_status", "granted");
-    if (typeof requestedSessionId === "string" && UUID_RE.test(requestedSessionId)) {
+    if (
+      typeof requestedSessionId === "string" &&
+      UUID_RE.test(requestedSessionId)
+    ) {
       sessionQuery = sessionQuery.eq("id", requestedSessionId);
     }
     const sessions = await sessionQuery
@@ -729,9 +850,15 @@ export async function recordServerAskJackEvent(input: {
         appSessionId: String(session.app_session_id),
         metadata:
           input.eventType === "ask_jack_completed"
-            ? { citation_count: Math.max(0, Math.min(input.citationCount ?? 0, 100)) }
+            ? {
+                citation_count: Math.max(
+                  0,
+                  Math.min(input.citationCount ?? 0, 100),
+                ),
+              }
             : { error_code: "ask_jack_failed" },
-        result: input.eventType === "ask_jack_completed" ? "success" : "failure",
+        result:
+          input.eventType === "ask_jack_completed" ? "success" : "failure",
         correlationId: input.correlationId,
         requestId: requestIdentifier(input.req),
         deviceCategory:
@@ -752,7 +879,10 @@ export async function recordServerAskJackEvent(input: {
         .eq("actor_user_id", actorUserId);
     }
   } catch (error) {
-    input.req.log?.warn({ err: error }, "server activity telemetry write failed");
+    input.req.log?.warn(
+      { err: error },
+      "server activity telemetry write failed",
+    );
   }
 }
 

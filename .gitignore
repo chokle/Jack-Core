@@ -55,6 +55,9 @@ Thumbs.db
 _prod_*
 _smoke_*
 
+# Local coordination state
+.foreman*/
+
 # Local handoff notes
 DAZ-HANDOFF-*.md
 PR*-review-summary-for-daz.md

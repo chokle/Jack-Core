@@ -24,6 +24,7 @@ import {
   recordServerAskJackEvent,
   requestIdentifier,
 } from "../lib/activity-telemetry.js";
+import { currentConversationReviewLinkage } from "../lib/conversation-review.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -68,6 +69,16 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+    const reviewLinkage = await currentConversationReviewLinkage(
+      userId,
+      session,
+    ).catch((err) => {
+      req.log.error(
+        { err },
+        "Could not resolve optional conversation-review linkage",
+      );
+      return null;
+    });
 
     const embedding = await createEmbedding(message);
 
@@ -380,6 +391,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         role: "user",
         content: message,
         citations: [],
+        ...(reviewLinkage ?? {}),
       })
       .select("id")
       .single();
@@ -431,6 +443,15 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         role: "assistant",
         content: answer,
         citations,
+        ...((await currentConversationReviewLinkage(userId, session).catch(
+          (err) => {
+            req.log.error(
+              { err },
+              "Could not refresh optional conversation-review linkage",
+            );
+            return null;
+          },
+        )) ?? {}),
       });
     if (assistantMessageError) throw assistantMessageError;
 
@@ -588,6 +609,7 @@ async function findGraphMemoryMatches(
   return ids
     .map((id) => byId.get(id))
     .filter((row): row is Record<string, unknown> => !!row)
+    .filter((row) => row["verification_status"] !== "rejected")
     .map((row) => {
       const meta = row["meta"] as Record<string, unknown> | null | undefined;
       const sourceCount =

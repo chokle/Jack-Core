@@ -11,6 +11,11 @@ import {
   resolveActiveTesterScope,
   WITHDRAWAL_DELETION_DAYS,
 } from "../lib/activity-telemetry.js";
+import {
+  CONVERSATION_REVIEW_CONSENT_VERSION,
+  latestConversationReviewConsent,
+} from "../lib/conversation-review.js";
+import { resolveSession } from "../lib/session.js";
 
 const router = Router();
 const UUID_RE =
@@ -20,41 +25,58 @@ const CONSENT_KEYS = new Set([
   "telemetry",
   "screen",
   "microphone",
+  "conversationReview",
   "privacyNoticeVersion",
   "consentVersion",
+  "conversationReviewConsentVersion",
 ]);
 
 function isoAfterDays(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function exactKeys(value: unknown, allowed: ReadonlySet<string>): value is Record<string, unknown> {
+function exactKeys(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+): value is Record<string, unknown> {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).every((key) => allowed.has(key)),
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) => allowed.has(key)),
   );
 }
 
-async function currentContext(userId: string, requestedPilotId?: string | null) {
+async function currentContext(
+  userId: string,
+  requestedPilotId?: string | null,
+) {
   const membership = await resolveActiveTesterScope(userId, requestedPilotId);
   if (!membership.scope) {
     return {
       enrolled: false,
       requiresPilotSelection: membership.reason === "ambiguous_pilot",
       scope: null,
-      consents: { telemetry: null, screen: null, microphone: null },
+      consents: {
+        telemetry: null,
+        screen: null,
+        microphone: null,
+        conversationReview: null,
+      },
       session: null,
       privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
       consentVersion: CONSENT_VERSION,
+      conversationReviewConsentVersion: CONVERSATION_REVIEW_CONSENT_VERSION,
     };
   }
-  const [telemetry, screen, microphone] = await Promise.all([
-    latestConsent(userId, membership.scope.pilotId, "telemetry"),
-    latestConsent(userId, membership.scope.pilotId, "screen"),
-    latestConsent(userId, membership.scope.pilotId, "microphone"),
-  ]);
+  const [telemetry, screen, microphone, conversationReview] = await Promise.all(
+    [
+      latestConsent(userId, membership.scope.pilotId, "telemetry"),
+      latestConsent(userId, membership.scope.pilotId, "screen"),
+      latestConsent(userId, membership.scope.pilotId, "microphone"),
+      latestConversationReviewConsent(userId, membership.scope.pilotId),
+    ],
+  );
   const session = await db
     .from("test_sessions")
     .select("*")
@@ -69,30 +91,32 @@ async function currentContext(userId: string, requestedPilotId?: string | null) 
     enrolled: true,
     requiresPilotSelection: false,
     scope: membership.scope,
-    consents: { telemetry, screen, microphone },
-    session: session.data && currentConsentGranted(telemetry)
-      ? {
-          id: session.data.id,
-          organizationId: session.data.organization_id,
-          pilotId: session.data.pilot_id,
-          appSessionId: session.data.app_session_id,
-          status: session.data.status,
-          telemetryStatus: session.data.telemetry_status,
-          screenConsentState: session.data.screen_consent_state,
-          microphoneConsentState: session.data.microphone_consent_state,
-          onboardingStatus: session.data.onboarding_status,
-          onboardingStep: session.data.onboarding_step,
-          recordingStatus: session.data.recording_status,
-          feedbackStatus: session.data.feedback_status,
-          questionCount: session.data.question_count,
-          startedAt: session.data.started_at,
-          resumedAt: session.data.resumed_at,
-          lastActivityAt: session.data.last_activity_at,
-          expiresAt: session.data.expires_at,
-        }
-      : null,
+    consents: { telemetry, screen, microphone, conversationReview },
+    session:
+      session.data && currentConsentGranted(telemetry)
+        ? {
+            id: session.data.id,
+            organizationId: session.data.organization_id,
+            pilotId: session.data.pilot_id,
+            appSessionId: session.data.app_session_id,
+            status: session.data.status,
+            telemetryStatus: session.data.telemetry_status,
+            screenConsentState: session.data.screen_consent_state,
+            microphoneConsentState: session.data.microphone_consent_state,
+            onboardingStatus: session.data.onboarding_status,
+            onboardingStep: session.data.onboarding_step,
+            recordingStatus: session.data.recording_status,
+            feedbackStatus: session.data.feedback_status,
+            questionCount: session.data.question_count,
+            startedAt: session.data.started_at,
+            resumedAt: session.data.resumed_at,
+            lastActivityAt: session.data.last_activity_at,
+            expiresAt: session.data.expires_at,
+          }
+        : null,
     privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
     consentVersion: CONSENT_VERSION,
+    conversationReviewConsentVersion: CONVERSATION_REVIEW_CONSENT_VERSION,
   };
 }
 
@@ -127,26 +151,36 @@ router.get("/testing/telemetry/context", async (req, res) => {
         "Pilot telemetry is unavailable for this account.",
         "Telemetry preferences are temporarily unavailable.",
       )
-    ) return;
+    )
+      return;
     if (identity.isAdmin) {
       return res.json({
         enrolled: false,
         requiresPilotSelection: false,
         scope: null,
-        consents: { telemetry: null, screen: null, microphone: null },
+        consents: {
+          telemetry: null,
+          screen: null,
+          microphone: null,
+          conversationReview: null,
+        },
         session: null,
         privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
         consentVersion: CONSENT_VERSION,
+        conversationReviewConsentVersion: CONVERSATION_REVIEW_CONSENT_VERSION,
       });
     }
     const pilotId =
-      typeof req.query["pilotId"] === "string" && UUID_RE.test(req.query["pilotId"])
+      typeof req.query["pilotId"] === "string" &&
+      UUID_RE.test(req.query["pilotId"])
         ? req.query["pilotId"]
         : null;
     return res.json(await currentContext(identity.userId, pilotId));
   } catch (error) {
     req.log.error({ err: error }, "Could not load telemetry consent context");
-    return res.status(503).json({ error: "Telemetry preferences are temporarily unavailable." });
+    return res
+      .status(503)
+      .json({ error: "Telemetry preferences are temporarily unavailable." });
   }
 });
 
@@ -161,9 +195,12 @@ router.post("/testing/telemetry/consents", async (req, res) => {
         "Pilot telemetry is unavailable for this account.",
         "Telemetry preferences are temporarily unavailable.",
       )
-    ) return;
+    )
+      return;
     if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
+      return res
+        .status(403)
+        .json({ error: "Pilot telemetry is unavailable for this account." });
     }
     if (!exactKeys(req.body, CONSENT_KEYS)) {
       return res.status(400).json({ error: "Invalid consent request." });
@@ -175,25 +212,34 @@ router.post("/testing/telemetry/consents", async (req, res) => {
     const telemetry = req.body.telemetry;
     const screen = req.body.screen;
     const microphone = req.body.microphone;
+    const conversationReview = req.body.conversationReview;
     if (
       !["granted", "declined"].includes(String(telemetry)) ||
       !["granted", "declined"].includes(String(screen)) ||
       !["granted", "declined"].includes(String(microphone)) ||
+      !["granted", "declined"].includes(String(conversationReview)) ||
       req.body.privacyNoticeVersion !== PRIVACY_NOTICE_VERSION ||
       req.body.consentVersion !== CONSENT_VERSION ||
-      (telemetry === "declined" && (screen !== "declined" || microphone !== "declined")) ||
+      req.body.conversationReviewConsentVersion !==
+        CONVERSATION_REVIEW_CONSENT_VERSION ||
+      (telemetry === "declined" &&
+        (screen !== "declined" || microphone !== "declined")) ||
       (microphone === "granted" && screen !== "granted")
     ) {
-      return res.status(400).json({ error: "Invalid or outdated consent choices." });
+      return res
+        .status(400)
+        .json({ error: "Invalid or outdated consent choices." });
     }
     const membership = await resolveActiveTesterScope(identity.userId, pilotId);
     if (!membership.scope) {
-      return res.status(membership.reason === "ambiguous_pilot" ? 409 : 403).json({
-        error:
-          membership.reason === "ambiguous_pilot"
-            ? "Choose one active pilot before saving consent."
-            : "No active pilot membership was found.",
-      });
+      return res
+        .status(membership.reason === "ambiguous_pilot" ? 409 : 403)
+        .json({
+          error:
+            membership.reason === "ambiguous_pilot"
+              ? "Choose one active pilot before saving consent."
+              : "No active pilot membership was found.",
+        });
     }
     const now = new Date().toISOString();
     const retainedUntil = new Date(
@@ -217,12 +263,72 @@ router.post("/testing/telemetry/consents", async (req, res) => {
       retained_until: retainedUntil,
       created_at: now,
     }));
+    const reviewConsentId = randomUUID();
+    const chatSessionId = resolveSession(req, res);
     const inserted = await db.from("telemetry_consents").insert(rows);
     if (inserted.error) throw inserted.error;
-    return res.status(201).json(await currentContext(identity.userId, membership.scope.pilotId));
+    const reviewConsent = await db.from("conversation_review_consents").insert({
+      id: reviewConsentId,
+      actor_user_id: identity.userId,
+      organization_id: membership.scope.organizationId,
+      pilot_id: membership.scope.pilotId,
+      chat_session_id: chatSessionId,
+      state: conversationReview,
+      privacy_notice_version: PRIVACY_NOTICE_VERSION,
+      consent_version: CONVERSATION_REVIEW_CONSENT_VERSION,
+      source: "pilot_consent_addendum",
+      occurred_at: now,
+      retained_until: retainedUntil,
+      created_at: now,
+    });
+    if (reviewConsent.error) {
+      const rollback = await db
+        .from("telemetry_consents")
+        .delete()
+        .in(
+          "id",
+          rows.map((row) => row.id),
+        );
+      if (rollback.error)
+        throw new Error(
+          "Consent bundle failed and could not be rolled back safely.",
+        );
+      throw reviewConsent.error;
+    }
+    let context;
+    try {
+      context = await currentContext(identity.userId, membership.scope.pilotId);
+    } catch (error) {
+      const [reviewRollback, telemetryRollback] = await Promise.all([
+        db
+          .from("conversation_review_consents")
+          .delete()
+          .eq("id", reviewConsentId),
+        db
+          .from("telemetry_consents")
+          .delete()
+          .in(
+            "id",
+            rows.map((row) => row.id),
+          ),
+      ]);
+      if (reviewRollback.error || telemetryRollback.error) {
+        throw new Error(
+          "Consent was saved but its current state could not be confirmed. Reload privacy settings before continuing.",
+        );
+      }
+      throw error;
+    }
+    return res.status(201).json(context);
   } catch (error) {
     req.log.error({ err: error }, "Could not save telemetry consent");
-    return res.status(503).json({ error: "Consent choices could not be saved. Nothing was started." });
+    const uncertain =
+      error instanceof Error && error.message.startsWith("Consent was saved");
+    return res.status(503).json({
+      error: uncertain
+        ? error.message
+        : "Consent choices could not be saved. Nothing was started.",
+    });
   }
 });
 
@@ -237,9 +343,12 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
         "Pilot telemetry is unavailable for this account.",
         "Telemetry preferences are temporarily unavailable.",
       )
-    ) return;
+    )
+      return;
     if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
+      return res
+        .status(403)
+        .json({ error: "Pilot telemetry is unavailable for this account." });
     }
     if (
       !req.body ||
@@ -253,11 +362,16 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       typeof req.body.pilotId === "string" && UUID_RE.test(req.body.pilotId)
         ? req.body.pilotId
         : null;
-    const requestedScopes = Array.isArray(req.body.scopes) ? req.body.scopes : ["telemetry"];
+    const requestedScopes = Array.isArray(req.body.scopes)
+      ? req.body.scopes
+      : ["telemetry"];
     if (
       requestedScopes.length === 0 ||
       requestedScopes.some(
-        (scope: unknown) => !["telemetry", "screen", "microphone"].includes(String(scope)),
+        (scope: unknown) =>
+          !["telemetry", "screen", "microphone", "conversationReview"].includes(
+            String(scope),
+          ),
       )
     ) {
       return res.status(400).json({ error: "Invalid withdrawal scopes." });
@@ -268,12 +382,18 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       scopes.add("microphone");
     }
     const scope = await withdrawalScope(identity.userId, pilotId);
-    if (!scope) return res.status(404).json({ error: "Pilot consent history not found." });
+    if (!scope)
+      return res
+        .status(404)
+        .json({ error: "Pilot consent history not found." });
     const now = new Date().toISOString();
     const retainedUntil = new Date(
       new Date(now).setUTCMonth(new Date(now).getUTCMonth() + 24),
     ).toISOString();
-    const rows = [...scopes].map((consentScope) => ({
+    const telemetryScopes = [...scopes].filter(
+      (consentScope) => consentScope !== "conversationReview",
+    );
+    const rows = telemetryScopes.map((consentScope) => ({
       id: randomUUID(),
       actor_user_id: identity.userId,
       organization_id: scope.organizationId,
@@ -287,18 +407,78 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       retained_until: retainedUntil,
       created_at: now,
     }));
-    const inserted = await db.from("telemetry_consents").insert(rows);
-    if (inserted.error) throw inserted.error;
+    if (rows.length > 0) {
+      const inserted = await db.from("telemetry_consents").insert(rows);
+      if (inserted.error) throw inserted.error;
+    }
+    let reviewWithdrawalId: string | null = null;
+    if (scopes.has("conversationReview")) {
+      const priorReview = await latestConversationReviewConsent(
+        identity.userId,
+        scope.pilotId,
+      );
+      reviewWithdrawalId = randomUUID();
+      const reviewWithdrawal = await db
+        .from("conversation_review_consents")
+        .insert({
+          id: reviewWithdrawalId,
+          actor_user_id: identity.userId,
+          organization_id: scope.organizationId,
+          pilot_id: scope.pilotId,
+          chat_session_id:
+            priorReview?.chatSessionId || resolveSession(req, res),
+          state: "withdrawn",
+          privacy_notice_version: PRIVACY_NOTICE_VERSION,
+          consent_version: CONVERSATION_REVIEW_CONSENT_VERSION,
+          source: "account_privacy",
+          occurred_at: now,
+          retained_until: retainedUntil,
+          created_at: now,
+        });
+      if (reviewWithdrawal.error) {
+        if (rows.length > 0) {
+          const rollback = await db
+            .from("telemetry_consents")
+            .delete()
+            .in(
+              "id",
+              rows.map((row) => row.id),
+            );
+          if (rollback.error)
+            throw new Error(
+              "Consent withdrawal failed and could not be rolled back safely.",
+            );
+        }
+        throw reviewWithdrawal.error;
+      }
+    }
     // The approved retention window is 24 months after withdrawal (or pilot
     // end), so extend the complete consent audit chain rather than retaining
     // only the newly appended withdrawal rows.
-    const consentHistory = await db
-      .from("telemetry_consents")
-      .update({ retained_until: retainedUntil })
-      .eq("actor_user_id", identity.userId)
-      .eq("pilot_id", scope.pilotId)
-      .lt("retained_until", retainedUntil);
-    if (consentHistory.error) throw consentHistory.error;
+    const historyUpdates = [];
+    if (rows.length > 0) {
+      historyUpdates.push(
+        db
+          .from("telemetry_consents")
+          .update({ retained_until: retainedUntil })
+          .eq("actor_user_id", identity.userId)
+          .eq("pilot_id", scope.pilotId)
+          .lt("retained_until", retainedUntil),
+      );
+    }
+    if (reviewWithdrawalId) {
+      historyUpdates.push(
+        db
+          .from("conversation_review_consents")
+          .update({ retained_until: retainedUntil })
+          .eq("actor_user_id", identity.userId)
+          .eq("pilot_id", scope.pilotId)
+          .lt("retained_until", retainedUntil),
+      );
+    }
+    const historyResults = await Promise.all(historyUpdates);
+    const failedHistoryUpdate = historyResults.find((result) => result.error);
+    if (failedHistoryUpdate?.error) throw failedHistoryUpdate.error;
 
     const deletionDueAt = isoAfterDays(WITHDRAWAL_DELETION_DAYS);
     if (scopes.has("telemetry")) {
@@ -308,7 +488,9 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
         .eq("actor_user_id", identity.userId)
         .eq("pilot_id", scope.pilotId);
       if (sessions.error) throw sessions.error;
-      const sessionIds = (sessions.data ?? []).map((row: Record<string, unknown>) => row["id"]);
+      const sessionIds = (sessions.data ?? []).map(
+        (row: Record<string, unknown>) => row["id"],
+      );
       const sessionUpdate = await db
         .from("test_sessions")
         .update({
@@ -373,7 +555,11 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
           .eq("tester_user_id", identity.userId)
           .eq("pilot_id", scope.pilotId);
         if (!scopes.has("screen")) {
-          recordingQuery = recordingQuery.not("microphone_consent_id", "is", null);
+          recordingQuery = recordingQuery.not(
+            "microphone_consent_id",
+            "is",
+            null,
+          );
         }
         const recordings = await recordingQuery;
         if (recordings.error) throw recordings.error;
@@ -386,7 +572,9 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not withdraw telemetry consent");
-    return res.status(503).json({ error: "Telemetry withdrawal could not be completed." });
+    return res
+      .status(503)
+      .json({ error: "Telemetry withdrawal could not be completed." });
   }
 });
 
@@ -401,32 +589,65 @@ router.get("/testing/telemetry/export", async (req, res) => {
         "Pilot telemetry is unavailable for this account.",
         "Telemetry export is temporarily unavailable.",
       )
-    ) return;
-    const [consents, sessions, events, failures, recordings, feedback] = await Promise.all([
-      db.from("telemetry_consents").select("*").eq("actor_user_id", identity.userId),
+    )
+      return;
+    const [
+      consents,
+      conversationReviewConsents,
+      sessions,
+      events,
+      failures,
+      recordings,
+      feedback,
+    ] = await Promise.all([
+      db
+        .from("telemetry_consents")
+        .select("*")
+        .eq("actor_user_id", identity.userId),
+      db
+        .from("conversation_review_consents")
+        .select("*")
+        .eq("actor_user_id", identity.userId),
       db.from("test_sessions").select("*").eq("actor_user_id", identity.userId),
       db.from("test_events").select("*").eq("actor_user_id", identity.userId),
-      db.from("activity_ingest_failures").select("*").eq("actor_user_id", identity.userId),
+      db
+        .from("activity_ingest_failures")
+        .select("*")
+        .eq("actor_user_id", identity.userId),
       db
         .from("test_recordings")
-        .select("id,session_id,test_session_id,mime_type,duration_ms,size_bytes,created_at,retained_until,deletion_due_at")
+        .select(
+          "id,session_id,test_session_id,mime_type,duration_ms,size_bytes,created_at,retained_until,deletion_due_at",
+        )
         .eq("tester_user_id", identity.userId),
       db
         .from("test_feedback")
-        .select("id,session_id,test_session_id,features_used,device_category,trigger,goal,useful,shortfall,adoption_need,additional,status,created_at,updated_at,retained_until,deletion_due_at")
+        .select(
+          "id,session_id,test_session_id,features_used,device_category,trigger,goal,useful,shortfall,adoption_need,additional,status,created_at,updated_at,retained_until,deletion_due_at",
+        )
         .eq("tester_user_id", identity.userId),
     ]);
-    const failed = [consents, sessions, events, failures, recordings, feedback].find(
-      (result) => result.error,
-    );
+    const failed = [
+      consents,
+      conversationReviewConsents,
+      sessions,
+      events,
+      failures,
+      recordings,
+      feedback,
+    ].find((result) => result.error);
     if (failed?.error) throw failed.error;
-    res.setHeader("Content-Disposition", 'attachment; filename="jack-telemetry-export.json"');
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="jack-telemetry-export.json"',
+    );
     res.setHeader("Cache-Control", "no-store");
     return res.json({
       exportedAt: new Date().toISOString(),
       notice:
         "Ask Jack conversation history is product data and is not duplicated in this optional telemetry export.",
       consents: consents.data ?? [],
+      conversationReviewConsents: conversationReviewConsents.data ?? [],
       sessions: sessions.data ?? [],
       events: events.data ?? [],
       ingestionFailures: failures.data ?? [],
@@ -435,7 +656,9 @@ router.get("/testing/telemetry/export", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not export telemetry");
-    return res.status(503).json({ error: "Telemetry export could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Telemetry export could not be generated." });
   }
 });
 

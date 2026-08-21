@@ -7,14 +7,27 @@ const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
 const updates = vi.hoisted(
-  () => [] as Array<{ table: string; values: Record<string, unknown>; column: string; value: unknown }>,
+  () =>
+    [] as Array<{
+      table: string;
+      values: Record<string, unknown>;
+      column: string;
+      value: unknown;
+    }>,
 );
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
-  () => [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
+  () =>
+    [] as Array<{
+      id: unknown;
+      tester_user_id: string;
+      storage_path: string;
+    }>,
 );
 const removeRecordingObjects = vi.hoisted(() =>
-  vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({ error: null })),
+  vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({
+    error: null,
+  })),
 );
 
 vi.mock("@clerk/express", () => ({
@@ -23,7 +36,9 @@ vi.mock("@clerk/express", () => ({
 }));
 vi.mock("../../lib/jobs.js", () => ({ removeGraphSafe: vi.fn() }));
 vi.mock("../../lib/memory-graph.js", () => ({ withdrawMentor: vi.fn() }));
-vi.mock("../../lib/video-storage.js", () => ({ removeVideoAssets: vi.fn(async () => {}) }));
+vi.mock("../../lib/video-storage.js", () => ({
+  removeVideoAssets: vi.fn(async () => {}),
+}));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
     from: (table: string) => {
@@ -68,16 +83,23 @@ vi.mock("../../lib/supabase.js", () => ({
             return Promise.resolve(resolve({ data: [], error: null }));
           }
           if (operation === "delete") {
-            const ids = new Set(included?.column === "id" ? included.values : []);
+            const ids = new Set(
+              included?.column === "id" ? included.values : [],
+            );
             for (let index = recordingRows.length - 1; index >= 0; index -= 1) {
-              if (ids.has(recordingRows[index]!.id)) recordingRows.splice(index, 1);
+              if (ids.has(recordingRows[index]!.id))
+                recordingRows.splice(index, 1);
             }
             return Promise.resolve(resolve({ data: [], error: null }));
           }
           const rows = recordingRows.filter(
-            (row) => !equals || row[equals.column as keyof typeof row] === equals.value,
+            (row) =>
+              !equals ||
+              row[equals.column as keyof typeof row] === equals.value,
           );
-          return Promise.resolve(resolve({ data: rows.slice(0, limit), error: null }));
+          return Promise.resolve(
+            resolve({ data: rows.slice(0, limit), error: null }),
+          );
         },
       };
       return query;
@@ -130,11 +152,14 @@ describe("account deletion telemetry coverage", () => {
         "admin_access_audit",
         "test_sessions",
         "telemetry_consents",
+        "conversation_review_consents",
         "pilot_memberships",
         "platform_roles",
       ]),
     );
-    expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
+    expect(
+      deletions.filter(({ table }) => table === "activity_report_runs"),
+    ).toEqual([]);
     expect(
       updates.filter(({ table }) => table === "activity_report_runs"),
     ).toEqual([
@@ -161,7 +186,9 @@ describe("account deletion telemetry coverage", () => {
 
     expect(response.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
-    expect(removeRecordingObjects.mock.calls.map(([paths]) => paths.length)).toEqual([500, 500, 1]);
+    expect(
+      removeRecordingObjects.mock.calls.map(([paths]) => paths.length),
+    ).toEqual([500, 500, 1]);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 
@@ -184,5 +211,27 @@ describe("account deletion telemetry coverage", () => {
     expect(retried.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("validates every recording row id before deleting any storage object", async () => {
+    recordingRows.push(
+      {
+        id: "recording-valid",
+        tester_user_id: "user-1",
+        storage_path: "recordings/valid.webm",
+      },
+      {
+        id: null,
+        tester_user_id: "user-1",
+        storage_path: "recordings/malformed.webm",
+      },
+    );
+
+    const response = await request(app()).delete("/api/account");
+
+    expect(response.status).toBe(500);
+    expect(removeRecordingObjects).not.toHaveBeenCalled();
+    expect(recordingRows).toHaveLength(2);
+    expect(deleteUser).not.toHaveBeenCalled();
   });
 });

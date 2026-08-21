@@ -57,8 +57,18 @@ beforeEach(() => {
     { id: OTHER_ORGANIZATION_ID, name: "Other Org", status: "active" },
   ];
   fake.tables.pilots = [
-    { id: PILOT_ID, organization_id: ORGANIZATION_ID, name: "Allowed Pilot", status: "active" },
-    { id: OTHER_PILOT_ID, organization_id: OTHER_ORGANIZATION_ID, name: "Other Pilot", status: "active" },
+    {
+      id: PILOT_ID,
+      organization_id: ORGANIZATION_ID,
+      name: "Allowed Pilot",
+      status: "active",
+    },
+    {
+      id: OTHER_PILOT_ID,
+      organization_id: OTHER_ORGANIZATION_ID,
+      name: "Other Pilot",
+      status: "active",
+    },
   ];
   fake.tables.pilot_memberships = [
     {
@@ -83,56 +93,78 @@ beforeEach(() => {
     },
   ];
   fake.tables.platform_roles = [];
-  fake.tables.test_sessions = [{
-    id: "55555555-5555-4555-8555-555555555555",
-    actor_user_id: USER_ID,
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    status: "completed",
-    started_at: "2026-07-25T00:00:00.000Z",
-    last_activity_at: "2026-07-25T01:00:00.000Z",
-    onboarding_status: "completed",
-    onboarding_step: 3,
-    question_count: 1,
-    screen_consent_state: "declined",
-    microphone_consent_state: "declined",
-    recording_status: "not_requested",
-    feedback_status: "submitted",
-    completed_at: "2026-07-25T01:00:00.000Z",
-    error_count: 0,
-  }];
-  fake.tables.test_events = [{
-    event_id: "66666666-6666-4666-8666-666666666666",
-    actor_user_id: USER_ID,
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    test_session_id: "55555555-5555-4555-8555-555555555555",
-    event_type: "ask_jack_completed",
-    occurred_at: "2026-07-25T00:30:00.000Z",
-    surface: "ask_jack",
-    result: "success",
-    metadata: { citation_count: 2 },
-    schema_version: 1,
-  }];
-  fake.tables.test_feedback = [{
-    id: "77777777-7777-4777-8777-777777777777",
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-  }];
+  fake.tables.test_sessions = [
+    {
+      id: "55555555-5555-4555-8555-555555555555",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      chat_session_id: "pilot-chat-session-1",
+      status: "completed",
+      started_at: "2026-07-25T00:00:00.000Z",
+      last_activity_at: "2026-07-25T01:00:00.000Z",
+      onboarding_status: "completed",
+      onboarding_step: 3,
+      question_count: 1,
+      screen_consent_state: "declined",
+      microphone_consent_state: "declined",
+      recording_status: "not_requested",
+      feedback_status: "submitted",
+      completed_at: "2026-07-25T01:00:00.000Z",
+      error_count: 0,
+    },
+  ];
+  fake.tables.test_events = [
+    {
+      event_id: "66666666-6666-4666-8666-666666666666",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: "55555555-5555-4555-8555-555555555555",
+      event_type: "ask_jack_completed",
+      occurred_at: "2026-07-25T00:30:00.000Z",
+      surface: "ask_jack",
+      result: "success",
+      metadata: { citation_count: 2 },
+      schema_version: 1,
+    },
+  ];
+  fake.tables.test_feedback = [
+    {
+      id: "77777777-7777-4777-8777-777777777777",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+    },
+  ];
   fake.tables.activity_ingest_failures = [];
+  fake.tables.chat_messages = [];
   fake.tables.admin_access_audit = [];
   fake.tables.activity_report_runs = [];
 });
 
 describe("pilot activity reports", () => {
   it("returns scoped aggregates and a minimized per-user timeline", async () => {
-    const summary = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const summary = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(summary.status).toBe(200);
     expect(summary.body.summary).toMatchObject({
+      aggregateUnit: "sessions",
       participantCount: 1,
+      sessionCount: 1,
       completedSessions: 1,
       feedbackCount: 1,
     });
+    expect(summary.body.participants).toEqual([
+      expect.objectContaining({
+        actorUserId: USER_ID,
+        sessionCount: 1,
+        askJackUseCount: 1,
+        sessions: [expect.objectContaining({ actorUserId: USER_ID })],
+      }),
+    ]);
+    expect(summary.body.sessions).toHaveLength(1);
+    expect(summary.body).not.toHaveProperty("users");
     const timeline = await request(app()).get(
       `/api/testing/reports/users/${USER_ID}/timeline?${query}`,
     );
@@ -143,15 +175,382 @@ describe("pilot activity reports", () => {
     expect(JSON.stringify(timeline.body)).not.toContain("question");
   });
 
+  it("groups repeated sessions under one primary participant", async () => {
+    fake.tables.test_sessions.push({
+      ...fake.tables.test_sessions[0],
+      id: SECOND_SESSION_ID,
+      status: "active",
+      started_at: "2026-07-25T01:30:00.000Z",
+      last_activity_at: "2026-07-25T02:00:00.000Z",
+      onboarding_status: "not_started",
+      onboarding_step: 0,
+      question_count: 2,
+      feedback_status: "not_requested",
+      completed_at: null,
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary).toMatchObject({
+      aggregateUnit: "sessions",
+      participantCount: 1,
+      sessionCount: 2,
+      completedSessions: 1,
+      completionRate: 0.5,
+    });
+    expect(response.body.participants).toHaveLength(1);
+    expect(response.body.participants[0]).toMatchObject({
+      actorUserId: USER_ID,
+      sessionCount: 2,
+      askJackUseCount: 3,
+    });
+    expect(response.body.participants[0].sessions).toHaveLength(2);
+    expect(response.body.sessions).toHaveLength(2);
+    expect(response.body.reconciliation.sessionCountsByActor).toEqual({
+      [USER_ID]: 2,
+    });
+  });
+
+  it("selects the latest participant session by parsed activity time with null oldest", async () => {
+    fake.tables.test_sessions.push(
+      {
+        ...fake.tables.test_sessions[0],
+        id: SECOND_SESSION_ID,
+        status: "active",
+        onboarding_status: "not_started",
+        question_count: 2,
+        last_activity_at: null,
+      },
+      {
+        ...fake.tables.test_sessions[0],
+        id: THIRD_SESSION_ID,
+        status: "active",
+        onboarding_status: "in_progress",
+        question_count: 3,
+        last_activity_at: "2026-07-25T03:00:00.000Z",
+      },
+    );
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.participants[0]).toMatchObject({
+      latestStatus: "active",
+      latestOnboardingStatus: "in_progress",
+      lastActivityAt: "2026-07-25T03:00:00.000Z",
+    });
+    expect(response.body.participants[0].sessions[0].lastActivityAt).toBeNull();
+  });
+
+  it("fails closed for malformed administrator and tester membership dates", async () => {
+    fake.tables.pilot_memberships[0]!.valid_from = "not-a-date";
+
+    const denied = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(denied.status).toBe(403);
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      decision: "denied",
+    });
+
+    fake.tables.pilot_memberships[0]!.valid_from = null;
+    fake.tables.pilot_memberships[1]!.valid_until = "not-a-date";
+    const allowed = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.reconciliation.enrolledTesterIds).toEqual([]);
+    expect(allowed.body.reconciliation.observedSessionActorIds).toEqual([
+      USER_ID,
+    ]);
+  });
+
+  it("returns minimized scoped identity reconciliation without chat content", async () => {
+    const enrolledWithoutActivity = "tester-2";
+    const observedNotEnrolled = "tester-observed-only";
+    fake.tables.pilot_memberships.push({
+      id: "second-tester-membership",
+      user_id: enrolledWithoutActivity,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    });
+    fake.tables.test_sessions.push({
+      ...fake.tables.test_sessions[0],
+      id: SECOND_SESSION_ID,
+      actor_user_id: observedNotEnrolled,
+      chat_session_id: "pilot-chat-session-observed",
+    });
+    fake.tables.chat_messages = [
+      {
+        id: "chat-1",
+        user_id: USER_ID,
+        session_id: "pilot-chat-session-1",
+        organization_id: null,
+        pilot_id: null,
+        content: "private tester text",
+        role: "user",
+      },
+      {
+        id: "chat-2",
+        user_id: USER_ID,
+        session_id: "pilot-chat-session-1",
+        organization_id: null,
+        pilot_id: null,
+        content: "private Jack text",
+        role: "assistant",
+      },
+      {
+        id: "chat-3",
+        user_id: observedNotEnrolled,
+        session_id: "pilot-chat-session-observed",
+        organization_id: null,
+        pilot_id: null,
+        content: "private observed text",
+        role: "user",
+      },
+      {
+        id: "chat-personal",
+        user_id: USER_ID,
+        session_id: "personal-session",
+        organization_id: null,
+        pilot_id: null,
+        content: "private personal activity",
+        role: "user",
+      },
+      {
+        id: "chat-4",
+        user_id: "unrelated-user",
+        session_id: "other-session",
+        organization_id: null,
+        pilot_id: null,
+        content: "out of scope",
+        role: "user",
+      },
+    ];
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation).toEqual({
+      enrolledTesterIds: [USER_ID, enrolledWithoutActivity],
+      observedSessionActorIds: [USER_ID, observedNotEnrolled],
+      sessionCountsByActor: {
+        [USER_ID]: 1,
+        [enrolledWithoutActivity]: 0,
+        [observedNotEnrolled]: 1,
+      },
+      chatActivityEvidence: { status: "available" },
+      chatActivityCountsByActor: {
+        [USER_ID]: 2,
+        [enrolledWithoutActivity]: 0,
+        [observedNotEnrolled]: 1,
+      },
+      likelyMismatches: {
+        observedNotEnrolled: [observedNotEnrolled],
+        enrolledWithoutSessionEvidence: [enrolledWithoutActivity],
+        enrolledWithoutActivity: [enrolledWithoutActivity],
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private tester text");
+    expect(JSON.stringify(response.body)).not.toContain(
+      "private personal activity",
+    );
+    expect(JSON.stringify(response.body)).not.toContain("unrelated-user");
+  });
+
+  it("uses exact bounded chat counts beyond typical PostgREST row caps", async () => {
+    fake.tables.chat_messages = Array.from({ length: 1_501 }, (_, index) => ({
+      id: `scoped-chat-${index}`,
+      user_id: USER_ID,
+      session_id: "pilot-chat-session-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `private-${index}`,
+    }));
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation.chatActivityEvidence).toEqual({
+      status: "available",
+    });
+    expect(response.body.reconciliation.chatActivityCountsByActor).toEqual({
+      [USER_ID]: 1_501,
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private-1500");
+  });
+
+  it("returns session evidence with globally unavailable chat counts when a chat scope column is missing", async () => {
+    const enrolledWithoutSessionEvidence = "tester-2";
+    fake.tables.pilot_memberships.push({
+      id: "second-tester-membership",
+      user_id: enrolledWithoutSessionEvidence,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      role: "tester",
+      active: true,
+      valid_from: "2026-01-01T00:00:00.000Z",
+      valid_until: null,
+    });
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.organization_id does not exist",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation).toMatchObject({
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [enrolledWithoutSessionEvidence],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
+  it("returns session evidence when test session chat linkage is absent from the schema cache", async () => {
+    fake.failNext("test_sessions", "select", {
+      code: "PGRST204",
+      message:
+        "Could not find the 'chat_session_id' column of 'test_sessions' in the schema cache",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.sessionCount).toBe(1);
+    expect(response.body.reconciliation).toMatchObject({
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
+  it("fails closed for unrelated chat count errors", async () => {
+    fake.failNext("chat_messages", "select", {
+      code: "42501",
+      message: "permission denied for table chat_messages",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "Pilot report could not be generated.",
+    });
+  });
+
+  it("fails closed when concurrent chat counts mix an expected schema error with an unexpected error", async () => {
+    fake.passNext("chat_messages", "select");
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.organization_id does not exist",
+    });
+    fake.failNext("chat_messages", "select", {
+      code: "42501",
+      message: "permission denied for table chat_messages",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "Pilot report could not be generated.",
+    });
+  });
+
+  it("reports chat evidence unavailable for a missing scope column when there are no actors", async () => {
+    fake.tables.test_sessions = [];
+    fake.tables.pilot_memberships = fake.tables.pilot_memberships.filter(
+      (membership) => membership.role !== "tester",
+    );
+    fake.failNext("chat_messages", "select", {
+      code: "PGRST204",
+      message:
+        "Could not find the 'pilot_id' column of 'chat_messages' in the schema cache",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliation).toMatchObject({
+      enrolledTesterIds: [],
+      observedSessionActorIds: [],
+      chatActivityEvidence: {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      },
+      chatActivityCountsByActor: null,
+      likelyMismatches: {
+        enrolledWithoutSessionEvidence: [],
+        enrolledWithoutActivity: null,
+      },
+    });
+  });
+
+  it("does not degrade for a missing column outside the required capability set", async () => {
+    fake.failNext("chat_messages", "select", {
+      code: "42703",
+      message: "column chat_messages.content does not exist",
+    });
+
+    const response = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
+
+    expect(response.status).toBe(503);
+  });
+
   it("denies cross-organization access and presentation mode", async () => {
     const denied = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
     );
     expect(denied.status).toBe(403);
-    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({ decision: "denied" });
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      decision: "denied",
+    });
     identity.userId = "clerk-presentation-account";
     identity.isPresentation = true;
-    const presentation = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const presentation = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(presentation.status).toBe(403);
     const scopes = await request(app()).get("/api/testing/reports/scopes");
     expect(scopes.status).toBe(403);
@@ -160,12 +559,24 @@ describe("pilot activity reports", () => {
   it("fails closed when trusted identity resolution is unavailable", async () => {
     identity.classification = "unavailable";
 
-    expect((await request(app()).get(`/api/testing/reports/summary?${query}`)).status).toBe(503);
-    expect((await request(app()).get("/api/testing/reports/scopes")).status).toBe(503);
     expect(
-      (await request(app()).get(`/api/testing/reports/users/${USER_ID}/timeline?${query}`)).status,
+      (await request(app()).get(`/api/testing/reports/summary?${query}`))
+        .status,
     ).toBe(503);
-    expect((await request(app()).get(`/api/testing/reports/export.csv?${query}`)).status).toBe(503);
+    expect(
+      (await request(app()).get("/api/testing/reports/scopes")).status,
+    ).toBe(503);
+    expect(
+      (
+        await request(app()).get(
+          `/api/testing/reports/users/${USER_ID}/timeline?${query}`,
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (await request(app()).get(`/api/testing/reports/export.csv?${query}`))
+        .status,
+    ).toBe(503);
     expect(
       (
         await request(app())
@@ -182,7 +593,9 @@ describe("pilot activity reports", () => {
       role: "organization_admin",
       pilot_id: null,
     };
-    const allowed = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const allowed = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(allowed.status).toBe(200);
     const denied = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
@@ -191,12 +604,14 @@ describe("pilot activity reports", () => {
   });
 
   it("allows cross-organization access only for an explicit platform-superadmin role", async () => {
-    fake.tables.platform_roles = [{
-      id: "platform-role",
-      user_id: "pilot-admin",
-      role: "platform_superadmin",
-      active: true,
-    }];
+    fake.tables.platform_roles = [
+      {
+        id: "platform-role",
+        user_id: "pilot-admin",
+        role: "platform_superadmin",
+        active: true,
+      },
+    ];
     const response = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
     );
@@ -208,7 +623,9 @@ describe("pilot activity reports", () => {
   });
 
   it("exports CSV and persists only a derived manual report snapshot", async () => {
-    const csv = await request(app()).get(`/api/testing/reports/export.csv?${query}`);
+    const csv = await request(app()).get(
+      `/api/testing/reports/export.csv?${query}`,
+    );
     expect(csv.status).toBe(200);
     expect(csv.text).toContain("actor_user_id");
     expect(csv.text).not.toContain("citation_count");
@@ -306,23 +723,31 @@ describe("pilot activity reports", () => {
       },
     );
 
-    const csv = await request(app()).get(`/api/testing/reports/export.csv?${query}`);
+    const csv = await request(app()).get(
+      `/api/testing/reports/export.csv?${query}`,
+    );
     expect(csv.status).toBe(200);
     const lines = csv.text.trim().split(/\r?\n/);
-    const headers = lines[0]?.split(",").map((header) => header.replace(/^\"|\"$/g, "")) ?? [];
+    const headers =
+      lines[0]?.split(",").map((header) => header.replace(/^\"|\"$/g, "")) ??
+      [];
     expect(headers).toContain("event_count");
     const rows = lines
       .slice(1)
       .filter((line) => line.trim().length > 0)
       .map((line) =>
         Object.fromEntries(
-          (line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/) as string[]).map((value, index) => [
-            headers[index] ?? `column_${index}`,
-            value.replace(/^\"|\"$/g, ""),
-          ]),
+          (line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/) as string[]).map(
+            (value, index) => [
+              headers[index] ?? `column_${index}`,
+              value.replace(/^\"|\"$/g, ""),
+            ],
+          ),
         ),
       );
-    const countsBySessionStart = Object.fromEntries(rows.map((row) => [String(row.started_at), row.event_count]));
+    const countsBySessionStart = Object.fromEntries(
+      rows.map((row) => [String(row.started_at), row.event_count]),
+    );
     expect(countsBySessionStart["2026-07-25T00:00:00.000Z"]).toBe("1");
     expect(countsBySessionStart["2026-07-25T01:30:00.000Z"]).toBe("1");
     expect(countsBySessionStart["2026-07-25T02:30:00.000Z"]).toBe("2");

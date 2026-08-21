@@ -5,16 +5,14 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import * as zod from 'zod';
-
+import * as zod from "zod";
 
 /**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
-})
-
+  status: zod.string(),
+});
 
 /**
  * Coarse, DB-free telemetry snapshot for the heartbeat widget. Returns only presentation-level fields (no raw CPU/RAM/queue internals).
@@ -23,75 +21,106 @@ export const HealthCheckResponse = zod.object({
 export const getSystemHealthResponseVitalityScoreMin = 0;
 export const getSystemHealthResponseVitalityScoreMax = 100;
 
-
-
-export const GetSystemHealthResponse = zod.object({
-  "vitalityScore": zod.number().min(getSystemHealthResponseVitalityScoreMin).max(getSystemHealthResponseVitalityScoreMax).describe('0..100 health index (100 = healthy). Activity is conveyed by state\/BPM.'),
-  "heartbeatBPM": zod.number().describe('Beats per minute for the animated heartbeat.'),
-  "pulseColor": zod.enum(['green', 'purple', 'orange', 'red']),
-  "status": zod.enum(['Healthy', 'Listening', 'Searching Memory', 'Reasoning', 'Writing Memory', 'Warning']),
-  "state": zod.enum(['idle', 'listening', 'searching', 'reasoning', 'writing', 'error'])
-}).describe('Coarse Systems Health telemetry for the heartbeat widget.')
-
+export const GetSystemHealthResponse = zod
+  .object({
+    vitalityScore: zod
+      .number()
+      .min(getSystemHealthResponseVitalityScoreMin)
+      .max(getSystemHealthResponseVitalityScoreMax)
+      .describe(
+        "0..100 health index (100 = healthy). Activity is conveyed by state\/BPM.",
+      ),
+    heartbeatBPM: zod
+      .number()
+      .describe("Beats per minute for the animated heartbeat."),
+    pulseColor: zod.enum(["green", "purple", "orange", "red"]),
+    status: zod.enum([
+      "Healthy",
+      "Listening",
+      "Searching Memory",
+      "Reasoning",
+      "Writing Memory",
+      "Warning",
+    ]),
+    state: zod.enum([
+      "idle",
+      "listening",
+      "searching",
+      "reasoning",
+      "writing",
+      "error",
+    ]),
+  })
+  .describe("Coarse Systems Health telemetry for the heartbeat widget.");
 
 /**
  * Returns the authenticated user's id, email, display name, and whether their email is in the server-side admin allowlist. Requires a signed-in user; the app-level auth gate 401s anonymous callers before this route.
  * @summary The signed-in caller's identity and admin status
  */
 export const GetMeResponse = zod.object({
-  "userId": zod.string(),
-  "email": zod.string().nullable(),
-  "name": zod.string().nullable(),
-  "isAdmin": zod.boolean(),
-  "canViewPilotReports": zod.boolean()
-})
-
+  userId: zod.string(),
+  email: zod.string().nullable(),
+  name: zod.string().nullable(),
+  isAdmin: zod.boolean(),
+  canViewPilotReports: zod.boolean(),
+});
 
 /**
  * @summary Read the signed-in user's Memory Graph onboarding preference
  */
 export const GetMemoryGraphOnboardingPreferenceResponse = zod.object({
-  "preference": zod.union([zod.object({
-  "version": zod.literal(1),
-  "status": zod.enum(['completed', 'skipped'])
-}),zod.null()])
-})
-
+  preference: zod.union([
+    zod.object({
+      version: zod.literal(1),
+      status: zod.enum(["completed", "skipped"]),
+    }),
+    zod.null(),
+  ]),
+});
 
 /**
  * @summary Persist the signed-in user's Memory Graph onboarding preference
  */
 export const UpdateMemoryGraphOnboardingPreferenceBody = zod.object({
-  "version": zod.literal(1),
-  "status": zod.enum(['completed', 'skipped'])
-})
+  version: zod.literal(1),
+  status: zod.enum(["completed", "skipped"]),
+});
 
 export const UpdateMemoryGraphOnboardingPreferenceResponse = zod.object({
-  "preference": zod.union([zod.object({
-  "version": zod.literal(1),
-  "status": zod.enum(['completed', 'skipped'])
-}),zod.null()])
-})
-
+  preference: zod.union([
+    zod.object({
+      version: zod.literal(1),
+      status: zod.enum(["completed", "skipped"]),
+    }),
+    zod.null(),
+  ]),
+});
 
 /**
  * @summary Log an allowlisted Memory Graph onboarding event
  */
 export const trackMemoryGraphOnboardingEventBodyStepMax = 3;
 
-
-
 export const TrackMemoryGraphOnboardingEventBody = zod.object({
-  "event": zod.enum(['memory_onboarding_started', 'memory_onboarding_step_viewed', 'memory_onboarding_skipped', 'memory_onboarding_completed', 'memory_onboarding_reopened']),
-  "source": zod.enum(['automatic', 'replay']),
-  "version": zod.literal(1),
-  "step": zod.number().min(1).max(trackMemoryGraphOnboardingEventBodyStepMax).optional()
-})
+  event: zod.enum([
+    "memory_onboarding_started",
+    "memory_onboarding_step_viewed",
+    "memory_onboarding_skipped",
+    "memory_onboarding_completed",
+    "memory_onboarding_reopened",
+  ]),
+  source: zod.enum(["automatic", "replay"]),
+  version: zod.literal(1),
+  step: zod
+    .number()
+    .min(1)
+    .max(trackMemoryGraphOnboardingEventBodyStepMax)
+    .optional(),
+});
 
 export const TrackMemoryGraphOnboardingEventResponse = zod.object({
-  "accepted": zod.boolean()
-})
-
+  accepted: zod.boolean(),
+});
 
 /**
  * @summary List all videos in the knowledge library
@@ -100,261 +129,337 @@ export const listVideosQueryLimitDefault = 20;
 export const listVideosQueryOffsetDefault = 0;
 
 export const ListVideosQueryParams = zod.object({
-  "trade": zod.coerce.string().optional().describe('Filter by trade category'),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']).optional().describe('Filter by processing status'),
-  "limit": zod.coerce.number().default(listVideosQueryLimitDefault),
-  "offset": zod.coerce.number().default(listVideosQueryOffsetDefault)
-})
+  trade: zod.coerce.string().optional().describe("Filter by trade category"),
+  status: zod
+    .enum([
+      "queued",
+      "uploading",
+      "uploaded",
+      "transcribing",
+      "analyzing",
+      "indexing",
+      "completed",
+      "failed",
+      "retrying",
+    ])
+    .optional()
+    .describe("Filter by processing status"),
+  limit: zod.coerce.number().default(listVideosQueryLimitDefault),
+  offset: zod.coerce.number().default(listVideosQueryOffsetDefault),
+});
 
 export const ListVideosResponse = zod.object({
-  "videos": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})),
-  "total": zod.number()
-})
-
+  videos: zod.array(
+    zod.object({
+      id: zod.string(),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      trade: zod.string().nullish(),
+      thumbnailUrl: zod.string().nullish(),
+      videoUrl: zod.string().nullish(),
+      duration: zod.number().nullish(),
+      status: zod.enum([
+        "queued",
+        "uploading",
+        "uploaded",
+        "transcribing",
+        "analyzing",
+        "indexing",
+        "completed",
+        "failed",
+        "retrying",
+      ]),
+      competencyCodes: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      attempts: zod.number().nullish(),
+      lastError: zod.string().nullish(),
+      createdAt: zod.string(),
+      updatedAt: zod.string().nullish(),
+    }),
+  ),
+  total: zod.number(),
+});
 
 /**
  * @summary Register a new video upload
  */
 
-
-
 export const CreateVideoBody = zod.object({
-  "title": zod.string().min(1),
-  "description": zod.string().optional(),
-  "trade": zod.string().optional(),
-  "tags": zod.array(zod.string()).optional()
-})
+  title: zod.string().min(1),
+  description: zod.string().optional(),
+  trade: zod.string().optional(),
+  tags: zod.array(zod.string()).optional(),
+});
 
 export const CreateVideoResponse = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
 
 /**
  * @summary Get library statistics (total videos, by trade, by status)
  */
 export const GetVideoStatsResponse = zod.object({
-  "total": zod.number(),
-  "byStatus": zod.record(zod.string(), zod.number()),
-  "byTrade": zod.record(zod.string(), zod.number()),
-  "totalDuration": zod.number().nullish()
-})
-
+  total: zod.number(),
+  byStatus: zod.record(zod.string(), zod.number()),
+  byTrade: zod.record(zod.string(), zod.number()),
+  totalDuration: zod.number().nullish(),
+});
 
 /**
  * @summary Get knowledge-object statistics (total and per-trade counts)
  */
 export const GetKnowledgeStatsResponse = zod.object({
-  "total": zod.number(),
-  "byTrade": zod.record(zod.string(), zod.number())
-})
-
+  total: zod.number(),
+  byTrade: zod.record(zod.string(), zod.number()),
+});
 
 /**
  * @summary Get recently added or analyzed videos
  */
 export const GetRecentVideosResponseItem = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-export const GetRecentVideosResponse = zod.array(GetRecentVideosResponseItem)
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
+export const GetRecentVideosResponse = zod.array(GetRecentVideosResponseItem);
 
 /**
  * @summary Get a single video with its transcript and analysis
  */
 export const GetVideoParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const GetVideoResponse = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "transcript": zod.string().nullish(),
-  "segments": zod.array(zod.object({
-  "id": zod.string(),
-  "startTime": zod.number(),
-  "endTime": zod.number(),
-  "text": zod.string(),
-  "confidence": zod.number().nullish()
-})).optional(),
-  "analysis": zod.string().nullish(),
-  "keyPoints": zod.array(zod.string()).optional(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  transcript: zod.string().nullish(),
+  segments: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        startTime: zod.number(),
+        endTime: zod.number(),
+        text: zod.string(),
+        confidence: zod.number().nullish(),
+      }),
+    )
+    .optional(),
+  analysis: zod.string().nullish(),
+  keyPoints: zod.array(zod.string()).optional(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
 
 /**
  * @summary Update video metadata
  */
 export const UpdateVideoParams = zod.object({
-  "id": zod.coerce.string()
-})
-
-
-
+  id: zod.coerce.string(),
+});
 
 export const UpdateVideoBody = zod.object({
-  "title": zod.string().min(1).optional(),
-  "description": zod.string().optional(),
-  "trade": zod.string().optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']).optional()
-})
+  title: zod.string().min(1).optional(),
+  description: zod.string().optional(),
+  trade: zod.string().optional(),
+  tags: zod.array(zod.string()).optional(),
+  status: zod
+    .enum([
+      "queued",
+      "uploading",
+      "uploaded",
+      "transcribing",
+      "analyzing",
+      "indexing",
+      "completed",
+      "failed",
+      "retrying",
+    ])
+    .optional(),
+});
 
 export const UpdateVideoResponse = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
 
 /**
  * @summary Delete a video and all its data
  */
 export const DeleteVideoParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
-export const DeleteVideoResponse = zod.void()
-
+export const DeleteVideoResponse = zod.void();
 
 /**
  * @summary Trigger AI transcription via Whisper
  */
 export const TranscribeVideoParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const TranscribeVideoResponse = zod.object({
-  "jobId": zod.string(),
-  "status": zod.string(),
-  "videoId": zod.string(),
-  "message": zod.string().nullish()
-})
-
+  jobId: zod.string(),
+  status: zod.string(),
+  videoId: zod.string(),
+  message: zod.string().nullish(),
+});
 
 /**
  * @summary Trigger GPT-4 analysis and Red Seal competency mapping
  */
 export const AnalyzeVideoParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const AnalyzeVideoResponse = zod.object({
-  "jobId": zod.string(),
-  "status": zod.string(),
-  "videoId": zod.string(),
-  "message": zod.string().nullish()
-})
-
+  jobId: zod.string(),
+  status: zod.string(),
+  videoId: zod.string(),
+  message: zod.string().nullish(),
+});
 
 /**
  * @summary Get semantically related videos
  */
 export const FetchRelatedVideosParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const FetchRelatedVideosResponseItem = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-export const FetchRelatedVideosResponse = zod.array(FetchRelatedVideosResponseItem)
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
+export const FetchRelatedVideosResponse = zod.array(
+  FetchRelatedVideosResponseItem,
+);
 
 /**
  * @summary Get a signed Supabase Storage upload URL
  */
 export const GetUploadUrlParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const GetUploadUrlBody = zod.object({
-  "filename": zod.string(),
-  "contentType": zod.string()
-})
+  filename: zod.string(),
+  contentType: zod.string(),
+});
 
 export const GetUploadUrlResponse = zod.object({
-  "uploadUrl": zod.string(),
-  "path": zod.string(),
-  "token": zod.string().nullish()
-})
-
+  uploadUrl: zod.string(),
+  path: zod.string(),
+  token: zod.string().nullish(),
+});
 
 /**
  * @summary Semantic search across the knowledge library using RAG
@@ -363,168 +468,233 @@ export const GetUploadUrlResponse = zod.object({
 export const semanticSearchBodyLimitDefault = 10;
 
 export const SemanticSearchBody = zod.object({
-  "query": zod.string().min(1),
-  "trade": zod.string().nullish(),
-  "limit": zod.number().default(semanticSearchBodyLimitDefault)
-})
+  query: zod.string().min(1),
+  trade: zod.string().nullish(),
+  limit: zod.number().default(semanticSearchBodyLimitDefault),
+});
 
 export const SemanticSearchResponse = zod.object({
-  "query": zod.string(),
-  "results": zod.array(zod.object({
-  "videoId": zod.string(),
-  "videoTitle": zod.string(),
-  "thumbnailUrl": zod.string().nullish(),
-  "text": zod.string(),
-  "startTime": zod.number(),
-  "endTime": zod.number(),
-  "score": zod.number(),
-  "trade": zod.string().nullish()
-}))
-})
-
+  query: zod.string(),
+  results: zod.array(
+    zod.object({
+      videoId: zod.string(),
+      videoTitle: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      text: zod.string(),
+      startTime: zod.number(),
+      endTime: zod.number(),
+      score: zod.number(),
+      trade: zod.string().nullish(),
+    }),
+  ),
+});
 
 /**
  * @summary Ask Jack a question — searches internal library first, then answers with citations
  */
 
-
-
 export const AskJackBody = zod.object({
-  "message": zod.string().min(1)
-})
+  message: zod.string().min(1),
+});
 
 export const askJackResponseLearningExtractedCountMin = 0;
 
-
-
 export const AskJackResponse = zod.object({
-  "answer": zod.string(),
-  "citations": zod.array(zod.object({
-  "videoId": zod.string(),
-  "videoTitle": zod.string(),
-  "startTime": zod.number(),
-  "endTime": zod.number(),
-  "text": zod.string(),
-  "thumbnailUrl": zod.string().nullish(),
-  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
-  "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
-  "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
-  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
-})),
-  "usedInternalKnowledge": zod.boolean().optional(),
-  "learning": zod.object({
-  "status": zod.enum(['verified', 'discarded', 'failed']),
-  "extractedCount": zod.number().min(askJackResponseLearningExtractedCountMin),
-  "summary": zod.string().optional()
-})
-})
-
+  answer: zod.string(),
+  citations: zod.array(
+    zod.object({
+      videoId: zod.string(),
+      videoTitle: zod.string(),
+      startTime: zod.number(),
+      endTime: zod.number(),
+      text: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      sourceType: zod
+        .enum(["video", "knowledge"])
+        .optional()
+        .describe(
+          'Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).',
+        ),
+      entryId: zod
+        .string()
+        .nullish()
+        .describe('Knowledge Entry id when sourceType is \"knowledge\".'),
+      verified: zod
+        .boolean()
+        .optional()
+        .describe(
+          'True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.',
+        ),
+      sourceCount: zod
+        .number()
+        .optional()
+        .describe(
+          'How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.',
+        ),
+    }),
+  ),
+  usedInternalKnowledge: zod.boolean().optional(),
+  learning: zod.object({
+    status: zod.enum(["verified", "discarded", "failed"]),
+    extractedCount: zod.number().min(askJackResponseLearningExtractedCountMin),
+    summary: zod.string().optional(),
+  }),
+});
 
 /**
  * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
 export const GetChatHistoryResponseItem = zod.object({
-  "id": zod.string(),
-  "role": zod.enum(['user', 'assistant']),
-  "content": zod.string(),
-  "citations": zod.array(zod.object({
-  "videoId": zod.string(),
-  "videoTitle": zod.string(),
-  "startTime": zod.number(),
-  "endTime": zod.number(),
-  "text": zod.string(),
-  "thumbnailUrl": zod.string().nullish(),
-  "sourceType": zod.enum(['video', 'knowledge']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
-  "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
-  "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
-  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.')
-})).optional(),
-  "createdAt": zod.string()
-})
-export const GetChatHistoryResponse = zod.array(GetChatHistoryResponseItem)
-
+  id: zod.string(),
+  role: zod.enum(["user", "assistant"]),
+  content: zod.string(),
+  citations: zod
+    .array(
+      zod.object({
+        videoId: zod.string(),
+        videoTitle: zod.string(),
+        startTime: zod.number(),
+        endTime: zod.number(),
+        text: zod.string(),
+        thumbnailUrl: zod.string().nullish(),
+        sourceType: zod
+          .enum(["video", "knowledge"])
+          .optional()
+          .describe(
+            'Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).',
+          ),
+        entryId: zod
+          .string()
+          .nullish()
+          .describe('Knowledge Entry id when sourceType is \"knowledge\".'),
+        verified: zod
+          .boolean()
+          .optional()
+          .describe(
+            'True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.',
+          ),
+        sourceCount: zod
+          .number()
+          .optional()
+          .describe(
+            'How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.',
+          ),
+      }),
+    )
+    .optional(),
+  createdAt: zod.string(),
+});
+export const GetChatHistoryResponse = zod.array(GetChatHistoryResponseItem);
 
 /**
  * @summary Delete all saved Ask Jack messages for the signed-in caller, starting a fresh conversation
  */
-export const ClearChatHistoryResponse = zod.void()
-
+export const ClearChatHistoryResponse = zod.void();
 
 /**
  * @summary List all Red Seal competency categories
  */
 export const ListCompetenciesResponseItem = zod.object({
-  "code": zod.string(),
-  "name": zod.string(),
-  "trade": zod.string(),
-  "description": zod.string().nullish(),
-  "videoCount": zod.number().optional()
-})
-export const ListCompetenciesResponse = zod.array(ListCompetenciesResponseItem)
-
+  code: zod.string(),
+  name: zod.string(),
+  trade: zod.string(),
+  description: zod.string().nullish(),
+  videoCount: zod.number().optional(),
+});
+export const ListCompetenciesResponse = zod.array(ListCompetenciesResponseItem);
 
 /**
  * @summary Get all videos mapped to a Red Seal competency code
  */
 export const GetVideosByCompetencyParams = zod.object({
-  "code": zod.coerce.string()
-})
+  code: zod.coerce.string(),
+});
 
 export const GetVideosByCompetencyResponseItem = zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "thumbnailUrl": zod.string().nullish(),
-  "videoUrl": zod.string().nullish(),
-  "duration": zod.number().nullish(),
-  "status": zod.enum(['queued', 'uploading', 'uploaded', 'transcribing', 'analyzing', 'indexing', 'completed', 'failed', 'retrying']),
-  "competencyCodes": zod.array(zod.string()).optional(),
-  "tags": zod.array(zod.string()).optional(),
-  "attempts": zod.number().nullish(),
-  "lastError": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish()
-})
-export const GetVideosByCompetencyResponse = zod.array(GetVideosByCompetencyResponseItem)
-
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  thumbnailUrl: zod.string().nullish(),
+  videoUrl: zod.string().nullish(),
+  duration: zod.number().nullish(),
+  status: zod.enum([
+    "queued",
+    "uploading",
+    "uploaded",
+    "transcribing",
+    "analyzing",
+    "indexing",
+    "completed",
+    "failed",
+    "retrying",
+  ]),
+  competencyCodes: zod.array(zod.string()).optional(),
+  tags: zod.array(zod.string()).optional(),
+  attempts: zod.number().nullish(),
+  lastError: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+});
+export const GetVideosByCompetencyResponse = zod.array(
+  GetVideosByCompetencyResponseItem,
+);
 
 /**
  * @summary Get the persisted Living Memory knowledge graph
  */
 export const GetGraphResponse = zod.object({
-  "nodes": zod.array(zod.object({
-  "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
-  "label": zod.string(),
-  "trade": zod.string().nullish(),
-  "refId": zod.string().nullish(),
-  "description": zod.string().nullable(),
-  "confidence": zod.number().nullable(),
-  "verificationStatus": zod.string(),
-  "meta": zod.record(zod.string(), zod.unknown()),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string()
-})),
-  "edges": zod.array(zod.object({
-  "id": zod.string(),
-  "source": zod.string(),
-  "target": zod.string(),
-  "kind": zod.string(),
-  "weight": zod.number().optional(),
-  "meta": zod.record(zod.string(), zod.unknown())
-})),
-  "counts": zod.object({
-  "nodes": zod.number(),
-  "edges": zod.number(),
-  "topics": zod.number(),
-  "competencies": zod.number(),
-  "videos": zod.number(),
-  "knowledge": zod.number()
-}),
-  "generatedAt": zod.string()
-})
-
+  nodes: zod.array(
+    zod.object({
+      id: zod.string(),
+      kind: zod.enum([
+        "core",
+        "topic",
+        "competency",
+        "video",
+        "mentor",
+        "concept",
+        "tool",
+        "equipment",
+        "material",
+        "procedure",
+        "hazard",
+        "slang",
+        "certification",
+        "standard",
+        "regional_term",
+      ]),
+      label: zod.string(),
+      trade: zod.string().nullish(),
+      refId: zod.string().nullish(),
+      description: zod.string().nullable(),
+      confidence: zod.number().nullable(),
+      verificationStatus: zod.string(),
+      meta: zod.record(zod.string(), zod.unknown()),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+    }),
+  ),
+  edges: zod.array(
+    zod.object({
+      id: zod.string(),
+      source: zod.string(),
+      target: zod.string(),
+      kind: zod.string(),
+      weight: zod.number().optional(),
+      meta: zod.record(zod.string(), zod.unknown()),
+    }),
+  ),
+  counts: zod.object({
+    nodes: zod.number(),
+    edges: zod.number(),
+    topics: zod.number(),
+    competencies: zod.number(),
+    videos: zod.number(),
+    knowledge: zod.number(),
+  }),
+  generatedAt: zod.string(),
+});
 
 /**
  * @summary List mentor-concept candidates queued for review (read-only)
@@ -532,573 +702,996 @@ export const GetGraphResponse = zod.object({
 export const listKnowledgeCandidatesQueryStatusDefault = `pending`;
 
 export const ListKnowledgeCandidatesQueryParams = zod.object({
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']).default(listKnowledgeCandidatesQueryStatusDefault).describe('pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.')
-})
+  status: zod
+    .enum(["pending", "accepted", "rejected", "merged", "archived", "restored"])
+    .default(listKnowledgeCandidatesQueryStatusDefault)
+    .describe(
+      "Admin-only review queue status. Pending rows include contributor identity and verbatim interview evidence and are never public.",
+    ),
+});
 
 export const ListKnowledgeCandidatesResponse = zod.object({
-  "candidates": zod.array(zod.object({
-  "id": zod.string(),
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "category": zod.string(),
-  "trade": zod.string().nullish(),
-  "confidence": zod.number().nullish(),
-  "competencyCode": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "answerId": zod.string().nullish(),
-  "sessionId": zod.string().nullish(),
-  "bestMatches": zod.array(zod.object({
-  "nodeId": zod.string(),
-  "label": zod.string(),
-  "similarity": zod.number(),
-  "validity": zod.enum(['live', 'redirected', 'gone']).optional().describe('Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.'),
-  "currentNodeId": zod.string().nullish().describe('The node this match currently resolves to (itself when live, the survivor when redirected).'),
-  "currentLabel": zod.string().nullish()
-})),
-  "createdAt": zod.string().nullish(),
-  "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
-  "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
-  "resolvedAt": zod.string().nullish(),
-  "requestedTargetId": zod.string().nullish().describe('The target the reviewer originally asked for (accept\/merge only).'),
-  "redirectReason": zod.string().nullish().describe('Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.')
-})),
-  "total": zod.number()
-})
-
+  candidates: zod.array(
+    zod.object({
+      id: zod.string(),
+      status: zod.enum([
+        "pending",
+        "accepted",
+        "rejected",
+        "merged",
+        "archived",
+        "restored",
+      ]),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      category: zod.string(),
+      trade: zod.string().nullish(),
+      confidence: zod.number().nullish(),
+      competencyCode: zod.string().nullish(),
+      mentorProfileId: zod.string().nullish(),
+      mentorName: zod.string().nullish(),
+      answerId: zod.string().nullish(),
+      sessionId: zod.string().nullish(),
+      question: zod
+        .string()
+        .nullable()
+        .describe("Verbatim interview question loaded from the source answer."),
+      answerText: zod
+        .string()
+        .nullable()
+        .describe(
+          "Verbatim mentor answer retained outside the trusted graph until review.",
+        ),
+      sourceValid: zod
+        .boolean()
+        .describe(
+          "True only when the answer belongs to the candidate mentor and session.",
+        ),
+      bestMatches: zod.array(
+        zod.object({
+          nodeId: zod.string(),
+          label: zod.string(),
+          similarity: zod.number(),
+          validity: zod
+            .enum(["live", "redirected", "gone"])
+            .optional()
+            .describe(
+              "Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.",
+            ),
+          currentNodeId: zod
+            .string()
+            .nullish()
+            .describe(
+              "The node this match currently resolves to (itself when live, the survivor when redirected).",
+            ),
+          currentLabel: zod.string().nullish(),
+        }),
+      ),
+      createdAt: zod.string().nullish(),
+      resolvedTargetId: zod
+        .string()
+        .nullish()
+        .describe(
+          "The canonical concept node reinforced by an accept\/merge resolution.",
+        ),
+      resolutionReason: zod
+        .string()
+        .nullish()
+        .describe("The reviewer's reason, recorded on reject."),
+      resolvedAt: zod.string().nullish(),
+      requestedTargetId: zod
+        .string()
+        .nullish()
+        .describe(
+          "The target the reviewer originally asked for (accept\/merge only).",
+        ),
+      redirectReason: zod
+        .string()
+        .nullish()
+        .describe(
+          "Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.",
+        ),
+    }),
+  ),
+  total: zod.number(),
+});
 
 /**
  * Read-only aggregation over mentor→concept provenance edges and the knowledge-candidate history. Reviewers use it to gauge a mentor's overall track record when weighing a borderline candidate. Admin-gated like the rest of the resolved-candidate surface.
  * @summary Per-mentor contribution counts for reviewer trust calibration (admin only)
  */
 export const GetMentorContributionsResponse = zod.object({
-  "contributions": zod.array(zod.object({
-  "mentorProfileId": zod.string(),
-  "conceptsCreated": zod.number().describe('Live concepts this mentor is the sole provenance source for (no other video or mentor corroborates them).'),
-  "conceptsReinforced": zod.number().describe('Live concepts this mentor co-sources alongside other videos or mentors (strengthening a shared canonical concept).'),
-  "accepted": zod.number().describe('Review candidates from this mentor accepted or merged into the graph.'),
-  "rejected": zod.number().describe('Review candidates from this mentor rejected.'),
-  "pending": zod.number().describe('Review candidates from this mentor still awaiting a decision.')
-})),
-  "total": zod.number()
-})
-
+  contributions: zod.array(
+    zod.object({
+      mentorProfileId: zod.string(),
+      conceptsCreated: zod
+        .number()
+        .describe(
+          "Live concepts this mentor is the sole provenance source for (no other video or mentor corroborates them).",
+        ),
+      conceptsReinforced: zod
+        .number()
+        .describe(
+          "Live concepts this mentor co-sources alongside other videos or mentors (strengthening a shared canonical concept).",
+        ),
+      accepted: zod
+        .number()
+        .describe(
+          "Review candidates from this mentor accepted or merged into the graph.",
+        ),
+      rejected: zod
+        .number()
+        .describe("Review candidates from this mentor rejected."),
+      pending: zod
+        .number()
+        .describe(
+          "Review candidates from this mentor still awaiting a decision.",
+        ),
+    }),
+  ),
+  total: zod.number(),
+});
 
 /**
- * @summary Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+ * @summary Resolve a pending knowledge candidate — Accept / Edit / Merge / Reject (admin only)
  */
 export const ResolveKnowledgeCandidateParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const ResolveKnowledgeCandidateBody = zod.object({
-  "action": zod.enum(['accept', 'merge', 'reject', 'restore', 'rearchive', 'reopen']).describe('accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer\'s curated vouch if a video\/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept\/merge first withdraw this candidate\'s contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.'),
-  "targetNodeId": zod.string().optional().describe('The existing concept to merge into (required for merge).'),
-  "reason": zod.string().optional().describe('Why the candidate was rejected (required for reject).')
-})
+  action: zod
+    .enum([
+      "accept",
+      "edit",
+      "merge",
+      "reject",
+      "restore",
+      "rearchive",
+      "reopen",
+    ])
+    .describe(
+      "accept — reinforce the top best-match concept; edit — promote a reviewer-corrected title and description as a new reviewed concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video\/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept\/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.",
+    ),
+  targetNodeId: zod
+    .string()
+    .optional()
+    .describe("The existing concept to merge into (required for merge)."),
+  reason: zod
+    .string()
+    .optional()
+    .describe("Why the candidate was rejected (required for reject)."),
+  editedTitle: zod
+    .string()
+    .min(1)
+    .optional()
+    .describe("Reviewer-corrected concept title (required for edit)."),
+  editedDescription: zod
+    .string()
+    .optional()
+    .describe(
+      "Reviewer-corrected concept description (required for edit; may be empty).",
+    ),
+});
 
 export const ResolveKnowledgeCandidateResponse = zod.object({
-  "id": zod.string(),
-  "status": zod.enum(['pending', 'accepted', 'rejected', 'merged', 'archived', 'restored']),
-  "title": zod.string(),
-  "description": zod.string().nullish(),
-  "category": zod.string(),
-  "trade": zod.string().nullish(),
-  "confidence": zod.number().nullish(),
-  "competencyCode": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "answerId": zod.string().nullish(),
-  "sessionId": zod.string().nullish(),
-  "bestMatches": zod.array(zod.object({
-  "nodeId": zod.string(),
-  "label": zod.string(),
-  "similarity": zod.number(),
-  "validity": zod.enum(['live', 'redirected', 'gone']).optional().describe('Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.'),
-  "currentNodeId": zod.string().nullish().describe('The node this match currently resolves to (itself when live, the survivor when redirected).'),
-  "currentLabel": zod.string().nullish()
-})),
-  "createdAt": zod.string().nullish(),
-  "resolvedTargetId": zod.string().nullish().describe('The canonical concept node reinforced by an accept\/merge resolution.'),
-  "resolutionReason": zod.string().nullish().describe('The reviewer\'s reason, recorded on reject.'),
-  "resolvedAt": zod.string().nullish(),
-  "requestedTargetId": zod.string().nullish().describe('The target the reviewer originally asked for (accept\/merge only).'),
-  "redirectReason": zod.string().nullish().describe('Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.')
-})
-
+  id: zod.string(),
+  status: zod.enum([
+    "pending",
+    "accepted",
+    "rejected",
+    "merged",
+    "archived",
+    "restored",
+  ]),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  category: zod.string(),
+  trade: zod.string().nullish(),
+  confidence: zod.number().nullish(),
+  competencyCode: zod.string().nullish(),
+  mentorProfileId: zod.string().nullish(),
+  mentorName: zod.string().nullish(),
+  answerId: zod.string().nullish(),
+  sessionId: zod.string().nullish(),
+  question: zod
+    .string()
+    .nullable()
+    .describe("Verbatim interview question loaded from the source answer."),
+  answerText: zod
+    .string()
+    .nullable()
+    .describe(
+      "Verbatim mentor answer retained outside the trusted graph until review.",
+    ),
+  sourceValid: zod
+    .boolean()
+    .describe(
+      "True only when the answer belongs to the candidate mentor and session.",
+    ),
+  bestMatches: zod.array(
+    zod.object({
+      nodeId: zod.string(),
+      label: zod.string(),
+      similarity: zod.number(),
+      validity: zod
+        .enum(["live", "redirected", "gone"])
+        .optional()
+        .describe(
+          "Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId\/currentLabel); gone — no longer exists and left no redirect trail.",
+        ),
+      currentNodeId: zod
+        .string()
+        .nullish()
+        .describe(
+          "The node this match currently resolves to (itself when live, the survivor when redirected).",
+        ),
+      currentLabel: zod.string().nullish(),
+    }),
+  ),
+  createdAt: zod.string().nullish(),
+  resolvedTargetId: zod
+    .string()
+    .nullish()
+    .describe(
+      "The canonical concept node reinforced by an accept\/merge resolution.",
+    ),
+  resolutionReason: zod
+    .string()
+    .nullish()
+    .describe("The reviewer's reason, recorded on reject."),
+  resolvedAt: zod.string().nullish(),
+  requestedTargetId: zod
+    .string()
+    .nullish()
+    .describe(
+      "The target the reviewer originally asked for (accept\/merge only).",
+    ),
+  redirectReason: zod
+    .string()
+    .nullish()
+    .describe(
+      "Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.",
+    ),
+});
 
 /**
  * @summary Set the human verification status of a distilled knowledge node (admin only)
  */
 export const SetNodeVerificationParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const SetNodeVerificationBody = zod.object({
-  "status": zod.enum(['verified', 'rejected', 'unverified'])
-})
+  status: zod.enum(["verified", "rejected", "unverified"]),
+});
 
 export const SetNodeVerificationResponse = zod.object({
-  "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
-  "label": zod.string(),
-  "trade": zod.string().nullish(),
-  "refId": zod.string().nullish(),
-  "description": zod.string().nullable(),
-  "confidence": zod.number().nullable(),
-  "verificationStatus": zod.string(),
-  "meta": zod.record(zod.string(), zod.unknown()),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string()
-})
-
+  id: zod.string(),
+  kind: zod.enum([
+    "core",
+    "topic",
+    "competency",
+    "video",
+    "mentor",
+    "concept",
+    "tool",
+    "equipment",
+    "material",
+    "procedure",
+    "hazard",
+    "slang",
+    "certification",
+    "standard",
+    "regional_term",
+  ]),
+  label: zod.string(),
+  trade: zod.string().nullish(),
+  refId: zod.string().nullish(),
+  description: zod.string().nullable(),
+  confidence: zod.number().nullable(),
+  verificationStatus: zod.string(),
+  meta: zod.record(zod.string(), zod.unknown()),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
 
 /**
  * @summary Clear a reviewed withdrawn-evidence entry from a concept's provenance (admin only). Idempotent — a missing entry is a no-op success.
  */
 export const RestoreWithdrawnEvidenceParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const RestoreWithdrawnEvidenceBody = zod.object({
-  "videoId": zod.string().describe('The source video whose withdrawn-evidence entry a reviewer has reviewed and wants cleared from this concept\'s provenance history.')
-})
+  videoId: zod
+    .string()
+    .describe(
+      "The source video whose withdrawn-evidence entry a reviewer has reviewed and wants cleared from this concept's provenance history.",
+    ),
+});
 
 export const RestoreWithdrawnEvidenceResponse = zod.object({
-  "id": zod.string(),
-  "kind": zod.enum(['core', 'topic', 'competency', 'video', 'mentor', 'concept', 'tool', 'equipment', 'material', 'procedure', 'hazard', 'slang', 'certification', 'standard', 'regional_term']),
-  "label": zod.string(),
-  "trade": zod.string().nullish(),
-  "refId": zod.string().nullish(),
-  "description": zod.string().nullable(),
-  "confidence": zod.number().nullable(),
-  "verificationStatus": zod.string(),
-  "meta": zod.record(zod.string(), zod.unknown()),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string()
-})
-
+  id: zod.string(),
+  kind: zod.enum([
+    "core",
+    "topic",
+    "competency",
+    "video",
+    "mentor",
+    "concept",
+    "tool",
+    "equipment",
+    "material",
+    "procedure",
+    "hazard",
+    "slang",
+    "certification",
+    "standard",
+    "regional_term",
+  ]),
+  label: zod.string(),
+  trade: zod.string().nullish(),
+  refId: zod.string().nullish(),
+  description: zod.string().nullable(),
+  confidence: zod.number().nullable(),
+  verificationStatus: zod.string(),
+  meta: zod.record(zod.string(), zod.unknown()),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
 
 /**
  * Read-only. For a mentor-supported concept node, lists each mentor answer that corroborated it and the per-answer confidence recorded on the mentor→concept edge (meta.answerConfidences). Reviewers use it to see which mentor answers are propping up a concept's confidence, and by how much. Admin-gated like the rest of the mentor surface — it joins verbatim interview content (mentor names, questions, answer excerpts). An unknown or non-mentor-supported node returns an empty list.
  * @summary Per-answer confidence a concept drew from each mentor answer (admin only)
  */
 export const GetConceptAnswerContributionsParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const GetConceptAnswerContributionsResponse = zod.object({
-  "contributions": zod.array(zod.object({
-  "answerId": zod.string(),
-  "confidence": zod.number().nullable().describe('The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.'),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string().nullable().describe('The contributing mentor\'s name, or null if the profile is gone.'),
-  "question": zod.string().nullable().describe('The interview question this answer responded to, if still on record.'),
-  "answerExcerpt": zod.string().nullable().describe('A short excerpt of the mentor\'s verbatim answer, if still on record.')
-})),
-  "total": zod.number()
-})
-
+  contributions: zod.array(
+    zod.object({
+      answerId: zod.string(),
+      confidence: zod
+        .number()
+        .nullable()
+        .describe(
+          "The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.",
+        ),
+      mentorProfileId: zod.string(),
+      mentorName: zod
+        .string()
+        .nullable()
+        .describe(
+          "The contributing mentor's name, or null if the profile is gone.",
+        ),
+      question: zod
+        .string()
+        .nullable()
+        .describe(
+          "The interview question this answer responded to, if still on record.",
+        ),
+      answerExcerpt: zod
+        .string()
+        .nullable()
+        .describe(
+          "A short excerpt of the mentor's verbatim answer, if still on record.",
+        ),
+    }),
+  ),
+  total: zod.number(),
+});
 
 /**
  * @summary Get the signed-in contributor's saved interview profile
  */
 export const GetInterviewProfileResponse = zod.object({
-  "profile": zod.object({
-  "id": zod.string(),
-  "name": zod.string(),
-  "trade": zod.string().nullish(),
-  "tradeInput": zod.string().nullish(),
-  "yearsExperience": zod.number().nullish(),
-  "specialties": zod.array(zod.string()).optional(),
-  "region": zod.string().nullish(),
-  "background": zod.string().nullish(),
-  "createdAt": zod.string()
-}).optional()
-})
-
+  profile: zod
+    .object({
+      id: zod.string(),
+      name: zod.string(),
+      trade: zod.string().nullish(),
+      tradeInput: zod.string().nullish(),
+      yearsExperience: zod.number().nullish(),
+      specialties: zod.array(zod.string()).optional(),
+      region: zod.string().nullish(),
+      background: zod.string().nullish(),
+      createdAt: zod.string(),
+    })
+    .optional(),
+});
 
 /**
  * @summary Save the contributor's profile and start an interview session
  */
 export const StartInterviewBody = zod.object({
-  "name": zod.string().describe('The mentor\'s name'),
-  "trade": zod.string().describe('Selected trade (e.g. Welding, Heavy Equipment Operator, Other)'),
-  "tradeInput": zod.string().nullish().describe('Free-text trade when \"Other\" is selected'),
-  "yearsExperience": zod.number().nullish(),
-  "specialties": zod.array(zod.string()).optional(),
-  "region": zod.string().nullish(),
-  "background": zod.string().nullish(),
-  "focus": zod.string().nullish().describe('Per-interview topic or handoff context; used for questioning but not saved into the contributor profile')
-})
+  name: zod.string().describe("The mentor's name"),
+  trade: zod
+    .string()
+    .describe("Selected trade (e.g. Welding, Heavy Equipment Operator, Other)"),
+  tradeInput: zod
+    .string()
+    .nullish()
+    .describe('Free-text trade when \"Other\" is selected'),
+  yearsExperience: zod.number().nullish(),
+  specialties: zod.array(zod.string()).optional(),
+  region: zod.string().nullish(),
+  background: zod.string().nullish(),
+  focus: zod
+    .string()
+    .nullish()
+    .describe(
+      "Per-interview topic or handoff context; used for questioning but not saved into the contributor profile",
+    ),
+});
 
 export const StartInterviewResponse = zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-})
-
+  id: zod.string(),
+  mentorProfileId: zod.string(),
+  mentorName: zod.string(),
+  trade: zod.string().nullish(),
+  status: zod.enum(["active", "completed"]),
+  currentQuestion: zod.string().nullish(),
+  currentCategory: zod.string().nullish(),
+  currentTopic: zod.string().nullish(),
+  questionCount: zod.number(),
+  complete: zod
+    .boolean()
+    .describe("True when there are no further questions (interview finished)"),
+  createdAt: zod.string(),
+});
 
 /**
  * @summary Get the current state of an interview session
  */
 export const GetInterviewSessionParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
-export const GetInterviewSessionResponse = zod.object({
-  "session": zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-}),
-  "answers": zod.array(zod.object({
-  "id": zod.string(),
-  "question": zod.string(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "answerText": zod.string().nullish(),
-  "skipped": zod.boolean(),
-  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
-  "createdAt": zod.string()
-})).describe('The session\'s answers in ask order (oldest first).')
-}).describe('An interview session together with its ordered prior answers, so a client can rebuild the running transcript and resume an interrupted interview.')
-
+export const GetInterviewSessionResponse = zod
+  .object({
+    session: zod.object({
+      id: zod.string(),
+      mentorProfileId: zod.string(),
+      mentorName: zod.string(),
+      trade: zod.string().nullish(),
+      status: zod.enum(["active", "completed"]),
+      currentQuestion: zod.string().nullish(),
+      currentCategory: zod.string().nullish(),
+      currentTopic: zod.string().nullish(),
+      questionCount: zod.number(),
+      complete: zod
+        .boolean()
+        .describe(
+          "True when there are no further questions (interview finished)",
+        ),
+      createdAt: zod.string(),
+    }),
+    answers: zod
+      .array(
+        zod.object({
+          id: zod.string(),
+          question: zod.string(),
+          category: zod.string().nullish(),
+          topic: zod.string().nullish(),
+          answerText: zod.string().nullish(),
+          skipped: zod.boolean(),
+          distillationStatus: zod
+            .enum(["pending", "verified", "failed"])
+            .optional()
+            .describe(
+              "Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.",
+            ),
+          extractedKnowledge: zod
+            .array(
+              zod.object({
+                id: zod.string(),
+                title: zod.string(),
+                description: zod.string().optional(),
+                category: zod.string(),
+                confidence: zod.number(),
+                competencyCode: zod.string().nullish(),
+                outcome: zod
+                  .enum(["reinforced", "created", "queued"])
+                  .optional()
+                  .describe(
+                    "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+                  ),
+                matchedLabel: zod
+                  .string()
+                  .nullish()
+                  .describe(
+                    "Label of the existing concept this item reinforced, if any.",
+                  ),
+              }),
+            )
+            .optional()
+            .describe(
+              "Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.",
+            ),
+          createdAt: zod.string(),
+        }),
+      )
+      .describe("The session's answers in ask order (oldest first)."),
+  })
+  .describe(
+    "An interview session together with its ordered prior answers, so a client can rebuild the running transcript and resume an interrupted interview.",
+  );
 
 /**
  * @summary Submit the mentor's answer to the current question and get the next one
  */
 export const SubmitInterviewAnswerParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const SubmitInterviewAnswerBody = zod.object({
-  "answer": zod.string().describe('The mentor\'s verbatim answer to the current question')
-})
+  answer: zod
+    .string()
+    .describe("The mentor's verbatim answer to the current question"),
+});
 
 export const SubmitInterviewAnswerResponse = zod.object({
-  "session": zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-}),
-  "answer": zod.object({
-  "id": zod.string(),
-  "question": zod.string(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "answerText": zod.string().nullish(),
-  "skipped": zod.boolean(),
-  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
-  "createdAt": zod.string()
-}),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-}))
-})
-
+  session: zod.object({
+    id: zod.string(),
+    mentorProfileId: zod.string(),
+    mentorName: zod.string(),
+    trade: zod.string().nullish(),
+    status: zod.enum(["active", "completed"]),
+    currentQuestion: zod.string().nullish(),
+    currentCategory: zod.string().nullish(),
+    currentTopic: zod.string().nullish(),
+    questionCount: zod.number(),
+    complete: zod
+      .boolean()
+      .describe(
+        "True when there are no further questions (interview finished)",
+      ),
+    createdAt: zod.string(),
+  }),
+  answer: zod.object({
+    id: zod.string(),
+    question: zod.string(),
+    category: zod.string().nullish(),
+    topic: zod.string().nullish(),
+    answerText: zod.string().nullish(),
+    skipped: zod.boolean(),
+    distillationStatus: zod
+      .enum(["pending", "verified", "failed"])
+      .optional()
+      .describe(
+        "Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.",
+      ),
+    extractedKnowledge: zod
+      .array(
+        zod.object({
+          id: zod.string(),
+          title: zod.string(),
+          description: zod.string().optional(),
+          category: zod.string(),
+          confidence: zod.number(),
+          competencyCode: zod.string().nullish(),
+          outcome: zod
+            .enum(["reinforced", "created", "queued"])
+            .optional()
+            .describe(
+              "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+            ),
+          matchedLabel: zod
+            .string()
+            .nullish()
+            .describe(
+              "Label of the existing concept this item reinforced, if any.",
+            ),
+        }),
+      )
+      .optional()
+      .describe(
+        "Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.",
+      ),
+    createdAt: zod.string(),
+  }),
+  extractedKnowledge: zod.array(
+    zod.object({
+      id: zod.string(),
+      title: zod.string(),
+      description: zod.string().optional(),
+      category: zod.string(),
+      confidence: zod.number(),
+      competencyCode: zod.string().nullish(),
+      outcome: zod
+        .enum(["reinforced", "created", "queued"])
+        .optional()
+        .describe(
+          "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+        ),
+      matchedLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          "Label of the existing concept this item reinforced, if any.",
+        ),
+    }),
+  ),
+});
 
 /**
  * @summary Skip the current question and get the next one
  */
 export const SkipInterviewQuestionParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const SkipInterviewQuestionResponse = zod.object({
-  "session": zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-}),
-  "answer": zod.object({
-  "id": zod.string(),
-  "question": zod.string(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "answerText": zod.string().nullish(),
-  "skipped": zod.boolean(),
-  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
-  "createdAt": zod.string()
-}),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-}))
-})
-
+  session: zod.object({
+    id: zod.string(),
+    mentorProfileId: zod.string(),
+    mentorName: zod.string(),
+    trade: zod.string().nullish(),
+    status: zod.enum(["active", "completed"]),
+    currentQuestion: zod.string().nullish(),
+    currentCategory: zod.string().nullish(),
+    currentTopic: zod.string().nullish(),
+    questionCount: zod.number(),
+    complete: zod
+      .boolean()
+      .describe(
+        "True when there are no further questions (interview finished)",
+      ),
+    createdAt: zod.string(),
+  }),
+  answer: zod.object({
+    id: zod.string(),
+    question: zod.string(),
+    category: zod.string().nullish(),
+    topic: zod.string().nullish(),
+    answerText: zod.string().nullish(),
+    skipped: zod.boolean(),
+    distillationStatus: zod
+      .enum(["pending", "verified", "failed"])
+      .optional()
+      .describe(
+        "Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.",
+      ),
+    extractedKnowledge: zod
+      .array(
+        zod.object({
+          id: zod.string(),
+          title: zod.string(),
+          description: zod.string().optional(),
+          category: zod.string(),
+          confidence: zod.number(),
+          competencyCode: zod.string().nullish(),
+          outcome: zod
+            .enum(["reinforced", "created", "queued"])
+            .optional()
+            .describe(
+              "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+            ),
+          matchedLabel: zod
+            .string()
+            .nullish()
+            .describe(
+              "Label of the existing concept this item reinforced, if any.",
+            ),
+        }),
+      )
+      .optional()
+      .describe(
+        "Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.",
+      ),
+    createdAt: zod.string(),
+  }),
+  extractedKnowledge: zod.array(
+    zod.object({
+      id: zod.string(),
+      title: zod.string(),
+      description: zod.string().optional(),
+      category: zod.string(),
+      confidence: zod.number(),
+      competencyCode: zod.string().nullish(),
+      outcome: zod
+        .enum(["reinforced", "created", "queued"])
+        .optional()
+        .describe(
+          "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+        ),
+      matchedLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          "Label of the existing concept this item reinforced, if any.",
+        ),
+    }),
+  ),
+});
 
 /**
  * @summary List mentor profiles with contribution counts (admin only)
  */
 export const ListMentorsResponse = zod.object({
-  "mentors": zod.array(zod.object({
-  "id": zod.string(),
-  "name": zod.string(),
-  "trade": zod.string().nullish(),
-  "tradeInput": zod.string().nullish().describe('What the mentor typed for their trade, before normalization.'),
-  "yearsExperience": zod.number().nullish(),
-  "region": zod.string().nullish(),
-  "specialties": zod.array(zod.string()).optional(),
-  "sessionCount": zod.number().describe('Interview sessions this mentor has started.'),
-  "answerCount": zod.number().describe('Verbatim answers recorded (skips excluded).'),
-  "createdAt": zod.string()
-})),
-  "total": zod.number()
-})
-
+  mentors: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      trade: zod.string().nullish(),
+      tradeInput: zod
+        .string()
+        .nullish()
+        .describe(
+          "What the mentor typed for their trade, before normalization.",
+        ),
+      yearsExperience: zod.number().nullish(),
+      region: zod.string().nullish(),
+      specialties: zod.array(zod.string()).optional(),
+      sessionCount: zod
+        .number()
+        .describe("Interview sessions this mentor has started."),
+      answerCount: zod
+        .number()
+        .describe("Verbatim answers recorded (skips excluded)."),
+      createdAt: zod.string(),
+    }),
+  ),
+  total: zod.number(),
+});
 
 /**
  * @summary Get a mentor's in-progress (incomplete) interview session, if any
  */
 export const GetMentorActiveSessionParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
-export const GetMentorActiveSessionResponse = zod.object({
-  "session": zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-}).optional()
-}).describe('A mentor\'s active (incomplete) interview session, if one exists. `session` is omitted when the mentor has no interview in progress.')
-
+export const GetMentorActiveSessionResponse = zod
+  .object({
+    session: zod
+      .object({
+        id: zod.string(),
+        mentorProfileId: zod.string(),
+        mentorName: zod.string(),
+        trade: zod.string().nullish(),
+        status: zod.enum(["active", "completed"]),
+        currentQuestion: zod.string().nullish(),
+        currentCategory: zod.string().nullish(),
+        currentTopic: zod.string().nullish(),
+        questionCount: zod.number(),
+        complete: zod
+          .boolean()
+          .describe(
+            "True when there are no further questions (interview finished)",
+          ),
+        createdAt: zod.string(),
+      })
+      .optional(),
+  })
+  .describe(
+    "A mentor's active (incomplete) interview session, if one exists. `session` is omitted when the mentor has no interview in progress.",
+  );
 
 /**
  * @summary Withdraw a mentor — remove their personal data and re-evaluate the Living Memory graph (admin only)
  */
 export const WithdrawMentorParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const WithdrawMentorResponse = zod.object({
-  "mentorProfileId": zod.string(),
-  "conceptsRetained": zod.number().describe('Concepts kept alive on surviving evidence, aggregates recomputed.'),
-  "conceptsArchived": zod.number().describe('Mentor-only concepts demoted to archived candidates (out of the live graph).'),
-  "candidatesDeleted": zod.number().describe('Pending knowledge candidates from this mentor that were removed.'),
-  "candidatesScrubbed": zod.number().describe('Resolved candidates that kept their audit record but lost all mentor attribution.')
-})
-
+  mentorProfileId: zod.string(),
+  conceptsRetained: zod
+    .number()
+    .describe(
+      "Concepts kept alive on surviving evidence, aggregates recomputed.",
+    ),
+  conceptsArchived: zod
+    .number()
+    .describe(
+      "Mentor-only concepts demoted to archived candidates (out of the live graph).",
+    ),
+  candidatesDeleted: zod
+    .number()
+    .describe(
+      "Pending knowledge candidates from this mentor that were removed.",
+    ),
+  candidatesScrubbed: zod
+    .number()
+    .describe(
+      "Resolved candidates that kept their audit record but lost all mentor attribution.",
+    ),
+});
 
 /**
  * @summary Preview the impact of withdrawing a mentor without making any changes (admin only)
  */
 export const PreviewMentorWithdrawalParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const PreviewMentorWithdrawalResponse = zod.object({
-  "mentorProfileId": zod.string(),
-  "conceptsRetained": zod.number().describe('Concepts that would stay in the graph on surviving evidence.'),
-  "conceptsArchived": zod.number().describe('Mentor-only concepts that would be demoted to archived candidates.'),
-  "candidatesDeleted": zod.number().describe('Pending knowledge candidates from this mentor that would be removed.'),
-  "candidatesScrubbed": zod.number().describe('Resolved candidates that would keep their audit record but lose mentor attribution.'),
-  "archivedConcepts": zod.array(zod.object({
-  "id": zod.string(),
-  "label": zod.string(),
-  "category": zod.string().describe('The concept\'s knowledge kind (concept, tool, hazard, …).')
-})).describe('The mentor-only concepts that would leave the live graph, for admin review.')
-})
-
+  mentorProfileId: zod.string(),
+  conceptsRetained: zod
+    .number()
+    .describe("Concepts that would stay in the graph on surviving evidence."),
+  conceptsArchived: zod
+    .number()
+    .describe(
+      "Mentor-only concepts that would be demoted to archived candidates.",
+    ),
+  candidatesDeleted: zod
+    .number()
+    .describe(
+      "Pending knowledge candidates from this mentor that would be removed.",
+    ),
+  candidatesScrubbed: zod
+    .number()
+    .describe(
+      "Resolved candidates that would keep their audit record but lose mentor attribution.",
+    ),
+  archivedConcepts: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        label: zod.string(),
+        category: zod
+          .string()
+          .describe("The concept's knowledge kind (concept, tool, hazard, …)."),
+      }),
+    )
+    .describe(
+      "The mentor-only concepts that would leave the live graph, for admin review.",
+    ),
+});
 
 /**
  * @summary End the interview session
  */
 export const FinishInterviewParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const FinishInterviewResponse = zod.object({
-  "id": zod.string(),
-  "mentorProfileId": zod.string(),
-  "mentorName": zod.string(),
-  "trade": zod.string().nullish(),
-  "status": zod.enum(['active', 'completed']),
-  "currentQuestion": zod.string().nullish(),
-  "currentCategory": zod.string().nullish(),
-  "currentTopic": zod.string().nullish(),
-  "questionCount": zod.number(),
-  "complete": zod.boolean().describe('True when there are no further questions (interview finished)'),
-  "createdAt": zod.string()
-})
-
+  id: zod.string(),
+  mentorProfileId: zod.string(),
+  mentorName: zod.string(),
+  trade: zod.string().nullish(),
+  status: zod.enum(["active", "completed"]),
+  currentQuestion: zod.string().nullish(),
+  currentCategory: zod.string().nullish(),
+  currentTopic: zod.string().nullish(),
+  questionCount: zod.number(),
+  complete: zod
+    .boolean()
+    .describe("True when there are no further questions (interview finished)"),
+  createdAt: zod.string(),
+});
 
 /**
  * @summary Re-run distillation + verification for a single answer (admin only)
  */
 export const RedistillInterviewAnswerParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const RedistillInterviewAnswerResponse = zod.object({
-  "answer": zod.object({
-  "id": zod.string(),
-  "question": zod.string(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "answerText": zod.string().nullish(),
-  "skipped": zod.boolean(),
-  "distillationStatus": zod.enum(['pending', 'verified', 'failed']).optional().describe('Whether this answer\'s knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.'),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-})).optional().describe('Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.'),
-  "createdAt": zod.string()
-}),
-  "extractedKnowledge": zod.array(zod.object({
-  "id": zod.string(),
-  "title": zod.string(),
-  "description": zod.string().optional(),
-  "category": zod.string(),
-  "confidence": zod.number(),
-  "competencyCode": zod.string().nullish(),
-  "outcome": zod.enum(['reinforced', 'created', 'queued']).optional().describe('How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.'),
-  "matchedLabel": zod.string().nullish().describe('Label of the existing concept this item reinforced, if any.')
-}))
-})
-
+  answer: zod.object({
+    id: zod.string(),
+    question: zod.string(),
+    category: zod.string().nullish(),
+    topic: zod.string().nullish(),
+    answerText: zod.string().nullish(),
+    skipped: zod.boolean(),
+    distillationStatus: zod
+      .enum(["pending", "verified", "failed"])
+      .optional()
+      .describe(
+        "Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.",
+      ),
+    extractedKnowledge: zod
+      .array(
+        zod.object({
+          id: zod.string(),
+          title: zod.string(),
+          description: zod.string().optional(),
+          category: zod.string(),
+          confidence: zod.number(),
+          competencyCode: zod.string().nullish(),
+          outcome: zod
+            .enum(["reinforced", "created", "queued"])
+            .optional()
+            .describe(
+              "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+            ),
+          matchedLabel: zod
+            .string()
+            .nullish()
+            .describe(
+              "Label of the existing concept this item reinforced, if any.",
+            ),
+        }),
+      )
+      .optional()
+      .describe(
+        "Snapshot of the concepts this answer distilled into, taken at submission time. Empty for skipped or not-yet-distilled answers. Used to rebuild the transcript when an interview is resumed.",
+      ),
+    createdAt: zod.string(),
+  }),
+  extractedKnowledge: zod.array(
+    zod.object({
+      id: zod.string(),
+      title: zod.string(),
+      description: zod.string().optional(),
+      category: zod.string(),
+      confidence: zod.number(),
+      competencyCode: zod.string().nullish(),
+      outcome: zod
+        .enum(["reinforced", "created", "queued"])
+        .optional()
+        .describe(
+          "How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.",
+        ),
+      matchedLabel: zod
+        .string()
+        .nullish()
+        .describe(
+          "Label of the existing concept this item reinforced, if any.",
+        ),
+    }),
+  ),
+});
 
 /**
  * @summary Knowledge-write health — verified/partial/failed counts, retry queue, recent writes (admin only)
  */
 export const GetGraphHealthResponse = zod.object({
-  "counts": zod.object({
-  "verified": zod.number(),
-  "partial": zod.number(),
-  "failed": zod.number(),
-  "pending": zod.number(),
-  "total": zod.number()
-}),
-  "retryQueue": zod.object({
-  "videos": zod.number(),
-  "answers": zod.number(),
-  "total": zod.number()
-}),
-  "avgProcessingMs": zod.number().nullable(),
-  "recentWrites": zod.array(zod.object({
-  "id": zod.string(),
-  "scope": zod.string(),
-  "refId": zod.string(),
-  "status": zod.enum(['verified', 'partial', 'failed', 'pending']),
-  "error": zod.string().nullish(),
-  "durationMs": zod.number().nullish(),
-  "attempts": zod.number(),
-  "updatedAt": zod.string().nullish(),
-  "checks": zod.object({
-  "nodesExist": zod.object({
-  "ok": zod.boolean(),
-  "detail": zod.string()
-}),
-  "edgesExist": zod.object({
-  "ok": zod.boolean(),
-  "detail": zod.string()
-}),
-  "provenanceStored": zod.object({
-  "ok": zod.boolean(),
-  "detail": zod.string()
-}),
-  "confidenceUpdated": zod.object({
-  "ok": zod.boolean(),
-  "detail": zod.string()
-}),
-  "searchIndexUpdated": zod.object({
-  "ok": zod.boolean(),
-  "detail": zod.string()
-})
-})
-}))
-})
-
+  counts: zod.object({
+    verified: zod.number(),
+    partial: zod.number(),
+    failed: zod.number(),
+    pending: zod.number(),
+    total: zod.number(),
+  }),
+  retryQueue: zod.object({
+    videos: zod.number(),
+    answers: zod.number(),
+    total: zod.number(),
+  }),
+  avgProcessingMs: zod.number().nullable(),
+  recentWrites: zod.array(
+    zod.object({
+      id: zod.string(),
+      scope: zod.string(),
+      refId: zod.string(),
+      status: zod.enum(["verified", "partial", "failed", "pending"]),
+      error: zod.string().nullish(),
+      durationMs: zod.number().nullish(),
+      attempts: zod.number(),
+      updatedAt: zod.string().nullish(),
+      checks: zod.object({
+        nodesExist: zod.object({
+          ok: zod.boolean(),
+          detail: zod.string(),
+        }),
+        edgesExist: zod.object({
+          ok: zod.boolean(),
+          detail: zod.string(),
+        }),
+        provenanceStored: zod.object({
+          ok: zod.boolean(),
+          detail: zod.string(),
+        }),
+        confidenceUpdated: zod.object({
+          ok: zod.boolean(),
+          detail: zod.string(),
+        }),
+        searchIndexUpdated: zod.object({
+          ok: zod.boolean(),
+          detail: zod.string(),
+        }),
+      }),
+    }),
+  ),
+});
 
 /**
  * @summary Save a snapshot of an interrupted chat or interview thought
@@ -1115,160 +1708,310 @@ export const parkThoughtBodyTopicMax = 200;
 
 export const parkThoughtBodyCategoryMax = 200;
 
-
-
 export const ParkThoughtBody = zod.object({
-  "source": zod.enum(['chat', 'interview']),
-  "interviewSessionId": zod.string().nullish().describe('Required when source is \"interview\"; ignored otherwise. The server derives mentorProfileId\/trade\/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.'),
-  "context": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']),
-  "text": zod.string().max(parkThoughtBodyContextItemTextMax),
-  "at": zod.string().nullish()
-})).max(parkThoughtBodyContextMax).describe('Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.'),
-  "unfinishedThought": zod.string().max(parkThoughtBodyUnfinishedThoughtMax).nullish(),
-  "reason": zod.string().max(parkThoughtBodyReasonMax).nullish(),
-  "topic": zod.string().max(parkThoughtBodyTopicMax).nullish().describe('Chat-sourced only; ignored for interview (derived from the session).'),
-  "category": zod.string().max(parkThoughtBodyCategoryMax).nullish().describe('Chat-sourced only; ignored for interview (derived from the session).')
-})
+  source: zod.enum(["chat", "interview"]),
+  interviewSessionId: zod
+    .string()
+    .nullish()
+    .describe(
+      'Required when source is \"interview\"; ignored otherwise. The server derives mentorProfileId\/trade\/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.',
+    ),
+  context: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        text: zod.string().max(parkThoughtBodyContextItemTextMax),
+        at: zod.string().nullish(),
+      }),
+    )
+    .max(parkThoughtBodyContextMax)
+    .describe(
+      "Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.",
+    ),
+  unfinishedThought: zod
+    .string()
+    .max(parkThoughtBodyUnfinishedThoughtMax)
+    .nullish(),
+  reason: zod.string().max(parkThoughtBodyReasonMax).nullish(),
+  topic: zod
+    .string()
+    .max(parkThoughtBodyTopicMax)
+    .nullish()
+    .describe(
+      "Chat-sourced only; ignored for interview (derived from the session).",
+    ),
+  category: zod
+    .string()
+    .max(parkThoughtBodyCategoryMax)
+    .nullish()
+    .describe(
+      "Chat-sourced only; ignored for interview (derived from the session).",
+    ),
+});
 
 export const parkThoughtResponseContextItemTextMax = 2000;
 
-
-
 export const ParkThoughtResponse = zod.object({
-  "id": zod.string(),
-  "source": zod.enum(['chat', 'interview']),
-  "interviewSessionId": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "title": zod.string(),
-  "summary": zod.string(),
-  "unfinishedThought": zod.string().nullish(),
-  "reason": zod.string().nullish(),
-  "context": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']),
-  "text": zod.string().max(parkThoughtResponseContextItemTextMax),
-  "at": zod.string().nullish()
-})).optional(),
-  "status": zod.enum(['parked', 'resumed', 'resolved']),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish(),
-  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
-})
-
+  id: zod.string(),
+  source: zod.enum(["chat", "interview"]),
+  interviewSessionId: zod.string().nullish(),
+  mentorProfileId: zod.string().nullish(),
+  mentorName: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  category: zod.string().nullish(),
+  topic: zod.string().nullish(),
+  title: zod.string(),
+  summary: zod.string(),
+  unfinishedThought: zod.string().nullish(),
+  reason: zod.string().nullish(),
+  context: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        text: zod.string().max(parkThoughtResponseContextItemTextMax),
+        at: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+  status: zod.enum(["parked", "resumed", "resolved"]),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+  canManage: zod
+    .boolean()
+    .describe(
+      "True only when the current caller may resume or archive this thought.",
+    ),
+});
 
 /**
  * Chat-sourced rows are scoped to the caller's jack_session cookie; interview-sourced rows are public, consistent with the rest of the app's interview/mentor data.
  * @summary List parked thoughts visible to the caller
  */
 export const ListParkedThoughtsQueryParams = zod.object({
-  "status": zod.enum(['parked', 'resumed', 'resolved']).optional(),
-  "mentorProfileId": zod.coerce.string().optional()
-})
+  status: zod.enum(["parked", "resumed", "resolved"]).optional(),
+  mentorProfileId: zod.coerce.string().optional(),
+});
 
 export const listParkedThoughtsResponseItemsItemContextItemTextMax = 2000;
 
-
-
 export const ListParkedThoughtsResponse = zod.object({
-  "items": zod.array(zod.object({
-  "id": zod.string(),
-  "source": zod.enum(['chat', 'interview']),
-  "interviewSessionId": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "title": zod.string(),
-  "summary": zod.string(),
-  "unfinishedThought": zod.string().nullish(),
-  "reason": zod.string().nullish(),
-  "context": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']),
-  "text": zod.string().max(listParkedThoughtsResponseItemsItemContextItemTextMax),
-  "at": zod.string().nullish()
-})).optional(),
-  "status": zod.enum(['parked', 'resumed', 'resolved']),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish(),
-  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
-}))
-})
-
+  items: zod.array(
+    zod.object({
+      id: zod.string(),
+      source: zod.enum(["chat", "interview"]),
+      interviewSessionId: zod.string().nullish(),
+      mentorProfileId: zod.string().nullish(),
+      mentorName: zod.string().nullish(),
+      trade: zod.string().nullish(),
+      category: zod.string().nullish(),
+      topic: zod.string().nullish(),
+      title: zod.string(),
+      summary: zod.string(),
+      unfinishedThought: zod.string().nullish(),
+      reason: zod.string().nullish(),
+      context: zod
+        .array(
+          zod.object({
+            role: zod.enum(["user", "assistant"]),
+            text: zod
+              .string()
+              .max(listParkedThoughtsResponseItemsItemContextItemTextMax),
+            at: zod.string().nullish(),
+          }),
+        )
+        .optional(),
+      status: zod.enum(["parked", "resumed", "resolved"]),
+      createdAt: zod.string(),
+      updatedAt: zod.string().nullish(),
+      canManage: zod
+        .boolean()
+        .describe(
+          "True only when the current caller may resume or archive this thought.",
+        ),
+    }),
+  ),
+});
 
 /**
  * @summary Mark a parked thought resumed and return it for context restore
  */
 export const ResumeParkedThoughtParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const resumeParkedThoughtResponseContextItemTextMax = 2000;
 
-
-
 export const ResumeParkedThoughtResponse = zod.object({
-  "id": zod.string(),
-  "source": zod.enum(['chat', 'interview']),
-  "interviewSessionId": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "title": zod.string(),
-  "summary": zod.string(),
-  "unfinishedThought": zod.string().nullish(),
-  "reason": zod.string().nullish(),
-  "context": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']),
-  "text": zod.string().max(resumeParkedThoughtResponseContextItemTextMax),
-  "at": zod.string().nullish()
-})).optional(),
-  "status": zod.enum(['parked', 'resumed', 'resolved']),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish(),
-  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
-})
-
+  id: zod.string(),
+  source: zod.enum(["chat", "interview"]),
+  interviewSessionId: zod.string().nullish(),
+  mentorProfileId: zod.string().nullish(),
+  mentorName: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  category: zod.string().nullish(),
+  topic: zod.string().nullish(),
+  title: zod.string(),
+  summary: zod.string(),
+  unfinishedThought: zod.string().nullish(),
+  reason: zod.string().nullish(),
+  context: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        text: zod.string().max(resumeParkedThoughtResponseContextItemTextMax),
+        at: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+  status: zod.enum(["parked", "resumed", "resolved"]),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+  canManage: zod
+    .boolean()
+    .describe(
+      "True only when the current caller may resume or archive this thought.",
+    ),
+});
 
 /**
  * @summary Mark a parked thought resolved
  */
 export const ArchiveParkedThoughtParams = zod.object({
-  "id": zod.coerce.string()
-})
+  id: zod.coerce.string(),
+});
 
 export const archiveParkedThoughtResponseContextItemTextMax = 2000;
 
-
-
 export const ArchiveParkedThoughtResponse = zod.object({
-  "id": zod.string(),
-  "source": zod.enum(['chat', 'interview']),
-  "interviewSessionId": zod.string().nullish(),
-  "mentorProfileId": zod.string().nullish(),
-  "mentorName": zod.string().nullish(),
-  "trade": zod.string().nullish(),
-  "category": zod.string().nullish(),
-  "topic": zod.string().nullish(),
-  "title": zod.string(),
-  "summary": zod.string(),
-  "unfinishedThought": zod.string().nullish(),
-  "reason": zod.string().nullish(),
-  "context": zod.array(zod.object({
-  "role": zod.enum(['user', 'assistant']),
-  "text": zod.string().max(archiveParkedThoughtResponseContextItemTextMax),
-  "at": zod.string().nullish()
-})).optional(),
-  "status": zod.enum(['parked', 'resumed', 'resolved']),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().nullish(),
-  "canManage": zod.boolean().describe('True only when the current caller may resume or archive this thought.')
-})
+  id: zod.string(),
+  source: zod.enum(["chat", "interview"]),
+  interviewSessionId: zod.string().nullish(),
+  mentorProfileId: zod.string().nullish(),
+  mentorName: zod.string().nullish(),
+  trade: zod.string().nullish(),
+  category: zod.string().nullish(),
+  topic: zod.string().nullish(),
+  title: zod.string(),
+  summary: zod.string(),
+  unfinishedThought: zod.string().nullish(),
+  reason: zod.string().nullish(),
+  context: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        text: zod.string().max(archiveParkedThoughtResponseContextItemTextMax),
+        at: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+  status: zod.enum(["parked", "resumed", "resolved"]),
+  createdAt: zod.string(),
+  updatedAt: zod.string().nullish(),
+  canManage: zod
+    .boolean()
+    .describe(
+      "True only when the current caller may resume or archive this thought.",
+    ),
+});
 
+/**
+ * Returns minimized activity aggregates, participant/session summaries, and identity reconciliation for an actively authorized organization and pilot scope. Ask Jack message content is not included.
+ * @summary Get the protected pilot activity summary
+ */
+export const GetPilotReportSummaryQueryParams = zod.object({
+  organizationId: zod.coerce.string().uuid(),
+  pilotId: zod.coerce.string().uuid(),
+});
 
+export const GetPilotReportSummaryResponse = zod.object({
+  scope: zod.object({
+    organizationId: zod.string().uuid(),
+    pilotId: zod.string().uuid(),
+  }),
+  summary: zod.object({
+    aggregateUnit: zod.enum(["sessions"]),
+    participantCount: zod.number(),
+    sessionCount: zod.number(),
+    activeSessions: zod.number(),
+    completedSessions: zod.number(),
+    completionRate: zod.number(),
+    onboardingCompletionRate: zod.number(),
+    recordingOptInRate: zod.number(),
+    feedbackCount: zod.number(),
+    droppedEventCount: zod.number(),
+    rejectedEventCount: zod.number(),
+    eventCounts: zod.record(zod.string(), zod.number()),
+  }),
+  participants: zod.array(
+    zod.object({
+      actorUserId: zod.string(),
+      sessionCount: zod.number(),
+      askJackUseCount: zod.number(),
+      latestStatus: zod.string(),
+      latestOnboardingStatus: zod.string(),
+      lastActivityAt: zod.coerce.date().nullable(),
+      sessions: zod.array(
+        zod.object({
+          id: zod.string().uuid(),
+          actorUserId: zod.string(),
+          status: zod.string(),
+          startedAt: zod.coerce.date(),
+          resumedAt: zod.coerce.date().nullable(),
+          lastActivityAt: zod.coerce.date().nullable(),
+          onboardingStatus: zod.string(),
+          onboardingStep: zod.number(),
+          questionCount: zod.number(),
+          screenConsentState: zod.string(),
+          microphoneConsentState: zod.string(),
+          recordingStatus: zod.string(),
+          feedbackStatus: zod.string(),
+          completedAt: zod.coerce.date().nullable(),
+          errorCount: zod.number(),
+        }),
+      ),
+    }),
+  ),
+  sessions: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      actorUserId: zod.string(),
+      status: zod.string(),
+      startedAt: zod.coerce.date(),
+      resumedAt: zod.coerce.date().nullable(),
+      lastActivityAt: zod.coerce.date().nullable(),
+      onboardingStatus: zod.string(),
+      onboardingStep: zod.number(),
+      questionCount: zod.number(),
+      screenConsentState: zod.string(),
+      microphoneConsentState: zod.string(),
+      recordingStatus: zod.string(),
+      feedbackStatus: zod.string(),
+      completedAt: zod.coerce.date().nullable(),
+      errorCount: zod.number(),
+    }),
+  ),
+  reconciliation: zod.object({
+    enrolledTesterIds: zod.array(zod.string()),
+    observedSessionActorIds: zod.array(zod.string()),
+    sessionCountsByActor: zod.record(zod.string(), zod.number()),
+    chatActivityEvidence: zod.union([
+      zod.object({
+        status: zod.enum(["available"]),
+      }),
+      zod.object({
+        status: zod.enum(["unavailable"]),
+        reason: zod.enum(["schema_capability_missing"]),
+      }),
+    ]),
+    chatActivityCountsByActor: zod.union([
+      zod.record(zod.string(), zod.number()),
+      zod.null(),
+    ]),
+    likelyMismatches: zod.object({
+      observedNotEnrolled: zod.array(zod.string()),
+      enrolledWithoutSessionEvidence: zod.array(zod.string()),
+      enrolledWithoutActivity: zod.union([zod.array(zod.string()), zod.null()]),
+    }),
+  }),
+  generatedAt: zod.coerce.date(),
+});

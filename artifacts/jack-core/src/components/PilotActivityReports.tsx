@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PilotConversationReview } from "./PilotConversationReview";
 import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
 
 interface ReportScope {
@@ -23,8 +24,34 @@ interface SessionRow {
   errorCount: number;
 }
 
+interface ParticipantRow {
+  actorUserId: string;
+  sessionCount: number;
+  askJackUseCount: number;
+  latestStatus: string;
+  latestOnboardingStatus: string;
+  lastActivityAt: string | null;
+  sessions: SessionRow[];
+}
+
+interface Reconciliation {
+  enrolledTesterIds: string[];
+  observedSessionActorIds: string[];
+  sessionCountsByActor: Record<string, number>;
+  chatActivityEvidence:
+    | { status: "available" }
+    | { status: "unavailable"; reason: "schema_capability_missing" };
+  chatActivityCountsByActor: Record<string, number> | null;
+  likelyMismatches: {
+    observedNotEnrolled: string[];
+    enrolledWithoutSessionEvidence: string[];
+    enrolledWithoutActivity: string[] | null;
+  };
+}
+
 interface SummaryResponse {
   summary: {
+    aggregateUnit: "sessions";
     participantCount: number;
     sessionCount: number;
     completedSessions: number;
@@ -36,7 +63,9 @@ interface SummaryResponse {
     rejectedEventCount: number;
     eventCounts: Record<string, number>;
   };
-  users: SessionRow[];
+  participants: ParticipantRow[];
+  sessions: SessionRow[];
+  reconciliation: Reconciliation;
   generatedAt: string;
 }
 
@@ -51,7 +80,9 @@ interface TimelineEvent {
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "include", ...init });
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
   if (!response.ok) throw new Error(body.error || "Report request failed.");
   return body;
 }
@@ -64,13 +95,17 @@ export function PilotActivityReports() {
   const [scopes, setScopes] = useState<ReportScope[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [report, setReport] = useState<SummaryResponse | null>(null);
-  const [timeline, setTimeline] = useState<{ userId: string; events: TimelineEvent[] } | null>(
-    null,
-  );
+  const [timeline, setTimeline] = useState<{
+    userId: string;
+    events: TimelineEvent[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const selected = useMemo(
-    () => scopes.find((scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey),
+    () =>
+      scopes.find(
+        (scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey,
+      ),
     [scopes, selectedKey],
   );
   const query = selected
@@ -84,7 +119,11 @@ export function PilotActivityReports() {
         const first = body.scopes[0];
         if (first) setSelectedKey(`${first.organizationId}:${first.pilotId}`);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, []);
 
   useEffect(() => {
@@ -93,7 +132,11 @@ export function PilotActivityReports() {
     setError(null);
     void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
       .then(setReport)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, [query]);
 
   const loadTimeline = async (userId: string) => {
@@ -103,7 +146,9 @@ export function PilotActivityReports() {
       );
       setTimeline({ userId: body.actorUserId, events: body.events });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Timeline unavailable.");
+      setError(
+        reason instanceof Error ? reason.message : "Timeline unavailable.",
+      );
     }
   };
 
@@ -116,7 +161,9 @@ export function PilotActivityReports() {
         body: JSON.stringify({ reportType: "pilot_summary" }),
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Report generation failed.");
+      setError(
+        reason instanceof Error ? reason.message : "Report generation failed.",
+      );
     } finally {
       setGenerating(false);
     }
@@ -127,24 +174,39 @@ export function PilotActivityReports() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-primary">Admin only</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-primary">
+              Admin only
+            </p>
             <h1 className="text-2xl font-bold">Pilot activity reports</h1>
             <p className="text-sm text-muted-foreground">
-              Organization-isolated, minimized telemetry. Ask Jack content is never shown here.
+              Organization-isolated, minimized telemetry. Activity metrics
+              exclude Ask Jack content; consented Q/A appears only in the
+              separate Conversation Review section.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
-            <Button variant="outline" onClick={() => window.print()} disabled={!report}>
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              disabled={!report}
+            >
               Print
             </Button>
             <Button
               variant="outline"
               disabled={!query}
-              onClick={() => window.location.assign(`/api/testing/reports/export.csv?${query}`)}
+              onClick={() =>
+                window.location.assign(
+                  `/api/testing/reports/export.csv?${query}`,
+                )
+              }
             >
               Export CSV
             </Button>
-            <Button disabled={!query || generating} onClick={() => void generate()}>
+            <Button
+              disabled={!query || generating}
+              onClick={() => void generate()}
+            >
               {generating ? "Generating…" : "Generate report"}
             </Button>
           </div>
@@ -162,65 +224,245 @@ export function PilotActivityReports() {
                 key={`${scope.organizationId}:${scope.pilotId}`}
                 value={`${scope.organizationId}:${scope.pilotId}`}
               >
-                {scope.organizationName ?? "Organization"} — {scope.pilotName ?? "Pilot"}
+                {scope.organizationName ?? "Organization"} —{" "}
+                {scope.pilotName ?? "Pilot"}
               </option>
             ))}
           </select>
         </label>
 
-        {error && <p className="rounded-lg border border-destructive p-3 text-destructive">{error}</p>}
-        {scopes.length === 0 && !error && <p>No active report scope is assigned.</p>}
+        {error && (
+          <p className="rounded-lg border border-destructive p-3 text-destructive">
+            {error}
+          </p>
+        )}
+        {scopes.length === 0 && !error && (
+          <p>No active report scope is assigned.</p>
+        )}
 
         {report && (
           <>
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {[
-                ["Participants", report.summary.participantCount],
-                ["Completed", report.summary.completedSessions],
-                ["Completion rate", percent(report.summary.completionRate)],
-                ["Onboarding complete", percent(report.summary.onboardingCompletionRate)],
-                ["Recording opt-in", percent(report.summary.recordingOptInRate)],
-                ["Feedback", report.summary.feedbackCount],
+                ["Unique participants", report.summary.participantCount],
+                ["Sessions", report.summary.sessionCount],
+                ["Completed sessions", report.summary.completedSessions],
+                [
+                  "Session completion rate",
+                  percent(report.summary.completionRate),
+                ],
+                [
+                  "Sessions onboarding complete",
+                  percent(report.summary.onboardingCompletionRate),
+                ],
+                [
+                  "Sessions recording opt-in",
+                  percent(report.summary.recordingOptInRate),
+                ],
+                ["Feedback submissions", report.summary.feedbackCount],
                 ["Dropped events", report.summary.droppedEventCount],
                 ["Rejected events", report.summary.rejectedEventCount],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-4">
+                <div
+                  key={label}
+                  className="rounded-lg border border-border bg-card p-4"
+                >
                   <p className="text-xs text-muted-foreground">{label}</p>
                   <p className="mt-1 text-2xl font-bold">{value}</p>
                 </div>
               ))}
             </section>
 
-            <section className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="p-3">Participant ID</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Onboarding</th>
-                    <th className="p-3">Ask Jack uses</th>
-                    <th className="p-3">Last activity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.users.map((user) => (
-                    <tr key={user.id} className="border-t border-border">
-                      <td className="p-3">
-                        <button
-                          className="font-mono text-xs text-primary underline print:text-black"
-                          onClick={() => void loadTimeline(user.actorUserId)}
-                        >
-                          {user.actorUserId}
-                        </button>
-                      </td>
-                      <td className="p-3">{user.status}</td>
-                      <td className="p-3">{user.onboardingStatus}</td>
-                      <td className="p-3">{user.questionCount}</td>
-                      <td className="p-3">{new Date(user.lastActivityAt).toLocaleString()}</td>
+            <section className="space-y-2">
+              <div>
+                <h2 className="font-semibold">Participants</h2>
+                <p className="text-xs text-muted-foreground">
+                  One row per actor, with activity combined across their
+                  sessions.
+                </p>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="p-3">Participant ID</th>
+                      <th className="p-3">Sessions</th>
+                      <th className="p-3">Latest status</th>
+                      <th className="p-3">Latest onboarding</th>
+                      <th className="p-3">Ask Jack uses</th>
+                      <th className="p-3">Last activity</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {report.participants.map((participant) => (
+                      <tr
+                        key={participant.actorUserId}
+                        className="border-t border-border"
+                      >
+                        <td className="p-3">
+                          <button
+                            className="font-mono text-xs text-primary underline print:text-black"
+                            onClick={() =>
+                              void loadTimeline(participant.actorUserId)
+                            }
+                          >
+                            {participant.actorUserId}
+                          </button>
+                        </td>
+                        <td className="p-3">{participant.sessionCount}</td>
+                        <td className="p-3">{participant.latestStatus}</td>
+                        <td className="p-3">
+                          {participant.latestOnboardingStatus}
+                        </td>
+                        <td className="p-3">{participant.askJackUseCount}</td>
+                        <td className="p-3">
+                          {participant.lastActivityAt
+                            ? new Date(
+                                participant.lastActivityAt,
+                              ).toLocaleString()
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <div>
+                <h2 className="font-semibold">Session-level records</h2>
+                <p className="text-xs text-muted-foreground">
+                  Each row is one test session. Completion, onboarding, and
+                  recording rates above are session-based.
+                </p>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="p-3">Session ID</th>
+                      <th className="p-3">Participant ID</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Onboarding</th>
+                      <th className="p-3">Ask Jack uses</th>
+                      <th className="p-3">Started</th>
+                      <th className="p-3">Last activity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.sessions.map((session) => (
+                      <tr key={session.id} className="border-t border-border">
+                        <td className="p-3 font-mono text-xs">{session.id}</td>
+                        <td className="p-3 font-mono text-xs">
+                          {session.actorUserId}
+                        </td>
+                        <td className="p-3">{session.status}</td>
+                        <td className="p-3">{session.onboardingStatus}</td>
+                        <td className="p-3">{session.questionCount}</td>
+                        <td className="p-3">
+                          {new Date(session.startedAt).toLocaleString()}
+                        </td>
+                        <td className="p-3">
+                          {new Date(session.lastActivityAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="space-y-2 rounded-lg border border-border p-4">
+              <div>
+                <h2 className="font-semibold">
+                  Identity reconciliation (read only)
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Counts only for enrolled testers or actors observed in this
+                  pilot. Chat content is never loaded or shown.
+                </p>
+                {report.reconciliation.chatActivityEvidence.status ===
+                  "unavailable" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Chat activity evidence is unavailable until the required
+                    schema capability is present. Session evidence remains
+                    available.
+                  </p>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="p-3">Actor ID</th>
+                      <th className="p-3">Enrolled</th>
+                      <th className="p-3">Observed</th>
+                      <th className="p-3">Sessions</th>
+                      <th className="p-3">Chat messages</th>
+                      <th className="p-3">Likely mismatch</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ...new Set([
+                        ...report.reconciliation.enrolledTesterIds,
+                        ...report.reconciliation.observedSessionActorIds,
+                      ]),
+                    ]
+                      .sort()
+                      .map((actorUserId) => {
+                        const enrolled =
+                          report.reconciliation.enrolledTesterIds.includes(
+                            actorUserId,
+                          );
+                        const observed =
+                          report.reconciliation.observedSessionActorIds.includes(
+                            actorUserId,
+                          );
+                        const mismatch =
+                          report.reconciliation.likelyMismatches.observedNotEnrolled.includes(
+                            actorUserId,
+                          )
+                            ? "Observed, not enrolled"
+                            : report.reconciliation.likelyMismatches.enrolledWithoutActivity?.includes(
+                                  actorUserId,
+                                )
+                              ? "No observed activity"
+                              : report.reconciliation.likelyMismatches.enrolledWithoutSessionEvidence.includes(
+                                    actorUserId,
+                                  )
+                                ? "No session evidence"
+                                : "—";
+                        return (
+                          <tr
+                            key={actorUserId}
+                            className="border-t border-border"
+                          >
+                            <td className="p-3 font-mono text-xs">
+                              {actorUserId}
+                            </td>
+                            <td className="p-3">{enrolled ? "Yes" : "No"}</td>
+                            <td className="p-3">{observed ? "Yes" : "No"}</td>
+                            <td className="p-3">
+                              {report.reconciliation.sessionCountsByActor[
+                                actorUserId
+                              ] ?? 0}
+                            </td>
+                            <td className="p-3">
+                              {report.reconciliation.chatActivityCountsByActor
+                                ? (report.reconciliation
+                                    .chatActivityCountsByActor[actorUserId] ??
+                                  0)
+                                : "Unavailable"}
+                            </td>
+                            <td className="p-3">{mismatch}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           </>
         )}
@@ -230,10 +472,14 @@ export function PilotActivityReports() {
             <h2 className="font-semibold">Timeline: {timeline.userId}</h2>
             <ol className="mt-3 space-y-2">
               {timeline.events.map((event) => (
-                <li key={event.eventId} className="rounded bg-muted/40 p-3 text-sm">
+                <li
+                  key={event.eventId}
+                  className="rounded bg-muted/40 p-3 text-sm"
+                >
                   <span className="font-semibold">{event.eventType}</span>
                   <span className="ml-2 text-muted-foreground">
-                    {new Date(event.occurredAt).toLocaleString()} · {event.result}
+                    {new Date(event.occurredAt).toLocaleString()} ·{" "}
+                    {event.result}
                   </span>
                   {Object.keys(event.metadata).length > 0 && (
                     <span className="ml-2 font-mono text-xs">
@@ -246,10 +492,16 @@ export function PilotActivityReports() {
           </section>
         )}
         {selected && (
-          <UserTestFeedbackReview
-            organizationId={selected.organizationId}
-            pilotId={selected.pilotId}
-          />
+          <>
+            <PilotConversationReview
+              organizationId={selected.organizationId}
+              pilotId={selected.pilotId}
+            />
+            <UserTestFeedbackReview
+              organizationId={selected.organizationId}
+              pilotId={selected.pilotId}
+            />
+          </>
         )}
       </div>
     </main>

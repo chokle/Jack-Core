@@ -10,6 +10,7 @@ vi.mock("../supabase.js", async () => {
 import { fake, resetMocks } from "./mocks.js";
 import {
   hasAnyReportScope,
+  isActiveMembershipWindow,
   CONSENT_VERSION,
   PRIVACY_NOTICE_VERSION,
   recordServerAskJackEvent,
@@ -32,9 +33,7 @@ function request(sessionId?: string): Request {
   } as unknown as Request;
 }
 
-function identity(
-  overrides: Partial<CallerIdentity> = {},
-): CallerIdentity {
+function identity(overrides: Partial<CallerIdentity> = {}): CallerIdentity {
   return {
     userId: "tester-1",
     email: "tester@example.test",
@@ -120,32 +119,43 @@ describe("server-authoritative Ask Jack telemetry", () => {
       metadata: { citation_count: 2 },
       correlation_id: "chat-message-1",
     });
-    expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("question");
+    expect(JSON.stringify(fake.tables.test_events[0])).not.toContain(
+      "question",
+    );
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("answer");
   });
 
   it.each([
     {
-      actorIdentity: identity({ isPresentation: true, classification: "restricted" }),
+      actorIdentity: identity({
+        isPresentation: true,
+        classification: "restricted",
+      }),
       label: "presentation identity",
     },
     {
       actorIdentity: identity({ classification: "unavailable" }),
       label: "unavailable identity",
     },
-  ])("skips Ask Jack telemetry writes for $label", async ({ actorIdentity }) => {
-    const originalQuestionCount = fake.tables.test_sessions[0]?.question_count;
+  ])(
+    "skips Ask Jack telemetry writes for $label",
+    async ({ actorIdentity }) => {
+      const originalQuestionCount =
+        fake.tables.test_sessions[0]?.question_count;
 
-    await recordServerAskJackEvent({
-      req: request(SESSION_ID),
-      actorIdentity,
-      eventType: "ask_jack_failed",
-      correlationId: "chat-message-2",
-    });
+      await recordServerAskJackEvent({
+        req: request(SESSION_ID),
+        actorIdentity,
+        eventType: "ask_jack_failed",
+        correlationId: "chat-message-2",
+      });
 
-    expect(fake.tables.test_events).toHaveLength(0);
-    expect(fake.tables.test_sessions[0]?.question_count).toBe(originalQuestionCount);
-  });
+      expect(fake.tables.test_events).toHaveLength(0);
+      expect(fake.tables.test_sessions[0]?.question_count).toBe(
+        originalQuestionCount,
+      );
+    },
+  );
 
   it("returns true when any membership in the valid scope window is report-authorized", async () => {
     fake.tables.pilot_memberships = [
@@ -171,5 +181,29 @@ describe("server-authoritative Ask Jack telemetry", () => {
       },
     ];
     expect(await hasAnyReportScope("tester-1")).toBe(true);
+  });
+
+  it("treats null membership bounds as open and malformed bounds as inactive", () => {
+    expect(
+      isActiveMembershipWindow({
+        active: true,
+        valid_from: null,
+        valid_until: null,
+      }),
+    ).toBe(true);
+    expect(
+      isActiveMembershipWindow({
+        active: true,
+        valid_from: "not-a-date",
+        valid_until: null,
+      }),
+    ).toBe(false);
+    expect(
+      isActiveMembershipWindow({
+        active: true,
+        valid_from: null,
+        valid_until: "not-a-date",
+      }),
+    ).toBe(false);
   });
 });

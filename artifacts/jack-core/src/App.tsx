@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { AuthenticateWithRedirectCallback, SignUp, Show, useAuth, useClerk } from "@clerk/react";
+import {
+  AuthenticateWithRedirectCallback,
+  SignUp,
+  Show,
+  useAuth,
+  useClerk,
+} from "@clerk/react";
 import { InternalClerkProvider as ClerkProvider } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
-import { Switch, Route, Redirect, useLocation, Router as WouterRouter } from "wouter";
+import {
+  Switch,
+  Route,
+  Redirect,
+  useLocation,
+  Router as WouterRouter,
+} from "wouter";
 import {
   QueryClient,
   QueryClientProvider,
@@ -25,7 +37,11 @@ import { Input } from "@/components/ui/input";
 import { EmailCodeSignIn } from "@/components/EmailCodeSignIn";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
-import { InterviewMode, type FieldNoteInterviewPreload, type TorchInterviewPreload } from "./components/InterviewMode";
+import {
+  InterviewMode,
+  type FieldNoteInterviewPreload,
+  type TorchInterviewPreload,
+} from "./components/InterviewMode";
 import { KnowledgeReview } from "./components/KnowledgeReview";
 import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
@@ -61,7 +77,12 @@ import {
 } from "./lib/user-testing/test-session-service";
 import { setFeedbackSessionId } from "./lib/user-testing/feedback-service";
 import { handoffInterviewResume } from "./lib/interview-resume";
-import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
+import {
+  setAuthTokenGetter,
+  useGetMe,
+  type Citation,
+  type ParkedThought,
+} from "@workspace/api-client-react";
 
 const queryClient = new QueryClient();
 
@@ -70,13 +91,13 @@ const isLocalClerkHost =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1" ||
   window.location.hostname === "[::1]";
-const isRailwayPreviewHost = window.location.hostname.endsWith(".up.railway.app");
+const isRailwayPreviewHost =
+  window.location.hostname.endsWith(".up.railway.app");
 const useDirectClerkAssets = isLocalClerkHost || isRailwayPreviewHost;
 const clerkProxyEnabled =
   import.meta.env.VITE_ENABLE_CLERK_PROXY === "true" &&
   import.meta.env.VITE_DISABLE_CLERK_PROXY !== "true";
-const useClerkAssetsFromProxy =
-  clerkProxyEnabled && !useDirectClerkAssets;
+const useClerkAssetsFromProxy = clerkProxyEnabled && !useDirectClerkAssets;
 
 // Local IP hosts are not valid Clerk custom domains. Resolving 127.0.0.1 through
 // publishableKeyFromHost produces clerk.127.0.0.1 and prevents ClerkJS loading.
@@ -85,28 +106,29 @@ const clerkPubKey = configuredClerkPubKey;
 
 // Production auth can be routed through Jack's same-origin server proxy so
 // privacy tools and restrictive networks do not need direct Clerk FAPI access.
-const clerkProxyUrl =
-  isLocalClerkHost
-    ? `${window.location.origin}/api/__clerk`
-    : clerkProxyEnabled
+const clerkProxyUrl = isLocalClerkHost
+  ? `${window.location.origin}/api/__clerk`
+  : clerkProxyEnabled
     ? import.meta.env.VITE_CLERK_PROXY_URL
     : undefined;
 
 const localClerkJsUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
   : useClerkAssetsFromProxy
-  ? `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`
-  : "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
+    ? `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`
+    : "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
 const localClerkUiUrl = useDirectClerkAssets
   ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
   : useClerkAssetsFromProxy
-  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`
-  : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
+    ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`
+    : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
-const USER_TESTING_DECLINED_KEY = "jack.userTesting.declinedWithoutRecording.v1";
-const USER_TESTING_ACCEPTED_KEY = "jack.userTesting.acceptedWithoutRecording.v1";
+const USER_TESTING_DECLINED_KEY =
+  "jack.userTesting.declinedWithoutRecording.v1";
+const USER_TESTING_ACCEPTED_KEY =
+  "jack.userTesting.acceptedWithoutRecording.v1";
 const AUTH_STARTUP_TIMEOUT_MS = 6_000;
 
 function userTestingDeclinedKey(userId: string) {
@@ -173,9 +195,16 @@ function clearUserTestingAccepted(userId?: string | null) {
 
 function captureTorchInterviewHandoff() {
   const params = new URLSearchParams(window.location.search);
-  if (params.get("view") !== "interview" || params.get("source") !== "torch-command-centre") return;
+  if (
+    params.get("view") !== "interview" ||
+    params.get("source") !== "torch-command-centre"
+  )
+    return;
   try {
-    sessionStorage.setItem(TORCH_INTERVIEW_HANDOFF_KEY, params.toString().slice(0, 4000));
+    sessionStorage.setItem(
+      TORCH_INTERVIEW_HANDOFF_KEY,
+      params.toString().slice(0, 4000),
+    );
   } catch {
     // Storage can be blocked; signed-in users still consume the live URL.
   }
@@ -188,16 +217,22 @@ function readTorchInterviewPreload(): TorchInterviewPreload | undefined {
   let params = liveParams;
   if (liveParams.get("source") !== "torch-command-centre") {
     try {
-      params = new URLSearchParams(sessionStorage.getItem(TORCH_INTERVIEW_HANDOFF_KEY) ?? "");
+      params = new URLSearchParams(
+        sessionStorage.getItem(TORCH_INTERVIEW_HANDOFF_KEY) ?? "",
+      );
     } catch {
       return undefined;
     }
   }
-  if (params.get("view") !== "interview" || params.get("source") !== "torch-command-centre") {
+  if (
+    params.get("view") !== "interview" ||
+    params.get("source") !== "torch-command-centre"
+  ) {
     return undefined;
   }
 
-  const value = (key: string, maxLength: number) => (params.get(key) ?? "").trim().slice(0, maxLength);
+  const value = (key: string, maxLength: number) =>
+    (params.get(key) ?? "").trim().slice(0, maxLength);
   const preload = {
     starvingPointId: value("starvingPointId", 120),
     title: value("title", 180),
@@ -208,7 +243,8 @@ function readTorchInterviewPreload(): TorchInterviewPreload | undefined {
     evidence: value("evidence", 800),
   };
 
-  if (!preload.starvingPointId || !preload.title || !preload.trade) return undefined;
+  if (!preload.starvingPointId || !preload.title || !preload.trade)
+    return undefined;
   try {
     sessionStorage.removeItem(TORCH_INTERVIEW_HANDOFF_KEY);
   } catch {
@@ -257,12 +293,14 @@ const clerkAppearance = {
     footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
     headerTitle: "text-foreground",
     headerSubtitle: "text-muted-foreground",
-    socialButtonsBlockButton: "border border-border bg-card/60 hover:bg-muted/60",
+    socialButtonsBlockButton:
+      "border border-border bg-card/60 hover:bg-muted/60",
     socialButtonsBlockButtonText: "text-foreground",
     dividerLine: "bg-border",
     dividerText: "text-muted-foreground",
     formFieldLabel: "text-foreground",
-    formFieldInput: "bg-[hsl(217_33%_17%)] border border-border text-foreground",
+    formFieldInput:
+      "bg-[hsl(217_33%_17%)] border border-border text-foreground",
     formButtonPrimary:
       "!bg-primary !text-primary-foreground hover:!bg-primary/90 !shadow-[0_0_15px_rgba(255,100,0,0.35)]",
     footerAction: "text-muted-foreground",
@@ -279,8 +317,12 @@ const clerkAppearance = {
 };
 
 function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
-  const [interviewPreload, setInterviewPreload] = useState<TorchInterviewPreload | undefined>(readTorchInterviewPreload);
-  const [fieldNotePreload, setFieldNotePreload] = useState<FieldNoteInterviewPreload | undefined>();
+  const [interviewPreload, setInterviewPreload] = useState<
+    TorchInterviewPreload | undefined
+  >(readTorchInterviewPreload);
+  const [fieldNotePreload, setFieldNotePreload] = useState<
+    FieldNoteInterviewPreload | undefined
+  >();
   const fieldNoteHandoffToken = useRef(0);
   const [view, setView] = useState<JackView>(() => {
     if (interviewPreload) return "interview";
@@ -294,14 +336,20 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
   const [deletePhrase, setDeletePhrase] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
-  const [accountDeleteError, setAccountDeleteError] = useState<string | null>(null);
+  const [accountDeleteError, setAccountDeleteError] = useState<string | null>(
+    null,
+  );
   // Set when the drawer is opened via "Resume" on a parked chat thought — shows
   // a reorientation banner atop the conversation. Cleared on close so the next
   // plain "Ask Jack" open (no resume) doesn't show a stale banner.
-  const [resumedThought, setResumedThought] = useState<ParkedThought | null>(null);
+  const [resumedThought, setResumedThought] = useState<ParkedThought | null>(
+    null,
+  );
   // A monotonically-increasing token so clicking the *same* citation twice still
   // re-triggers a seek; `time` is the target position in seconds.
-  const [seek, setSeek] = useState<{ time: number; token: number } | undefined>();
+  const [seek, setSeek] = useState<
+    { time: number; token: number } | undefined
+  >();
   const testingAcceptanceInProgress = useRef(false);
 
   const graph = useMemoryGraphData();
@@ -324,13 +372,18 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // Beta user-testing mode: the "Start User Test" button in JackShell opens
   // the consent modal via this imperative handle; TestingOverlay also opens
   // itself on `?test=true`. See components/testing/TestingOverlay.tsx.
-  const shouldAutoPromptUserTesting = new URLSearchParams(window.location.search).get("test") === "true";
+  const shouldAutoPromptUserTesting =
+    new URLSearchParams(window.location.search).get("test") === "true";
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
   const feedbackRef = useRef<UserTestFeedbackHandle>(null);
   const testStartPendingRef = useRef(false);
   const [testStartPending, setTestStartPending] = useState(false);
-  const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
+  const [telemetryContext, setTelemetryContext] =
+    useState<TelemetryContext | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
+  const [telemetryConsentPurpose, setTelemetryConsentPurpose] = useState<
+    "start" | "review"
+  >("start");
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
     restricted: boolean;
@@ -434,14 +487,23 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     setDeletingAccount(true);
     setAccountDeleteError(null);
     try {
-      const response = await fetch("/api/account", { method: "DELETE", credentials: "include" });
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        credentials: "include",
+      });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
         throw new Error(body.error ?? "Could not delete your account.");
       }
       window.location.assign("/api/auth/reset-session");
     } catch (error) {
-      setAccountDeleteError(error instanceof Error ? error.message : "Could not delete your account.");
+      setAccountDeleteError(
+        error instanceof Error
+          ? error.message
+          : "Could not delete your account.",
+      );
       setDeletingAccount(false);
     }
   };
@@ -465,10 +527,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       );
       handleNavigate("graph");
       window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
+        window.dispatchEvent(
+          new CustomEvent("jack:test-session-started", { detail: session }),
+        );
       }, 0);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Test could not start. Please try again.");
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Test could not start. Please try again.",
+      );
     } finally {
       testStartPendingRef.current = false;
       setTestStartPending(false);
@@ -494,13 +562,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
     if (
       context.consents.telemetry?.state === "granted" &&
-      context.consents.telemetry.privacyNoticeVersion === context.privacyNoticeVersion &&
+      context.consents.telemetry.privacyNoticeVersion ===
+        context.privacyNoticeVersion &&
       context.consents.telemetry.consentVersion === context.consentVersion
     ) {
       await launchTestSession(context.scope.pilotId);
       testingOverlayRef.current?.open();
       return;
     }
+    setTelemetryConsentPurpose("start");
     setTelemetryConsentOpen(true);
   };
 
@@ -540,26 +610,50 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     testStartPendingRef.current = true;
     setTestStartPending(true);
     try {
+      const pilotId = telemetryContext.scope.pilotId;
+      const downgradedScopes = (
+        ["telemetry", "screen", "microphone", "conversationReview"] as const
+      ).filter(
+        (scope) =>
+          telemetryContext.consents[scope]?.state === "granted" &&
+          choices[scope] === "declined",
+      );
+      if (downgradedScopes.length > 0) {
+        // Withdrawal dispatches the local stop event before its request so an
+        // active capture ends immediately, then the API schedules attributable
+        // data for deletion. The full choice bundle is saved only after that
+        // fail-closed withdrawal succeeds.
+        await withdrawTelemetry(pilotId, downgradedScopes);
+      }
       const context = await saveTelemetryConsents({
-        pilotId: telemetryContext.scope.pilotId,
+        pilotId,
         ...choices,
         privacyNoticeVersion: telemetryContext.privacyNoticeVersion,
         consentVersion: telemetryContext.consentVersion,
+        conversationReviewConsentVersion:
+          telemetryContext.conversationReviewConsentVersion,
       });
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
-      if (choices.telemetry === "granted") {
+      if (
+        telemetryConsentPurpose === "start" &&
+        choices.telemetry === "granted"
+      ) {
         testStartPendingRef.current = false;
         setTestStartPending(false);
         await launchTestSession(context.scope?.pilotId);
-      } else {
+      } else if (choices.telemetry === "declined") {
         persistUserTestingDeclined(me?.userId);
         clearUserTestingAccepted(me?.userId);
         setTestingGate({ accepted: false, restricted: false });
         handleNavigate("graph");
       }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Consent choices could not be saved.",
+      );
     } finally {
       testStartPendingRef.current = false;
       setTestStartPending(false);
@@ -567,7 +661,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleTelemetryWithdrawal = async (
-    scopes: Array<"telemetry" | "screen" | "microphone">,
+    scopes: Array<"telemetry" | "screen" | "microphone" | "conversationReview">,
   ) => {
     const pilotId = telemetryContext?.scope?.pilotId;
     if (!pilotId) return;
@@ -575,33 +669,45 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       await withdrawTelemetry(pilotId, scopes);
       setTelemetryContext(await loadTelemetryContext(pilotId));
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Consent could not be withdrawn.");
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Consent could not be withdrawn.",
+      );
     }
   };
 
   useEffect(() => {
     if (me?.isAdmin !== false) return;
     const stopRetry = initializeTelemetryRetry();
-    void loadTelemetryContext().then((context) => {
-      setTelemetryContext(context);
-      const session = context.session;
-      if (session) {
-        setFeedbackSessionId(session.id);
-      }
-      if (session && session.onboardingStatus !== "completed") {
-        handleNavigate("graph");
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
-        }, 0);
-      }
-    }).catch(() => setTelemetryContext(null));
+    void loadTelemetryContext()
+      .then((context) => {
+        setTelemetryContext(context);
+        const session = context.session;
+        if (session) {
+          setFeedbackSessionId(session.id);
+        }
+        if (session && session.onboardingStatus !== "completed") {
+          handleNavigate("graph");
+          window.setTimeout(() => {
+            window.dispatchEvent(
+              new CustomEvent("jack:test-session-started", { detail: session }),
+            );
+          }, 0);
+        }
+      })
+      .catch(() => setTelemetryContext(null));
     return stopRetry;
   }, [me?.isAdmin]);
 
   useEffect(() => {
     const continueTest = () => testingOverlayRef.current?.open();
     window.addEventListener("jack:test-onboarding-completed", continueTest);
-    return () => window.removeEventListener("jack:test-onboarding-completed", continueTest);
+    return () =>
+      window.removeEventListener(
+        "jack:test-onboarding-completed",
+        continueTest,
+      );
   }, []);
 
   const handleSignOut = () => {
@@ -662,9 +768,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         }}
         onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
         onStartUserTest={
-          me?.isAdmin === false
-            ? handleStartUserTest
-            : undefined
+          me?.isAdmin === false ? handleStartUserTest : undefined
         }
         userTestStarting={testStartPending}
         canViewPilotReports={me?.canViewPilotReports === true}
@@ -687,7 +791,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           />
         ) : view === "interview" ? (
           <InterviewMode
-            key={fieldNotePreload ? `field-note-${fieldNoteHandoffToken.current}` : "interview"}
+            key={
+              fieldNotePreload
+                ? `field-note-${fieldNoteHandoffToken.current}`
+                : "interview"
+            }
             preload={interviewPreload}
             fieldNote={fieldNotePreload}
             onComplete={handleInterviewComplete}
@@ -704,11 +812,23 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       <TelemetryConsentModal
         open={telemetryConsentOpen}
         saving={testStartPending}
+        initialChoices={{
+          telemetry: telemetryContext?.consents.telemetry?.state === "granted",
+          screen: telemetryContext?.consents.screen?.state === "granted",
+          microphone:
+            telemetryContext?.consents.microphone?.state === "granted",
+          conversationReview:
+            telemetryContext?.consents.conversationReview?.state === "granted",
+        }}
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
       <UserTestingGate
-        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
+        open={
+          me?.isAdmin === false &&
+          testingGate.restricted &&
+          !testingGate.accepted
+        }
         onStart={handleStartUserTest}
       />
 
@@ -726,10 +846,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         onMeaningfulSessionComplete={handleAskJackComplete}
       />
 
-      <TestingOverlay
-        ref={testingOverlayRef}
-        onEvent={handleTestingEvent}
-      />
+      <TestingOverlay ref={testingOverlayRef} onEvent={handleTestingEvent} />
       <UserTestFeedback
         ref={feedbackRef}
         consented={testingGate.accepted}
@@ -737,26 +854,45 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         pilotId={telemetryContext?.scope?.pilotId}
       />
 
-      <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
+      <AlertDialog
+        open={accountSettingsOpen}
+        onOpenChange={setAccountSettingsOpen}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Account & privacy</AlertDialogTitle>
             <AlertDialogDescription>
-              You control your participation. Ask Jack conversations are stored as product history separately from optional activity telemetry.
+              You control your participation. Ask Jack conversations are stored
+              as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {telemetryContext?.scope && (
             <div className="rounded-lg border border-border p-4">
               <p className="font-semibold">Pilot telemetry</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Export your activity data or withdraw consent. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
+                Export your activity data or withdraw consent. Withdrawal stops
+                future collection and active recording immediately and schedules
+                attributable telemetry for deletion within 30 days.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={exportTelemetry}>Export telemetry</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setTelemetryConsentPurpose("review");
+                    setTelemetryConsentOpen(true);
+                  }}
+                >
+                  Review consent choices
+                </Button>
+                <Button variant="outline" onClick={exportTelemetry}>
+                  Export telemetry
+                </Button>
                 {telemetryContext.consents.microphone?.state === "granted" && (
                   <Button
                     variant="outline"
-                    onClick={() => void handleTelemetryWithdrawal(["microphone"])}
+                    onClick={() =>
+                      void handleTelemetryWithdrawal(["microphone"])
+                    }
                   >
                     Withdraw microphone
                   </Button>
@@ -767,6 +903,17 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                     onClick={() => void handleTelemetryWithdrawal(["screen"])}
                   >
                     Withdraw screen recording
+                  </Button>
+                )}
+                {telemetryContext.consents.conversationReview?.state ===
+                  "granted" && (
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      void handleTelemetryWithdrawal(["conversationReview"])
+                    }
+                  >
+                    Withdraw conversation review
                   </Button>
                 )}
                 <Button
@@ -780,13 +927,27 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           )}
           <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-4">
             <p className="font-semibold text-destructive">Delete account</p>
-            <p className="mt-1 text-sm text-muted-foreground">This removes your sign-in, uploaded videos, interviews, Ask Jack history, parked thoughts, feedback, pilot sessions, activity events, and test recordings. It cannot be undone.</p>
-            <Button className="mt-3" variant="destructive" onClick={() => { setAccountDeleteError(null); setDeletePhrase(""); setAccountDeleteOpen(true); }}>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This removes your sign-in, uploaded videos, interviews, Ask Jack
+              history, parked thoughts, feedback, pilot sessions, activity
+              events, and test recordings. It cannot be undone.
+            </p>
+            <Button
+              className="mt-3"
+              variant="destructive"
+              onClick={() => {
+                setAccountDeleteError(null);
+                setDeletePhrase("");
+                setAccountDeleteOpen(true);
+              }}
+            >
               Delete my account
             </Button>
           </div>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setAccountSettingsOpen(false)}>Done</AlertDialogAction>
+            <AlertDialogAction onClick={() => setAccountSettingsOpen(false)}>
+              Done
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -794,14 +955,35 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       <AlertDialog open={accountDeleteOpen} onOpenChange={setAccountDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Permanently delete your account?</AlertDialogTitle>
-            <AlertDialogDescription>Type DELETE to confirm. This cannot be reversed.</AlertDialogDescription>
+            <AlertDialogTitle>
+              Permanently delete your account?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Type DELETE to confirm. This cannot be reversed.
+            </AlertDialogDescription>
           </AlertDialogHeader>
-          <Input value={deletePhrase} onChange={(event) => setDeletePhrase(event.target.value)} placeholder="Type DELETE" aria-label="Account deletion confirmation" autoComplete="off" />
-          {accountDeleteError && <p className="text-sm text-destructive">{accountDeleteError}</p>}
+          <Input
+            value={deletePhrase}
+            onChange={(event) => setDeletePhrase(event.target.value)}
+            placeholder="Type DELETE"
+            aria-label="Account deletion confirmation"
+            autoComplete="off"
+          />
+          {accountDeleteError && (
+            <p className="text-sm text-destructive">{accountDeleteError}</p>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingAccount}>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={deletePhrase !== "DELETE" || deletingAccount} onClick={(event) => { event.preventDefault(); void deleteAccount(); }}>
+            <AlertDialogCancel disabled={deletingAccount}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletePhrase !== "DELETE" || deletingAccount}
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteAccount();
+              }}
+            >
               {deletingAccount ? "Deleting..." : "Delete account"}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -824,7 +1006,11 @@ function AppSurface({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
 function AuthenticatedAppSurface() {
   const { signOut } = useClerk();
-  return <AppSurface onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })} />;
+  return (
+    <AppSurface
+      onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })}
+    />
+  );
 }
 
 function StartupReady() {
@@ -854,7 +1040,11 @@ function SignUpPage() {
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
-        forceRedirectUrl={useDirectClerkAssets ? `${window.location.origin}${basePath}/app` : undefined}
+        forceRedirectUrl={
+          useDirectClerkAssets
+            ? `${window.location.origin}${basePath}/app`
+            : undefined
+        }
       />
     </div>
   );
@@ -984,9 +1174,17 @@ function AuthStartupScreen() {
       aria-live="polite"
     >
       <div>
-        <img className="mx-auto h-16 w-16" src={`${basePath}/logo.svg`} alt="" />
-        <p className="mt-5 text-lg font-semibold text-foreground">Starting Jack…</p>
-        <p className="mt-1 text-sm text-muted-foreground">Connecting your secure session</p>
+        <img
+          className="mx-auto h-16 w-16"
+          src={`${basePath}/logo.svg`}
+          alt=""
+        />
+        <p className="mt-5 text-lg font-semibold text-foreground">
+          Starting Jack…
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Connecting your secure session
+        </p>
       </div>
     </div>
   );
@@ -1000,12 +1198,20 @@ function AuthUnavailableScreen() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-center">
       <div className="max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl">
-        <img className="mx-auto h-14 w-14" src={`${basePath}/logo.svg`} alt="" />
-        <h1 className="mt-5 text-2xl font-semibold text-foreground">Sign-in is temporarily unavailable</h1>
+        <img
+          className="mx-auto h-14 w-14"
+          src={`${basePath}/logo.svg`}
+          alt=""
+        />
+        <h1 className="mt-5 text-2xl font-semibold text-foreground">
+          Sign-in is temporarily unavailable
+        </h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           Jack stays locked until the secure session service reconnects.
         </p>
-        <Button className="mt-6" onClick={() => window.location.reload()}>Try again</Button>
+        <Button className="mt-6" onClick={() => window.location.reload()}>
+          Try again
+        </Button>
       </div>
     </div>
   );
@@ -1017,7 +1223,10 @@ function ManagedAppEntry() {
 
   useEffect(() => {
     if (authReady) return;
-    const timeout = window.setTimeout(() => setAuthTimedOut(true), AUTH_STARTUP_TIMEOUT_MS);
+    const timeout = window.setTimeout(
+      () => setAuthTimedOut(true),
+      AUTH_STARTUP_TIMEOUT_MS,
+    );
     return () => window.clearTimeout(timeout);
   }, [authReady]);
 

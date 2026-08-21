@@ -24,6 +24,8 @@ tags:
     description: Park an interrupted thought during a chat or interview and resume it later
   - name: system
     description: Live Systems Health telemetry (heartbeat widget)
+  - name: pilot-reports
+    description: Protected, organization-scoped pilot reporting
 
 paths:
   /healthz:
@@ -489,10 +491,8 @@ paths:
             enum: [pending, accepted, rejected, merged, archived, restored]
             default: pending
           description: >-
-            pending is publicly readable; every other status (including
-            archived — mentor-withdrawn concepts held out of the live graph,
-            and restored — archived concepts a reviewer re-minted into the
-            graph) requires an admin session.
+            Admin-only review queue status. Pending rows include contributor
+            identity and verbatim interview evidence and are never public.
       responses:
         "200":
           description: Queued knowledge candidates
@@ -525,7 +525,7 @@ paths:
     post:
       operationId: resolveKnowledgeCandidate
       tags: [graph]
-      summary: Resolve a pending knowledge candidate — Accept / Merge / Reject (admin only)
+      summary: Resolve a pending knowledge candidate — Accept / Edit / Merge / Reject (admin only)
       parameters:
         - name: id
           in: path
@@ -981,6 +981,42 @@ paths:
         "404":
           description: Not found (or a chat-sourced thought owned by a different session)
 
+  /testing/reports/summary:
+    get:
+      operationId: getPilotReportSummary
+      tags: [pilot-reports]
+      summary: Get the protected pilot activity summary
+      description: >-
+        Returns minimized activity aggregates, participant/session summaries,
+        and identity reconciliation for an actively authorized organization and
+        pilot scope. Ask Jack message content is not included.
+      parameters:
+        - name: organizationId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: pilotId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Scoped pilot activity summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PilotReportSummaryResponse"
+        "401":
+          description: Authenticated identity required
+        "403":
+          description: No active report role for the requested scope
+        "503":
+          description: Pilot report temporarily unavailable
+
 components:
   schemas:
     CurrentUser:
@@ -997,6 +1033,249 @@ components:
           type: boolean
         canViewPilotReports:
           type: boolean
+
+    PilotReportScope:
+      type: object
+      additionalProperties: false
+      required: [organizationId, pilotId]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        pilotId:
+          type: string
+          format: uuid
+
+    PilotReportAggregate:
+      type: object
+      additionalProperties: false
+      required:
+        - aggregateUnit
+        - participantCount
+        - sessionCount
+        - activeSessions
+        - completedSessions
+        - completionRate
+        - onboardingCompletionRate
+        - recordingOptInRate
+        - feedbackCount
+        - droppedEventCount
+        - rejectedEventCount
+        - eventCounts
+      properties:
+        aggregateUnit:
+          type: string
+          enum: [sessions]
+        participantCount:
+          type: integer
+        sessionCount:
+          type: integer
+        activeSessions:
+          type: integer
+        completedSessions:
+          type: integer
+        completionRate:
+          type: number
+        onboardingCompletionRate:
+          type: number
+        recordingOptInRate:
+          type: number
+        feedbackCount:
+          type: integer
+        droppedEventCount:
+          type: integer
+        rejectedEventCount:
+          type: integer
+        eventCounts:
+          type: object
+          additionalProperties:
+            type: integer
+
+    PilotReportSession:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - actorUserId
+        - status
+        - startedAt
+        - resumedAt
+        - lastActivityAt
+        - onboardingStatus
+        - onboardingStep
+        - questionCount
+        - screenConsentState
+        - microphoneConsentState
+        - recordingStatus
+        - feedbackStatus
+        - completedAt
+        - errorCount
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorUserId:
+          type: string
+        status:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        resumedAt:
+          type: [string, "null"]
+          format: date-time
+        lastActivityAt:
+          type: [string, "null"]
+          format: date-time
+        onboardingStatus:
+          type: string
+        onboardingStep:
+          type: integer
+        questionCount:
+          type: integer
+        screenConsentState:
+          type: string
+        microphoneConsentState:
+          type: string
+        recordingStatus:
+          type: string
+        feedbackStatus:
+          type: string
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        errorCount:
+          type: integer
+
+    PilotReportParticipant:
+      type: object
+      additionalProperties: false
+      required:
+        - actorUserId
+        - sessionCount
+        - askJackUseCount
+        - latestStatus
+        - latestOnboardingStatus
+        - lastActivityAt
+        - sessions
+      properties:
+        actorUserId:
+          type: string
+        sessionCount:
+          type: integer
+        askJackUseCount:
+          type: integer
+        latestStatus:
+          type: string
+        latestOnboardingStatus:
+          type: string
+        lastActivityAt:
+          type: [string, "null"]
+          format: date-time
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportSession"
+
+    PilotReportReconciliation:
+      type: object
+      additionalProperties: false
+      required:
+        - enrolledTesterIds
+        - observedSessionActorIds
+        - sessionCountsByActor
+        - chatActivityEvidence
+        - chatActivityCountsByActor
+        - likelyMismatches
+      properties:
+        enrolledTesterIds:
+          type: array
+          items:
+            type: string
+        observedSessionActorIds:
+          type: array
+          items:
+            type: string
+        sessionCountsByActor:
+          type: object
+          additionalProperties:
+            type: integer
+        chatActivityEvidence:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [available]
+            - type: object
+              additionalProperties: false
+              required: [status, reason]
+              properties:
+                status:
+                  type: string
+                  enum: [unavailable]
+                reason:
+                  type: string
+                  enum: [schema_capability_missing]
+        chatActivityCountsByActor:
+          oneOf:
+            - type: object
+              additionalProperties:
+                type: integer
+            - type: "null"
+        likelyMismatches:
+          type: object
+          additionalProperties: false
+          required:
+            - observedNotEnrolled
+            - enrolledWithoutSessionEvidence
+            - enrolledWithoutActivity
+          properties:
+            observedNotEnrolled:
+              type: array
+              items:
+                type: string
+            enrolledWithoutSessionEvidence:
+              type: array
+              items:
+                type: string
+            enrolledWithoutActivity:
+              oneOf:
+                - type: array
+                  items:
+                    type: string
+                - type: "null"
+
+    PilotReportSummaryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - scope
+        - summary
+        - participants
+        - sessions
+        - reconciliation
+        - generatedAt
+      properties:
+        scope:
+          $ref: "#/components/schemas/PilotReportScope"
+        summary:
+          $ref: "#/components/schemas/PilotReportAggregate"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportParticipant"
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PilotReportSession"
+        reconciliation:
+          $ref: "#/components/schemas/PilotReportReconciliation"
+        generatedAt:
+          type: string
+          format: date-time
 
     MemoryGraphOnboardingPreference:
       type: object
@@ -1828,7 +2107,17 @@ components:
 
     KnowledgeCandidate:
       type: object
-      required: [id, status, title, category, bestMatches]
+      required:
+        [
+          id,
+          status,
+          title,
+          category,
+          question,
+          answerText,
+          sourceValid,
+          bestMatches,
+        ]
       properties:
         id:
           type: string
@@ -1855,6 +2144,15 @@ components:
           type: ["string", "null"]
         sessionId:
           type: ["string", "null"]
+        question:
+          type: ["string", "null"]
+          description: Verbatim interview question loaded from the source answer.
+        answerText:
+          type: ["string", "null"]
+          description: Verbatim mentor answer retained outside the trusted graph until review.
+        sourceValid:
+          type: boolean
+          description: True only when the answer belongs to the candidate mentor and session.
         bestMatches:
           type: array
           items:
@@ -1885,10 +2183,12 @@ components:
       properties:
         action:
           type: string
-          enum: [accept, merge, reject, restore, rearchive, reopen]
+          enum: [accept, edit, merge, reject, restore, rearchive, reopen]
           description: >-
-            accept — reinforce the top best-match concept; merge — reinforce the
-            reviewer-chosen targetNodeId; reject — discard with a required reason;
+            accept — reinforce the top best-match concept; edit — promote a
+            reviewer-corrected title and description as a new reviewed concept;
+            merge — reinforce the reviewer-chosen targetNodeId; reject — discard
+            with a required reason;
             restore — re-mint an archived (mentor-withdrawn) concept as
             attribution-free unverified knowledge; rearchive — undo a restore,
             demoting the curated concept back to an archived candidate (removing
@@ -1907,6 +2207,13 @@ components:
         reason:
           type: string
           description: Why the candidate was rejected (required for reject).
+        editedTitle:
+          type: string
+          minLength: 1
+          description: Reviewer-corrected concept title (required for edit).
+        editedDescription:
+          type: string
+          description: Reviewer-corrected concept description (required for edit; may be empty).
 
     CandidateResolutionConflict:
       type: object

@@ -61,10 +61,16 @@ export interface TelemetryContext {
       privacyNoticeVersion: string;
       consentVersion: string;
     } | null;
+    conversationReview: {
+      state: ConsentState;
+      privacyNoticeVersion: string;
+      consentVersion: string;
+    } | null;
   };
   session: TestSession | null;
   privacyNoticeVersion: string;
   consentVersion: string;
+  conversationReviewConsentVersion: string;
 }
 
 interface QueuedEvent {
@@ -118,7 +124,9 @@ export function deviceCategory(): "desktop" | "tablet" | "mobile" {
 
 export function getCachedTestSession(): TestSession | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null") as TestSession | null;
+    const value = JSON.parse(
+      sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null",
+    ) as TestSession | null;
     return value?.id && value.status === "active" ? value : null;
   } catch {
     return null;
@@ -139,7 +147,9 @@ export function cacheTestSession(session: TestSession | null): void {
 
 function readQueue(): QueuedEvent[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
+    const value: unknown = JSON.parse(
+      localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]",
+    );
     return Array.isArray(value) ? (value as QueuedEvent[]) : [];
   } catch {
     return [];
@@ -155,12 +165,17 @@ function writeQueue(queue: QueuedEvent[]): void {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "Request could not be completed.");
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
+  if (!response.ok)
+    throw new Error(body.error || "Request could not be completed.");
   return body;
 }
 
-export async function loadTelemetryContext(pilotId?: string): Promise<TelemetryContext> {
+export async function loadTelemetryContext(
+  pilotId?: string,
+): Promise<TelemetryContext> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/telemetry/context${query}`, {
     credentials: "include",
@@ -175,8 +190,10 @@ export async function saveTelemetryConsents(input: {
   telemetry: "granted" | "declined";
   screen: "granted" | "declined";
   microphone: "granted" | "declined";
+  conversationReview: "granted" | "declined";
   privacyNoticeVersion: string;
   consentVersion: string;
+  conversationReviewConsentVersion: string;
 }): Promise<TelemetryContext> {
   const response = await fetch("/api/testing/telemetry/consents", {
     method: "POST",
@@ -189,22 +206,29 @@ export async function saveTelemetryConsents(input: {
 
 export async function withdrawTelemetry(
   pilotId: string,
-  scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
+  scopes: Array<
+    "telemetry" | "screen" | "microphone" | "conversationReview"
+  > = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
     cacheTestSession(null);
     writeQueue([]);
   }
-  window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
-    detail: { withdrawn: scopes, deletionDueAt: null },
-  }));
+  window.dispatchEvent(
+    new CustomEvent("jack:telemetry-withdrawn", {
+      detail: { withdrawn: scopes, deletionDueAt: null },
+    }),
+  );
   const response = await fetch("/api/testing/telemetry/withdraw", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pilotId, scopes }),
   });
-  const result = await readJson<{ withdrawn: string[]; deletionDueAt: string | null }>(response);
+  const result = await readJson<{
+    withdrawn: string[];
+    deletionDueAt: string | null;
+  }>(response);
   return result;
 }
 
@@ -239,7 +263,9 @@ export function startTestSession(pilotId?: string): Promise<TestSession> {
   return startRequest;
 }
 
-export async function loadCurrentTestSession(pilotId?: string): Promise<TestSession | null> {
+export async function loadCurrentTestSession(
+  pilotId?: string,
+): Promise<TestSession | null> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/sessions/current${query}`, {
     credentials: "include",
@@ -252,12 +278,18 @@ export async function loadCurrentTestSession(pilotId?: string): Promise<TestSess
 
 async function reportDropped(sessionId: string, count: number): Promise<void> {
   try {
-    await fetch(`/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasonCode: "queue_overflow", eventCount: count }),
-    });
+    await fetch(
+      `/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reasonCode: "queue_overflow",
+          eventCount: count,
+        }),
+      },
+    );
   } catch {
     // Payload-free observability is best effort and never blocks the product.
   }
@@ -354,7 +386,7 @@ export async function trackTestEvent(
         ? "failure"
         : eventType === "test_abandoned" || eventType === "onboarding_skipped"
           ? "cancelled"
-        : "success"),
+          : "success"),
     ...(dedupeKey ? { dedupeKey } : {}),
     appVersion: import.meta.env.VITE_APP_VERSION || undefined,
     deployVersion: import.meta.env.VITE_DEPLOY_VERSION || undefined,

@@ -6,6 +6,7 @@ import {
   activityDb as db,
   auditReportAccess,
   authorizeReportScope,
+  isActiveMembershipWindow,
   listReportScopes,
   requestIdentifier,
   type PilotScope,
@@ -19,6 +20,29 @@ const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 interface AuthorizedScope extends PilotScope {
   authority: "pilot_admin" | "organization_admin" | "platform_superadmin";
   userId: string;
+}
+
+type ChatActivityEvidence =
+  | { status: "available" }
+  | { status: "unavailable"; reason: "schema_capability_missing" };
+
+const REQUIRED_CHAT_CAPABILITIES = [
+  ["test_sessions", "chat_session_id"],
+  ["chat_messages", "organization_id"],
+  ["chat_messages", "pilot_id"],
+] as const;
+
+function isExpectedMissingChatCapability(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as Record<string, unknown>;
+  const code = String(value["code"] ?? "");
+  if (code !== "42703" && code !== "PGRST204") return false;
+  const text = [value["message"], value["details"], value["hint"]]
+    .map((part) => String(part ?? "").toLowerCase())
+    .join(" ");
+  return REQUIRED_CHAT_CAPABILITIES.some(
+    ([table, column]) => text.includes(table) && text.includes(column),
+  );
 }
 
 async function requireReportScope(
@@ -38,15 +62,24 @@ async function requireReportScope(
       "Reports are unavailable in presentation mode.",
       "Reports are temporarily unavailable.",
     )
-  ) return null;
+  )
+    return null;
   const organizationId =
-    typeof req.query["organizationId"] === "string" ? req.query["organizationId"] : "";
-  const pilotId = typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
-  const authorization = await authorizeReportScope(identity.userId, organizationId, pilotId);
+    typeof req.query["organizationId"] === "string"
+      ? req.query["organizationId"]
+      : "";
+  const pilotId =
+    typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
+  const authorization = await authorizeReportScope(
+    identity.userId,
+    organizationId,
+    pilotId,
+  );
   await auditReportAccess({
     userId: identity.userId,
     targetUserId:
-      typeof req.params.userId === "string" && USER_ID_RE.test(req.params.userId)
+      typeof req.params.userId === "string" &&
+      USER_ID_RE.test(req.params.userId)
         ? req.params.userId
         : null,
     organizationId: UUID_RE.test(organizationId) ? organizationId : null,
@@ -57,7 +90,9 @@ async function requireReportScope(
     requestId: requestIdentifier(req),
   });
   if (!authorization.allowed || !authorization.authority) {
-    res.status(403).json({ error: "No active report role exists for this organization and pilot." });
+    res.status(403).json({
+      error: "No active report role exists for this organization and pilot.",
+    });
     return null;
   }
   return {
@@ -68,7 +103,9 @@ async function requireReportScope(
   };
 }
 
-function eventCounts(events: Array<Record<string, unknown>>): Record<string, number> {
+function eventCounts(
+  events: Array<Record<string, unknown>>,
+): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const event of events) {
     const type = String(event["event_type"] ?? "unknown");
@@ -83,9 +120,15 @@ function buildSummary(
   feedback: Array<Record<string, unknown>>,
   failures: Array<Record<string, unknown>>,
 ) {
-  const actors = new Set(sessions.map((session) => String(session["actor_user_id"])));
-  const completed = sessions.filter((session) => session["status"] === "completed").length;
-  const active = sessions.filter((session) => session["status"] === "active").length;
+  const actors = new Set(
+    sessions.map((session) => String(session["actor_user_id"])),
+  );
+  const completed = sessions.filter(
+    (session) => session["status"] === "completed",
+  ).length;
+  const active = sessions.filter(
+    (session) => session["status"] === "active",
+  ).length;
   const onboardingCompleted = sessions.filter(
     (session) => session["onboarding_status"] === "completed",
   ).length;
@@ -99,12 +142,15 @@ function buildSummary(
     .filter((failure) => failure["outcome"] === "rejected")
     .reduce((sum, failure) => sum + Number(failure["event_count"] ?? 0), 0);
   return {
+    aggregateUnit: "sessions" as const,
     participantCount: actors.size,
     sessionCount: sessions.length,
     activeSessions: active,
     completedSessions: completed,
     completionRate: sessions.length ? completed / sessions.length : 0,
-    onboardingCompletionRate: sessions.length ? onboardingCompleted / sessions.length : 0,
+    onboardingCompletionRate: sessions.length
+      ? onboardingCompleted / sessions.length
+      : 0,
     recordingOptInRate: sessions.length ? recordingOptIns / sessions.length : 0,
     feedbackCount: feedback.length,
     droppedEventCount: dropped,
@@ -113,8 +159,123 @@ function buildSummary(
   };
 }
 
+function uniqueSortedIds(
+  rows: Array<Record<string, unknown>>,
+  column: string,
+): string[] {
+  return [
+    ...new Set(rows.map((row) => String(row[column] ?? "")).filter(Boolean)),
+  ].sort();
+}
+
+function buildParticipants(sessions: Array<Record<string, unknown>>) {
+  const grouped = new Map<string, ReturnType<typeof serializeSession>[]>();
+  for (const session of sessions) {
+    const actorUserId = String(session["actor_user_id"]);
+    const actorSessions = grouped.get(actorUserId) ?? [];
+    actorSessions.push(serializeSession(session));
+    grouped.set(actorUserId, actorSessions);
+  }
+  return [...grouped.entries()].map(([actorUserId, actorSessions]) => {
+    const latestSession = actorSessions.reduce<
+      ReturnType<typeof serializeSession> | undefined
+    >((latest, session) => {
+      if (!latest) return session;
+      const currentTime = activityTimestamp(session.lastActivityAt);
+      const latestTime = activityTimestamp(latest.lastActivityAt);
+      return currentTime > latestTime ? session : latest;
+    }, undefined);
+    return {
+      actorUserId,
+      sessionCount: actorSessions.length,
+      askJackUseCount: actorSessions.reduce(
+        (sum, session) => sum + Number(session.questionCount ?? 0),
+        0,
+      ),
+      latestStatus: latestSession?.status ?? "unknown",
+      latestOnboardingStatus: latestSession?.onboardingStatus ?? "unknown",
+      lastActivityAt: latestSession?.lastActivityAt ?? null,
+      sessions: actorSessions,
+    };
+  });
+}
+
+function buildReconciliation(
+  sessions: Array<Record<string, unknown>>,
+  memberships: Array<Record<string, unknown>>,
+  chatActivityCountsByActor: Record<string, number> | null,
+  chatActivityEvidence: ChatActivityEvidence,
+) {
+  const enrolledTesterIds = uniqueSortedIds(
+    memberships.filter((membership) => isActiveMembershipWindow(membership)),
+    "user_id",
+  );
+  const observedSessionActorIds = uniqueSortedIds(sessions, "actor_user_id");
+  const scopedActorIds = [
+    ...new Set([...enrolledTesterIds, ...observedSessionActorIds]),
+  ].sort();
+  const scopedActorIdSet = new Set(scopedActorIds);
+  const sessionCountsByActor = Object.fromEntries(
+    scopedActorIds.map((id) => [id, 0]),
+  );
+  const scopedChatActivityCountsByActor = chatActivityCountsByActor
+    ? Object.fromEntries(
+        scopedActorIds.map((id) => [id, chatActivityCountsByActor[id] ?? 0]),
+      )
+    : null;
+  for (const session of sessions) {
+    const actorUserId = String(session["actor_user_id"] ?? "");
+    if (scopedActorIdSet.has(actorUserId)) {
+      sessionCountsByActor[actorUserId] =
+        (sessionCountsByActor[actorUserId] ?? 0) + 1;
+    }
+  }
+  const enrolled = new Set(enrolledTesterIds);
+  const enrolledWithoutSessionEvidence = enrolledTesterIds.filter(
+    (id) => (sessionCountsByActor[id] ?? 0) === 0,
+  );
+  return {
+    enrolledTesterIds,
+    observedSessionActorIds,
+    sessionCountsByActor,
+    chatActivityEvidence,
+    chatActivityCountsByActor: scopedChatActivityCountsByActor,
+    likelyMismatches: {
+      observedNotEnrolled: observedSessionActorIds.filter(
+        (id) => !enrolled.has(id),
+      ),
+      enrolledWithoutSessionEvidence,
+      enrolledWithoutActivity: scopedChatActivityCountsByActor
+        ? enrolledWithoutSessionEvidence.filter(
+            (id) => (scopedChatActivityCountsByActor[id] ?? 0) === 0,
+          )
+        : null,
+    },
+  };
+}
+
 async function loadScopeRows(scope: PilotScope) {
-  const [sessions, events, feedback, failures] = await Promise.all([
+  const [
+    chatSessionCapability,
+    chatScopeCapability,
+    sessions,
+    events,
+    feedback,
+    failures,
+    memberships,
+  ] = await Promise.all([
+    db
+      .from("test_sessions")
+      .select("chat_session_id", { head: true })
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .limit(1),
+    db
+      .from("chat_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .limit(1),
     db
       .from("test_sessions")
       .select("*")
@@ -137,15 +298,118 @@ async function loadScopeRows(scope: PilotScope) {
       .select("*")
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId),
+    db
+      .from("pilot_memberships")
+      .select("user_id,active,valid_from,valid_until")
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .eq("role", "tester")
+      .eq("active", true),
   ]);
-  const failed = [sessions, events, feedback, failures].find((result) => result.error);
+  const capabilityErrors = [
+    chatSessionCapability.error,
+    chatScopeCapability.error,
+  ].filter(Boolean);
+  const unexpectedCapabilityError = capabilityErrors.find(
+    (error) => !isExpectedMissingChatCapability(error),
+  );
+  if (unexpectedCapabilityError) throw unexpectedCapabilityError;
+  const failed = [sessions, events, feedback, failures, memberships].find(
+    (result) => result.error,
+  );
   if (failed?.error) throw failed.error;
+  const sessionRows = (sessions.data ?? []) as Array<Record<string, unknown>>;
+  const membershipRows = (memberships.data ?? []) as Array<
+    Record<string, unknown>
+  >;
+  const scopedActorIds = [
+    ...new Set([
+      ...uniqueSortedIds(sessionRows, "actor_user_id"),
+      ...uniqueSortedIds(
+        membershipRows.filter((membership) =>
+          isActiveMembershipWindow(membership),
+        ),
+        "user_id",
+      ),
+    ]),
+  ];
+  let chatActivityEvidence: ChatActivityEvidence =
+    capabilityErrors.length > 0
+      ? { status: "unavailable", reason: "schema_capability_missing" }
+      : { status: "available" };
+  let chatActivityCountsByActor: Record<string, number> | null = null;
+  if (chatActivityEvidence.status === "available") {
+    const chatCountEntries = await Promise.all(
+      scopedActorIds.map(async (actorUserId) => {
+        const legacySessionIds = [
+          ...new Set(
+            sessionRows
+              .filter(
+                (row) => String(row["actor_user_id"] ?? "") === actorUserId,
+              )
+              .map((row) => String(row["chat_session_id"] ?? ""))
+              .filter(Boolean),
+          ),
+        ];
+        const [scopedCount, legacyCount] = await Promise.all([
+          db
+            .from("chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", actorUserId)
+            .eq("organization_id", scope.organizationId)
+            .eq("pilot_id", scope.pilotId),
+          legacySessionIds.length > 0
+            ? db
+                .from("chat_messages")
+                .select("id", { count: "exact", head: true })
+                .eq("user_id", actorUserId)
+                .in("session_id", legacySessionIds)
+                .is("organization_id", null)
+                .is("pilot_id", null)
+            : Promise.resolve({ count: 0, error: null }),
+        ]);
+        const countErrors = [scopedCount.error, legacyCount.error].filter(
+          Boolean,
+        );
+        const unexpectedCountError = countErrors.find(
+          (error) => !isExpectedMissingChatCapability(error),
+        );
+        if (unexpectedCountError) throw unexpectedCountError;
+        if (countErrors.length > 0) return null;
+        return [
+          actorUserId,
+          (scopedCount.count ?? 0) + (legacyCount.count ?? 0),
+        ] as const;
+      }),
+    );
+    if (chatCountEntries.some((entry) => entry === null)) {
+      chatActivityEvidence = {
+        status: "unavailable",
+        reason: "schema_capability_missing",
+      };
+    } else {
+      chatActivityCountsByActor = Object.fromEntries(
+        chatCountEntries.filter(
+          (entry): entry is readonly [string, number] => entry !== null,
+        ),
+      );
+    }
+  }
   return {
-    sessions: (sessions.data ?? []) as Array<Record<string, unknown>>,
+    sessions: sessionRows,
     events: (events.data ?? []) as Array<Record<string, unknown>>,
     feedback: (feedback.data ?? []) as Array<Record<string, unknown>>,
     failures: (failures.data ?? []) as Array<Record<string, unknown>>,
+    memberships: membershipRows,
+    chatActivityEvidence,
+    chatActivityCountsByActor,
   };
+}
+
+function activityTimestamp(value: unknown): number {
+  if (value == null) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
 
 function serializeSession(row: Record<string, unknown>) {
@@ -184,11 +448,14 @@ router.get("/testing/reports/scopes", async (req, res) => {
         "Reports are unavailable in presentation mode.",
         "Report scopes could not be loaded.",
       )
-    ) return;
+    )
+      return;
     return res.json({ scopes: await listReportScopes(identity.userId) });
   } catch (error) {
     req.log.error({ err: error }, "Could not list report scopes");
-    return res.status(503).json({ error: "Report scopes could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Report scopes could not be loaded." });
   }
 });
 
@@ -199,13 +466,27 @@ router.get("/testing/reports/summary", async (req, res) => {
     const rows = await loadScopeRows(scope);
     return res.json({
       scope: { organizationId: scope.organizationId, pilotId: scope.pilotId },
-      summary: buildSummary(rows.sessions, rows.events, rows.feedback, rows.failures),
-      users: rows.sessions.map(serializeSession),
+      summary: buildSummary(
+        rows.sessions,
+        rows.events,
+        rows.feedback,
+        rows.failures,
+      ),
+      participants: buildParticipants(rows.sessions),
+      sessions: rows.sessions.map(serializeSession),
+      reconciliation: buildReconciliation(
+        rows.sessions,
+        rows.memberships,
+        rows.chatActivityCountsByActor,
+        rows.chatActivityEvidence,
+      ),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not generate pilot report summary");
-    return res.status(503).json({ error: "Pilot report could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Pilot report could not be generated." });
   }
 });
 
@@ -224,7 +505,9 @@ router.get("/testing/progress", async (req, res) => {
     return res.json({ testers: (sessions.data ?? []).map(serializeSession) });
   } catch (error) {
     req.log.error({ err: error }, "Could not load scoped test progress");
-    return res.status(503).json({ error: "Test progress could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Test progress could not be loaded." });
   }
 });
 
@@ -232,8 +515,10 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
   try {
     const scope = await requireReportScope(req, res, "pilot_user_timeline");
     if (!scope) return;
-    const actorUserId = typeof req.params.userId === "string" ? req.params.userId : "";
-    if (!USER_ID_RE.test(actorUserId)) return res.status(400).json({ error: "Invalid user id." });
+    const actorUserId =
+      typeof req.params.userId === "string" ? req.params.userId : "";
+    if (!USER_ID_RE.test(actorUserId))
+      return res.status(400).json({ error: "Invalid user id." });
     const participant = await db
       .from("test_sessions")
       .select("id")
@@ -243,10 +528,13 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
       .limit(1)
       .maybeSingle();
     if (participant.error) throw participant.error;
-    if (!participant.data) return res.status(404).json({ error: "Pilot participant not found." });
+    if (!participant.data)
+      return res.status(404).json({ error: "Pilot participant not found." });
     const events = await db
       .from("test_events")
-      .select("event_id,event_type,occurred_at,surface,result,metadata,schema_version")
+      .select(
+        "event_id,event_type,occurred_at,surface,result,metadata,schema_version",
+      )
       .eq("organization_id", scope.organizationId)
       .eq("pilot_id", scope.pilotId)
       .eq("actor_user_id", actorUserId)
@@ -266,7 +554,9 @@ router.get("/testing/reports/users/:userId/timeline", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not load pilot timeline");
-    return res.status(503).json({ error: "Pilot timeline could not be loaded." });
+    return res
+      .status(503)
+      .json({ error: "Pilot timeline could not be loaded." });
   }
 });
 
@@ -298,10 +588,9 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     const lines = [header.map(csvCell).join(",")];
     for (const session of rows.sessions) {
       const actor = String(session["actor_user_id"]);
-      const count = Object.values(countsBySession.get(String(session["id"])) ?? {}).reduce(
-        (sum, value) => sum + value,
-        0,
-      );
+      const count = Object.values(
+        countsBySession.get(String(session["id"])) ?? {},
+      ).reduce((sum, value) => sum + value, 0);
       lines.push(
         [
           actor,
@@ -328,13 +617,19 @@ router.get("/testing/reports/export.csv", async (req, res) => {
     return res.send(`${lines.join("\r\n")}\r\n`);
   } catch (error) {
     req.log.error({ err: error }, "Could not export pilot report CSV");
-    return res.status(503).json({ error: "Pilot CSV export could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Pilot CSV export could not be generated." });
   }
 });
 
 router.post("/testing/reports/generate", async (req, res) => {
   try {
-    const scope = await requireReportScope(req, res, "pilot_report_manual_generation");
+    const scope = await requireReportScope(
+      req,
+      res,
+      "pilot_report_manual_generation",
+    );
     if (!scope) return;
     if (
       !req.body ||
@@ -346,7 +641,12 @@ router.post("/testing/reports/generate", async (req, res) => {
       return res.status(400).json({ error: "Invalid report request." });
     }
     const rows = await loadScopeRows(scope);
-    const snapshot = buildSummary(rows.sessions, rows.events, rows.feedback, rows.failures);
+    const snapshot = buildSummary(
+      rows.sessions,
+      rows.events,
+      rows.feedback,
+      rows.failures,
+    );
     const now = new Date();
     const retainedUntil = new Date(now);
     retainedUntil.setUTCMonth(retainedUntil.getUTCMonth() + 12);
@@ -376,7 +676,9 @@ router.post("/testing/reports/generate", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not persist manual pilot report");
-    return res.status(503).json({ error: "Manual pilot report could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "Manual pilot report could not be generated." });
   }
 });
 
