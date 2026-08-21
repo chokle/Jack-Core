@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { UserTestFeedbackReview } from "./UserTestFeedbackReview";
 
@@ -49,6 +49,50 @@ interface TimelineEvent {
   metadata: Record<string, string | number | boolean>;
 }
 
+type IntegrityState =
+  | "VERIFIED_COMPLETE"
+  | "VERIFIED_ZERO_ACTIVITY"
+  | "INCOMPLETE_TELEMETRY"
+  | "ATTRIBUTION_ANOMALY";
+
+interface EndOfDayResponse {
+  report: {
+    reportState: IntegrityState;
+    window: { start: string; end: string };
+    assignedParticipantCount: number;
+    authenticatedUserCount: number;
+    activeUserCount: number;
+    inactiveAssignedUserCount: number;
+    verifiedActiveMs: number;
+    feedbackSubmissionCount: number;
+    failedEventCount: number;
+    outsideCohortActors: string[];
+    users: Array<{
+      actorUserId: string;
+      authenticated: boolean;
+      active: boolean;
+      firstActivityAt: string | null;
+      lastActivityAt: string | null;
+      sessionCount: number;
+      verifiedActiveMs: number;
+      eventCounts: Record<string, number>;
+    }>;
+    telemetryHealth: {
+      complete: boolean;
+      telemetryPathObserved: boolean;
+      malformedEventCount: number;
+      inactivityCutoffMs: number;
+    };
+    provenance: {
+      sources: string[];
+      eventTypes: string[];
+      windowStart: string;
+      windowEnd: string;
+    };
+  };
+  generatedAt: string;
+}
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "include", ...init });
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -60,6 +104,19 @@ function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function duration(milliseconds: number): string {
+  const minutes = Math.floor(milliseconds / 60_000);
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+const INTEGRITY_LABELS: Record<IntegrityState, string> = {
+  VERIFIED_COMPLETE: "Verified complete",
+  VERIFIED_ZERO_ACTIVITY: "Verified zero activity",
+  INCOMPLETE_TELEMETRY: "Incomplete telemetry",
+  ATTRIBUTION_ANOMALY: "Attribution anomaly",
+};
+
 export function PilotActivityReports() {
   const [scopes, setScopes] = useState<ReportScope[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
@@ -69,6 +126,10 @@ export function PilotActivityReports() {
   );
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endOfDay, setEndOfDay] = useState<EndOfDayResponse | null>(null);
+  const [loadingEndOfDay, setLoadingEndOfDay] = useState(false);
+  const endOfDayRequestRef = useRef(0);
   const selected = useMemo(
     () => scopes.find((scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey),
     [scopes, selectedKey],
@@ -89,12 +150,42 @@ export function PilotActivityReports() {
 
   useEffect(() => {
     if (!query) return;
+    endOfDayRequestRef.current += 1;
     setTimeline(null);
+    setEndOfDay(null);
+    setLoadingEndOfDay(false);
     setError(null);
     void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
       .then(setReport)
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
   }, [query]);
+
+  const loadEndOfDay = async () => {
+    const requestId = ++endOfDayRequestRef.current;
+    const requestedDate = reportDate;
+    const requestedQuery = query;
+    setLoadingEndOfDay(true);
+    setError(null);
+    setEndOfDay(null);
+    try {
+      const body = await json<EndOfDayResponse>(
+        `/api/testing/reports/end-of-day?${requestedQuery}&date=${encodeURIComponent(requestedDate)}`,
+      );
+      if (
+        requestId === endOfDayRequestRef.current &&
+        requestedDate === reportDate &&
+        requestedQuery === query
+      ) setEndOfDay(body);
+    } catch (reason) {
+      if (
+        requestId === endOfDayRequestRef.current &&
+        requestedDate === reportDate &&
+        requestedQuery === query
+      ) setError(reason instanceof Error ? reason.message : "End-of-day report unavailable.");
+    } finally {
+      if (requestId === endOfDayRequestRef.current) setLoadingEndOfDay(false);
+    }
+  };
 
   const loadTimeline = async (userId: string) => {
     try {
@@ -167,6 +258,100 @@ export function PilotActivityReports() {
             ))}
           </select>
         </label>
+
+        <section className="rounded-lg border border-border p-4">
+          <div className="flex flex-wrap items-end gap-3 print:hidden">
+            <label className="text-sm">
+              End-of-day report date (UTC)
+              <input
+                aria-label="End-of-day report date (UTC)"
+                type="date"
+                className="mt-1 block rounded-md border border-border bg-background p-2"
+                value={reportDate}
+                onChange={(event) => {
+                  endOfDayRequestRef.current += 1;
+                  setReportDate(event.target.value);
+                  setEndOfDay(null);
+                  setLoadingEndOfDay(false);
+                }}
+              />
+            </label>
+            <Button disabled={!query || !reportDate || loadingEndOfDay} onClick={() => void loadEndOfDay()}>
+              {loadingEndOfDay ? "Loading…" : "Load end-of-day report"}
+            </Button>
+          </div>
+
+          {endOfDay && (
+            <div className="mt-4 space-y-4" data-testid="end-of-day-report">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Integrity state</p>
+                <h2 className="text-xl font-bold">{INTEGRITY_LABELS[endOfDay.report.reportState]}</h2>
+                {endOfDay.report.reportState === "INCOMPLETE_TELEMETRY" && (
+                  <p>Activity totals are not certified complete for this UTC window.</p>
+                )}
+                {endOfDay.report.reportState === "ATTRIBUTION_ANOMALY" && (
+                  <p>Activity includes accounts outside the assigned pilot cohort.</p>
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["Assigned", endOfDay.report.assignedParticipantCount],
+                  ["Authenticated", endOfDay.report.authenticatedUserCount],
+                  ["Active", endOfDay.report.activeUserCount],
+                  ["Inactive assigned", endOfDay.report.inactiveAssignedUserCount],
+                  ["Verified active time", duration(endOfDay.report.verifiedActiveMs)],
+                  ["Feedback", endOfDay.report.feedbackSubmissionCount],
+                  ["Failed events", endOfDay.report.failedEventCount],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded border border-border p-3">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="font-semibold">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {endOfDay.report.outsideCohortActors.length > 0 && (
+                <p>Outside-cohort accounts: {endOfDay.report.outsideCohortActors.join(", ")}</p>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead><tr>
+                    <th className="p-2">Participant ID</th>
+                    <th className="p-2">Authenticated</th>
+                    <th className="p-2">Active</th>
+                    <th className="p-2">Sessions</th>
+                    <th className="p-2">Verified active time</th>
+                    <th className="p-2">First / last activity</th>
+                  </tr></thead>
+                  <tbody>{endOfDay.report.users.map((user) => (
+                    <tr key={user.actorUserId} className="border-t border-border">
+                      <td className="p-2 font-mono text-xs">{user.actorUserId}</td>
+                      <td className="p-2">{user.authenticated ? "Yes" : "No"}</td>
+                      <td className="p-2">{user.active ? "Yes" : "No"}</td>
+                      <td className="p-2">{user.sessionCount}</td>
+                      <td className="p-2">{duration(user.verifiedActiveMs)}</td>
+                      <td className="p-2">
+                        {user.firstActivityAt ?? "—"} / {user.lastActivityAt ?? "—"}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+
+              <details>
+                <summary className="cursor-pointer font-semibold">Telemetry traceability</summary>
+                <dl className="mt-2 grid gap-2 text-sm">
+                  <div><dt className="font-medium">UTC window</dt><dd>{endOfDay.report.provenance.windowStart} — {endOfDay.report.provenance.windowEnd}</dd></div>
+                  <div><dt className="font-medium">Sources</dt><dd>{endOfDay.report.provenance.sources.join(", ")}</dd></div>
+                  <div><dt className="font-medium">Event types</dt><dd>{endOfDay.report.provenance.eventTypes.join(", ") || "None"}</dd></div>
+                  <div><dt className="font-medium">Generated</dt><dd>{endOfDay.generatedAt}</dd></div>
+                </dl>
+              </details>
+            </div>
+          )}
+        </section>
 
         {error && <p className="rounded-lg border border-destructive p-3 text-destructive">{error}</p>}
         {scopes.length === 0 && !error && <p>No active report scope is assigned.</p>}

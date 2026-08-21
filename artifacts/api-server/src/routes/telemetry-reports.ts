@@ -3,6 +3,10 @@ import { Router, type Request, type Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
+  buildPilotEndOfDayReport,
+  hasCompleteHeartbeatCoverage,
+} from "../lib/pilot-end-of-day-report.js";
+import {
   activityDb as db,
   auditReportAccess,
   authorizeReportScope,
@@ -148,6 +152,49 @@ async function loadScopeRows(scope: PilotScope) {
   };
 }
 
+async function loadEndOfDayRows(scope: PilotScope, windowStart: string, windowEnd: string) {
+  const [memberships, sessions, events, feedback, failures] = await Promise.all([
+    db.from("pilot_memberships").select("user_id,role,active,valid_from,valid_until")
+      .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
+      .eq("role", "tester"),
+    db.from("test_sessions").select("*")
+      .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
+      .gte("last_activity_at", windowStart).lt("started_at", windowEnd),
+    db.from("test_events").select("*")
+      .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
+      .gte("occurred_at", windowStart).lt("occurred_at", windowEnd)
+      .order("occurred_at", { ascending: true }),
+    db.from("test_feedback").select("*")
+      .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
+      .gte("created_at", windowStart).lt("created_at", windowEnd),
+    db.from("activity_ingest_failures").select("*")
+      .eq("organization_id", scope.organizationId).eq("pilot_id", scope.pilotId)
+      .gte("created_at", windowStart).lt("created_at", windowEnd),
+  ]);
+  const failed = [memberships, sessions, events, feedback, failures].find((result) => result.error);
+  if (failed?.error) throw failed.error;
+  const startMs = Date.parse(windowStart);
+  const endMs = Date.parse(windowEnd);
+  return {
+    memberships: (memberships.data ?? []).filter((row: Record<string, unknown>) => {
+      const validFrom = Date.parse(String(row["valid_from"] ?? ""));
+      const validUntil = row["valid_until"] ? Date.parse(String(row["valid_until"])) : Infinity;
+      return (!Number.isFinite(validFrom) || validFrom < endMs) && validUntil > startMs;
+    }) as Array<Record<string, unknown>>,
+    sessions: (sessions.data ?? []) as Array<Record<string, unknown>>,
+    events: (events.data ?? []) as Array<Record<string, unknown>>,
+    feedback: (feedback.data ?? []) as Array<Record<string, unknown>>,
+    failures: (failures.data ?? []) as Array<Record<string, unknown>>,
+  };
+}
+
+function utcDayWindow(value: unknown): { start: string; end: string } | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const start = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(start.getTime()) || start.toISOString().slice(0, 10) !== value) return null;
+  return { start: start.toISOString(), end: new Date(start.getTime() + 86_400_000).toISOString() };
+}
+
 function serializeSession(row: Record<string, unknown>) {
   return {
     id: row["id"],
@@ -206,6 +253,39 @@ router.get("/testing/reports/summary", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error }, "Could not generate pilot report summary");
     return res.status(503).json({ error: "Pilot report could not be generated." });
+  }
+});
+
+router.get("/testing/reports/end-of-day", async (req, res) => {
+  try {
+    const scope = await requireReportScope(req, res, "pilot_end_of_day_report");
+    if (!scope) return;
+    const window = utcDayWindow(req.query["date"]);
+    if (!window) return res.status(400).json({ error: "A valid UTC report date is required." });
+    const rows = await loadEndOfDayRows(scope, window.start, window.end);
+    const hasHeartbeatEvidence = hasCompleteHeartbeatCoverage({
+      windowStart: window.start,
+      windowEnd: window.end,
+      sessions: rows.sessions,
+      events: rows.events,
+    });
+    const report = buildPilotEndOfDayReport({
+      windowStart: window.start,
+      windowEnd: window.end,
+      ...rows,
+      telemetryHealth: hasHeartbeatEvidence
+        ? { windowStart: window.start, windowEnd: window.end, status: "healthy" }
+        : null,
+    });
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      scope: { organizationId: scope.organizationId, pilotId: scope.pilotId },
+      report,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Could not generate end-of-day pilot report");
+    return res.status(503).json({ error: "End-of-day pilot report could not be generated." });
   }
 });
 

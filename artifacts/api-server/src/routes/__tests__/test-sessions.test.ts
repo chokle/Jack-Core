@@ -154,6 +154,68 @@ describe("canonical user-test sessions", () => {
     });
   });
 
+  it("accepts minimized heartbeat retries idempotently under server-derived scope", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const heartbeat = {
+      eventId: "12121212-1212-4212-8212-121212121212",
+      eventType: "activity_heartbeat",
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: { visibility: "foreground", meaningful_activity: true },
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+    };
+    const endpoint = `/api/testing/sessions/${started.body.session.id}/events`;
+    expect((await request(app).post(endpoint).send(heartbeat)).status).toBe(201);
+    expect((await request(app).post(endpoint).send(heartbeat)).body).toMatchObject({
+      accepted: true,
+      duplicate: true,
+    });
+    expect(fake.tables.test_events.at(-1)).toMatchObject({
+      event_id: heartbeat.eventId,
+      actor_user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      event_type: "activity_heartbeat",
+      metadata: heartbeat.metadata,
+    });
+    expect(fake.tables.test_events.filter((row) => row.event_id === heartbeat.eventId)).toHaveLength(1);
+    const invalid = await request(app).post(endpoint).send({
+      ...heartbeat,
+      eventId: "13131313-1313-4313-8313-131313131313",
+      metadata: { visibility: "hidden", meaningful_activity: true },
+    });
+    expect(invalid.status).toBe(400);
+    const clientScoped = await request(app).post(endpoint).send({
+      ...heartbeat,
+      eventId: "15151515-1515-4515-8515-151515151515",
+      actorUserId: "attacker",
+      organizationId: "99999999-9999-4999-8999-999999999999",
+      pilotId: "99999999-9999-4999-8999-999999999999",
+    });
+    expect(clientScoped.status).toBe(400);
+  });
+
+  it("stores hidden heartbeat health without extending meaningful session activity", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const lastActivityAt = fake.tables.test_sessions[0]?.last_activity_at;
+    const response = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({
+        eventId: "16161616-1616-4616-8616-161616161616",
+        eventType: "activity_heartbeat",
+        occurredAt: new Date().toISOString(),
+        appSessionId: APP_SESSION_ID,
+        metadata: { visibility: "hidden", meaningful_activity: false },
+        result: "success",
+        deviceCategory: "desktop",
+        schemaVersion: 1,
+      });
+    expect(response.status).toBe(201);
+    expect(fake.tables.test_sessions[0]?.last_activity_at).toBe(lastActivityAt);
+  });
+
   it("rejects invalid start metadata before creating a session", async () => {
     const response = await request(app)
       .post("/api/testing/sessions/start")

@@ -12,7 +12,8 @@ export type TestEventType =
   | "recording_upload_succeeded"
   | "recording_upload_failed"
   | "feedback_submitted"
-  | "reliability_error";
+  | "reliability_error"
+  | "activity_heartbeat";
 
 export type ConsentState = "granted" | "declined" | "withdrawn";
 

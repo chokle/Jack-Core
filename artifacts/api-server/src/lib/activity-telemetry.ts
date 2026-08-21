@@ -29,6 +29,7 @@ export const CLIENT_EVENT_TYPES = new Set([
   "recording_upload_failed",
   "feedback_submitted",
   "reliability_error",
+  "activity_heartbeat",
 ]);
 
 export const ALL_EVENT_TYPES = new Set([
@@ -51,6 +52,7 @@ export const ALL_EVENT_TYPES = new Set([
   "recording_upload_failed",
   "feedback_submitted",
   "reliability_error",
+  "activity_heartbeat",
 ]);
 
 const UUID_RE =
@@ -110,6 +112,7 @@ const SURFACE_BY_EVENT: Record<string, string> = {
   recording_upload_failed: "recording",
   feedback_submitted: "feedback",
   reliability_error: "reliability",
+  activity_heartbeat: "app",
 };
 
 export interface PilotScope {
@@ -299,6 +302,16 @@ export function validateEventMetadata(
   if (eventType === "feature_viewed") {
     if (!exactKeys(input, ["feature"]) || !FEATURES.has(String(input["feature"]))) return null;
     return { feature: String(input["feature"]) };
+  }
+  if (eventType === "activity_heartbeat") {
+    if (!exactKeys(input, ["visibility", "meaningful_activity"])) return null;
+    if (!["foreground", "hidden"].includes(String(input["visibility"]))) return null;
+    if (typeof input["meaningful_activity"] !== "boolean") return null;
+    if (input["visibility"] === "hidden" && input["meaningful_activity"] === true) return null;
+    return {
+      visibility: String(input["visibility"]),
+      meaningful_activity: input["meaningful_activity"],
+    };
   }
   if (eventType === "workflow_completed") {
     if (!exactKeys(input, ["workflow"]) || !WORKFLOWS.has(String(input["workflow"]))) return null;

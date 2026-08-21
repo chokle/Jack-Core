@@ -60,6 +60,7 @@ import {
   type TelemetryContext,
 } from "./lib/user-testing/test-session-service";
 import { setFeedbackSessionId } from "./lib/user-testing/feedback-service";
+import { initializeActivityHeartbeat } from "./lib/user-testing/activity-heartbeat";
 import { handoffInterviewResume } from "./lib/interview-resume";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
@@ -582,6 +583,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   useEffect(() => {
     if (me?.isAdmin !== false) return;
     const stopRetry = initializeTelemetryRetry();
+    const stopHeartbeat = initializeActivityHeartbeat();
     void loadTelemetryContext().then((context) => {
       setTelemetryContext(context);
       const session = context.session;
@@ -595,7 +597,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         }, 0);
       }
     }).catch(() => setTelemetryContext(null));
-    return stopRetry;
+    return () => {
+      stopHeartbeat();
+      stopRetry();
+    };
   }, [me?.isAdmin]);
 
   useEffect(() => {

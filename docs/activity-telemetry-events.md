@@ -62,6 +62,7 @@ match the retry. Conflicting reuse is rejected and cannot update session state.
 | `recording_upload_failed` | Client after upload fallback | recording | `error_code` | failure |
 | `feedback_submitted` | Client after durable feedback API confirmation | feedback | none | success |
 | `reliability_error` | Client for allowlisted operational failures only | reliability | `error_code` | failure |
+| `activity_heartbeat` | Client every 60 seconds while a consented pilot session is active and on visibility changes | app | `visibility`, `meaningful_activity` | success |
 
 Allowlisted `feature` values: `memory_graph`, `library`, `interview_mode`,
 `knowledge_review`, `video_detail`.
@@ -71,6 +72,14 @@ Allowlisted `workflow` values: `interview_completed`,
 
 Allowlisted error and stop values are stable codes defined beside the API
 validator. Raw messages and exception text are prohibited.
+
+Heartbeat `visibility` is limited to `foreground` or `hidden`; `meaningful_activity`
+is boolean. Hidden heartbeats must always set it to false. Foreground heartbeats
+remain meaningful for at most five minutes after pointer, keyboard, or touch
+activity. A heartbeat carries no key, pointer, route, content, or device detail.
+The stored event ID is stable across retries, and report duration merges
+overlapping per-tab intervals server-side so multiple tabs cannot double-count
+active time.
 
 ## Consent and product-content separation
 
