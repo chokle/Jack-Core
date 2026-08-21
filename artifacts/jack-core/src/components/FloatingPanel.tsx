@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { X } from "lucide-react";
+import { Maximize2, Minus, X } from "lucide-react";
 
 /** Where the panel first appears when there is no remembered session position. */
 type Placement = "bottom" | "top-right" | { x: number; y: number };
@@ -24,6 +24,12 @@ interface FloatingPanelProps {
   /** Panel body. Scrolls independently of the graph. */
   children: ReactNode;
   onClose: () => void;
+  /** Expanded/minimized presentation; closed panels are unmounted by the owner. */
+  state?: "expanded" | "minimized";
+  onMinimize?: () => void;
+  onRestore?: () => void;
+  /** Compact identity rendered inside the minimized pill. */
+  minimizedContent?: ReactNode;
   /** The positioning context the panel floats within (position: relative). */
   stageRef: RefObject<HTMLElement | null>;
   /**
@@ -120,6 +126,10 @@ export function FloatingPanel({
   headerActions,
   children,
   onClose,
+  state = "expanded",
+  onMinimize,
+  onRestore,
+  minimizedContent,
   stageRef,
   positionKey,
   defaultPlacement,
@@ -139,7 +149,13 @@ export function FloatingPanel({
   const [ready, setReady] = useState(false);
   // Live drag origin + captured stage/panel bounds; null when not dragging.
   const dragRef = useRef<
-    ({ startX: number; startY: number; originX: number; originY: number } & Bounds) | null
+    | ({
+        startX: number;
+        startY: number;
+        originX: number;
+        originY: number;
+      } & Bounds)
+    | null
   >(null);
 
   const measure = (): Bounds | null => {
@@ -163,14 +179,27 @@ export function FloatingPanel({
   // Initial placement — measured after layout so size is real. Runs on mount and
   // if the persistence identity changes, but NOT on content swaps.
   useLayoutEffect(() => {
-    const b = measure();
-    if (!b) return;
-    const start = readStored(positionKey) ?? placementToXY(defaultPlacement, b);
-    posRef.current = clampPos(start, b);
-    applyTransform();
-    setReady(true);
+    if (!isDesktop || state !== "expanded") {
+      setReady(false);
+      return;
+    }
+    let frame = 0;
+    const place = () => {
+      const b = measure();
+      if (!b) {
+        frame = window.requestAnimationFrame(place);
+        return;
+      }
+      const start =
+        readStored(positionKey) ?? placementToXY(defaultPlacement, b);
+      posRef.current = clampPos(start, b);
+      applyTransform();
+      setReady(true);
+    };
+    place();
+    return () => window.cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positionKey]);
+  }, [isDesktop, positionKey, state]);
 
   // Re-clamp when the body content changes (e.g. switching to a taller node) so
   // the panel can never hang past the stage edge after a content swap.
@@ -199,7 +228,10 @@ export function FloatingPanel({
     const d = dragRef.current;
     if (!d) return null;
     return clampPos(
-      { x: d.originX + (e.clientX - d.startX), y: d.originY + (e.clientY - d.startY) },
+      {
+        x: d.originX + (e.clientX - d.startX),
+        y: d.originY + (e.clientY - d.startY),
+      },
       d,
     );
   };
@@ -255,12 +287,27 @@ export function FloatingPanel({
     visibility: ready ? "visible" : "hidden",
   };
 
+  if (state === "minimized") {
+    return (
+      <MinimizedPill
+        stageRef={stageRef}
+        positionKey={positionKey}
+        ariaLabel={ariaLabel}
+        isDesktop={isDesktop}
+        onRestore={onRestore}
+      >
+        {minimizedContent ?? headerContent}
+      </MinimizedPill>
+    );
+  }
+
   if (!isDesktop) {
     return (
       <MobileSheet
         headerContent={headerContent}
         headerActions={headerActions}
         onClose={onClose}
+        onMinimize={onMinimize}
         maxHeight={maxHeight}
         bodyKey={bodyKey}
         ariaLabel={ariaLabel}
@@ -289,6 +336,16 @@ export function FloatingPanel({
         <div className="min-w-0 flex-1">{headerContent}</div>
         <div className="flex shrink-0 items-center gap-1">
           {headerActions}
+          {onMinimize && (
+            <button
+              onClick={onMinimize}
+              title="Minimize"
+              aria-label="Minimize"
+              className="-mt-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+          )}
           <button
             onClick={onClose}
             title="Close"
@@ -320,6 +377,7 @@ function MobileSheet({
   headerActions,
   children,
   onClose,
+  onMinimize,
   maxHeight,
   bodyKey,
   ariaLabel,
@@ -328,6 +386,7 @@ function MobileSheet({
   headerActions?: ReactNode;
   children: ReactNode;
   onClose: () => void;
+  onMinimize?: () => void;
   maxHeight?: string;
   bodyKey?: string;
   ariaLabel?: string;
@@ -392,11 +451,24 @@ function MobileSheet({
         style={{ touchAction: "none" }}
         className="flex select-none flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-2 active:cursor-grabbing"
       >
-        <div className="mx-auto h-1.5 w-10 shrink-0 rounded-full bg-white/20" aria-hidden />
+        <div
+          className="mx-auto h-1.5 w-10 shrink-0 rounded-full bg-white/20"
+          aria-hidden
+        />
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">{headerContent}</div>
           <div className="flex shrink-0 items-center gap-1">
             {headerActions}
+            {onMinimize && (
+              <button
+                onClick={onMinimize}
+                title="Minimize"
+                aria-label="Minimize"
+                className="-mt-1 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors active:bg-white/10 active:text-foreground"
+              >
+                <Minus className="h-5 w-5" />
+              </button>
+            )}
             <button
               onClick={onClose}
               title="Close"
@@ -415,5 +487,161 @@ function MobileSheet({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Compact, docked identity for a minimized inspector. On phones it stays on the
+ * bottom edge and can be dragged horizontally out of the way; a tap restores
+ * the full sheet. Desktop uses the same unobtrusive bottom-edge affordance.
+ */
+function MinimizedPill({
+  stageRef,
+  positionKey,
+  ariaLabel,
+  isDesktop,
+  onRestore,
+  children,
+}: {
+  stageRef: RefObject<HTMLElement | null>;
+  positionKey?: string;
+  ariaLabel?: string;
+  isDesktop: boolean;
+  onRestore?: () => void;
+  children: ReactNode;
+}) {
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const xRef = useRef<number | null>(null);
+  const dragRef = useRef<{
+    startX: number;
+    originX: number;
+    moved: number;
+    maxX: number;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const [ready, setReady] = useState(false);
+  const minimizedKey = positionKey ? `${positionKey}:minimized` : undefined;
+
+  const clampX = (x: number, maxX: number) =>
+    Math.min(Math.max(x, PAD), Math.max(PAD, maxX));
+
+  const measure = () => {
+    const stage = stageRef.current;
+    const pill = pillRef.current;
+    if (!stage || !pill) return null;
+    return { maxX: stage.clientWidth - pill.offsetWidth - PAD };
+  };
+
+  const applyX = () => {
+    if (pillRef.current && xRef.current != null) {
+      pillRef.current.style.transform = `translateX(${xRef.current}px)`;
+    }
+  };
+
+  useEffect(() => {
+    let frame = 0;
+    const place = () => {
+      const bounds = measure();
+      if (!bounds) {
+        frame = window.requestAnimationFrame(place);
+        return;
+      }
+      const stored = readStored(minimizedKey);
+      // Start centered along the bottom edge so the pill does not cover the
+      // graph's bottom-right zoom and lock controls.
+      const centeredX = (PAD + bounds.maxX) / 2;
+      xRef.current = clampX(stored?.x ?? centeredX, bounds.maxX);
+      applyX();
+      setReady(true);
+    };
+    place();
+    return () => window.cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minimizedKey]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const bounds = measure();
+      if (!bounds || xRef.current == null) return;
+      xRef.current = clampX(xRef.current, bounds.maxX);
+      applyX();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageRef]);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    suppressClickRef.current = false;
+    const bounds = measure();
+    if (!bounds || xRef.current == null) return;
+    dragRef.current = {
+      startX: e.clientX,
+      originX: xRef.current,
+      moved: 0,
+      maxX: bounds.maxX,
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    drag.moved = Math.max(drag.moved, Math.abs(dx));
+    xRef.current = clampX(drag.originX + dx, drag.maxX);
+    applyX();
+  };
+
+  const endDrag = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    if (!drag) return;
+    if (xRef.current != null) {
+      writeStored(minimizedKey, { x: xRef.current, y: 0 });
+    }
+    suppressClickRef.current = drag.moved >= 6;
+  };
+
+  return (
+    <button
+      ref={pillRef}
+      type="button"
+      data-panel-state="minimized"
+      aria-label={`Restore ${ariaLabel ?? "details"}`}
+      title="Restore details"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onClick={() => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
+        onRestore?.();
+      }}
+      style={{
+        visibility: ready ? "visible" : "hidden",
+        touchAction: "none",
+        bottom: isDesktop ? PAD : "max(0.75rem, env(safe-area-inset-bottom))",
+      }}
+      className="pointer-events-auto absolute left-0 z-30 flex h-11 max-w-[calc(100%_-_1.5rem)] cursor-grab items-center gap-2 rounded-full border border-white/10 bg-card/95 px-3 text-sm font-medium shadow-xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl active:cursor-grabbing md:max-w-72"
+    >
+      <span className="min-w-0 flex-1 truncate text-left">{children}</span>
+      <Maximize2
+        className="h-4 w-4 shrink-0 text-muted-foreground"
+        aria-hidden
+      />
+    </button>
   );
 }
