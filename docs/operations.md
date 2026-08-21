@@ -9,8 +9,26 @@ Run/operate commands, the required Supabase schema setup, and operational gotcha
 - `pnpm --filter @workspace/scripts run setup:supabase` — apply the Supabase schema (tables, functions, seed data, storage bucket)
 - `pnpm --filter @workspace/api-server run seed:knowledge` — seed the sample non-video Knowledge Entries (data-driven `ENTRIES` array across trades; uploads any images, embeds, upserts by stable ids; idempotent)
 - `pnpm --filter @workspace/api-server run import:knowledge` — import Knowledge Objects (`src/scripts/import-knowledge-objects.ts`)
+- `pnpm --filter @workspace/scripts run provision:pilot-membership -- --organization-id=<uuid> --user-id=user_... --pilot-id=<uuid> --role=tester [--confirm]` — manage pilot membership rows used by closeout/testing authorization
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+
+### Pilot membership provisioning
+
+Pilot users are resolved by Clerk `userId` plus rows in `pilot_memberships`.
+To provision a tester without any UI:
+
+1. Create/sign in the tester in Clerk so you have the Clerk user id (e.g. `user_...`).
+2. Find/create the target organization and pilot ids in Supabase (`organizations.id`, `pilots.id`).
+3. Run:
+   - `pnpm --filter @workspace/scripts run provision:pilot-membership -- --organization-id=<org-uuid> --user-id=<clerk-user-id> --pilot-id=<pilot-uuid> --role=tester --confirm`
+
+Safety:
+
+- Without `--confirm`, the script is dry-run and prints what it would write.
+- Membership is constrained to the exact `(organization_id, pilot_id, user_id, role)` tuple.
+- `role=organization_admin` requires no `pilot-id` and is only for org-scoped admins.
+- Use `created_by_user_id` only when the provisioning operator must be auditable.
 
 ## Required Setup — Supabase Schema
 
@@ -39,7 +57,7 @@ drifts.
 - Re-run `setup:supabase` before enabling feedback collection so the `test_feedback` workflow/status/notification columns and RLS policies exist. Do not expose Supabase credentials to the browser; all feedback and admin reads go through authenticated API routes.
 - Apply the Supabase schema before the app will work — run `pnpm --filter @workspace/scripts run setup:supabase` (with `SUPABASE_DB_URL` set) or paste the SQL manually; tables don't exist until you do
 - The Supabase JS/REST client cannot run DDL — schema setup needs a direct Postgres connection (`SUPABASE_DB_URL`). `DATABASE_URL`/`PG*` point at Replit's built-in Postgres, not Supabase
-- Replit is IPv4-only but Supabase's **direct** host (`db.<ref>.supabase.co`) is IPv6-only, so it fails with a cryptic `ENOTFOUND`/`EAFNOSUPPORT`. Always use the **Session pooler** URL (`postgresql://postgres.<ref>:<password>@aws-<N>-<region>.pooler.supabase.com:5432/postgres`), not the direct host or the *transaction* pooler. `setup:supabase` detects this and prints the fix
+- Replit is IPv4-only but Supabase's **direct** host (`db.<ref>.supabase.co`) is IPv6-only, so it fails with a cryptic `ENOTFOUND`/`EAFNOSUPPORT`. Always use the **Session pooler** URL (`postgresql://postgres.<ref>:<password>@aws-<N>-<region>.pooler.supabase.com:5432/postgres`), not the direct host or the _transaction_ pooler. `setup:supabase` detects this and prints the fix
 - Don't paste Supabase's `[YOUR-PASSWORD]` placeholder with the literal square brackets — strip them. `setup:supabase` warns when the password is still bracket-wrapped, and an auth failure (`28P01`) means reset the password in Dashboard → Project Settings → Database
 - After any OpenAPI spec change, run `pnpm --filter @workspace/api-spec run codegen` before starting the server
 - Transcription/analysis are async background jobs — poll the video `status` field (queued → uploading → uploaded → transcribing → analyzing → indexing → completed, plus `failed`/`retrying`)

@@ -57,8 +57,18 @@ beforeEach(() => {
     { id: OTHER_ORGANIZATION_ID, name: "Other Org", status: "active" },
   ];
   fake.tables.pilots = [
-    { id: PILOT_ID, organization_id: ORGANIZATION_ID, name: "Allowed Pilot", status: "active" },
-    { id: OTHER_PILOT_ID, organization_id: OTHER_ORGANIZATION_ID, name: "Other Pilot", status: "active" },
+    {
+      id: PILOT_ID,
+      organization_id: ORGANIZATION_ID,
+      name: "Allowed Pilot",
+      status: "active",
+    },
+    {
+      id: OTHER_PILOT_ID,
+      organization_id: OTHER_ORGANIZATION_ID,
+      name: "Other Pilot",
+      status: "active",
+    },
   ];
   fake.tables.pilot_memberships = [
     {
@@ -83,42 +93,48 @@ beforeEach(() => {
     },
   ];
   fake.tables.platform_roles = [];
-  fake.tables.test_sessions = [{
-    id: "55555555-5555-4555-8555-555555555555",
-    actor_user_id: USER_ID,
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    status: "completed",
-    started_at: "2026-07-25T00:00:00.000Z",
-    last_activity_at: "2026-07-25T01:00:00.000Z",
-    onboarding_status: "completed",
-    onboarding_step: 3,
-    question_count: 1,
-    screen_consent_state: "declined",
-    microphone_consent_state: "declined",
-    recording_status: "not_requested",
-    feedback_status: "submitted",
-    completed_at: "2026-07-25T01:00:00.000Z",
-    error_count: 0,
-  }];
-  fake.tables.test_events = [{
-    event_id: "66666666-6666-4666-8666-666666666666",
-    actor_user_id: USER_ID,
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-    test_session_id: "55555555-5555-4555-8555-555555555555",
-    event_type: "ask_jack_completed",
-    occurred_at: "2026-07-25T00:30:00.000Z",
-    surface: "ask_jack",
-    result: "success",
-    metadata: { citation_count: 2 },
-    schema_version: 1,
-  }];
-  fake.tables.test_feedback = [{
-    id: "77777777-7777-4777-8777-777777777777",
-    organization_id: ORGANIZATION_ID,
-    pilot_id: PILOT_ID,
-  }];
+  fake.tables.test_sessions = [
+    {
+      id: "55555555-5555-4555-8555-555555555555",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      status: "completed",
+      started_at: "2026-07-25T00:00:00.000Z",
+      last_activity_at: "2026-07-25T01:00:00.000Z",
+      onboarding_status: "completed",
+      onboarding_step: 3,
+      question_count: 1,
+      screen_consent_state: "declined",
+      microphone_consent_state: "declined",
+      recording_status: "not_requested",
+      feedback_status: "submitted",
+      completed_at: "2026-07-25T01:00:00.000Z",
+      error_count: 0,
+    },
+  ];
+  fake.tables.test_events = [
+    {
+      event_id: "66666666-6666-4666-8666-666666666666",
+      actor_user_id: USER_ID,
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: "55555555-5555-4555-8555-555555555555",
+      event_type: "ask_jack_completed",
+      occurred_at: "2026-07-25T00:30:00.000Z",
+      surface: "ask_jack",
+      result: "success",
+      metadata: { citation_count: 2 },
+      schema_version: 1,
+    },
+  ];
+  fake.tables.test_feedback = [
+    {
+      id: "77777777-7777-4777-8777-777777777777",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+    },
+  ];
   fake.tables.activity_ingest_failures = [];
   fake.tables.admin_access_audit = [];
   fake.tables.activity_report_runs = [];
@@ -126,7 +142,9 @@ beforeEach(() => {
 
 describe("pilot activity reports", () => {
   it("returns scoped aggregates and a minimized per-user timeline", async () => {
-    const summary = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const summary = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(summary.status).toBe(200);
     expect(summary.body.summary).toMatchObject({
       participantCount: 1,
@@ -148,10 +166,14 @@ describe("pilot activity reports", () => {
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
     );
     expect(denied.status).toBe(403);
-    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({ decision: "denied" });
+    expect(fake.tables.admin_access_audit.at(-1)).toMatchObject({
+      decision: "denied",
+    });
     identity.userId = "clerk-presentation-account";
     identity.isPresentation = true;
-    const presentation = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const presentation = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(presentation.status).toBe(403);
     const scopes = await request(app()).get("/api/testing/reports/scopes");
     expect(scopes.status).toBe(403);
@@ -160,12 +182,24 @@ describe("pilot activity reports", () => {
   it("fails closed when trusted identity resolution is unavailable", async () => {
     identity.classification = "unavailable";
 
-    expect((await request(app()).get(`/api/testing/reports/summary?${query}`)).status).toBe(503);
-    expect((await request(app()).get("/api/testing/reports/scopes")).status).toBe(503);
     expect(
-      (await request(app()).get(`/api/testing/reports/users/${USER_ID}/timeline?${query}`)).status,
+      (await request(app()).get(`/api/testing/reports/summary?${query}`))
+        .status,
     ).toBe(503);
-    expect((await request(app()).get(`/api/testing/reports/export.csv?${query}`)).status).toBe(503);
+    expect(
+      (await request(app()).get("/api/testing/reports/scopes")).status,
+    ).toBe(503);
+    expect(
+      (
+        await request(app()).get(
+          `/api/testing/reports/users/${USER_ID}/timeline?${query}`,
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (await request(app()).get(`/api/testing/reports/export.csv?${query}`))
+        .status,
+    ).toBe(503);
     expect(
       (
         await request(app())
@@ -182,7 +216,9 @@ describe("pilot activity reports", () => {
       role: "organization_admin",
       pilot_id: null,
     };
-    const allowed = await request(app()).get(`/api/testing/reports/summary?${query}`);
+    const allowed = await request(app()).get(
+      `/api/testing/reports/summary?${query}`,
+    );
     expect(allowed.status).toBe(200);
     const denied = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
@@ -191,12 +227,14 @@ describe("pilot activity reports", () => {
   });
 
   it("allows cross-organization access only for an explicit platform-superadmin role", async () => {
-    fake.tables.platform_roles = [{
-      id: "platform-role",
-      user_id: "pilot-admin",
-      role: "platform_superadmin",
-      active: true,
-    }];
+    fake.tables.platform_roles = [
+      {
+        id: "platform-role",
+        user_id: "pilot-admin",
+        role: "platform_superadmin",
+        active: true,
+      },
+    ];
     const response = await request(app()).get(
       `/api/testing/reports/summary?organizationId=${OTHER_ORGANIZATION_ID}&pilotId=${OTHER_PILOT_ID}`,
     );
@@ -208,7 +246,9 @@ describe("pilot activity reports", () => {
   });
 
   it("exports CSV and persists only a derived manual report snapshot", async () => {
-    const csv = await request(app()).get(`/api/testing/reports/export.csv?${query}`);
+    const csv = await request(app()).get(
+      `/api/testing/reports/export.csv?${query}`,
+    );
     expect(csv.status).toBe(200);
     expect(csv.text).toContain("actor_user_id");
     expect(csv.text).not.toContain("citation_count");
@@ -306,25 +346,106 @@ describe("pilot activity reports", () => {
       },
     );
 
-    const csv = await request(app()).get(`/api/testing/reports/export.csv?${query}`);
+    const csv = await request(app()).get(
+      `/api/testing/reports/export.csv?${query}`,
+    );
     expect(csv.status).toBe(200);
     const lines = csv.text.trim().split(/\r?\n/);
-    const headers = lines[0]?.split(",").map((header) => header.replace(/^\"|\"$/g, "")) ?? [];
+    const headers =
+      lines[0]?.split(",").map((header) => header.replace(/^\"|\"$/g, "")) ??
+      [];
     expect(headers).toContain("event_count");
     const rows = lines
       .slice(1)
       .filter((line) => line.trim().length > 0)
       .map((line) =>
         Object.fromEntries(
-          (line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/) as string[]).map((value, index) => [
-            headers[index] ?? `column_${index}`,
-            value.replace(/^\"|\"$/g, ""),
-          ]),
+          (line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/) as string[]).map(
+            (value, index) => [
+              headers[index] ?? `column_${index}`,
+              value.replace(/^\"|\"$/g, ""),
+            ],
+          ),
         ),
       );
-    const countsBySessionStart = Object.fromEntries(rows.map((row) => [String(row.started_at), row.event_count]));
+    const countsBySessionStart = Object.fromEntries(
+      rows.map((row) => [String(row.started_at), row.event_count]),
+    );
     expect(countsBySessionStart["2026-07-25T00:00:00.000Z"]).toBe("1");
     expect(countsBySessionStart["2026-07-25T01:30:00.000Z"]).toBe("1");
     expect(countsBySessionStart["2026-07-25T02:30:00.000Z"]).toBe("2");
+  });
+
+  it("filters and bounds scoped closeout submissions", async () => {
+    fake.tables.end_of_shift_closeouts = [
+      {
+        id: "closeout-1",
+        actor_user_id: USER_ID,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        work_date: "2026-07-25",
+        shift: "day",
+        crew: "Crew A",
+        trade: "Electrical",
+        answers: {},
+        status: "draft",
+        submitted_at: null,
+        created_at: "2026-07-25T00:00:00.000Z",
+        updated_at: "2026-07-25T00:00:00.000Z",
+      },
+      {
+        id: "closeout-2",
+        actor_user_id: "another-user",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        work_date: "2026-07-24",
+        shift: "night",
+        crew: "Crew B",
+        trade: "Pipefitter",
+        answers: {},
+        status: "submitted",
+        submitted_at: "2026-07-25T01:00:00.000Z",
+        created_at: "2026-07-24T00:00:00.000Z",
+        updated_at: "2026-07-25T01:00:00.000Z",
+      },
+      {
+        id: "closeout-3",
+        actor_user_id: "other-user",
+        organization_id: OTHER_ORGANIZATION_ID,
+        pilot_id: OTHER_PILOT_ID,
+        work_date: "2026-07-25",
+        shift: "day",
+        crew: "Crew C",
+        trade: "Rigger",
+        answers: {},
+        status: "submitted",
+        submitted_at: "2026-07-25T02:00:00.000Z",
+        created_at: "2026-07-25T00:00:00.000Z",
+        updated_at: "2026-07-25T02:00:00.000Z",
+      },
+    ];
+
+    const closeouts = await request(app()).get(
+      `/api/testing/reports/closeouts?${query}&limit=1`,
+    );
+    expect(closeouts.status).toBe(200);
+    expect(closeouts.body.limit).toBe(1);
+    expect(closeouts.body.count).toBe(2);
+    expect(closeouts.body.truncated).toBe(true);
+    expect(closeouts.body.closeouts).toHaveLength(1);
+
+    const submitted = await request(app()).get(
+      `/api/testing/reports/closeouts?${query}&state=submitted`,
+    );
+    expect(submitted.status).toBe(200);
+    expect(submitted.body.count).toBe(1);
+    expect(submitted.body.closeouts).toHaveLength(1);
+    expect(submitted.body.closeouts[0].status).toBe("submitted");
+    expect(submitted.body.closeouts[0].actorUserId).toBe("another-user");
+
+    const invalid = await request(app()).get(
+      `/api/testing/reports/closeouts?${query}&state=invalid`,
+    );
+    expect(invalid.status).toBe(400);
   });
 });

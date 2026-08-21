@@ -27,8 +27,9 @@ export interface TestRecordingResult {
 export interface RecordingServiceCallbacks {
   /** Fired once when recording ends for any reason (Stop Test, native "stop
    *  sharing", or an internal error) — the natural place to trigger upload. */
-  onStop?: (result: TestRecordingResult) => void;
+  onStop?: (result: TestRecordingResult | null) => void;
   onError?: (error: Error) => void;
+  onPauseStateChange?: (isPaused: boolean) => void;
 }
 
 // Chrome/Firefox support webm; Safari's screen-capture support is limited and
@@ -72,6 +73,7 @@ export class RecordingService {
   private pausedAt = 0;
   private pausedAccumulated = 0;
   private stopped = false;
+  private stopPromise: Promise<TestRecordingResult | null> | null = null;
   private callbacks: RecordingServiceCallbacks;
 
   constructor(callbacks: RecordingServiceCallbacks = {}) {
@@ -87,7 +89,11 @@ export class RecordingService {
   }
 
   get micIncluded(): boolean {
-    return this.micRequested && !this.micDenied && (this.stream?.getAudioTracks().length ?? 0) > 0;
+    return (
+      this.micRequested &&
+      !this.micDenied &&
+      (this.stream?.getAudioTracks().length ?? 0) > 0
+    );
   }
 
   /** Elapsed recording time, excluding any paused duration. */
@@ -107,15 +113,32 @@ export class RecordingService {
       throw new Error("Screen recording is not supported in this browser.");
     }
 
+    this.stream = null;
+    this.recorder = null;
+    this.chunks = [];
+    this.mimeType = "";
+    this.micRequested = false;
+    this.micDenied = false;
+    this.startedAt = 0;
+    this.pausedAt = 0;
+    this.pausedAccumulated = 0;
+    this.stopped = false;
+    this.stopPromise = null;
+
     const displayStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: false,
     });
 
     this.micRequested = includeMicrophone;
-    if (includeMicrophone && typeof navigator.mediaDevices.getUserMedia === "function") {
+    if (
+      includeMicrophone &&
+      typeof navigator.mediaDevices.getUserMedia === "function"
+    ) {
       try {
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
         for (const track of micStream.getAudioTracks()) {
           displayStream.addTrack(track);
         }
@@ -141,16 +164,28 @@ export class RecordingService {
         : new MediaRecorder(displayStream);
     } catch (err) {
       this.releaseTracks();
-      throw err instanceof Error ? err : new Error("Failed to start MediaRecorder");
+      throw err instanceof Error
+        ? err
+        : new Error("Failed to start MediaRecorder");
     }
 
     this.chunks = [];
     this.recorder.ondataavailable = (e) => {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
+    this.recorder.onpause = () => {
+      this.pausedAt = Date.now();
+      this.callbacks.onPauseStateChange?.(true);
+    };
+    this.recorder.onresume = () => {
+      this.pausedAccumulated += Date.now() - this.pausedAt;
+      this.pausedAt = 0;
+      this.callbacks.onPauseStateChange?.(false);
+    };
     this.recorder.onerror = () => {
       this.callbacks.onError?.(new Error("MediaRecorder encountered an error"));
     };
+    this.callbacks.onPauseStateChange?.(false);
 
     this.startedAt = Date.now();
     // A 1s timeslice keeps chunks flowing for long sessions instead of
@@ -158,44 +193,76 @@ export class RecordingService {
     this.recorder.start(1000);
   }
 
-  pause(): void {
-    if (this.recorder?.state !== "recording") return;
+  pause(): boolean {
+    if (this.recorder?.state !== "recording") return false;
     this.recorder.pause();
-    this.pausedAt = Date.now();
+    this.callbacks.onPauseStateChange?.(true);
+    return true;
   }
 
-  resume(): void {
-    if (this.recorder?.state !== "paused") return;
+  resume(): boolean {
+    if (this.recorder?.state !== "paused") return false;
     this.recorder.resume();
-    this.pausedAccumulated += Date.now() - this.pausedAt;
-    this.pausedAt = 0;
+    this.callbacks.onPauseStateChange?.(false);
+    return true;
   }
 
   /** Stop recording (idempotent) and resolve with the captured Blob, or null if nothing was captured. */
-  async stop(reason: RecordingStopReason = "user"): Promise<TestRecordingResult | null> {
-    if (this.stopped) return null;
-    this.stopped = true;
+  async stop(
+    reason: RecordingStopReason = "user",
+  ): Promise<TestRecordingResult | null> {
+    if (this.stopped) return this.stopPromise ?? Promise.resolve(null);
 
-    const recorder = this.recorder;
+    if (this.stopPromise) return this.stopPromise;
+
+    this.stopped = true;
+    this.stopPromise = this.finalizeStop(reason);
+    return this.stopPromise;
+  }
+
+  private async finalizeStop(
+    reason: RecordingStopReason,
+  ): Promise<TestRecordingResult | null> {
     const durationMs = this.elapsedMs();
     const screenResolution = this.captureResolution();
     const micIncluded = this.micIncluded;
     const mimeType = this.mimeType;
 
+    const recorder = this.recorder;
     const blob = await new Promise<Blob | null>((resolve) => {
       if (!recorder || recorder.state === "inactive") {
-        resolve(this.chunks.length ? new Blob(this.chunks, { type: mimeType || "video/webm" }) : null);
+        resolve(
+          this.chunks.length
+            ? new Blob(this.chunks, { type: mimeType || "video/webm" })
+            : null,
+        );
         return;
       }
       recorder.onstop = () => {
-        resolve(this.chunks.length ? new Blob(this.chunks, { type: mimeType || "video/webm" }) : null);
+        resolve(
+          this.chunks.length
+            ? new Blob(this.chunks, { type: mimeType || "video/webm" })
+            : null,
+        );
       };
-      recorder.stop();
+      try {
+        recorder.stop();
+      } catch {
+        resolve(
+          this.chunks.length
+            ? new Blob(this.chunks, { type: mimeType || "video/webm" })
+            : null,
+        );
+      }
     });
 
     this.releaseTracks();
 
-    if (!blob) return null;
+    if (!blob) {
+      this.callbacks.onPauseStateChange?.(false);
+      this.callbacks.onStop?.(null);
+      return null;
+    }
 
     const result: TestRecordingResult = {
       blob,
@@ -205,6 +272,7 @@ export class RecordingService {
       micIncluded,
       stopReason: reason,
     };
+    this.callbacks.onPauseStateChange?.(false);
     this.callbacks.onStop?.(result);
     return result;
   }
@@ -213,6 +281,7 @@ export class RecordingService {
   cancel(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.stopPromise = Promise.resolve(null);
     try {
       this.recorder?.stop();
     } catch {
@@ -224,7 +293,8 @@ export class RecordingService {
 
   private captureResolution(): string {
     const settings = this.stream?.getVideoTracks()[0]?.getSettings();
-    if (settings?.width && settings?.height) return `${settings.width}x${settings.height}`;
+    if (settings?.width && settings?.height)
+      return `${settings.width}x${settings.height}`;
     if (typeof window !== "undefined" && window.screen) {
       return `${window.screen.width}x${window.screen.height}`;
     }
@@ -234,5 +304,6 @@ export class RecordingService {
   private releaseTracks(): void {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
+    this.recorder = null;
   }
 }

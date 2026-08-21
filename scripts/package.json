@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "setup:supabase": "tsx ./src/setup-supabase.ts",
     "cleanup:chat": "tsx ./src/cleanup-legacy-chat-messages.ts",
+    "provision:pilot-membership": "tsx ./src/provision-pilot-membership.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

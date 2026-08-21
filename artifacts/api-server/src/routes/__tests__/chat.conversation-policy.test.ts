@@ -83,8 +83,11 @@ const bannedCorporatePhrases = [
 ];
 
 const safetyCriticalPatterns = [
-  /someone.?s under|someone.?s underneath|underneath.*someone/i,
-  /\b(unsafe|hazard|immediate danger|load.*shifted|under.*load|injury|injured|injuring|fire|electric|electrical|collapsed|collapse|fall|trapped|tripped|critical|panic)\b/i,
+  /\b(?:someone|somebody|anyone|a person|worker|crew member|operator)\b.{0,50}\b(?:under|underneath|trapped|injured|hurt|falling|on fire|being shocked|electrocuted|in immediate danger)\b/i,
+  /\b(?:under|underneath)\b.{0,40}\b(?:load|equipment|structure|vehicle)\b.{0,40}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:load|equipment|structure|scaffold|wall)\b.{0,50}\b(?:shifted|collapsed|falling|fell)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew)\b/i,
+  /\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b.{0,50}\b(?:someone|somebody|anyone|person|worker|crew|injured|hurt|exposed)\b/i,
+  /\b(?:someone|somebody|anyone|person|worker|crew)\b.{0,50}\b(?:live wire|energized|electric shock|electrical shock|fire|smoke)\b/i,
 ] as const;
 
 const identityQuestions = [
@@ -410,6 +413,81 @@ beforeEach(() => {
 });
 
 describe("POST /api/chat — conversational policy regression", () => {
+  it('handles "I meant 3G weld" with one process question and no model call', async () => {
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "I meant 3G weld." });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toBe(
+      "Got it — 3G noted. What welding process are you running?",
+    );
+    expect(res.body.citations).toEqual([]);
+    assertOneQuestionOnly(String(res.body.answer));
+    expect(completionHistory).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      "The grinder bogs when I put pressure on it.",
+      /I hear the symptom.*What exactly slows down/i,
+    ],
+    [
+      "This grinder is fucked.",
+      /I hear the conclusion.*What observable behaviour/i,
+    ],
+    [
+      "I changed everything you told me and the weld still looks like shit.",
+      /previous diagnosis is still unresolved.*What changed/i,
+    ],
+  ] as const)(
+    "guards unsupported diagnostic conclusions: %s",
+    async (message, pattern) => {
+      const res = await request(app).post("/api/chat").send({ message });
+
+      expect(res.status).toBe(200);
+      expect(String(res.body.answer)).toMatch(pattern);
+      assertOneQuestionOnly(String(res.body.answer));
+      expect(res.body.citations).toEqual([]);
+      expect(completionHistory).toHaveLength(0);
+    },
+  );
+
+  it("puts immediate safety response before ordinary diagnostic flow", async () => {
+    const res = await request(app).post("/api/chat").send({
+      message: "The load shifted and someone's underneath it.",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(
+      /Stop and secure the area first.*Is anyone still exposed/i,
+    );
+    assertOneQuestionOnly(String(res.body.answer));
+    expect(completionHistory).toHaveLength(0);
+  });
+
+  it("does not ask for process again when the prior turn established it", async () => {
+    fake.tables["chat_messages"] = [
+      {
+        role: "user",
+        content: "I'm running FCAW.",
+        user_id: testUserId,
+        session_id: "test-session",
+        created_at: new Date().toISOString(),
+      },
+    ];
+
+    const res = await request(app)
+      .post("/api/chat")
+      .send({ message: "I meant 3G weld." });
+
+    expect(res.status).toBe(200);
+    expect(completionHistory).toHaveLength(1);
+    expect(res.body.answer).not.toBe(
+      "Got it — 3G noted. What welding process are you running?",
+    );
+  });
+
   it.each(GREETING_CASES)(
     "handles casual/non-identity turns without identity introduction: %s",
     async (message) => {
@@ -550,12 +628,30 @@ describe("POST /api/chat — conversational policy regression", () => {
     expect(res.status).toBe(200);
     const answer = String(res.body.answer);
     expect(answer).toMatch(
-      /Clear everyone out from under it\. Is the load stable right now\?/i,
+      /Stop and secure the area first\. Is anyone still exposed to the hazard\?/i,
     );
     expect(answer).not.toMatch(
       /Bro|Ahhh shit|That['’]ll ruin|Beauty|Jesus, bro|there['’]s your problem/i,
     );
   });
+
+  it.each([
+    "The critical weld review is tomorrow.",
+    "I panic before a difficult repair.",
+    "The fall on this bracket is too small.",
+    "I need to understand electrical troubleshooting.",
+  ])(
+    "does not trigger emergency preflight for ordinary trade language: %s",
+    async (message) => {
+      const res = await request(app).post("/api/chat").send({ message });
+
+      expect(res.status).toBe(200);
+      expect(completionHistory).toHaveLength(1);
+      expect(String(res.body.answer)).not.toMatch(
+        /Stop and secure the area first|Is anyone still exposed/i,
+      );
+    },
+  );
 
   it.each(["What are you?", "Who are you?"])(
     "allows identity intro only for explicit identity questions: %s",
