@@ -188,11 +188,25 @@ export function graphInspectorReducer(
         state.inspectorNodeId && action.liveIds.has(state.inspectorNodeId)
           ? state.inspectorNodeId
           : null;
+      const branchId = action.liveIds.has(state.branchId)
+        ? state.branchId
+        : CORE_ID;
+      const visibility = inspectorNodeId ? state.visibility : "closed";
+      // Returning the same object prevents a render loop if a malformed or
+      // temporarily empty server graph omits even the core node.
+      if (
+        activeGraphId === state.activeGraphId &&
+        branchId === state.branchId &&
+        inspectorNodeId === state.inspectorNodeId &&
+        visibility === state.visibility
+      ) {
+        return state;
+      }
       return {
         activeGraphId,
-        branchId: action.liveIds.has(state.branchId) ? state.branchId : CORE_ID,
+        branchId,
         inspectorNodeId,
-        visibility: inspectorNodeId ? state.visibility : "closed",
+        visibility,
       };
     }
   }
@@ -593,9 +607,13 @@ export function MemoryGraphView({
     [nodeById],
   );
 
-  const openNodeInCurrentBranch = useCallback((id: string) => {
-    dispatchGraphInspector({ type: "open-in-current-branch", id });
-  }, []);
+  const openNodeInCurrentBranch = useCallback(
+    (id: string) => {
+      if (!nodeById.has(id)) return;
+      dispatchGraphInspector({ type: "open-in-current-branch", id });
+    },
+    [nodeById],
+  );
 
   // Breadcrumb trail for the current selection: Jack › Trade hub › Node. Each
   // crumb is a live node the reviewer can jump back to, so exploration always

@@ -87,7 +87,37 @@ interface Props {
    * picked node and prunes to its local neighborhood (the legacy drill-in view).
    * User-toggled; defaults to full so launch never hides trades on selection.
    */
-  viewMode?: "full" | "focus" | "branches";
+  viewMode?: SpatialViewMode;
+}
+
+type SpatialViewMode = "full" | "focus" | "branches";
+
+/**
+ * Reconciles a durable branch with a freshly hydrated graph without disturbing
+ * the current center during ordinary polling.
+ */
+export function resolveHydratedBranchCenter(
+  nodes: ReadonlyArray<Pick<MemoryNode, "id" | "kind">>,
+  currentCenter: string,
+  branchId: string | null,
+  viewMode: SpatialViewMode,
+): string {
+  const currentExists = nodes.some((node) => node.id === currentCenter);
+  if (viewMode === "full" || !branchId) {
+    return currentExists ? currentCenter : CORE_ID;
+  }
+
+  const branch = nodes.find((node) => node.id === branchId);
+  const branchCanCenter =
+    !!branch &&
+    (viewMode === "focus" ||
+      branch.kind === "core" ||
+      branch.kind === "topic" ||
+      branch.kind === "mentor" ||
+      branch.kind === "contributor");
+
+  if (branchCanCenter) return branchId;
+  return currentExists ? currentCenter : CORE_ID;
 }
 
 /** Runtime, per-node render state: eased 3D position + per-frame projection. */
@@ -579,10 +609,22 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         membersByHub,
       });
 
-      // Keep the current center if it still exists, else fall back to the core.
-      const exists = model.nodes.some((n) => n.id === centerRef.current);
-      // Polling may move nodes, but must not discard the camera the user chose.
-      recenterRef.current(exists ? centerRef.current : CORE_ID, !exists);
+      // Reapply a branch that became available after initial hydration. During
+      // ordinary polling, keep both the current center and the user's camera.
+      const currentCenter = centerRef.current;
+      const currentExists = model.nodes.some((n) => n.id === currentCenter);
+      const nextCenter = resolveHydratedBranchCenter(
+        model.nodes,
+        currentCenter,
+        branchRef.current,
+        viewModeRef.current,
+      );
+      const restoredHydratedBranch =
+        nextCenter !== currentCenter && nextCenter === branchRef.current;
+      recenterRef.current(
+        nextCenter,
+        !currentExists && !restoredHydratedBranch,
+      );
 
       // Track edge births so new connections fade in.
       const born = edgeBornRef.current;

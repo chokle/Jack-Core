@@ -539,12 +539,23 @@ function MinimizedPill({
   };
 
   useEffect(() => {
-    const bounds = measure();
-    if (!bounds) return;
-    const stored = readStored(minimizedKey);
-    xRef.current = clampX(stored?.x ?? bounds.maxX, bounds.maxX);
-    applyX();
-    setReady(true);
+    let frame = 0;
+    const place = () => {
+      const bounds = measure();
+      if (!bounds) {
+        frame = window.requestAnimationFrame(place);
+        return;
+      }
+      const stored = readStored(minimizedKey);
+      // Start centered along the bottom edge so the pill does not cover the
+      // graph's bottom-right zoom and lock controls.
+      const centeredX = (PAD + bounds.maxX) / 2;
+      xRef.current = clampX(stored?.x ?? centeredX, bounds.maxX);
+      applyX();
+      setReady(true);
+    };
+    place();
+    return () => window.cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minimizedKey]);
 

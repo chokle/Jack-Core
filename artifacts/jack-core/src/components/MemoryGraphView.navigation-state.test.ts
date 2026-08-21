@@ -58,4 +58,16 @@ describe("MemoryGraphView graph and inspector state", () => {
       visibility: "expanded",
     });
   });
+
+  it("prunes idempotently when a temporary graph omits the core node", () => {
+    const liveIds = new Set<string>();
+    const first = graphInspectorReducer(INITIAL_GRAPH_INSPECTOR_STATE, {
+      type: "prune",
+      liveIds,
+    });
+    const second = graphInspectorReducer(first, { type: "prune", liveIds });
+
+    expect(first).toBe(INITIAL_GRAPH_INSPECTOR_STATE);
+    expect(second).toBe(first);
+  });
 });

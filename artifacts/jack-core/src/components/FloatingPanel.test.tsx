@@ -28,6 +28,7 @@ function MobileHarness({
           stageRef={stageRef}
           isDesktop={false}
           state={state}
+          positionKey="mobile-node"
           onMinimize={() => setState("minimized")}
           onRestore={() => setState("expanded")}
           onClose={() => setState("closed")}
@@ -68,7 +69,10 @@ function ResponsiveHarness() {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.sessionStorage.clear();
+});
 
 describe("FloatingPanel mobile inspector states", () => {
   it("uses a compact identity pill to minimize and restore the sheet", () => {
@@ -98,8 +102,13 @@ describe("FloatingPanel mobile inspector states", () => {
     fireEvent.pointerMove(pill, { pointerId: 1, clientX: 140 });
     fireEvent.pointerUp(pill, { pointerId: 1, clientX: 140 });
 
-    expect(pill.className).toContain("absolute");
-    expect(pill.style.touchAction).toBe("none");
+    expect(pill.style.transform).toMatch(/^translateX\(-?\d+(?:\.\d+)?px\)$/);
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem("floating-panel:mobile-node:minimized") ??
+          "null",
+      ),
+    ).toEqual({ x: 12, y: 0 });
     expect(screen.getByTestId("state").textContent).toBe("minimized");
   });
 
