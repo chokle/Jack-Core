@@ -21,6 +21,24 @@ import type { KnowledgeObjectMeta } from "../lib/knowledge-schema.js";
  */
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function requiredUuid(name: string): string {
+  const value = process.env[name]?.trim() ?? "";
+  if (!UUID_RE.test(value)) {
+    throw new Error(`${name} must be the canonical UUID before seeding`);
+  }
+  return value;
+}
+
+// These identifiers are operational configuration, not short labels or names.
+// Requiring the exact pair prevents two organizations with the same pilot name
+// from sharing a retrieval scope.
+const PILOT_001_SCOPE = {
+  pilotId: requiredUuid("PILOT_001_ID"),
+  organizationId: requiredUuid("PILOT_001_ORGANIZATION_ID"),
+};
 
 interface EntryImage {
   /** Absolute path to the source image file. */
@@ -191,7 +209,8 @@ Field tips:
   },
   {
     id: "e1e1e1e1-0004-4001-8001-000000000004",
-    title: "Laying Out Stair Stringers: Rise, Run, the 7-11 Rule & Dropping the Stringer",
+    title:
+      "Laying Out Stair Stringers: Rise, Run, the 7-11 Rule & Dropping the Stringer",
     trade: "Carpenter",
     category: "Framing",
     tags: [
@@ -231,7 +250,8 @@ Watch for:
   },
   {
     id: "e1e1e1e1-0005-4001-8001-000000000005",
-    title: "Charging AC/Heat Pumps: Superheat vs Subcooling (Fixed Orifice vs TXV)",
+    title:
+      "Charging AC/Heat Pumps: Superheat vs Subcooling (Fixed Orifice vs TXV)",
     trade: "HVAC/R Technician",
     category: "Refrigeration Systems",
     tags: [
@@ -267,9 +287,300 @@ Use accurate clamp thermocouples and a calibrated manifold or probes — small t
     image: {
       path: `${REPO_ROOT}attached_assets/stock_images/hvac_manifold_gauges.jpg`,
       contentType: "image/jpeg",
-      caption: "Outdoor condensing unit — confirm airflow, then set the charge by superheat or subcooling.",
+      caption:
+        "Outdoor condensing unit — confirm airflow, then set the charge by superheat or subcooling.",
     },
     metadata: { origin: "manual-seed", entryNumber: 5 },
+  },
+  {
+    id: "e1e1e1e1-0006-4001-8001-000000000006",
+    title: "Plumbing layout: install square, level, and plumb",
+    trade: "Plumber",
+    category: "Layout",
+    tags: [
+      "plumbing",
+      "layout",
+      "square",
+      "level",
+      "plumb",
+      "dimensions",
+      "inspection",
+    ],
+    description:
+      "Rob's field note on confirming square, level, and plumb before committing to install.",
+    body: `Rob's intake guidance:
+- Measure and confirm before installation.
+- Use plumbing best practices and the applicable manufacturer specifications.
+- Confirm slope and drainage requirements.
+- Do not rush the installation.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 6,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0007-4001-8001-000000000007",
+    title: "Keeping connections truly watertight",
+    trade: "Plumber",
+    category: "Connections and leak prevention",
+    tags: [
+      "plumbing",
+      "joint",
+      "water",
+      "leak",
+      "washer",
+      "seal",
+      "pressure test",
+      "connections",
+    ],
+    description:
+      "Rob's field-note checklist for sealed and watertight connections.",
+    body: `Connection areas Rob identified for checking:
+- rubbers and gaskets,
+- glues and PVC,
+- mechanical connections,
+- applicable manufacturer specifications,
+- and required cure or wait time.
+
+The intake notes contain no technical cure time or other numeric value; confirm those details from the applicable manufacturer specification.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 7,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0008-4001-8001-000000000008",
+    title: "Work safely without scraping knuckles",
+    trade: "Plumber",
+    category: "Work practices",
+    tags: [
+      "plumbing",
+      "knuckle",
+      "cut",
+      "wrist",
+      "tool control",
+      "materials handling",
+    ],
+    description:
+      "An unresolved field-practice and tool-access question recorded in Rob's intake.",
+    body: `Rob's literal recurring question: "How not to scrape knuckles?"
+
+The intake does not contain a validated answer. Ask the supervisor to clarify the site conditions, access, and tool choice rather than inventing guidance from this record.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 8,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0009-4001-8001-000000000009",
+    title: "Diagnosing backed up drains and plugged lines",
+    trade: "Plumber",
+    category: "Drainage and system troubleshooting",
+    tags: [
+      "plumbing",
+      "drains",
+      "backup",
+      "clog",
+      "diagnostic",
+      "observation",
+      "inspection",
+      "basin drain",
+      "connections",
+    ],
+    description:
+      "Field note on how to confirm the actual block points before choosing a fix.",
+    body: `When drains appear plugged or systems back up, Rob's checks are:
+- determine whether material is actually stuck in the drain lines,
+- determine whether the drains are truly plugged,
+- check whether the broader drainage and foundation area drains properly,
+- check the basin drain,
+- and confirm drain bodies are connected properly.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 9,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0010-4001-8001-000000000010",
+    title: "Pre-pour sequencing for slab and mechanical penetrations",
+    trade: "Plumber",
+    category: "Coordination before pour",
+    tags: [
+      "plumbing",
+      "slab",
+      "mechanical penetration",
+      "formwork",
+      "rebar",
+      "coordination",
+      "review drawings",
+    ],
+    description:
+      "Field note on pre-pour coordination to avoid stoppages and expensive exposure.",
+    body: `Rob's pre-pour coordination note:
+- Review drawings and identify slab or vertical mechanical penetrations before the pour.
+- Coordinate with formwork, reinforcing, and mechanical trades.
+- Missing this coordination can stop or disrupt a scheduled pour and cause rework or schedule impact.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 10,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+      siteSpecificFinancialContext:
+        "Rob noted approximately $50K/day in bank financing/line-of-credit capacity for this company's day-to-day operations. This is attributed Pilot 001 context, not a general cost claim.",
+    },
+  },
+  {
+    id: "e1e1e1e1-0011-4001-8001-000000000011",
+    title: "Cut length verification and recheck discipline",
+    trade: "Plumber",
+    category: "Fit-up quality",
+    tags: [
+      "plumbing",
+      "measure",
+      "dimensions",
+      "wrong cut",
+      "revision",
+      "material waste",
+      "common mistakes",
+      "reality check",
+    ],
+    description:
+      "Field note on avoiding wrong cuts, dimension mistakes, and avoidable waste.",
+    body: `Common apprentice mistakes Rob identified:
+- cutting material to the wrong length,
+- failing to double-check dimensions,
+- committing work before taking enough time to confirm the approach,
+- wasting material and adding cost,
+- failing to secure material after installation,
+- rushing or lacking diligence,
+- improper framing penetrations,
+- and improper coring, layout, or installation on slab.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 11,
+      issueId: 39,
+      sourceType: "supervisor field notes",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "direct",
+      evidenceType: "supervisor field notes",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0012-4001-8001-000000000012",
+    title: "Question-first approach for difficult plumbing work",
+    trade: "Plumber",
+    category: "Work method",
+    tags: [
+      "plumbing",
+      "ask",
+      "clarify",
+      "scope",
+      "tools",
+      "problem solving",
+      "judgment",
+    ],
+    description:
+      "Inferred reasoning pattern: ask, clarify, understand scope, then execute with the right tools.",
+    body: `Reasoning pattern from repeated field notes:
+- Ask clear questions before deciding the approach.
+- Clarify the scope and constraints before committing.
+- Confirm tool setup and access.
+- Execute once aligned, not while guessing.
+
+This pattern separates observation from conclusion and reduces avoidable rework.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 12,
+      issueId: 39,
+      sourceType: "inferred reasoning pattern",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Rob Field Notes Intake Form",
+    },
+  },
+  {
+    id: "e1e1e1e1-0013-4001-8001-000000000013",
+    title: "Verify system behavior before acting on first diagnosis",
+    trade: "Plumber",
+    category: "Problem solving",
+    tags: [
+      "plumbing",
+      "diagnostic",
+      "investigation",
+      "verify",
+      "observation",
+      "approach",
+      "troubleshooting",
+    ],
+    description:
+      "Inferred reasoning pattern: verify evidence before action when symptoms point to a possible fault.",
+    body: `When a symptom is visible, do not jump to a fix.
+Verify the larger system behavior, compare what is observed, and only then choose the first controlled correction.
+This helps distinguish root cause from appearance.`,
+    metadata: {
+      origin: "manual-seed",
+      entryNumber: 13,
+      issueId: 39,
+      sourceType: "inferred reasoning pattern",
+      pilotId: PILOT_001_SCOPE.pilotId,
+      organizationId: PILOT_001_SCOPE.organizationId,
+      pilotName: "Pilot 001",
+      contributor: "Rob",
+      knowledgeNature: "inferred",
+      evidenceType: "pattern inference",
+      originalSource: "Rob Field Notes Intake Form",
+    },
   },
 ];
 
@@ -283,16 +594,23 @@ async function seedEntry(entry: Entry): Promise<void> {
     const storagePath = `knowledge/${entry.id}/image${ext}`;
     const { error: upErr } = await supabase.storage
       .from("jack-videos")
-      .upload(storagePath, bytes, { contentType: entry.image.contentType, upsert: true });
-    if (upErr) throw new Error(`[${entry.title}] image upload failed: ${upErr.message}`);
+      .upload(storagePath, bytes, {
+        contentType: entry.image.contentType,
+        upsert: true,
+      });
+    if (upErr)
+      throw new Error(`[${entry.title}] image upload failed: ${upErr.message}`);
     const imageUrl = `${process.env["SUPABASE_URL"]}/storage/v1/object/public/jack-videos/${storagePath}`;
     images = [{ url: imageUrl, caption: entry.image.caption }];
   }
 
   // 2) Embed title + description + body so Ask Jack can retrieve it semantically.
-  const embedInput = [entry.title, entry.description, entry.body].filter(Boolean).join("\n\n");
+  const embedInput = [entry.title, entry.description, entry.body]
+    .filter(Boolean)
+    .join("\n\n");
   const embedding = await createEmbedding(embedInput, { cache: false });
-  if (embedding.length === 0) throw new Error(`[${entry.title}] embedding came back empty`);
+  if (embedding.length === 0)
+    throw new Error(`[${entry.title}] embedding came back empty`);
 
   // 3) Upsert the row (embedding stored JSON-serialized, like videos.embedding).
   const { error: insErr } = await supabase.from("knowledge_entries").upsert({
@@ -311,9 +629,12 @@ async function seedEntry(entry: Entry): Promise<void> {
     embedding: JSON.stringify(embedding),
     updated_at: new Date().toISOString(),
   });
-  if (insErr) throw new Error(`[${entry.title}] insert failed: ${insErr.message}`);
+  if (insErr)
+    throw new Error(`[${entry.title}] insert failed: ${insErr.message}`);
 
-  console.log(`✅ Seeded "${entry.title}" (${entry.trade})${images.length ? " [image]" : ""}`);
+  console.log(
+    `✅ Seeded "${entry.title}" (${entry.trade})${images.length ? " [image]" : ""}`,
+  );
 }
 
 async function main(): Promise<void> {
