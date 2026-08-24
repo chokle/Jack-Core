@@ -42,7 +42,28 @@ app.use(
 // dev FAPI directly); active in production where VITE_CLERK_PROXY_URL is set.
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = (process.env["CORS_ALLOWED_ORIGINS"] || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow same-origin requests and non-browser clients that send no Origin header.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.length === 0) {
+        // Without an explicit list, allow Torch subdomains and localhost development only.
+        const allowed =
+          /^https?:\/\/(.*\.)?torchlabs\.ca$/.test(origin) ||
+          /^http:\/\/localhost(:\d+)?$/.test(origin);
+        return callback(null, allowed);
+      }
+      return callback(null, allowedOrigins.includes(origin));
+    },
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
