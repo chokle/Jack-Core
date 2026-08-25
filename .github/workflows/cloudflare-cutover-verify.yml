@@ -1,0 +1,59 @@
+name: Cloudflare Cutover Verification
+
+on:
+  push:
+    branches:
+      - overclock/cloudflare-cutover-20260825
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "cloudflare/**"
+      - "Dockerfile.cloudflare"
+      - ".dockerignore"
+      - ".env.cloudflare.example"
+      - ".github/workflows/cloudflare-cutover-verify.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  VITE_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Cloudflare deploy config
+        run: node cloudflare/generate-deploy-config.mjs
+      - name: Validate Worker syntax
+        run: node --check cloudflare/worker.mjs
+      - name: Format check
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml
+      - name: Cloudflare Worker dry run
+        run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
+      - name: Build production container image
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" -t jack-core-cloudflare:verify .
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Workspace build
+        run: pnpm build
+      - name: Diff check
+        run: git diff --check origin/main...HEAD
