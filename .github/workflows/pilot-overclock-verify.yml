@@ -1,0 +1,71 @@
+name: Pilot001 Overclock Verify
+
+on:
+  push:
+    branches:
+      - reconcile/pilot-eod-report-20260824
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Focused Pilot001 tests
+        run: >-
+          pnpm --filter @workspace/api-server exec vitest run
+          src/lib/__tests__/pilot-end-of-day-report.test.ts
+          src/routes/__tests__/activity-heartbeat.test.ts
+          src/routes/__tests__/pilot-end-of-day.test.ts
+
+      - name: API telemetry regression
+        run: pnpm --filter @workspace/api-server test
+
+      - name: Jack frontend regression
+        run: pnpm --filter @workspace/jack-core test
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Production builds
+        run: pnpm --filter @workspace/api-server build && pnpm --filter @workspace/jack-core build
+
+      - name: Formatting
+        run: >-
+          pnpm exec prettier --check
+          artifacts/api-server/src/lib/pilot-end-of-day-report.ts
+          artifacts/api-server/src/lib/__tests__/pilot-end-of-day-report.test.ts
+          artifacts/api-server/src/routes/activity-heartbeat.ts
+          artifacts/api-server/src/routes/pilot-end-of-day.ts
+          artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+          artifacts/api-server/src/routes/__tests__/pilot-end-of-day.test.ts
+          artifacts/api-server/src/routes/index.ts
+          artifacts/jack-core/src/lib/user-testing/activity-heartbeat.ts
+          artifacts/jack-core/src/components/PilotActivityReports.tsx
+          artifacts/jack-core/src/main.tsx
+
+      - name: Diff whitespace check
+        run: git diff --check origin/main...HEAD
