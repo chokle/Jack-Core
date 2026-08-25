@@ -33,6 +33,6 @@ jobs:
       - name: API build
         run: pnpm --filter @workspace/api-server build
       - name: Format check
-        run: pnpm exec prettier --check artifacts/api-server/src/lib/__tests__/authority-migration.test.ts supabase/migrations/20260825051621_authoritative_source_registry.sql supabase/migrations/20260825051717_move_btree_gist_extension.sql
+        run: pnpm exec prettier --check artifacts/api-server/src/lib/__tests__/authority-migration.test.ts
       - name: Diff check
         run: git diff --check origin/main...HEAD
