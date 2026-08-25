@@ -1,0 +1,88 @@
+name: Pilot001 Heartbeat Hotfix Verify
+
+on:
+  push:
+    branches:
+      - hotfix/pilot-heartbeat-semantic-activity
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format hotfix files
+        run: >-
+          pnpm exec prettier --write
+          artifacts/api-server/src/routes/activity-heartbeat.ts
+          artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+
+      - name: Commit formatting if needed
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add artifacts/api-server/src/routes/activity-heartbeat.ts artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+            git commit -m "style: format Pilot001 heartbeat hotfix"
+            git push origin HEAD:hotfix/pilot-heartbeat-semantic-activity
+          fi
+
+      - name: Focused heartbeat test
+        run: pnpm --filter @workspace/api-server exec vitest run src/routes/__tests__/activity-heartbeat.test.ts
+
+      - name: API regression
+        run: pnpm --filter @workspace/api-server test
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: API production build
+        run: pnpm --filter @workspace/api-server build
+
+      - name: Normalize formatting after verification
+        run: >-
+          pnpm exec prettier --write
+          artifacts/api-server/src/routes/activity-heartbeat.ts
+          artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+
+      - name: Commit final formatting if needed
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add artifacts/api-server/src/routes/activity-heartbeat.ts artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+            git commit -m "style: normalize Pilot001 heartbeat hotfix"
+            git push origin HEAD:hotfix/pilot-heartbeat-semantic-activity
+          fi
+
+      - name: Formatting check
+        run: >-
+          pnpm exec prettier --check
+          artifacts/api-server/src/routes/activity-heartbeat.ts
+          artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+
+      - name: Diff whitespace check
+        run: git diff --check origin/main...HEAD
