@@ -7,8 +7,7 @@ const sourcePath = path.join(here, "wrangler.base.json");
 const outputPath = path.join(here, "wrangler.generated.json");
 
 const publishableKey =
-  process.env.VITE_CLERK_PUBLISHABLE_KEY ||
-  process.env.CLERK_PUBLISHABLE_KEY;
+  process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY;
 
 if (!publishableKey || !/^pk_(?:live|test)_/.test(publishableKey)) {
   throw new Error(
