@@ -4,6 +4,7 @@ import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
+  browserFamily,
   currentConsentGranted,
   latestConsent,
   RAW_EVENT_RETENTION_DAYS,
@@ -53,9 +54,10 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       typeof body.appSessionId === "string" && UUID_RE.test(body.appSessionId)
         ? body.appSessionId
         : null;
-    const visibility = body.visibility === "foreground" || body.visibility === "hidden"
-      ? body.visibility
-      : null;
+    const visibility =
+      body.visibility === "foreground" || body.visibility === "hidden"
+        ? body.visibility
+        : null;
     const meaningfulActivity = body.meaningfulActivity;
     const deviceCategory = DEVICE_CATEGORIES.has(body.deviceCategory)
       ? body.deviceCategory
@@ -84,7 +86,11 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       return res.status(409).json({ error: "No active pilot session was found." });
     }
 
-    const consent = await latestConsent(identity.userId, String(session.data.pilot_id), "telemetry");
+    const consent = await latestConsent(
+      identity.userId,
+      String(session.data.pilot_id),
+      "telemetry",
+    );
     if (!currentConsentGranted(consent)) {
       return res.status(412).json({ error: "Telemetry consent is not currently granted." });
     }
@@ -115,7 +121,7 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       app_version: null,
       deploy_version: null,
       device_category: deviceCategory,
-      browser_family: null,
+      browser_family: browserFamily(req.headers["user-agent"]),
       result: "success",
       correlation_id: null,
       request_id: null,
