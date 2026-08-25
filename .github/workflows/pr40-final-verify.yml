@@ -1,0 +1,43 @@
+name: PR40 Final Verification
+
+on:
+  push:
+    branches:
+      - verify/pr40-aca4c5-final
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Maintained-source format check
+        run: pnpm exec prettier --check artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx
+      - name: Focused API authority tests
+        run: pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/authority-migration.test.ts src/lib/__tests__/code-authority.test.ts src/lib/__tests__/revision-feed-observer.test.ts src/routes/__tests__/chat.code-safety.test.ts
+      - name: Focused Jack authority rendering test
+        run: pnpm --filter @workspace/jack-core exec vitest run src/components/StructuredAnswer.official-source.test.tsx
+      - name: Full typecheck
+        run: pnpm typecheck
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Full build
+        run: pnpm build
+      - name: Diff check
+        if: always()
+        run: git diff --check 2bdd99edadae9bf498bb778ce1959e26229fb194...aca4c5ac5b29de1fe9156dc90afd48b9d0626eb5
