@@ -24,19 +24,19 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Format reconciled chat route
-        run: pnpm exec prettier --write artifacts/api-server/src/routes/chat.ts
-      - name: Commit formatted chat route on verify branch
+      - name: Normalize PR40 formatting
+        run: pnpm exec prettier --write DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx lib/api-client-react/src/generated/api.schemas.ts lib/api-spec/openapi.yaml lib/api-spec/orval.config.ts lib/api-zod/src/generated/api.ts 'lib/api-zod/src/generated/types/**/*.ts'
+      - name: Commit formatting normalization on verify branch
         run: |
-          if git diff --quiet -- artifacts/api-server/src/routes/chat.ts; then
+          if git diff --quiet; then
             exit 0
           fi
           git config user.name "Pilot Overclock Verify"
           git config user.email "actions@users.noreply.github.com"
-          git add artifacts/api-server/src/routes/chat.ts
-          git commit -m "chore: format reconciled PR40 chat route"
+          git add DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib artifacts/api-server/src/routes artifacts/jack-core/src/components lib/api-client-react/src/generated/api.schemas.ts lib/api-spec lib/api-zod/src/generated
+          git commit -m "chore: normalize PR40 formatting"
           git push
-      - name: Format all PR40 source
+      - name: Verify PR40 formatting
         run: pnpm exec prettier --check DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx lib/api-client-react/src/generated/api.schemas.ts lib/api-spec/openapi.yaml lib/api-spec/orval.config.ts lib/api-zod/src/generated/api.ts 'lib/api-zod/src/generated/types/**/*.ts'
       - name: Focused API authority tests
         run: pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/authority-migration.test.ts src/lib/__tests__/code-authority.test.ts src/lib/__tests__/revision-feed-observer.test.ts src/routes/__tests__/chat.code-safety.test.ts
