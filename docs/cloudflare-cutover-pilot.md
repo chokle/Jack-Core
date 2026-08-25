@@ -8,6 +8,18 @@ Canonical goal: #49 steps 1 and 11.
 
 This preserves the current long-lived job, feedback-notification, telemetry-retention, and vitality loops during the pilot. Supabase remains the data/backend layer. Railway is not removed until the Cloudflare deployment passes acceptance.
 
+## Authentication boundary
+
+This cutover uses Wrangler to deploy a Worker + Container. A `cloudflared.exe service install <TUNNEL_TOKEN>` command is for Cloudflare Tunnel and is **not** part of this production architecture; it would connect a separate origin host and should not be used as a substitute for the Container deployment.
+
+Authenticate Wrangler with a Cloudflare API token/account ID in the local shell or supported CI secret store, then verify the authenticated account before deployment:
+
+```bash
+CLOUDFLARE_API_TOKEN='...' CLOUDFLARE_ACCOUNT_ID='...' npx wrangler whoami
+```
+
+Never commit either value. The generated Wrangler config declares the production runtime secrets as required so deployment fails closed if any are missing.
+
 ## Pre-cutover verification
 
 1. Export the current production values from Railway. Do not commit them.
