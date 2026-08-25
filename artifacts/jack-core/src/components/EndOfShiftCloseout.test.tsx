@@ -108,6 +108,7 @@ describe("EndOfShiftCloseout", () => {
     expect(
       await screen.findByText("Closeout status: Not started"),
     ).toBeTruthy();
+    // Exact label queries keep the participant-facing accessible names stable.
     const complete = [
       ["What tasks were completed today?", "Task A completed"],
       ["Any safety concerns or incidents?", "No incidents"],
