@@ -24,13 +24,13 @@ const features = [
   },
   {
     icon: Mic,
-    title: "Teach Jack",
-    body: "A guided mentor interview captures hard-won field knowledge and feeds the same living memory the videos build.",
+    title: "Get Jack Up to Speed",
+    body: "A guided mentor interview captures hard-won field knowledge and adds it to Jack’s living memory.",
   },
   {
     icon: Network,
     title: "Living Memory",
-    body: "Every video and interview grows one persistent knowledge graph — the platform gets smarter because people teach it.",
+    body: "Every video and interview adds hard-won field knowledge to one persistent knowledge graph — giving Jack deeper context from real-world experience.",
   },
 ];
 
@@ -101,8 +101,9 @@ export function Landing() {
           </h1>
           <p className="mt-6 max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
             Jack transcribes your training videos, maps them to Red Seal
-            competencies, and answers any trade question with the exact
-            timestamp — while mentors teach it everything they know.
+            competencies, and answers trade questions with exact timestamps —
+            while mentor experience adds deeper field context to his Living
+            Memory.
           </p>
           <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row">
             <Link

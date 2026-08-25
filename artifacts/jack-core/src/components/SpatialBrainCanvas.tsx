@@ -40,7 +40,9 @@ import { ambientMotionEnabled } from "../lib/motion";
  * View mode governs how selection behaves. In "full" (default) the WHOLE graph
  * is fanned out from the JACK core (every trade plus its deeper branch) and
  * stays put on selection: a click only EMPHASIZES the picked node and its
- * neighbours (via `selectedId`) and swings the orbit camera so that branch comes
+ * neighbours (via `selectedId`). `branchId` independently owns which branch is
+ * open, so hiding a details inspector never changes layout or camera framing.
+ * The orbit camera still swings so that branch comes
  * to the front — nothing is ever pruned, so every trade stays visible in the
  * background. In "focus" a selection recenters the layout on the picked node and
  * prunes to its local neighbourhood (the legacy drill-in). `focusNode` swings
@@ -59,7 +61,10 @@ export interface MemoryGraphHandle {
 
 interface Props {
   model: GraphModel;
+  /** Node highlighted on the canvas; may remain active with no inspector open. */
   selectedId: string | null;
+  /** Durable branch-navigation root, independent from inspector/highlight state. */
+  branchId?: string | null;
   onSelect: (id: string | null) => void;
   onHover?: (id: string | null) => void;
   onTogglePin?: (id: string) => void;
@@ -82,7 +87,37 @@ interface Props {
    * picked node and prunes to its local neighborhood (the legacy drill-in view).
    * User-toggled; defaults to full so launch never hides trades on selection.
    */
-  viewMode?: "full" | "focus" | "branches";
+  viewMode?: SpatialViewMode;
+}
+
+type SpatialViewMode = "full" | "focus" | "branches";
+
+/**
+ * Reconciles a durable branch with a freshly hydrated graph without disturbing
+ * the current center during ordinary polling.
+ */
+export function resolveHydratedBranchCenter(
+  nodes: ReadonlyArray<Pick<MemoryNode, "id" | "kind">>,
+  currentCenter: string,
+  branchId: string | null,
+  viewMode: SpatialViewMode,
+): string {
+  const currentExists = nodes.some((node) => node.id === currentCenter);
+  if (viewMode === "full" || !branchId) {
+    return currentExists ? currentCenter : CORE_ID;
+  }
+
+  const branch = nodes.find((node) => node.id === branchId);
+  const branchCanCenter =
+    !!branch &&
+    (viewMode === "focus" ||
+      branch.kind === "core" ||
+      branch.kind === "topic" ||
+      branch.kind === "mentor" ||
+      branch.kind === "contributor");
+
+  if (branchCanCenter) return branchId;
+  return currentExists ? currentCenter : CORE_ID;
 }
 
 /** Runtime, per-node render state: eased 3D position + per-frame projection. */
@@ -142,7 +177,11 @@ function clamp01(n: number): number {
 }
 
 /** Node radius scaled by accumulated knowledge (mirrors the flat canvas). */
-function spatialRadius(n: MemoryNode, degree: number, contentCount = 0): number {
+function spatialRadius(
+  n: MemoryNode,
+  degree: number,
+  contentCount = 0,
+): number {
   const base = BASE_RADII[n.kind] ?? 4;
   if (n.kind === "core") return base;
   let weight = 0;
@@ -182,7 +221,12 @@ const PULSE_STATE_RGB: Record<string, RGB> = {
   red: [248, 113, 113],
 };
 
-function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+function hexPath(
+  c: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+) {
   c.beginPath();
   for (let i = 0; i < 6; i++) {
     const a = (Math.PI / 3) * i - Math.PI / 2;
@@ -199,6 +243,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     {
       model,
       selectedId,
+      branchId = selectedId,
       onSelect,
       onHover,
       onTogglePin,
@@ -228,7 +273,11 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const dataReadyRef = useRef(true);
     const hasSettledRef = useRef(false);
     const centerRef = useRef<string>(CORE_ID);
-    const camRef = useRef<SpatialCamera>({ yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 });
+    const camRef = useRef<SpatialCamera>({
+      yaw: 0,
+      pitch: DEFAULT_PITCH,
+      zoom: 1,
+    });
     // Target the orbit camera eases toward (a focusNode/ensureVisible "swing").
     // null = no swing in flight; any manual drag/zoom clears it.
     const camTargetRef = useRef<SpatialCamera | null>(null);
@@ -236,6 +285,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const lockedRef = useRef(locked);
     const reducedRef = useRef(false);
     const selectedRef = useRef<string | null>(selectedId);
+    const branchRef = useRef<string | null>(branchId);
     const viewModeRef = useRef(viewMode);
     const searchRef = useRef("");
     const activeMatchRef = useRef<string | null>(null);
@@ -243,7 +293,9 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const pinnedRef = useRef<Set<string>>(EMPTY_PINNED);
     const onHoverRef = useRef(onHover);
     const onTogglePinRef = useRef(onTogglePin);
-    const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
+    const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>(
+      [],
+    );
     // Dev-only FPS meter refs (see `showFps`). The rolling frame count is written
     // straight to the DOM from the rAF loop, so measuring the frame rate never
     // itself triggers a React re-render (which would perturb the measurement).
@@ -252,6 +304,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const fpsLastRef = useRef(0);
 
     selectedRef.current = selectedId;
+    branchRef.current = branchId;
     viewModeRef.current = viewMode;
     lockedRef.current = locked;
     dataReadyRef.current = dataReady ?? true;
@@ -278,7 +331,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const { snapshot, isOffline } = useSystemHealth();
     const pulseColor: RGB = isOffline
       ? PULSE_STATE_RGB.green
-      : PULSE_STATE_RGB[snapshot.pulseColor] ?? PULSE_STATE_RGB.green;
+      : (PULSE_STATE_RGB[snapshot.pulseColor] ?? PULSE_STATE_RGB.green);
     const pulseColorRef = useRef<RGB>(pulseColor);
     pulseColorRef.current = pulseColor;
     const pulseCtrlRef = useRef<MemoryGraphPulseController | null>(null);
@@ -305,7 +358,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
             })
           : viewModeRef.current === "branches"
             ? buildBranchNavigatorLayout(m, id, info)
-          : buildSpatialLayout(m, id, { hierarchy: info });
+            : buildSpatialLayout(m, id, { hierarchy: info });
       centerRef.current = layout.centerId;
 
       if (viewModeRef.current === "branches" && resetBranchCamera) {
@@ -463,18 +516,25 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         // node's branch comes to the front (restores the old canvas's "jump").
         if (viewModeRef.current === "focus") recenterRef.current(id);
         else if (viewModeRef.current === "branches") {
-          const kind = modelRef.current?.nodes.find((node) => node.id === id)?.kind;
-          if (id === CORE_ID || kind === "topic" || kind === "mentor" || kind === "contributor") {
+          const kind = modelRef.current?.nodes.find(
+            (node) => node.id === id,
+          )?.kind;
+          if (
+            id === CORE_ID ||
+            kind === "topic" ||
+            kind === "mentor" ||
+            kind === "contributor"
+          ) {
             recenterRef.current(id);
           }
-        }
-        else orientCameraTo(id);
+        } else orientCameraTo(id);
       },
       ensureVisible: (id: string) => {
         // Full view: swing the camera only when the node is off-screen or on the
         // far side of the orbit, so an already-framed selection just emphasizes.
         // Focus view already recenters the selection to the middle.
-        if (viewModeRef.current === "full" && needsOrient(id)) orientCameraTo(id);
+        if (viewModeRef.current === "full" && needsOrient(id))
+          orientCameraTo(id);
       },
     }));
 
@@ -543,12 +603,28 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         }
         membersByHub[t.id] = members;
       }
-      pulseCtrlRef.current?.setTopology({ coreId: CORE_ID, hubIds, membersByHub });
+      pulseCtrlRef.current?.setTopology({
+        coreId: CORE_ID,
+        hubIds,
+        membersByHub,
+      });
 
-      // Keep the current center if it still exists, else fall back to the core.
-      const exists = model.nodes.some((n) => n.id === centerRef.current);
-      // Polling may move nodes, but must not discard the camera the user chose.
-      recenterRef.current(exists ? centerRef.current : CORE_ID, !exists);
+      // Reapply a branch that became available after initial hydration. During
+      // ordinary polling, keep both the current center and the user's camera.
+      const currentCenter = centerRef.current;
+      const currentExists = model.nodes.some((n) => n.id === currentCenter);
+      const nextCenter = resolveHydratedBranchCenter(
+        model.nodes,
+        currentCenter,
+        branchRef.current,
+        viewModeRef.current,
+      );
+      const restoredHydratedBranch =
+        nextCenter !== currentCenter && nextCenter === branchRef.current;
+      recenterRef.current(
+        nextCenter,
+        !currentExists && !restoredHydratedBranch,
+      );
 
       // Track edge births so new connections fade in.
       const born = edgeBornRef.current;
@@ -562,30 +638,33 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       for (const key of [...born.keys()]) if (!live.has(key)) born.delete(key);
     }, [model]);
 
-    // Selection behavior depends on the view mode. In "focus" mode a selection
-    // recenters the layout on the picked node (legacy drill-in: prunes to its
+    // Branch navigation depends on `branchId`, not inspector visibility or the
+    // highlighted node. In "focus" mode a branch change recenters the layout
+    // on the picked node (legacy drill-in: prunes to its
     // neighborhood). In "full" mode selection is emphasis-only — selectedRef
     // already drives the per-frame highlight/dim, so the global graph stays put
     // and no trades are hidden. Reads viewModeRef (not viewMode) so toggling the
     // mode doesn't re-run this effect; the transition below owns that.
     useEffect(() => {
       if (viewModeRef.current === "focus") {
-        recenterRef.current(selectedId ?? CORE_ID);
+        recenterRef.current(branchId ?? CORE_ID);
       } else if (viewModeRef.current === "branches") {
-        if (!selectedId) {
+        if (!branchId) {
           recenterRef.current(CORE_ID);
           return;
         }
-        if (selectedId === CORE_ID) {
+        if (branchId === CORE_ID) {
           recenterRef.current(CORE_ID);
           return;
         }
-        const kind = modelRef.current.nodes.find((node) => node.id === selectedId)?.kind;
+        const kind = modelRef.current.nodes.find(
+          (node) => node.id === branchId,
+        )?.kind;
         if (kind === "topic" || kind === "mentor" || kind === "contributor") {
-          recenterRef.current(selectedId);
+          recenterRef.current(branchId);
         }
       }
-    }, [selectedId]);
+    }, [branchId]);
 
     // View-mode transition: entering "full" rebuilds the whole graph around the
     // core (a prior focus view may have pruned it away) and swings back to the
@@ -597,13 +676,16 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         camTargetRef.current = { yaw: 0, pitch: DEFAULT_PITCH, zoom: 1 };
         onZoomChange(100);
       } else if (viewMode === "focus") {
-        recenterRef.current(selectedRef.current ?? CORE_ID);
+        recenterRef.current(branchRef.current ?? CORE_ID);
       } else {
-        const selected = selectedRef.current;
-        const kind = modelRef.current.nodes.find((node) => node.id === selected)?.kind;
+        const branch = branchRef.current;
+        const kind = modelRef.current.nodes.find(
+          (node) => node.id === branch,
+        )?.kind;
         recenterRef.current(
-          selected && (kind === "topic" || kind === "mentor" || kind === "contributor")
-            ? selected
+          branch &&
+            (kind === "topic" || kind === "mentor" || kind === "contributor")
+            ? branch
             : CORE_ID,
         );
       }
@@ -802,7 +884,8 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           n.vis += (n.targetVis - n.vis) * visK;
           if (n.radius !== n.targetRadius) {
             n.radius += (n.targetRadius - n.radius) * radK;
-            if (Math.abs(n.targetRadius - n.radius) < 0.02) n.radius = n.targetRadius;
+            if (Math.abs(n.targetRadius - n.radius) < 0.02)
+              n.radius = n.targetRadius;
           }
           if (n.targetVis === 0 && n.vis < 0.02) map.delete(id);
         }
@@ -849,7 +932,8 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         // Painter's order: farthest (largest depth) first.
         drawn.sort((a, b) => b.depth - a.depth);
 
-        const related = sel && adj.has(sel) ? (adj.get(sel) as Set<string>) : null;
+        const related =
+          sel && adj.has(sel) ? (adj.get(sel) as Set<string>) : null;
         const dimmed = (id: string): boolean => {
           if (q) {
             const node = map.get(id);
@@ -867,12 +951,17 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           const isSel = sel && (e.a === sel || e.b === sel);
           const faded = dimmed(e.a) && dimmed(e.b);
           let alpha =
-            e.kind === "competency" ? 0.09 : e.kind === "knowledge" ? 0.17 : 0.15;
+            e.kind === "competency"
+              ? 0.09
+              : e.kind === "knowledge"
+                ? 0.17
+                : 0.15;
           if (isSel) alpha = 0.55;
           else if (faded) alpha = 0.04;
           const cue = Math.min(a.palpha, b.palpha);
           ctx.strokeStyle = rgba(b.color, alpha * cue);
-          ctx.lineWidth = (isSel ? 1.6 : 0.8) * Math.min(a.sr, b.sr) * 0.14 + 0.2;
+          ctx.lineWidth =
+            (isSel ? 1.6 : 0.8) * Math.min(a.sr, b.sr) * 0.14 + 0.2;
           ctx.beginPath();
           ctx.moveTo(a.sx, a.sy);
           ctx.lineTo(b.sx, b.sy);
@@ -941,7 +1030,14 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
             ctx.lineTo(hx, hy);
             ctx.stroke();
             const headR = isPrimary ? 3.6 : 2.3;
-            const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, headR * 2.4);
+            const glow = ctx.createRadialGradient(
+              hx,
+              hy,
+              0,
+              hx,
+              hy,
+              headR * 2.4,
+            );
             glow.addColorStop(0, rgba(pcol, isPrimary ? 0.6 : 0.42));
             glow.addColorStop(1, rgba(pcol, 0));
             ctx.fillStyle = glow;
@@ -961,13 +1057,19 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           const faded = dimmed(t.id);
           const fontPx = Math.max(8, Math.min(15, 12 * (hub.sr / 12)));
           ctx.font = `700 ${fontPx}px 'Space Mono', monospace`;
-          ctx.fillStyle = rgba([235, 240, 255], (faded ? 0.25 : 0.85) * hub.palpha);
+          ctx.fillStyle = rgba(
+            [235, 240, 255],
+            (faded ? 0.25 : 0.85) * hub.palpha,
+          );
           ctx.fillText(t.label.toUpperCase(), hub.sx, hub.sy - hub.sr - 8);
           // Virgin cluster affordance: an unpopulated hub invites the first
           // contribution rather than reading as broken/empty.
           if (!hub.populated) {
             ctx.font = `500 ${Math.max(7, fontPx * 0.72)}px 'Space Mono', monospace`;
-            ctx.fillStyle = rgba([255, 170, 90], (faded ? 0.3 : 0.7) * hub.palpha);
+            ctx.fillStyle = rgba(
+              [255, 170, 90],
+              (faded ? 0.3 : 0.7) * hub.palpha,
+            );
             ctx.fillText("+ be the first", hub.sx, hub.sy + hub.sr + 12);
           }
         }
@@ -1092,7 +1194,14 @@ function drawBirthBurst(c: CanvasRenderingContext2D, node: SN, p: number) {
   const flash = Math.max(0, 1 - p * 1.6);
   if (flash > 0) {
     const glowR = node.sr * 4.5;
-    const g = c.createRadialGradient(node.sx, node.sy, 0, node.sx, node.sy, glowR);
+    const g = c.createRadialGradient(
+      node.sx,
+      node.sy,
+      0,
+      node.sx,
+      node.sy,
+      glowR,
+    );
     g.addColorStop(0, rgba(col, 0.75 * flash));
     g.addColorStop(0.5, rgba(col, 0.2 * flash));
     g.addColorStop(1, rgba(col, 0));
@@ -1119,7 +1228,14 @@ function drawNodeGlow(
     const idle = (0.12 + 0.06 * breath) * (dim ? 0.4 : 1) * node.palpha;
     if (idle <= 0) return;
     const gr = node.sr * 3.2;
-    const ig = c.createRadialGradient(node.sx, node.sy, 0, node.sx, node.sy, gr);
+    const ig = c.createRadialGradient(
+      node.sx,
+      node.sy,
+      0,
+      node.sx,
+      node.sy,
+      gr,
+    );
     ig.addColorStop(0, rgba(node.color, idle));
     ig.addColorStop(1, rgba(node.color, 0));
     c.fillStyle = ig;
@@ -1143,7 +1259,14 @@ function drawNodeGlow(
     node.kind === "video" && node.status === "failed"
       ? ([239, 90, 90] as RGB)
       : node.color;
-  const g = c.createRadialGradient(node.sx, node.sy, 0, node.sx, node.sy, glowR);
+  const g = c.createRadialGradient(
+    node.sx,
+    node.sy,
+    0,
+    node.sx,
+    node.sy,
+    glowR,
+  );
   g.addColorStop(0, rgba(col, 0.5 * intensity));
   g.addColorStop(0.4, rgba(col, 0.12 * intensity));
   g.addColorStop(1, rgba(col, 0));
@@ -1237,7 +1360,14 @@ function drawCore(c: CanvasRenderingContext2D, core: SN, time: number) {
 
   c.globalCompositeOperation = "lighter";
   const glowR = r * 4;
-  const g = c.createRadialGradient(core.sx, core.sy, 0, core.sx, core.sy, glowR);
+  const g = c.createRadialGradient(
+    core.sx,
+    core.sy,
+    0,
+    core.sx,
+    core.sy,
+    glowR,
+  );
   g.addColorStop(0, rgba(core.color, 0.5 * a));
   g.addColorStop(0.5, rgba(core.color, 0.12 * a));
   g.addColorStop(1, rgba(core.color, 0));

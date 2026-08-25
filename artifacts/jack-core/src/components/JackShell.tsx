@@ -13,11 +13,12 @@ import {
   X,
   LogOut,
   Radio,
+  ClipboardList,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 
-export type JackView = "graph" | "library" | "interview" | "review" | "reports";
+export type JackView = "graph" | "library" | "interview" | "review" | "reports" | "closeout";
 
 interface JackShellProps {
   active: JackView;
@@ -35,6 +36,7 @@ interface JackShellProps {
   onStartUserTest?: () => void;
   userTestStarting?: boolean;
   canViewPilotReports?: boolean;
+  canUseParticipantCloseout?: boolean;
   children: ReactNode;
 }
 
@@ -56,6 +58,7 @@ export function JackShell({
   onStartUserTest,
   userTestStarting,
   canViewPilotReports,
+  canUseParticipantCloseout,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -180,6 +183,14 @@ export function JackShell({
               label="Pilot Reports"
               active={active === "reports"}
               onClick={() => go("reports")}
+            />
+          )}
+          {canUseParticipantCloseout && (
+            <NavItem
+              icon={<ClipboardList className="h-4 w-4" />}
+              label="Closeout"
+              active={active === "closeout"}
+              onClick={() => go("closeout")}
             />
           )}
           <NavItem icon={<LayoutDashboard className="h-4 w-4" />} label="Dashboard" soon />
