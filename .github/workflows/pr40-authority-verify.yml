@@ -36,7 +36,10 @@ jobs:
         run: pnpm --filter @workspace/jack-core test
       - name: Full build
         run: pnpm build
-      - name: Format check
-        run: pnpm exec prettier --check DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx lib/api-client-react/src/generated/api.schemas.ts lib/api-spec/openapi.yaml lib/api-spec/orval.config.ts lib/api-zod/src/generated/api.ts lib/api-zod/src/generated/types supabase/migrations/20260811120000_authoritative_source_registry.sql
+      - name: Format core source
+        run: pnpm exec prettier --check DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx
+      - name: Format API contract
+        run: pnpm exec prettier --check lib/api-client-react/src/generated/api.schemas.ts lib/api-spec/openapi.yaml lib/api-spec/orval.config.ts lib/api-zod/src/generated/api.ts 'lib/api-zod/src/generated/types/**/*.ts'
       - name: Diff check
+        if: always()
         run: git diff --check 2bdd99edadae9bf498bb778ce1959e26229fb194...HEAD
