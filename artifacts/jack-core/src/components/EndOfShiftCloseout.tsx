@@ -306,31 +306,35 @@ export function EndOfShiftCloseout({
             </div>
 
             <div className="space-y-3">
-              {questions.map((question) => (
-                <label key={question} className="block space-y-1 text-sm">
-                  <span className="font-semibold">
-                    {QUESTION_LABELS[question] ?? question}
-                  </span>
-                  <Textarea
-                    rows={3}
-                    maxLength={1000}
-                    value={sortedAnswers[question] ?? ""}
-                    readOnly={readOnly}
-                    onChange={(event) => {
-                      const next = event.target.value.slice(0, 1000);
-                      setAnswers((current) => ({
-                        ...current,
-                        [question]: next,
-                      }));
-                    }}
-                    placeholder="Answer briefly"
-                    className="min-h-20"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    {sortedAnswers[question]?.length ?? 0}/1000
+              {questions.map((question) => {
+                const inputId = `closeout-question-${question}`;
+                return (
+                  <div key={question} className="space-y-1 text-sm">
+                    <label htmlFor={inputId} className="block font-semibold">
+                      {QUESTION_LABELS[question] ?? question}
+                    </label>
+                    <Textarea
+                      id={inputId}
+                      rows={3}
+                      maxLength={1000}
+                      value={sortedAnswers[question] ?? ""}
+                      readOnly={readOnly}
+                      onChange={(event) => {
+                        const next = event.target.value.slice(0, 1000);
+                        setAnswers((current) => ({
+                          ...current,
+                          [question]: next,
+                        }));
+                      }}
+                      placeholder="Answer briefly"
+                      className="min-h-20"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      {sortedAnswers[question]?.length ?? 0}/1000
+                    </div>
                   </div>
-                </label>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}
