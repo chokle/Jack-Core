@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
@@ -41,4 +43,4 @@ jobs:
       - name: Format check
         run: pnpm exec prettier --check artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts
       - name: Diff check
-        run: git diff --check HEAD^ HEAD
+        run: git diff --check origin/main...HEAD
