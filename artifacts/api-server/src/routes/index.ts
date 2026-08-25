@@ -14,6 +14,8 @@ import testingRouter from "./testing.js";
 import testSessionsRouter from "./test-sessions.js";
 import telemetryConsentRouter from "./telemetry-consent.js";
 import telemetryReportsRouter from "./telemetry-reports.js";
+import pilotEndOfDayRouter from "./pilot-end-of-day.js";
+import activityHeartbeatRouter from "./activity-heartbeat.js";
 import accountRouter from "./account.js";
 
 const router: IRouter = Router();
@@ -33,6 +35,8 @@ router.use(testingRouter);
 router.use(testSessionsRouter);
 router.use(telemetryConsentRouter);
 router.use(telemetryReportsRouter);
+router.use(pilotEndOfDayRouter);
+router.use(activityHeartbeatRouter);
 router.use(accountRouter);
 
 export default router;
