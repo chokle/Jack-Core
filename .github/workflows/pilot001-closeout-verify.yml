@@ -25,7 +25,20 @@ jobs:
       - name: Focused API closeout tests
         run: pnpm --filter @workspace/api-server exec vitest run src/routes/__tests__/end-of-shift-closeout.test.ts
       - name: Focused Jack closeout tests
-        run: pnpm --filter @workspace/jack-core exec vitest run src/components/EndOfShiftCloseout.test.tsx
+        id: focused_jack
+        continue-on-error: true
+        run: pnpm --filter @workspace/jack-core exec vitest run src/components/EndOfShiftCloseout.test.tsx --reporter=json --outputFile=closeout-vitest.json
+      - name: Upload focused Jack diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-jack-closeout-diagnostics
+          path: artifacts/jack-core/closeout-vitest.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Fail on focused Jack test failure
+        if: steps.focused_jack.outcome == 'failure'
+        run: exit 1
       - name: API typecheck
         run: pnpm --filter @workspace/api-server typecheck
       - name: Jack typecheck
