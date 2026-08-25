@@ -20,6 +20,57 @@ The overlay remembers a sensible last position and size per device class where p
 
 It must remain easy to dismiss, minimize, move, resize, and restore without obscuring primary work.
 
+## Persistent desktop companion direction
+
+Jack Pulse should be designed so the web overlay can graduate into a lightweight desktop companion rather than being trapped inside Torch pages.
+
+Future desktop shell requirements:
+- pin Jack to any screen corner;
+- optional always-on-top window;
+- compact click-through-safe PEEK mode when appropriate, with a clear interaction toggle;
+- global summon/hide shortcut;
+- voice-first interaction without requiring the Torch app to be foregrounded;
+- preserve the same Jack identity, conversation context, health state, interventions, and task context across the web and desktop shells;
+- support being present while the user is working in other software, browsing, streaming, or gaming without stealing focus;
+- never capture unrelated screen/application content by default. Cross-app context must be explicit, permissioned, and bounded.
+
+The desktop shell should be thin. Jack Core remains the intelligence/service layer; the companion is another surface over the same state and APIs.
+
+## Multi-surface presence model
+
+Treat Jack as one intelligence with multiple surfaces, not separate assistants per device.
+
+Initial surface path:
+1. Torch web overlay — first implementation and proving ground;
+2. desktop companion — persistent corner presence across applications;
+3. phone companion/PWA — quick voice, interventions, status, and task continuity;
+4. smartwatch companion — glanceable Jack presence and short voice/action loops.
+
+Cross-surface continuity should preserve:
+- identity and user relationship;
+- active objective/task context where authorized;
+- unread interventions;
+- latest self-report and system-health state;
+- recent conversation context within privacy/retention policy;
+- device-appropriate presentation state.
+
+Do not clone full desktop functionality onto every device. Each surface gets the minimum controls that fit the moment.
+
+## Smartwatch direction
+
+A watch version should be a companion, not a miniature dashboard.
+
+High-value watch functions:
+- Jack presence/health glance;
+- material intervention alert with one-sentence summary;
+- tap or voice: “What happened?”, “Anything I need to know?”, “How are you running?”, “What’s next?”;
+- short spoken/text response;
+- acknowledge, snooze, or hand off to phone/desktop;
+- lightweight task/status checks;
+- optional haptic cue only for material interventions.
+
+Long reports, source inspection, deep provenance, configuration, and complex actions should hand off to phone or desktop.
+
 ## Visual direction
 
 Use translucent, layered panels rather than heavy dashboard chrome.
@@ -163,9 +214,10 @@ Backend:
 - include timestamps, source/provenance, freshness, and unknown/unavailable states;
 - emit material intervention events rather than polling the UI for every minor state change;
 - maintain a short intervention history without duplicating sensitive source text;
-- expose recent change events so post-upgrade comparison is grounded in actual deployments/config/source changes.
+- expose recent change events so post-upgrade comparison is grounded in actual deployments/config/source changes;
+- expose surface-agnostic session/presence state so web, desktop, phone, and watch can share continuity without duplicating Jack.
 
-Frontend:
+Frontend/web:
 - overlay shell mounted at internal app-shell level;
 - draggable and resizable with viewport-safe recovery;
 - PEEK / CHAT / EXPANDED / DOCKED states;
@@ -175,6 +227,12 @@ Frontend:
 - intervention badge/pulse;
 - conversational self-report thread;
 - mobile mode that defaults to compact overlay or bottom-edge dock without obscuring field workflows.
+
+Desktop companion later:
+- native/webview wrapper or comparable thin shell around the same Jack APIs/state;
+- always-on-top and corner pinning handled by the desktop shell, not emulated inside a browser tab;
+- aggressive idle efficiency so persistent presence does not become a resource hog;
+- OS notifications only for material events and only when enabled.
 
 ## Acceptance criteria for first implementation
 
@@ -187,11 +245,14 @@ Frontend:
 7. A post-upgrade event can trigger a structured check-in report.
 8. At least HEALTH and WHAT CHANGED utility panels can open from the overlay without replacing the conversation.
 9. The overlay never claims hidden internal state not represented by observable evidence.
-10. Mobile and desktop layouts remain usable.
+10. Mobile and desktop-browser layouts remain usable.
 11. Existing Ask Jack, health, privacy, auth, and provenance tests remain green.
+12. The internal state/API design does not assume Jack exists only inside a browser tab, preserving a clean path to desktop/phone/watch companion surfaces.
 
 ## Long-term direction
 
 Jack Pulse is the first visible expression of Jack as Torch's intelligence layer: present, socially aware, willing to challenge the team, able to report the condition of systems that constitute his operating environment, and increasingly useful in running Torch itself.
 
 The goal is not merely to monitor Jack. It is to give Torch an always-available window into him — a place where Jack can speak, explain, challenge, report degradation, show his evidence, and make his own condition legible to the people building him.
+
+Long term, that window should follow the user. Jack should be able to live in the corner of a work screen, move to the phone when the user walks away, and reduce to a glanceable voice-first presence on a watch while remaining the same Jack underneath.
