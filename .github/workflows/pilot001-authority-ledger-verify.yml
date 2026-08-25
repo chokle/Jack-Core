@@ -1,0 +1,38 @@
+name: Pilot001 Authority Ledger Verification
+
+on:
+  push:
+    branches:
+      - fix/pilot001-authority-migration-ledger
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Focused authority migration tests
+        run: pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/authority-migration.test.ts
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Workspace typecheck
+        run: pnpm run typecheck
+      - name: API build
+        run: pnpm --filter @workspace/api-server build
+      - name: Format check
+        run: pnpm exec prettier --check artifacts/api-server/src/lib/__tests__/authority-migration.test.ts supabase/migrations/20260825051621_authoritative_source_registry.sql supabase/migrations/20260825051717_move_btree_gist_extension.sql
+      - name: Diff check
+        run: git diff --check origin/main...HEAD
