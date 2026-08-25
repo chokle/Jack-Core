@@ -67,11 +67,9 @@ async function requireReportScope(
   });
 
   if (!authorization.allowed || !authorization.authority) {
-    res
-      .status(403)
-      .json({
-        error: "No active report role exists for this organization and pilot.",
-      });
+    res.status(403).json({
+      error: "No active report role exists for this organization and pilot.",
+    });
     return null;
   }
 
@@ -183,11 +181,9 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
 
     const window = utcDayWindow(req.query["date"]);
     if (!window) {
-      return res
-        .status(400)
-        .json({
-          error: "A valid current or past UTC report date is required.",
-        });
+      return res.status(400).json({
+        error: "A valid current or past UTC report date is required.",
+      });
     }
 
     const rows = await loadRows(scope, window.start, window.end);
