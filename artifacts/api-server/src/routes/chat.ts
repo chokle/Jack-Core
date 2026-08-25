@@ -23,6 +23,7 @@ import { KNOWLEDGE_NODE_KINDS } from "../lib/memory-graph.js";
 import {
   recordServerAskJackEvent,
   requestIdentifier,
+  resolveActiveTesterScope,
 } from "../lib/activity-telemetry.js";
 import {
   authoritativeSourceFromRow,
@@ -63,6 +64,10 @@ interface ChatCitation {
   thumbnailUrl: string | null;
   sourceType: "video" | "knowledge" | "authority";
   entryId?: string;
+  contributor?: string;
+  knowledgeNature?: "direct" | "inferred";
+  evidenceType?: string;
+  originalSource?: string;
   verified?: boolean;
   sourceCount?: number;
   jurisdiction?: string;
@@ -77,6 +82,46 @@ interface ChatCitation {
   officialSourceUrl?: string;
   amendmentIndicator?: string;
   contentAvailability?: string;
+}
+
+interface KnowledgeScope {
+  organizationId: string;
+  pilotId: string;
+}
+
+function knowledgeEntryScopeAllowed(
+  metadata: KnowledgeObjectMeta | undefined,
+  scope: KnowledgeScope | null,
+): boolean {
+  if (!metadata) return false;
+  const metadataPilotId = metadata.pilotId;
+  const metadataOrganizationId = metadata.organizationId;
+  const hasPilotId = typeof metadataPilotId === "string" && !!metadataPilotId;
+  const hasOrganizationId =
+    typeof metadataOrganizationId === "string" && !!metadataOrganizationId;
+  if (!hasPilotId && !hasOrganizationId) return true;
+  // Scoped knowledge must carry the complete canonical scope. A legacy name,
+  // short code, or half-populated scope is unknown and therefore excluded.
+  if (!hasPilotId || !hasOrganizationId || !scope) return false;
+  return (
+    metadataPilotId === scope.pilotId &&
+    metadataOrganizationId === scope.organizationId
+  );
+}
+
+async function resolveKnowledgeScope(
+  userId: string,
+): Promise<KnowledgeScope | null> {
+  try {
+    const membership = await resolveActiveTesterScope(userId);
+    if (!membership.scope) return null;
+    return {
+      organizationId: membership.scope.organizationId,
+      pilotId: membership.scope.pilotId,
+    };
+  } catch (_error) {
+    return null;
+  }
 }
 
 router.post("/chat", aiQueryLimiter, async (req, res) => {
@@ -107,6 +152,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .json({ error: "Unauthorized — sign in required." });
     }
     const session = resolveSession(req, res);
+    const knowledgeScope = await resolveKnowledgeScope(userId);
 
     const sensitivity = classifyCodeSensitiveQuestion(message);
     if (sensitivity.isCodeSensitive) {
@@ -286,6 +332,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       .map((e) => e["id"])
       .filter((id): id is string => typeof id === "string" && !!id);
     const metaByEntryId = new Map<string, KnowledgeObjectMeta>();
+    const metaAvailableById = new Set<string>();
     if (entryIds.length > 0) {
       const { data: metaRows, error: metaError } = await supabase
         .from("knowledge_entries")
@@ -299,13 +346,24 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       } else {
         for (const row of (metaRows ?? []) as Array<Record<string, unknown>>) {
           const id = row["id"];
-          if (typeof id === "string")
+          if (typeof id === "string") {
             metaByEntryId.set(id, readKnowledgeMeta(row["metadata"]));
+            metaAvailableById.add(id);
+          }
         }
       }
     }
 
-    const rebalancedEntries = rebalanceEntriesForTopic(rawEntries, topicBias);
+    const rebalancedEntries = rebalanceEntriesForTopic(
+      rawEntries,
+      topicBias,
+    ).filter((entry) => {
+      const entryId = entry["id"];
+      if (typeof entryId !== "string") return false;
+      if (!metaAvailableById.has(entryId)) return false;
+      const metadata = metaByEntryId.get(entryId);
+      return knowledgeEntryScopeAllowed(metadata, knowledgeScope);
+    });
     for (const e of rebalancedEntries) {
       const title = (e["title"] as string) ?? "Knowledge Entry";
       const description = (e["description"] as string) ?? "";
@@ -319,6 +377,8 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .trim()
         .slice(0, 240);
       const entryId = e["id"] as string;
+      const metadata = metaByEntryId.get(entryId);
+      const provenance = knowledgeEntryProvenance(metadata);
       // Surface the field note's OWN trust signal (verifiedBy / evidenceCount from
       // its Knowledge Object metadata), mirroring how video citations carry the
       // reranker's verified/sourceCount. A genuinely neutral note (no verifier, no
@@ -327,7 +387,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       contextText += `[Knowledge Entry: ${title}${describeTrust(
         trust.verified ? "verified" : "neutral",
         trust.sourceCount ?? 0,
-      )}]\n${description ? description + "\n" : ""}${body}\n\n`;
+      )}]\n${formatKnowledgeProvenance(provenance)}${description ? description + "\n" : ""}${body}\n\n`;
       citations.push({
         // No video to jump to — videoId is empty; entryId identifies the source.
         videoId: "",
@@ -338,6 +398,18 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         thumbnailUrl: imageUrl,
         sourceType: "knowledge",
         entryId,
+        ...(provenance.contributor
+          ? { contributor: provenance.contributor }
+          : {}),
+        ...(provenance.knowledgeNature
+          ? { knowledgeNature: provenance.knowledgeNature }
+          : {}),
+        ...(provenance.evidenceType
+          ? { evidenceType: provenance.evidenceType }
+          : {}),
+        ...(provenance.originalSource
+          ? { originalSource: provenance.originalSource }
+          : {}),
         // Only set when meaningful — knowledgeEntryTrust omits neutral signals.
         ...(trust.verified ? { verified: true } : {}),
         ...(trust.sourceCount !== undefined
@@ -1028,6 +1100,49 @@ export function describeTrust(
   if (verification === "verified") parts.push("mentor-verified");
   if (sourceCount >= 2) parts.push(`confirmed across ${sourceCount} videos`);
   return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+}
+
+interface KnowledgeProvenance {
+  contributor?: string;
+  knowledgeNature?: "direct" | "inferred";
+  evidenceType?: string;
+  originalSource?: string;
+}
+
+function metadataString(
+  meta: KnowledgeObjectMeta | undefined,
+  key: string,
+): string | undefined {
+  const value = meta?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function knowledgeEntryProvenance(
+  meta: KnowledgeObjectMeta | undefined,
+): KnowledgeProvenance {
+  const nature = metadataString(meta, "knowledgeNature");
+  return {
+    contributor: metadataString(meta, "contributor"),
+    knowledgeNature:
+      nature === "direct" || nature === "inferred" ? nature : undefined,
+    evidenceType: metadataString(meta, "evidenceType"),
+    originalSource: metadataString(meta, "originalSource"),
+  };
+}
+
+function formatKnowledgeProvenance(provenance: KnowledgeProvenance): string {
+  const parts: string[] = [];
+  if (provenance.originalSource)
+    parts.push(`Source: ${provenance.originalSource}`);
+  if (provenance.contributor)
+    parts.push(`Contributor: ${provenance.contributor}`);
+  if (provenance.evidenceType)
+    parts.push(`Evidence: ${provenance.evidenceType}`);
+  if (provenance.knowledgeNature === "direct")
+    parts.push("Classification: direct supervisor-provided knowledge");
+  if (provenance.knowledgeNature === "inferred")
+    parts.push("Classification: inferred interpretation, not a direct quote");
+  return parts.length > 0 ? `${parts.join(" · ")}\n` : "";
 }
 
 /**
