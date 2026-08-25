@@ -1,0 +1,44 @@
+name: Pilot001 Closeout Verification
+
+on:
+  push:
+    branches:
+      - reconcile/pilot-closeout-20260824
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Focused API closeout tests
+        run: pnpm --filter @workspace/api-server exec vitest run src/routes/__tests__/end-of-shift-closeout.test.ts
+      - name: Focused Jack closeout tests
+        run: pnpm --filter @workspace/jack-core exec vitest run src/components/EndOfShiftCloseout.test.tsx
+      - name: API typecheck
+        run: pnpm --filter @workspace/api-server typecheck
+      - name: Jack typecheck
+        run: pnpm --filter @workspace/jack-core typecheck
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: API build
+        run: pnpm --filter @workspace/api-server build
+      - name: Jack build
+        run: pnpm --filter @workspace/jack-core build
+      - name: Format check
+        run: pnpm exec prettier --check artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/App.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/components/JackShell.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts
+      - name: Diff check
+        run: git diff --check HEAD^ HEAD
