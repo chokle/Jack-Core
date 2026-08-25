@@ -54,8 +54,9 @@ create table if not exists public.authoritative_sources (
   )
 );
 
--- Only one active governing primary may cover a jurisdiction/edition/date.
--- Superseded historical rows retain their closed windows for replay and audit.
+-- Only one governing primary may cover a jurisdiction/edition/date, including
+-- superseded historical rows used for replay. Historical rows therefore must
+-- close their effective windows before a successor window begins.
 alter table public.authoritative_sources
   drop constraint if exists authoritative_sources_no_overlapping_active_primary;
 alter table public.authoritative_sources
@@ -67,7 +68,6 @@ alter table public.authoritative_sources
     daterange(effective_from, effective_to, '[]') with &&
   ) where (
     source_type in ('adopted_code', 'municipal_bylaw')
-    and status in ('current', 'requires_review')
   );
 
 create index if not exists idx_authoritative_sources_resolution
@@ -76,7 +76,7 @@ create index if not exists idx_authoritative_sources_resolution
 
 alter table public.authoritative_sources enable row level security;
 revoke all on table public.authoritative_sources from public, anon, authenticated;
-grant select on table public.authoritative_sources to service_role;
+grant select, update on table public.authoritative_sources to service_role;
 
 insert into public.authoritative_sources (
   source_id, authority, jurisdiction, document_title, edition, revision_id,
