@@ -10,7 +10,7 @@ on:
     paths:
       - "cloudflare/**"
       - "Dockerfile.cloudflare"
-      - "Dockerfile.cloudflare.dockerignore"
+      - ".dockerignore"
       - ".env.cloudflare.example"
       - ".github/workflows/cloudflare-cutover-verify.yml"
 
@@ -41,6 +41,8 @@ jobs:
         run: node cloudflare/generate-deploy-config.mjs
       - name: Validate Worker syntax
         run: node --check cloudflare/worker.mjs
+      - name: Format check
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml
       - name: Cloudflare Worker dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
@@ -53,7 +55,5 @@ jobs:
         run: pnpm typecheck
       - name: Workspace build
         run: pnpm build
-      - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml
       - name: Diff check
         run: git diff --check origin/main...HEAD
