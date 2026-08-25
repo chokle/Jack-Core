@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AuthorityCitationMetadataContentAvailability = typeof AuthorityCitationMetadataContentAvailability[keyof typeof AuthorityCitationMetadataContentAvailability];
-
+export type AuthorityCitationMetadataContentAvailability =
+  (typeof AuthorityCitationMetadataContentAvailability)[keyof typeof AuthorityCitationMetadataContentAvailability];
 
 export const AuthorityCitationMetadataContentAvailability = {
-  metadata_only: 'metadata_only',
-  licensed_section: 'licensed_section',
+  metadata_only: "metadata_only",
+  licensed_section: "licensed_section",
 } as const;

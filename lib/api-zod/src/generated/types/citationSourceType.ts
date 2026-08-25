@@ -9,11 +9,11 @@
 /**
  * Origin of the citation. "video" (the default when omitted) cites a transcript segment. "knowledge" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).
  */
-export type CitationSourceType = typeof CitationSourceType[keyof typeof CitationSourceType];
-
+export type CitationSourceType =
+  (typeof CitationSourceType)[keyof typeof CitationSourceType];
 
 export const CitationSourceType = {
-  video: 'video',
-  knowledge: 'knowledge',
-  authority: 'authority',
+  video: "video",
+  knowledge: "knowledge",
+  authority: "authority",
 } as const;

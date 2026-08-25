@@ -6,12 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type GraphHealthWriteStatus = typeof GraphHealthWriteStatus[keyof typeof GraphHealthWriteStatus];
-
+export type GraphHealthWriteStatus =
+  (typeof GraphHealthWriteStatus)[keyof typeof GraphHealthWriteStatus];
 
 export const GraphHealthWriteStatus = {
-  verified: 'verified',
-  partial: 'partial',
-  failed: 'failed',
-  pending: 'pending',
+  verified: "verified",
+  partial: "partial",
+  failed: "failed",
+  pending: "pending",
 } as const;

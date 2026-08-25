@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ChatResponseLearningStatus } from './chatResponseLearningStatus';
+import type { ChatResponseLearningStatus } from "./chatResponseLearningStatus";
 
 export type ChatResponseLearning = {
   status: ChatResponseLearningStatus;

@@ -12,9 +12,9 @@ export interface StartInterviewInput {
   /** Selected trade (e.g. Welding, Heavy Equipment Operator, Other) */
   trade: string;
   /**
-     * Free-text trade when "Other" is selected
-     * @nullable
-     */
+   * Free-text trade when "Other" is selected
+   * @nullable
+   */
   tradeInput?: string | null;
   /** @nullable */
   yearsExperience?: number | null;
@@ -24,8 +24,8 @@ export interface StartInterviewInput {
   /** @nullable */
   background?: string | null;
   /**
-     * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
-     * @nullable
-     */
+   * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
+   * @nullable
+   */
   focus?: string | null;
 }

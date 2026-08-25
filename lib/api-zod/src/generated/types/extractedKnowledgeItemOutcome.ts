@@ -9,11 +9,11 @@
 /**
  * How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.
  */
-export type ExtractedKnowledgeItemOutcome = typeof ExtractedKnowledgeItemOutcome[keyof typeof ExtractedKnowledgeItemOutcome];
-
+export type ExtractedKnowledgeItemOutcome =
+  (typeof ExtractedKnowledgeItemOutcome)[keyof typeof ExtractedKnowledgeItemOutcome];
 
 export const ExtractedKnowledgeItemOutcome = {
-  reinforced: 'reinforced',
-  created: 'created',
-  queued: 'queued',
+  reinforced: "reinforced",
+  created: "created",
+  queued: "queued",
 } as const;

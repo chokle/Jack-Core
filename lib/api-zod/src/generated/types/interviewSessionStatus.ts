@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type InterviewSessionStatus = typeof InterviewSessionStatus[keyof typeof InterviewSessionStatus];
-
+export type InterviewSessionStatus =
+  (typeof InterviewSessionStatus)[keyof typeof InterviewSessionStatus];
 
 export const InterviewSessionStatus = {
-  active: 'active',
-  completed: 'completed',
+  active: "active",
+  completed: "completed",
 } as const;

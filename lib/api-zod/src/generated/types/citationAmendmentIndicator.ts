@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CitationAmendmentIndicator = typeof CitationAmendmentIndicator[keyof typeof CitationAmendmentIndicator];
-
+export type CitationAmendmentIndicator =
+  (typeof CitationAmendmentIndicator)[keyof typeof CitationAmendmentIndicator];
 
 export const CitationAmendmentIndicator = {
-  bc_amendment: 'bc_amendment',
-  vancouver_specific: 'vancouver_specific',
-  none: 'none',
+  bc_amendment: "bc_amendment",
+  vancouver_specific: "vancouver_specific",
+  none: "none",
 } as const;

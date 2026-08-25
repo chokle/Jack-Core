@@ -5,9 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeEdge } from './knowledgeEdge';
-import type { KnowledgeGraphCounts } from './knowledgeGraphCounts';
-import type { KnowledgeNode } from './knowledgeNode';
+import type { KnowledgeEdge } from "./knowledgeEdge";
+import type { KnowledgeGraphCounts } from "./knowledgeGraphCounts";
+import type { KnowledgeNode } from "./knowledgeNode";
 
 export interface KnowledgeGraph {
   nodes: KnowledgeNode[];

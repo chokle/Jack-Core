@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { CandidateResolutionConflictCode } from './candidateResolutionConflictCode';
-import type { KnowledgeCandidateMatch } from './knowledgeCandidateMatch';
+import type { CandidateResolutionConflictCode } from "./candidateResolutionConflictCode";
+import type { KnowledgeCandidateMatch } from "./knowledgeCandidateMatch";
 
 export interface CandidateResolutionConflict {
   error: string;

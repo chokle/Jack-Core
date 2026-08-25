@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeCandidateMatch } from './knowledgeCandidateMatch';
-import type { KnowledgeCandidateStatus } from './knowledgeCandidateStatus';
+import type { KnowledgeCandidateMatch } from "./knowledgeCandidateMatch";
+import type { KnowledgeCandidateStatus } from "./knowledgeCandidateStatus";
 
 export interface KnowledgeCandidate {
   id: string;
@@ -33,25 +33,25 @@ export interface KnowledgeCandidate {
   /** @nullable */
   createdAt?: string | null;
   /**
-     * The canonical concept node reinforced by an accept/merge resolution.
-     * @nullable
-     */
+   * The canonical concept node reinforced by an accept/merge resolution.
+   * @nullable
+   */
   resolvedTargetId?: string | null;
   /**
-     * The reviewer's reason, recorded on reject.
-     * @nullable
-     */
+   * The reviewer's reason, recorded on reject.
+   * @nullable
+   */
   resolutionReason?: string | null;
   /** @nullable */
   resolvedAt?: string | null;
   /**
-     * The target the reviewer originally asked for (accept/merge only).
-     * @nullable
-     */
+   * The target the reviewer originally asked for (accept/merge only).
+   * @nullable
+   */
   requestedTargetId?: string | null;
   /**
-     * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
-     * @nullable
-     */
+   * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
+   * @nullable
+   */
   redirectReason?: string | null;
 }

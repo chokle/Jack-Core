@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthorityContextMeasurementsItem } from './authorityContextMeasurementsItem';
+import type { AuthorityContextMeasurementsItem } from "./authorityContextMeasurementsItem";
 
 /**
  * Trusted user/project context for deterministic authority resolution. Jurisdiction must not be inferred from photos, EXIF, faces, signs, or model guesses.
@@ -14,9 +14,9 @@ export interface AuthorityContext {
   province?: string;
   municipality?: string;
   /**
-     * User-supplied calendar date in YYYY-MM-DD form; not image-derived.
-     * @pattern ^\d{4}-\d{2}-\d{2}$
-     */
+   * User-supplied calendar date in YYYY-MM-DD form; not image-derived.
+   * @pattern ^\d{4}-\d{2}-\d{2}$
+   */
   permitApplicationDate?: string;
   explicitCodeEdition?: string;
   authorityHavingJurisdiction?: string;

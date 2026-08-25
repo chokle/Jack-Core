@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CitationContentAvailability = typeof CitationContentAvailability[keyof typeof CitationContentAvailability];
-
+export type CitationContentAvailability =
+  (typeof CitationContentAvailability)[keyof typeof CitationContentAvailability];
 
 export const CitationContentAvailability = {
-  metadata_only: 'metadata_only',
-  licensed_section: 'licensed_section',
+  metadata_only: "metadata_only",
+  licensed_section: "licensed_section",
 } as const;

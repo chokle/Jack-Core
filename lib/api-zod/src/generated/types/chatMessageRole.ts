@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
-
+export type ChatMessageRole =
+  (typeof ChatMessageRole)[keyof typeof ChatMessageRole];
 
 export const ChatMessageRole = {
-  user: 'user',
-  assistant: 'assistant',
+  user: "user",
+  assistant: "assistant",
 } as const;

@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { VideoStatus } from './videoStatus';
+import type { VideoStatus } from "./videoStatus";
 
 export interface Video {
   id: string;

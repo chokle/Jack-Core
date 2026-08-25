@@ -5,11 +5,11 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ListKnowledgeCandidatesStatus } from './listKnowledgeCandidatesStatus';
+import type { ListKnowledgeCandidatesStatus } from "./listKnowledgeCandidatesStatus";
 
 export type ListKnowledgeCandidatesParams = {
-/**
- * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
- */
-status?: ListKnowledgeCandidatesStatus;
+  /**
+   * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
+   */
+  status?: ListKnowledgeCandidatesStatus;
 };

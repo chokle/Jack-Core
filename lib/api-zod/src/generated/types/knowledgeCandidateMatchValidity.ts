@@ -9,11 +9,11 @@
 /**
  * Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail.
  */
-export type KnowledgeCandidateMatchValidity = typeof KnowledgeCandidateMatchValidity[keyof typeof KnowledgeCandidateMatchValidity];
-
+export type KnowledgeCandidateMatchValidity =
+  (typeof KnowledgeCandidateMatchValidity)[keyof typeof KnowledgeCandidateMatchValidity];
 
 export const KnowledgeCandidateMatchValidity = {
-  live: 'live',
-  redirected: 'redirected',
-  gone: 'gone',
+  live: "live",
+  redirected: "redirected",
+  gone: "gone",
 } as const;

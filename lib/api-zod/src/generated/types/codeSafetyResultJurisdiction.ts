@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CodeSafetyResultJurisdiction = typeof CodeSafetyResultJurisdiction[keyof typeof CodeSafetyResultJurisdiction];
-
+export type CodeSafetyResultJurisdiction =
+  (typeof CodeSafetyResultJurisdiction)[keyof typeof CodeSafetyResultJurisdiction];
 
 export const CodeSafetyResultJurisdiction = {
-  BC_GENERAL: 'BC_GENERAL',
-  VANCOUVER: 'VANCOUVER',
-  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+  BC_GENERAL: "BC_GENERAL",
+  VANCOUVER: "VANCOUVER",
+  UNKNOWN_SPECIAL_AUTHORITY: "UNKNOWN_SPECIAL_AUTHORITY",
 } as const;

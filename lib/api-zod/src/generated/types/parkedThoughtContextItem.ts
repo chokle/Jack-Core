@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ParkedThoughtContextItemRole } from './parkedThoughtContextItemRole';
+import type { ParkedThoughtContextItemRole } from "./parkedThoughtContextItemRole";
 
 export interface ParkedThoughtContextItem {
   role: ParkedThoughtContextItemRole;

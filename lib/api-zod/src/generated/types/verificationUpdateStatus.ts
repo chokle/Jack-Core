@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type VerificationUpdateStatus = typeof VerificationUpdateStatus[keyof typeof VerificationUpdateStatus];
-
+export type VerificationUpdateStatus =
+  (typeof VerificationUpdateStatus)[keyof typeof VerificationUpdateStatus];
 
 export const VerificationUpdateStatus = {
-  verified: 'verified',
-  rejected: 'rejected',
-  unverified: 'unverified',
+  verified: "verified",
+  rejected: "rejected",
+  unverified: "unverified",
 } as const;

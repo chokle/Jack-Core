@@ -6,12 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SystemHealthSnapshotPulseColor = typeof SystemHealthSnapshotPulseColor[keyof typeof SystemHealthSnapshotPulseColor];
-
+export type SystemHealthSnapshotPulseColor =
+  (typeof SystemHealthSnapshotPulseColor)[keyof typeof SystemHealthSnapshotPulseColor];
 
 export const SystemHealthSnapshotPulseColor = {
-  green: 'green',
-  purple: 'purple',
-  orange: 'orange',
-  red: 'red',
+  green: "green",
+  purple: "purple",
+  orange: "orange",
+  red: "red",
 } as const;

@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { SearchResult } from './searchResult';
+import type { SearchResult } from "./searchResult";
 
 export interface SearchResults {
   query: string;

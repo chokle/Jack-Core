@@ -5,17 +5,17 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { MemoryGraphOnboardingEventEvent } from './memoryGraphOnboardingEventEvent';
-import type { MemoryGraphOnboardingEventSource } from './memoryGraphOnboardingEventSource';
-import type { MemoryGraphOnboardingEventVersion } from './memoryGraphOnboardingEventVersion';
+import type { MemoryGraphOnboardingEventEvent } from "./memoryGraphOnboardingEventEvent";
+import type { MemoryGraphOnboardingEventSource } from "./memoryGraphOnboardingEventSource";
+import type { MemoryGraphOnboardingEventVersion } from "./memoryGraphOnboardingEventVersion";
 
 export interface MemoryGraphOnboardingEvent {
   event: MemoryGraphOnboardingEventEvent;
   source: MemoryGraphOnboardingEventSource;
   version: MemoryGraphOnboardingEventVersion;
   /**
-     * @minimum 1
-     * @maximum 3
-     */
+   * @minimum 1
+   * @maximum 3
+   */
   step?: number;
 }

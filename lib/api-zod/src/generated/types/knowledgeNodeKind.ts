@@ -6,23 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type KnowledgeNodeKind = typeof KnowledgeNodeKind[keyof typeof KnowledgeNodeKind];
-
+export type KnowledgeNodeKind =
+  (typeof KnowledgeNodeKind)[keyof typeof KnowledgeNodeKind];
 
 export const KnowledgeNodeKind = {
-  core: 'core',
-  topic: 'topic',
-  competency: 'competency',
-  video: 'video',
-  mentor: 'mentor',
-  concept: 'concept',
-  tool: 'tool',
-  equipment: 'equipment',
-  material: 'material',
-  procedure: 'procedure',
-  hazard: 'hazard',
-  slang: 'slang',
-  certification: 'certification',
-  standard: 'standard',
-  regional_term: 'regional_term',
+  core: "core",
+  topic: "topic",
+  competency: "competency",
+  video: "video",
+  mentor: "mentor",
+  concept: "concept",
+  tool: "tool",
+  equipment: "equipment",
+  material: "material",
+  procedure: "procedure",
+  hazard: "hazard",
+  slang: "slang",
+  certification: "certification",
+  standard: "standard",
+  regional_term: "regional_term",
 } as const;

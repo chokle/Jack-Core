@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListParkedThoughtsStatus = typeof ListParkedThoughtsStatus[keyof typeof ListParkedThoughtsStatus];
-
+export type ListParkedThoughtsStatus =
+  (typeof ListParkedThoughtsStatus)[keyof typeof ListParkedThoughtsStatus];
 
 export const ListParkedThoughtsStatus = {
-  parked: 'parked',
-  resumed: 'resumed',
-  resolved: 'resolved',
+  parked: "parked",
+  resumed: "resumed",
+  resolved: "resolved",
 } as const;

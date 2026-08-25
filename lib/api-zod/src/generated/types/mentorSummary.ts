@@ -12,9 +12,9 @@ export interface MentorSummary {
   /** @nullable */
   trade?: string | null;
   /**
-     * What the mentor typed for their trade, before normalization.
-     * @nullable
-     */
+   * What the mentor typed for their trade, before normalization.
+   * @nullable
+   */
   tradeInput?: string | null;
   /** @nullable */
   yearsExperience?: number | null;

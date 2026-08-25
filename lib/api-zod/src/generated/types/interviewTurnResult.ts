@@ -5,9 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ExtractedKnowledgeItem } from './extractedKnowledgeItem';
-import type { InterviewAnswer } from './interviewAnswer';
-import type { InterviewSession } from './interviewSession';
+import type { ExtractedKnowledgeItem } from "./extractedKnowledgeItem";
+import type { InterviewAnswer } from "./interviewAnswer";
+import type { InterviewSession } from "./interviewSession";
 
 export interface InterviewTurnResult {
   session: InterviewSession;

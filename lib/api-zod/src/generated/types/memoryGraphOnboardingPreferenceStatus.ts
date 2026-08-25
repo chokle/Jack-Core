@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryGraphOnboardingPreferenceStatus = typeof MemoryGraphOnboardingPreferenceStatus[keyof typeof MemoryGraphOnboardingPreferenceStatus];
-
+export type MemoryGraphOnboardingPreferenceStatus =
+  (typeof MemoryGraphOnboardingPreferenceStatus)[keyof typeof MemoryGraphOnboardingPreferenceStatus];
 
 export const MemoryGraphOnboardingPreferenceStatus = {
-  completed: 'completed',
-  skipped: 'skipped',
+  completed: "completed",
+  skipped: "skipped",
 } as const;

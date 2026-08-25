@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { VerificationUpdateStatus } from './verificationUpdateStatus';
+import type { VerificationUpdateStatus } from "./verificationUpdateStatus";
 
 export interface VerificationUpdate {
   status: VerificationUpdateStatus;

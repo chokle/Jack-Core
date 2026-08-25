@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ParkThoughtInputSource = typeof ParkThoughtInputSource[keyof typeof ParkThoughtInputSource];
-
+export type ParkThoughtInputSource =
+  (typeof ParkThoughtInputSource)[keyof typeof ParkThoughtInputSource];
 
 export const ParkThoughtInputSource = {
-  chat: 'chat',
-  interview: 'interview',
+  chat: "chat",
+  interview: "interview",
 } as const;

@@ -6,14 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type SystemHealthSnapshotStatus = typeof SystemHealthSnapshotStatus[keyof typeof SystemHealthSnapshotStatus];
-
+export type SystemHealthSnapshotStatus =
+  (typeof SystemHealthSnapshotStatus)[keyof typeof SystemHealthSnapshotStatus];
 
 export const SystemHealthSnapshotStatus = {
-  Healthy: 'Healthy',
-  Listening: 'Listening',
-  Searching_Memory: 'Searching Memory',
-  Reasoning: 'Reasoning',
-  Writing_Memory: 'Writing Memory',
-  Warning: 'Warning',
+  Healthy: "Healthy",
+  Listening: "Listening",
+  Searching_Memory: "Searching Memory",
+  Reasoning: "Reasoning",
+  Writing_Memory: "Writing Memory",
+  Warning: "Warning",
 } as const;

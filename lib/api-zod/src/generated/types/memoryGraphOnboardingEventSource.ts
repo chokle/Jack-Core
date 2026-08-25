@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryGraphOnboardingEventSource = typeof MemoryGraphOnboardingEventSource[keyof typeof MemoryGraphOnboardingEventSource];
-
+export type MemoryGraphOnboardingEventSource =
+  (typeof MemoryGraphOnboardingEventSource)[keyof typeof MemoryGraphOnboardingEventSource];
 
 export const MemoryGraphOnboardingEventSource = {
-  automatic: 'automatic',
-  replay: 'replay',
+  automatic: "automatic",
+  replay: "replay",
 } as const;

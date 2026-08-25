@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeCandidateMatchValidity } from './knowledgeCandidateMatchValidity';
+import type { KnowledgeCandidateMatchValidity } from "./knowledgeCandidateMatchValidity";
 
 export interface KnowledgeCandidateMatch {
   nodeId: string;
@@ -14,9 +14,9 @@ export interface KnowledgeCandidateMatch {
   /** Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail. */
   validity?: KnowledgeCandidateMatchValidity;
   /**
-     * The node this match currently resolves to (itself when live, the survivor when redirected).
-     * @nullable
-     */
+   * The node this match currently resolves to (itself when live, the survivor when redirected).
+   * @nullable
+   */
   currentNodeId?: string | null;
   /** @nullable */
   currentLabel?: string | null;

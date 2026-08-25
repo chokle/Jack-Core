@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CodeSafetyResultOutcome = typeof CodeSafetyResultOutcome[keyof typeof CodeSafetyResultOutcome];
-
+export type CodeSafetyResultOutcome =
+  (typeof CodeSafetyResultOutcome)[keyof typeof CodeSafetyResultOutcome];
 
 export const CodeSafetyResultOutcome = {
-  bypass: 'bypass',
-  blocked: 'blocked',
-  allowed: 'allowed',
+  bypass: "bypass",
+  blocked: "blocked",
+  allowed: "allowed",
 } as const;

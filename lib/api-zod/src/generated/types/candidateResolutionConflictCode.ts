@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CandidateResolutionConflictCode = typeof CandidateResolutionConflictCode[keyof typeof CandidateResolutionConflictCode];
-
+export type CandidateResolutionConflictCode =
+  (typeof CandidateResolutionConflictCode)[keyof typeof CandidateResolutionConflictCode];
 
 export const CandidateResolutionConflictCode = {
-  already_resolved: 'already_resolved',
-  target_gone: 'target_gone',
+  already_resolved: "already_resolved",
+  target_gone: "target_gone",
 } as const;

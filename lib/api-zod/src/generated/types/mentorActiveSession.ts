@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { InterviewSession } from './interviewSession';
+import type { InterviewSession } from "./interviewSession";
 
 /**
  * A mentor's active (incomplete) interview session, if one exists. `session` is omitted when the mentor has no interview in progress.

@@ -9,11 +9,11 @@
 /**
  * Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.
  */
-export type InterviewAnswerDistillationStatus = typeof InterviewAnswerDistillationStatus[keyof typeof InterviewAnswerDistillationStatus];
-
+export type InterviewAnswerDistillationStatus =
+  (typeof InterviewAnswerDistillationStatus)[keyof typeof InterviewAnswerDistillationStatus];
 
 export const InterviewAnswerDistillationStatus = {
-  pending: 'pending',
-  verified: 'verified',
-  failed: 'failed',
+  pending: "pending",
+  verified: "verified",
+  failed: "failed",
 } as const;

@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeEdgeMeta } from './knowledgeEdgeMeta';
+import type { KnowledgeEdgeMeta } from "./knowledgeEdgeMeta";
 
 export interface KnowledgeEdge {
   id: string;

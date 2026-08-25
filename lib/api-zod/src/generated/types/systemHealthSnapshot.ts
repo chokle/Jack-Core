@@ -5,19 +5,19 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { SystemHealthSnapshotPulseColor } from './systemHealthSnapshotPulseColor';
-import type { SystemHealthSnapshotState } from './systemHealthSnapshotState';
-import type { SystemHealthSnapshotStatus } from './systemHealthSnapshotStatus';
+import type { SystemHealthSnapshotPulseColor } from "./systemHealthSnapshotPulseColor";
+import type { SystemHealthSnapshotState } from "./systemHealthSnapshotState";
+import type { SystemHealthSnapshotStatus } from "./systemHealthSnapshotStatus";
 
 /**
  * Coarse Systems Health telemetry for the heartbeat widget.
  */
 export interface SystemHealthSnapshot {
   /**
-     * 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
-     * @minimum 0
-     * @maximum 100
-     */
+   * 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
+   * @minimum 0
+   * @maximum 100
+   */
   vitalityScore: number;
   /** Beats per minute for the animated heartbeat. */
   heartbeatBPM: number;

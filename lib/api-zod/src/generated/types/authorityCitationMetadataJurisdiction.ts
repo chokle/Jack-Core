@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AuthorityCitationMetadataJurisdiction = typeof AuthorityCitationMetadataJurisdiction[keyof typeof AuthorityCitationMetadataJurisdiction];
-
+export type AuthorityCitationMetadataJurisdiction =
+  (typeof AuthorityCitationMetadataJurisdiction)[keyof typeof AuthorityCitationMetadataJurisdiction];
 
 export const AuthorityCitationMetadataJurisdiction = {
-  BC_GENERAL: 'BC_GENERAL',
-  VANCOUVER: 'VANCOUVER',
-  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+  BC_GENERAL: "BC_GENERAL",
+  VANCOUVER: "VANCOUVER",
+  UNKNOWN_SPECIAL_AUTHORITY: "UNKNOWN_SPECIAL_AUTHORITY",
 } as const;

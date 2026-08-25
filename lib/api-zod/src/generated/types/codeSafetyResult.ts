@@ -5,10 +5,10 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthorityCitationMetadata } from './authorityCitationMetadata';
-import type { CodeSafetyResultJurisdiction } from './codeSafetyResultJurisdiction';
-import type { CodeSafetyResultOutcome } from './codeSafetyResultOutcome';
-import type { CodeSensitivityResult } from './codeSensitivityResult';
+import type { AuthorityCitationMetadata } from "./authorityCitationMetadata";
+import type { CodeSafetyResultJurisdiction } from "./codeSafetyResultJurisdiction";
+import type { CodeSafetyResultOutcome } from "./codeSafetyResultOutcome";
+import type { CodeSensitivityResult } from "./codeSensitivityResult";
 
 export interface CodeSafetyResult {
   outcome: CodeSafetyResultOutcome;

@@ -15,19 +15,19 @@ export interface CurrentUser {
   canViewPilotReports: boolean;
 }
 
-export type MemoryGraphOnboardingPreferenceVersion = typeof MemoryGraphOnboardingPreferenceVersion[keyof typeof MemoryGraphOnboardingPreferenceVersion];
-
+export type MemoryGraphOnboardingPreferenceVersion =
+  (typeof MemoryGraphOnboardingPreferenceVersion)[keyof typeof MemoryGraphOnboardingPreferenceVersion];
 
 export const MemoryGraphOnboardingPreferenceVersion = {
   NUMBER_1: 1,
 } as const;
 
-export type MemoryGraphOnboardingPreferenceStatus = typeof MemoryGraphOnboardingPreferenceStatus[keyof typeof MemoryGraphOnboardingPreferenceStatus];
-
+export type MemoryGraphOnboardingPreferenceStatus =
+  (typeof MemoryGraphOnboardingPreferenceStatus)[keyof typeof MemoryGraphOnboardingPreferenceStatus];
 
 export const MemoryGraphOnboardingPreferenceStatus = {
-  completed: 'completed',
-  skipped: 'skipped',
+  completed: "completed",
+  skipped: "skipped",
 } as const;
 
 export interface MemoryGraphOnboardingPreference {
@@ -39,27 +39,27 @@ export interface MemoryGraphOnboardingPreferenceResponse {
   preference: MemoryGraphOnboardingPreference | null;
 }
 
-export type MemoryGraphOnboardingEventEvent = typeof MemoryGraphOnboardingEventEvent[keyof typeof MemoryGraphOnboardingEventEvent];
-
+export type MemoryGraphOnboardingEventEvent =
+  (typeof MemoryGraphOnboardingEventEvent)[keyof typeof MemoryGraphOnboardingEventEvent];
 
 export const MemoryGraphOnboardingEventEvent = {
-  memory_onboarding_started: 'memory_onboarding_started',
-  memory_onboarding_step_viewed: 'memory_onboarding_step_viewed',
-  memory_onboarding_skipped: 'memory_onboarding_skipped',
-  memory_onboarding_completed: 'memory_onboarding_completed',
-  memory_onboarding_reopened: 'memory_onboarding_reopened',
+  memory_onboarding_started: "memory_onboarding_started",
+  memory_onboarding_step_viewed: "memory_onboarding_step_viewed",
+  memory_onboarding_skipped: "memory_onboarding_skipped",
+  memory_onboarding_completed: "memory_onboarding_completed",
+  memory_onboarding_reopened: "memory_onboarding_reopened",
 } as const;
 
-export type MemoryGraphOnboardingEventSource = typeof MemoryGraphOnboardingEventSource[keyof typeof MemoryGraphOnboardingEventSource];
-
+export type MemoryGraphOnboardingEventSource =
+  (typeof MemoryGraphOnboardingEventSource)[keyof typeof MemoryGraphOnboardingEventSource];
 
 export const MemoryGraphOnboardingEventSource = {
-  automatic: 'automatic',
-  replay: 'replay',
+  automatic: "automatic",
+  replay: "replay",
 } as const;
 
-export type MemoryGraphOnboardingEventVersion = typeof MemoryGraphOnboardingEventVersion[keyof typeof MemoryGraphOnboardingEventVersion];
-
+export type MemoryGraphOnboardingEventVersion =
+  (typeof MemoryGraphOnboardingEventVersion)[keyof typeof MemoryGraphOnboardingEventVersion];
 
 export const MemoryGraphOnboardingEventVersion = {
   NUMBER_1: 1,
@@ -70,9 +70,9 @@ export interface MemoryGraphOnboardingEvent {
   source: MemoryGraphOnboardingEventSource;
   version: MemoryGraphOnboardingEventVersion;
   /**
-     * @minimum 1
-     * @maximum 3
-     */
+   * @minimum 1
+   * @maximum 3
+   */
   step?: number;
 }
 
@@ -84,38 +84,38 @@ export interface HealthStatus {
   status: string;
 }
 
-export type SystemHealthSnapshotPulseColor = typeof SystemHealthSnapshotPulseColor[keyof typeof SystemHealthSnapshotPulseColor];
-
+export type SystemHealthSnapshotPulseColor =
+  (typeof SystemHealthSnapshotPulseColor)[keyof typeof SystemHealthSnapshotPulseColor];
 
 export const SystemHealthSnapshotPulseColor = {
-  green: 'green',
-  purple: 'purple',
-  orange: 'orange',
-  red: 'red',
+  green: "green",
+  purple: "purple",
+  orange: "orange",
+  red: "red",
 } as const;
 
-export type SystemHealthSnapshotStatus = typeof SystemHealthSnapshotStatus[keyof typeof SystemHealthSnapshotStatus];
-
+export type SystemHealthSnapshotStatus =
+  (typeof SystemHealthSnapshotStatus)[keyof typeof SystemHealthSnapshotStatus];
 
 export const SystemHealthSnapshotStatus = {
-  Healthy: 'Healthy',
-  Listening: 'Listening',
-  Searching_Memory: 'Searching Memory',
-  Reasoning: 'Reasoning',
-  Writing_Memory: 'Writing Memory',
-  Warning: 'Warning',
+  Healthy: "Healthy",
+  Listening: "Listening",
+  Searching_Memory: "Searching Memory",
+  Reasoning: "Reasoning",
+  Writing_Memory: "Writing Memory",
+  Warning: "Warning",
 } as const;
 
-export type SystemHealthSnapshotState = typeof SystemHealthSnapshotState[keyof typeof SystemHealthSnapshotState];
-
+export type SystemHealthSnapshotState =
+  (typeof SystemHealthSnapshotState)[keyof typeof SystemHealthSnapshotState];
 
 export const SystemHealthSnapshotState = {
-  idle: 'idle',
-  listening: 'listening',
-  searching: 'searching',
-  reasoning: 'reasoning',
-  writing: 'writing',
-  error: 'error',
+  idle: "idle",
+  listening: "listening",
+  searching: "searching",
+  reasoning: "reasoning",
+  writing: "writing",
+  error: "error",
 } as const;
 
 /**
@@ -123,10 +123,10 @@ export const SystemHealthSnapshotState = {
  */
 export interface SystemHealthSnapshot {
   /**
-     * 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
-     * @minimum 0
-     * @maximum 100
-     */
+   * 0..100 health index (100 = healthy). Activity is conveyed by state/BPM.
+   * @minimum 0
+   * @maximum 100
+   */
   vitalityScore: number;
   /** Beats per minute for the animated heartbeat. */
   heartbeatBPM: number;
@@ -135,19 +135,18 @@ export interface SystemHealthSnapshot {
   state: SystemHealthSnapshotState;
 }
 
-export type VideoStatus = typeof VideoStatus[keyof typeof VideoStatus];
-
+export type VideoStatus = (typeof VideoStatus)[keyof typeof VideoStatus];
 
 export const VideoStatus = {
-  queued: 'queued',
-  uploading: 'uploading',
-  uploaded: 'uploaded',
-  transcribing: 'transcribing',
-  analyzing: 'analyzing',
-  indexing: 'indexing',
-  completed: 'completed',
-  failed: 'failed',
-  retrying: 'retrying',
+  queued: "queued",
+  uploading: "uploading",
+  uploaded: "uploaded",
+  transcribing: "transcribing",
+  analyzing: "analyzing",
+  indexing: "indexing",
+  completed: "completed",
+  failed: "failed",
+  retrying: "retrying",
 } as const;
 
 export interface Video {
@@ -175,19 +174,19 @@ export interface Video {
   updatedAt?: string | null;
 }
 
-export type VideoDetailStatus = typeof VideoDetailStatus[keyof typeof VideoDetailStatus];
-
+export type VideoDetailStatus =
+  (typeof VideoDetailStatus)[keyof typeof VideoDetailStatus];
 
 export const VideoDetailStatus = {
-  queued: 'queued',
-  uploading: 'uploading',
-  uploaded: 'uploaded',
-  transcribing: 'transcribing',
-  analyzing: 'analyzing',
-  indexing: 'indexing',
-  completed: 'completed',
-  failed: 'failed',
-  retrying: 'retrying',
+  queued: "queued",
+  uploading: "uploading",
+  uploaded: "uploaded",
+  transcribing: "transcribing",
+  analyzing: "analyzing",
+  indexing: "indexing",
+  completed: "completed",
+  failed: "failed",
+  retrying: "retrying",
 } as const;
 
 export interface TranscriptSegment {
@@ -243,19 +242,19 @@ export interface VideoInput {
   tags?: string[];
 }
 
-export type VideoUpdateStatus = typeof VideoUpdateStatus[keyof typeof VideoUpdateStatus];
-
+export type VideoUpdateStatus =
+  (typeof VideoUpdateStatus)[keyof typeof VideoUpdateStatus];
 
 export const VideoUpdateStatus = {
-  queued: 'queued',
-  uploading: 'uploading',
-  uploaded: 'uploaded',
-  transcribing: 'transcribing',
-  analyzing: 'analyzing',
-  indexing: 'indexing',
-  completed: 'completed',
-  failed: 'failed',
-  retrying: 'retrying',
+  queued: "queued",
+  uploading: "uploading",
+  uploaded: "uploaded",
+  transcribing: "transcribing",
+  analyzing: "analyzing",
+  indexing: "indexing",
+  completed: "completed",
+  failed: "failed",
+  retrying: "retrying",
 } as const;
 
 export interface VideoUpdate {
@@ -267,9 +266,9 @@ export interface VideoUpdate {
   status?: VideoUpdateStatus;
 }
 
-export type VideoStatsByStatus = {[key: string]: number};
+export type VideoStatsByStatus = { [key: string]: number };
 
-export type VideoStatsByTrade = {[key: string]: number};
+export type VideoStatsByTrade = { [key: string]: number };
 
 export interface VideoStats {
   total: number;
@@ -279,7 +278,7 @@ export interface VideoStats {
   totalDuration?: number | null;
 }
 
-export type KnowledgeStatsByTrade = {[key: string]: number};
+export type KnowledgeStatsByTrade = { [key: string]: number };
 
 export interface KnowledgeStats {
   total: number;
@@ -333,9 +332,9 @@ export interface AuthorityContext {
   province?: string;
   municipality?: string;
   /**
-     * User-supplied calendar date in YYYY-MM-DD form; not image-derived.
-     * @pattern ^\d{4}-\d{2}-\d{2}$
-     */
+   * User-supplied calendar date in YYYY-MM-DD form; not image-derived.
+   * @pattern ^\d{4}-\d{2}-\d{2}$
+   */
   permitApplicationDate?: string;
   explicitCodeEdition?: string;
   authorityHavingJurisdiction?: string;
@@ -352,13 +351,13 @@ export interface ChatInput {
   authorityContext?: AuthorityContext;
 }
 
-export type ChatResponseLearningStatus = typeof ChatResponseLearningStatus[keyof typeof ChatResponseLearningStatus];
-
+export type ChatResponseLearningStatus =
+  (typeof ChatResponseLearningStatus)[keyof typeof ChatResponseLearningStatus];
 
 export const ChatResponseLearningStatus = {
-  verified: 'verified',
-  discarded: 'discarded',
-  failed: 'failed',
+  verified: "verified",
+  discarded: "discarded",
+  failed: "failed",
 } as const;
 
 export type ChatResponseLearning = {
@@ -371,39 +370,39 @@ export type ChatResponseLearning = {
 /**
  * Origin of the citation. "video" (the default when omitted) cites a transcript segment. "knowledge" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).
  */
-export type CitationSourceType = typeof CitationSourceType[keyof typeof CitationSourceType];
-
+export type CitationSourceType =
+  (typeof CitationSourceType)[keyof typeof CitationSourceType];
 
 export const CitationSourceType = {
-  video: 'video',
-  knowledge: 'knowledge',
-  authority: 'authority',
+  video: "video",
+  knowledge: "knowledge",
+  authority: "authority",
 } as const;
 
-export type CitationSourceStatus = typeof CitationSourceStatus[keyof typeof CitationSourceStatus];
-
+export type CitationSourceStatus =
+  (typeof CitationSourceStatus)[keyof typeof CitationSourceStatus];
 
 export const CitationSourceStatus = {
-  current: 'current',
-  superseded: 'superseded',
-  requires_review: 'requires_review',
+  current: "current",
+  superseded: "superseded",
+  requires_review: "requires_review",
 } as const;
 
-export type CitationAmendmentIndicator = typeof CitationAmendmentIndicator[keyof typeof CitationAmendmentIndicator];
-
+export type CitationAmendmentIndicator =
+  (typeof CitationAmendmentIndicator)[keyof typeof CitationAmendmentIndicator];
 
 export const CitationAmendmentIndicator = {
-  bc_amendment: 'bc_amendment',
-  vancouver_specific: 'vancouver_specific',
-  none: 'none',
+  bc_amendment: "bc_amendment",
+  vancouver_specific: "vancouver_specific",
+  none: "none",
 } as const;
 
-export type CitationContentAvailability = typeof CitationContentAvailability[keyof typeof CitationContentAvailability];
-
+export type CitationContentAvailability =
+  (typeof CitationContentAvailability)[keyof typeof CitationContentAvailability];
 
 export const CitationContentAvailability = {
-  metadata_only: 'metadata_only',
-  licensed_section: 'licensed_section',
+  metadata_only: "metadata_only",
+  licensed_section: "licensed_section",
 } as const;
 
 export interface Citation {
@@ -417,9 +416,9 @@ export interface Citation {
   /** Origin of the citation. "video" (the default when omitted) cites a transcript segment. "knowledge" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to). */
   sourceType?: CitationSourceType;
   /**
-     * Knowledge Entry id when sourceType is "knowledge".
-     * @nullable
-     */
+   * Knowledge Entry id when sourceType is "knowledge".
+   * @nullable
+   */
   entryId?: string | null;
   /** True when this citation is mentor-verified. For "video" citations that means retrieval tied the segment to a reviewer-verified concept; for "knowledge" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent/false when nothing has confirmed it. */
   verified?: boolean;
@@ -444,13 +443,13 @@ export interface Citation {
   contentAvailability?: CitationContentAvailability;
 }
 
-export type CodeSafetyResultOutcome = typeof CodeSafetyResultOutcome[keyof typeof CodeSafetyResultOutcome];
-
+export type CodeSafetyResultOutcome =
+  (typeof CodeSafetyResultOutcome)[keyof typeof CodeSafetyResultOutcome];
 
 export const CodeSafetyResultOutcome = {
-  bypass: 'bypass',
-  blocked: 'blocked',
-  allowed: 'allowed',
+  bypass: "bypass",
+  blocked: "blocked",
+  allowed: "allowed",
 } as const;
 
 export interface CodeSensitivityResult {
@@ -459,48 +458,48 @@ export interface CodeSensitivityResult {
   requiresMeasurements: boolean;
 }
 
-export type CodeSafetyResultJurisdiction = typeof CodeSafetyResultJurisdiction[keyof typeof CodeSafetyResultJurisdiction];
-
+export type CodeSafetyResultJurisdiction =
+  (typeof CodeSafetyResultJurisdiction)[keyof typeof CodeSafetyResultJurisdiction];
 
 export const CodeSafetyResultJurisdiction = {
-  BC_GENERAL: 'BC_GENERAL',
-  VANCOUVER: 'VANCOUVER',
-  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+  BC_GENERAL: "BC_GENERAL",
+  VANCOUVER: "VANCOUVER",
+  UNKNOWN_SPECIAL_AUTHORITY: "UNKNOWN_SPECIAL_AUTHORITY",
 } as const;
 
-export type AuthorityCitationMetadataJurisdiction = typeof AuthorityCitationMetadataJurisdiction[keyof typeof AuthorityCitationMetadataJurisdiction];
-
+export type AuthorityCitationMetadataJurisdiction =
+  (typeof AuthorityCitationMetadataJurisdiction)[keyof typeof AuthorityCitationMetadataJurisdiction];
 
 export const AuthorityCitationMetadataJurisdiction = {
-  BC_GENERAL: 'BC_GENERAL',
-  VANCOUVER: 'VANCOUVER',
-  UNKNOWN_SPECIAL_AUTHORITY: 'UNKNOWN_SPECIAL_AUTHORITY',
+  BC_GENERAL: "BC_GENERAL",
+  VANCOUVER: "VANCOUVER",
+  UNKNOWN_SPECIAL_AUTHORITY: "UNKNOWN_SPECIAL_AUTHORITY",
 } as const;
 
-export type AuthorityCitationMetadataSourceStatus = typeof AuthorityCitationMetadataSourceStatus[keyof typeof AuthorityCitationMetadataSourceStatus];
-
+export type AuthorityCitationMetadataSourceStatus =
+  (typeof AuthorityCitationMetadataSourceStatus)[keyof typeof AuthorityCitationMetadataSourceStatus];
 
 export const AuthorityCitationMetadataSourceStatus = {
-  current: 'current',
-  superseded: 'superseded',
-  requires_review: 'requires_review',
+  current: "current",
+  superseded: "superseded",
+  requires_review: "requires_review",
 } as const;
 
-export type AuthorityCitationMetadataAmendmentIndicator = typeof AuthorityCitationMetadataAmendmentIndicator[keyof typeof AuthorityCitationMetadataAmendmentIndicator];
-
+export type AuthorityCitationMetadataAmendmentIndicator =
+  (typeof AuthorityCitationMetadataAmendmentIndicator)[keyof typeof AuthorityCitationMetadataAmendmentIndicator];
 
 export const AuthorityCitationMetadataAmendmentIndicator = {
-  bc_amendment: 'bc_amendment',
-  vancouver_specific: 'vancouver_specific',
-  none: 'none',
+  bc_amendment: "bc_amendment",
+  vancouver_specific: "vancouver_specific",
+  none: "none",
 } as const;
 
-export type AuthorityCitationMetadataContentAvailability = typeof AuthorityCitationMetadataContentAvailability[keyof typeof AuthorityCitationMetadataContentAvailability];
-
+export type AuthorityCitationMetadataContentAvailability =
+  (typeof AuthorityCitationMetadataContentAvailability)[keyof typeof AuthorityCitationMetadataContentAvailability];
 
 export const AuthorityCitationMetadataContentAvailability = {
-  metadata_only: 'metadata_only',
-  licensed_section: 'licensed_section',
+  metadata_only: "metadata_only",
+  licensed_section: "licensed_section",
 } as const;
 
 export interface AuthorityCitationMetadata {
@@ -548,12 +547,12 @@ export interface ChatResponse {
   codeSafety?: CodeSafetyResult;
 }
 
-export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
-
+export type ChatMessageRole =
+  (typeof ChatMessageRole)[keyof typeof ChatMessageRole];
 
 export const ChatMessageRole = {
-  user: 'user',
-  assistant: 'assistant',
+  user: "user",
+  assistant: "assistant",
 } as const;
 
 export interface ChatMessage {
@@ -585,13 +584,13 @@ export interface UploadUrlResponse {
   token?: string | null;
 }
 
-export type VerificationUpdateStatus = typeof VerificationUpdateStatus[keyof typeof VerificationUpdateStatus];
-
+export type VerificationUpdateStatus =
+  (typeof VerificationUpdateStatus)[keyof typeof VerificationUpdateStatus];
 
 export const VerificationUpdateStatus = {
-  verified: 'verified',
-  rejected: 'rejected',
-  unverified: 'unverified',
+  verified: "verified",
+  rejected: "rejected",
+  unverified: "unverified",
 } as const;
 
 export interface VerificationUpdate {
@@ -603,25 +602,25 @@ export interface RestoreEvidenceInput {
   videoId: string;
 }
 
-export type KnowledgeNodeKind = typeof KnowledgeNodeKind[keyof typeof KnowledgeNodeKind];
-
+export type KnowledgeNodeKind =
+  (typeof KnowledgeNodeKind)[keyof typeof KnowledgeNodeKind];
 
 export const KnowledgeNodeKind = {
-  core: 'core',
-  topic: 'topic',
-  competency: 'competency',
-  video: 'video',
-  mentor: 'mentor',
-  concept: 'concept',
-  tool: 'tool',
-  equipment: 'equipment',
-  material: 'material',
-  procedure: 'procedure',
-  hazard: 'hazard',
-  slang: 'slang',
-  certification: 'certification',
-  standard: 'standard',
-  regional_term: 'regional_term',
+  core: "core",
+  topic: "topic",
+  competency: "competency",
+  video: "video",
+  mentor: "mentor",
+  concept: "concept",
+  tool: "tool",
+  equipment: "equipment",
+  material: "material",
+  procedure: "procedure",
+  hazard: "hazard",
+  slang: "slang",
+  certification: "certification",
+  standard: "standard",
+  regional_term: "regional_term",
 } as const;
 
 export type KnowledgeNodeMeta = { [key: string]: unknown };
@@ -698,9 +697,9 @@ export interface StartInterviewInput {
   /** Selected trade (e.g. Welding, Heavy Equipment Operator, Other) */
   trade: string;
   /**
-     * Free-text trade when "Other" is selected
-     * @nullable
-     */
+   * Free-text trade when "Other" is selected
+   * @nullable
+   */
   tradeInput?: string | null;
   /** @nullable */
   yearsExperience?: number | null;
@@ -710,9 +709,9 @@ export interface StartInterviewInput {
   /** @nullable */
   background?: string | null;
   /**
-     * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
-     * @nullable
-     */
+   * Per-interview topic or handoff context; used for questioning but not saved into the contributor profile
+   * @nullable
+   */
   focus?: string | null;
 }
 
@@ -721,12 +720,12 @@ export interface SubmitAnswerInput {
   answer: string;
 }
 
-export type InterviewSessionStatus = typeof InterviewSessionStatus[keyof typeof InterviewSessionStatus];
-
+export type InterviewSessionStatus =
+  (typeof InterviewSessionStatus)[keyof typeof InterviewSessionStatus];
 
 export const InterviewSessionStatus = {
-  active: 'active',
-  completed: 'completed',
+  active: "active",
+  completed: "completed",
 } as const;
 
 export interface InterviewSession {
@@ -751,25 +750,25 @@ export interface InterviewSession {
 /**
  * Whether this answer's knowledge write was verified to have landed in the graph. pending = skipped or not yet distilled; failed = surfaced on the Graph Health dashboard for redistillation.
  */
-export type InterviewAnswerDistillationStatus = typeof InterviewAnswerDistillationStatus[keyof typeof InterviewAnswerDistillationStatus];
-
+export type InterviewAnswerDistillationStatus =
+  (typeof InterviewAnswerDistillationStatus)[keyof typeof InterviewAnswerDistillationStatus];
 
 export const InterviewAnswerDistillationStatus = {
-  pending: 'pending',
-  verified: 'verified',
-  failed: 'failed',
+  pending: "pending",
+  verified: "verified",
+  failed: "failed",
 } as const;
 
 /**
  * How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review.
  */
-export type ExtractedKnowledgeItemOutcome = typeof ExtractedKnowledgeItemOutcome[keyof typeof ExtractedKnowledgeItemOutcome];
-
+export type ExtractedKnowledgeItemOutcome =
+  (typeof ExtractedKnowledgeItemOutcome)[keyof typeof ExtractedKnowledgeItemOutcome];
 
 export const ExtractedKnowledgeItemOutcome = {
-  reinforced: 'reinforced',
-  created: 'created',
-  queued: 'queued',
+  reinforced: "reinforced",
+  created: "created",
+  queued: "queued",
 } as const;
 
 export interface ExtractedKnowledgeItem {
@@ -783,9 +782,9 @@ export interface ExtractedKnowledgeItem {
   /** How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review. */
   outcome?: ExtractedKnowledgeItemOutcome;
   /**
-     * Label of the existing concept this item reinforced, if any.
-     * @nullable
-     */
+   * Label of the existing concept this item reinforced, if any.
+   * @nullable
+   */
   matchedLabel?: string | null;
 }
 
@@ -825,13 +824,13 @@ export interface MentorActiveSession {
 /**
  * Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail.
  */
-export type KnowledgeCandidateMatchValidity = typeof KnowledgeCandidateMatchValidity[keyof typeof KnowledgeCandidateMatchValidity];
-
+export type KnowledgeCandidateMatchValidity =
+  (typeof KnowledgeCandidateMatchValidity)[keyof typeof KnowledgeCandidateMatchValidity];
 
 export const KnowledgeCandidateMatchValidity = {
-  live: 'live',
-  redirected: 'redirected',
-  gone: 'gone',
+  live: "live",
+  redirected: "redirected",
+  gone: "gone",
 } as const;
 
 export interface KnowledgeCandidateMatch {
@@ -841,24 +840,24 @@ export interface KnowledgeCandidateMatch {
   /** Read-time annotation of whether this recorded match still exists in the live graph: live — usable as-is; redirected — absorbed into another concept (see currentNodeId/currentLabel); gone — no longer exists and left no redirect trail. */
   validity?: KnowledgeCandidateMatchValidity;
   /**
-     * The node this match currently resolves to (itself when live, the survivor when redirected).
-     * @nullable
-     */
+   * The node this match currently resolves to (itself when live, the survivor when redirected).
+   * @nullable
+   */
   currentNodeId?: string | null;
   /** @nullable */
   currentLabel?: string | null;
 }
 
-export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typeof KnowledgeCandidateStatus];
-
+export type KnowledgeCandidateStatus =
+  (typeof KnowledgeCandidateStatus)[keyof typeof KnowledgeCandidateStatus];
 
 export const KnowledgeCandidateStatus = {
-  pending: 'pending',
-  accepted: 'accepted',
-  rejected: 'rejected',
-  merged: 'merged',
-  archived: 'archived',
-  restored: 'restored',
+  pending: "pending",
+  accepted: "accepted",
+  rejected: "rejected",
+  merged: "merged",
+  archived: "archived",
+  restored: "restored",
 } as const;
 
 export interface KnowledgeCandidate {
@@ -886,42 +885,42 @@ export interface KnowledgeCandidate {
   /** @nullable */
   createdAt?: string | null;
   /**
-     * The canonical concept node reinforced by an accept/merge resolution.
-     * @nullable
-     */
+   * The canonical concept node reinforced by an accept/merge resolution.
+   * @nullable
+   */
   resolvedTargetId?: string | null;
   /**
-     * The reviewer's reason, recorded on reject.
-     * @nullable
-     */
+   * The reviewer's reason, recorded on reject.
+   * @nullable
+   */
   resolutionReason?: string | null;
   /** @nullable */
   resolvedAt?: string | null;
   /**
-     * The target the reviewer originally asked for (accept/merge only).
-     * @nullable
-     */
+   * The target the reviewer originally asked for (accept/merge only).
+   * @nullable
+   */
   requestedTargetId?: string | null;
   /**
-     * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
-     * @nullable
-     */
+   * Why the recorded resolvedTargetId differs from requestedTargetId — set when the requested concept was merged away or re-matched by content at resolution time; null when the target was used as-is.
+   * @nullable
+   */
   redirectReason?: string | null;
 }
 
 /**
  * accept — reinforce the top best-match concept; merge — reinforce the reviewer-chosen targetNodeId; reject — discard with a required reason; restore — re-mint an archived (mentor-withdrawn) concept as attribution-free unverified knowledge; rearchive — undo a restore, demoting the curated concept back to an archived candidate (removing the sourceless node from the live graph, or dropping only the reviewer's curated vouch if a video/mentor re-taught it meanwhile); reopen — undo a resolved decision, returning the candidate to the pending queue for a fresh review (rejected, accepted, or merged candidates). Reject wrote no graph edge so its reopen is side-effect- free; accept/merge first withdraw this candidate's contribution from the mentor→concept edge (decrementing its weight, deleting the edge when its last answer is removed) and re-evaluate the concept node. A scrubbed (withdrawn-mentor) candidate can never be reopened.
  */
-export type CandidateResolutionInputAction = typeof CandidateResolutionInputAction[keyof typeof CandidateResolutionInputAction];
-
+export type CandidateResolutionInputAction =
+  (typeof CandidateResolutionInputAction)[keyof typeof CandidateResolutionInputAction];
 
 export const CandidateResolutionInputAction = {
-  accept: 'accept',
-  merge: 'merge',
-  reject: 'reject',
-  restore: 'restore',
-  rearchive: 'rearchive',
-  reopen: 'reopen',
+  accept: "accept",
+  merge: "merge",
+  reject: "reject",
+  restore: "restore",
+  rearchive: "rearchive",
+  reopen: "reopen",
 } as const;
 
 export interface CandidateResolutionInput {
@@ -933,12 +932,12 @@ export interface CandidateResolutionInput {
   reason?: string;
 }
 
-export type CandidateResolutionConflictCode = typeof CandidateResolutionConflictCode[keyof typeof CandidateResolutionConflictCode];
-
+export type CandidateResolutionConflictCode =
+  (typeof CandidateResolutionConflictCode)[keyof typeof CandidateResolutionConflictCode];
 
 export const CandidateResolutionConflictCode = {
-  already_resolved: 'already_resolved',
-  target_gone: 'target_gone',
+  already_resolved: "already_resolved",
+  target_gone: "target_gone",
 } as const;
 
 export interface CandidateResolutionConflict {
@@ -975,25 +974,25 @@ export interface MentorContributionList {
 export interface AnswerContribution {
   answerId: string;
   /**
-     * The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.
-     * @nullable
-     */
+   * The per-answer extraction confidence (0..1) recorded on the mentor→concept edge (meta.answerConfidences). Null for answers recorded before per-answer tracking existed (legacy edges) — never backfilled from the edge max, so the ledger stays honest.
+   * @nullable
+   */
   confidence: number | null;
   mentorProfileId: string;
   /**
-     * The contributing mentor's name, or null if the profile is gone.
-     * @nullable
-     */
+   * The contributing mentor's name, or null if the profile is gone.
+   * @nullable
+   */
   mentorName: string | null;
   /**
-     * The interview question this answer responded to, if still on record.
-     * @nullable
-     */
+   * The interview question this answer responded to, if still on record.
+   * @nullable
+   */
   question: string | null;
   /**
-     * A short excerpt of the mentor's verbatim answer, if still on record.
-     * @nullable
-     */
+   * A short excerpt of the mentor's verbatim answer, if still on record.
+   * @nullable
+   */
   answerExcerpt: string | null;
 }
 
@@ -1008,9 +1007,9 @@ export interface MentorSummary {
   /** @nullable */
   trade?: string | null;
   /**
-     * What the mentor typed for their trade, before normalization.
-     * @nullable
-     */
+   * What the mentor typed for their trade, before normalization.
+   * @nullable
+   */
   tradeInput?: string | null;
   /** @nullable */
   yearsExperience?: number | null;
@@ -1086,14 +1085,14 @@ export interface GraphWriteChecks {
   searchIndexUpdated: WriteCheck;
 }
 
-export type GraphHealthWriteStatus = typeof GraphHealthWriteStatus[keyof typeof GraphHealthWriteStatus];
-
+export type GraphHealthWriteStatus =
+  (typeof GraphHealthWriteStatus)[keyof typeof GraphHealthWriteStatus];
 
 export const GraphHealthWriteStatus = {
-  verified: 'verified',
-  partial: 'partial',
-  failed: 'failed',
-  pending: 'pending',
+  verified: "verified",
+  partial: "partial",
+  failed: "failed",
+  pending: "pending",
 } as const;
 
 export interface GraphHealthWrite {
@@ -1133,12 +1132,12 @@ export interface GraphHealthReport {
   recentWrites: GraphHealthWrite[];
 }
 
-export type ParkedThoughtContextItemRole = typeof ParkedThoughtContextItemRole[keyof typeof ParkedThoughtContextItemRole];
-
+export type ParkedThoughtContextItemRole =
+  (typeof ParkedThoughtContextItemRole)[keyof typeof ParkedThoughtContextItemRole];
 
 export const ParkedThoughtContextItemRole = {
-  user: 'user',
-  assistant: 'assistant',
+  user: "user",
+  assistant: "assistant",
 } as const;
 
 export interface ParkedThoughtContextItem {
@@ -1149,65 +1148,65 @@ export interface ParkedThoughtContextItem {
   at?: string | null;
 }
 
-export type ParkThoughtInputSource = typeof ParkThoughtInputSource[keyof typeof ParkThoughtInputSource];
-
+export type ParkThoughtInputSource =
+  (typeof ParkThoughtInputSource)[keyof typeof ParkThoughtInputSource];
 
 export const ParkThoughtInputSource = {
-  chat: 'chat',
-  interview: 'interview',
+  chat: "chat",
+  interview: "interview",
 } as const;
 
 export interface ParkThoughtInput {
   source: ParkThoughtInputSource;
   /**
-     * Required when source is "interview"; ignored otherwise. The server derives mentorProfileId/trade/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.
-     * @nullable
-     */
+   * Required when source is "interview"; ignored otherwise. The server derives mentorProfileId/trade/topic from this session — client- supplied values for those fields are never trusted for interview-sourced rows.
+   * @nullable
+   */
   interviewSessionId?: string | null;
   /**
-     * Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.
-     * @maxItems 5
-     */
+   * Recent turns captured at park time. Capped to 5 items of up to 2000 characters each.
+   * @maxItems 5
+   */
   context: ParkedThoughtContextItem[];
   /**
-     * @maxLength 2000
-     * @nullable
-     */
+   * @maxLength 2000
+   * @nullable
+   */
   unfinishedThought?: string | null;
   /**
-     * @maxLength 500
-     * @nullable
-     */
+   * @maxLength 500
+   * @nullable
+   */
   reason?: string | null;
   /**
-     * Chat-sourced only; ignored for interview (derived from the session).
-     * @maxLength 200
-     * @nullable
-     */
+   * Chat-sourced only; ignored for interview (derived from the session).
+   * @maxLength 200
+   * @nullable
+   */
   topic?: string | null;
   /**
-     * Chat-sourced only; ignored for interview (derived from the session).
-     * @maxLength 200
-     * @nullable
-     */
+   * Chat-sourced only; ignored for interview (derived from the session).
+   * @maxLength 200
+   * @nullable
+   */
   category?: string | null;
 }
 
-export type ParkedThoughtSource = typeof ParkedThoughtSource[keyof typeof ParkedThoughtSource];
-
+export type ParkedThoughtSource =
+  (typeof ParkedThoughtSource)[keyof typeof ParkedThoughtSource];
 
 export const ParkedThoughtSource = {
-  chat: 'chat',
-  interview: 'interview',
+  chat: "chat",
+  interview: "interview",
 } as const;
 
-export type ParkedThoughtStatus = typeof ParkedThoughtStatus[keyof typeof ParkedThoughtStatus];
-
+export type ParkedThoughtStatus =
+  (typeof ParkedThoughtStatus)[keyof typeof ParkedThoughtStatus];
 
 export const ParkedThoughtStatus = {
-  parked: 'parked',
-  resumed: 'resumed',
-  resolved: 'resolved',
+  parked: "parked",
+  resumed: "resumed",
+  resolved: "resolved",
 } as const;
 
 export interface ParkedThought {
@@ -1245,63 +1244,62 @@ export interface ParkedThoughtList {
 }
 
 export type ListVideosParams = {
-/**
- * Filter by trade category
- */
-trade?: string;
-/**
- * Filter by processing status
- */
-status?: ListVideosStatus;
-limit?: number;
-offset?: number;
+  /**
+   * Filter by trade category
+   */
+  trade?: string;
+  /**
+   * Filter by processing status
+   */
+  status?: ListVideosStatus;
+  limit?: number;
+  offset?: number;
 };
 
-export type ListVideosStatus = typeof ListVideosStatus[keyof typeof ListVideosStatus];
-
+export type ListVideosStatus =
+  (typeof ListVideosStatus)[keyof typeof ListVideosStatus];
 
 export const ListVideosStatus = {
-  queued: 'queued',
-  uploading: 'uploading',
-  uploaded: 'uploaded',
-  transcribing: 'transcribing',
-  analyzing: 'analyzing',
-  indexing: 'indexing',
-  completed: 'completed',
-  failed: 'failed',
-  retrying: 'retrying',
+  queued: "queued",
+  uploading: "uploading",
+  uploaded: "uploaded",
+  transcribing: "transcribing",
+  analyzing: "analyzing",
+  indexing: "indexing",
+  completed: "completed",
+  failed: "failed",
+  retrying: "retrying",
 } as const;
 
 export type ListKnowledgeCandidatesParams = {
-/**
- * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
- */
-status?: ListKnowledgeCandidatesStatus;
+  /**
+   * pending is publicly readable; every other status (including archived — mentor-withdrawn concepts held out of the live graph, and restored — archived concepts a reviewer re-minted into the graph) requires an admin session.
+   */
+  status?: ListKnowledgeCandidatesStatus;
 };
 
-export type ListKnowledgeCandidatesStatus = typeof ListKnowledgeCandidatesStatus[keyof typeof ListKnowledgeCandidatesStatus];
-
+export type ListKnowledgeCandidatesStatus =
+  (typeof ListKnowledgeCandidatesStatus)[keyof typeof ListKnowledgeCandidatesStatus];
 
 export const ListKnowledgeCandidatesStatus = {
-  pending: 'pending',
-  accepted: 'accepted',
-  rejected: 'rejected',
-  merged: 'merged',
-  archived: 'archived',
-  restored: 'restored',
+  pending: "pending",
+  accepted: "accepted",
+  rejected: "rejected",
+  merged: "merged",
+  archived: "archived",
+  restored: "restored",
 } as const;
 
 export type ListParkedThoughtsParams = {
-status?: ListParkedThoughtsStatus;
-mentorProfileId?: string;
+  status?: ListParkedThoughtsStatus;
+  mentorProfileId?: string;
 };
 
-export type ListParkedThoughtsStatus = typeof ListParkedThoughtsStatus[keyof typeof ListParkedThoughtsStatus];
-
+export type ListParkedThoughtsStatus =
+  (typeof ListParkedThoughtsStatus)[keyof typeof ListParkedThoughtsStatus];
 
 export const ListParkedThoughtsStatus = {
-  parked: 'parked',
-  resumed: 'resumed',
-  resolved: 'resolved',
+  parked: "parked",
+  resumed: "resumed",
+  resolved: "resolved",
 } as const;
-

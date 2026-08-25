@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { MentorProfile } from './mentorProfile';
+import type { MentorProfile } from "./mentorProfile";
 
 export interface CurrentInterviewProfile {
   profile?: MentorProfile;

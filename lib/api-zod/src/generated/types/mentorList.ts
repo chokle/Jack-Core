@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { MentorSummary } from './mentorSummary';
+import type { MentorSummary } from "./mentorSummary";
 
 export interface MentorList {
   mentors: MentorSummary[];

@@ -5,9 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ChatResponseLearning } from './chatResponseLearning';
-import type { Citation } from './citation';
-import type { CodeSafetyResult } from './codeSafetyResult';
+import type { ChatResponseLearning } from "./chatResponseLearning";
+import type { Citation } from "./citation";
+import type { CodeSafetyResult } from "./codeSafetyResult";
 
 export interface ChatResponse {
   answer: string;

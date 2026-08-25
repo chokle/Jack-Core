@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ParkedThoughtContextItemRole = typeof ParkedThoughtContextItemRole[keyof typeof ParkedThoughtContextItemRole];
-
+export type ParkedThoughtContextItemRole =
+  (typeof ParkedThoughtContextItemRole)[keyof typeof ParkedThoughtContextItemRole];
 
 export const ParkedThoughtContextItemRole = {
-  user: 'user',
-  assistant: 'assistant',
+  user: "user",
+  assistant: "assistant",
 } as const;

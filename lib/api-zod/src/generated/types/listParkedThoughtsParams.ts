@@ -5,9 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ListParkedThoughtsStatus } from './listParkedThoughtsStatus';
+import type { ListParkedThoughtsStatus } from "./listParkedThoughtsStatus";
 
 export type ListParkedThoughtsParams = {
-status?: ListParkedThoughtsStatus;
-mentorProfileId?: string;
+  status?: ListParkedThoughtsStatus;
+  mentorProfileId?: string;
 };

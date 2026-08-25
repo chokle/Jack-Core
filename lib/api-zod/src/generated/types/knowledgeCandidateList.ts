@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeCandidate } from './knowledgeCandidate';
+import type { KnowledgeCandidate } from "./knowledgeCandidate";
 
 export interface KnowledgeCandidateList {
   candidates: KnowledgeCandidate[];

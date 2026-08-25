@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ChatMessageRole } from './chatMessageRole';
-import type { Citation } from './citation';
+import type { ChatMessageRole } from "./chatMessageRole";
+import type { Citation } from "./citation";
 
 export interface ChatMessage {
   id: string;

@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AuthorityCitationMetadataAmendmentIndicator = typeof AuthorityCitationMetadataAmendmentIndicator[keyof typeof AuthorityCitationMetadataAmendmentIndicator];
-
+export type AuthorityCitationMetadataAmendmentIndicator =
+  (typeof AuthorityCitationMetadataAmendmentIndicator)[keyof typeof AuthorityCitationMetadataAmendmentIndicator];
 
 export const AuthorityCitationMetadataAmendmentIndicator = {
-  bc_amendment: 'bc_amendment',
-  vancouver_specific: 'vancouver_specific',
-  none: 'none',
+  bc_amendment: "bc_amendment",
+  vancouver_specific: "vancouver_specific",
+  none: "none",
 } as const;

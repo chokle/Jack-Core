@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { InterviewAnswer } from './interviewAnswer';
-import type { InterviewSession } from './interviewSession';
+import type { InterviewAnswer } from "./interviewAnswer";
+import type { InterviewSession } from "./interviewSession";
 
 /**
  * An interview session together with its ordered prior answers, so a client can rebuild the running transcript and resume an interrupted interview.

@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CitationSourceStatus = typeof CitationSourceStatus[keyof typeof CitationSourceStatus];
-
+export type CitationSourceStatus =
+  (typeof CitationSourceStatus)[keyof typeof CitationSourceStatus];
 
 export const CitationSourceStatus = {
-  current: 'current',
-  superseded: 'superseded',
-  requires_review: 'requires_review',
+  current: "current",
+  superseded: "superseded",
+  requires_review: "requires_review",
 } as const;

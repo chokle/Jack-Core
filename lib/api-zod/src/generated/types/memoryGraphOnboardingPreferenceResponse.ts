@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { MemoryGraphOnboardingPreference } from './memoryGraphOnboardingPreference';
+import type { MemoryGraphOnboardingPreference } from "./memoryGraphOnboardingPreference";
 
 export interface MemoryGraphOnboardingPreferenceResponse {
   preference: MemoryGraphOnboardingPreference | null;

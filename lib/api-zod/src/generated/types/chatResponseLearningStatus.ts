@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ChatResponseLearningStatus = typeof ChatResponseLearningStatus[keyof typeof ChatResponseLearningStatus];
-
+export type ChatResponseLearningStatus =
+  (typeof ChatResponseLearningStatus)[keyof typeof ChatResponseLearningStatus];
 
 export const ChatResponseLearningStatus = {
-  verified: 'verified',
-  discarded: 'discarded',
-  failed: 'failed',
+  verified: "verified",
+  discarded: "discarded",
+  failed: "failed",
 } as const;

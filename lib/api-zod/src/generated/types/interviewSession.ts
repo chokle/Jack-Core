@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { InterviewSessionStatus } from './interviewSessionStatus';
+import type { InterviewSessionStatus } from "./interviewSessionStatus";
 
 export interface InterviewSession {
   id: string;

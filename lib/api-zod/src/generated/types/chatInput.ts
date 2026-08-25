@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthorityContext } from './authorityContext';
+import type { AuthorityContext } from "./authorityContext";
 
 export interface ChatInput {
   /** @minLength 1 */

@@ -6,11 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AuthorityCitationMetadataSourceStatus = typeof AuthorityCitationMetadataSourceStatus[keyof typeof AuthorityCitationMetadataSourceStatus];
-
+export type AuthorityCitationMetadataSourceStatus =
+  (typeof AuthorityCitationMetadataSourceStatus)[keyof typeof AuthorityCitationMetadataSourceStatus];
 
 export const AuthorityCitationMetadataSourceStatus = {
-  current: 'current',
-  superseded: 'superseded',
-  requires_review: 'requires_review',
+  current: "current",
+  superseded: "superseded",
+  requires_review: "requires_review",
 } as const;

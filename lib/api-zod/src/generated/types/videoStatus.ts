@@ -6,17 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type VideoStatus = typeof VideoStatus[keyof typeof VideoStatus];
-
+export type VideoStatus = (typeof VideoStatus)[keyof typeof VideoStatus];
 
 export const VideoStatus = {
-  queued: 'queued',
-  uploading: 'uploading',
-  uploaded: 'uploaded',
-  transcribing: 'transcribing',
-  analyzing: 'analyzing',
-  indexing: 'indexing',
-  completed: 'completed',
-  failed: 'failed',
-  retrying: 'retrying',
+  queued: "queued",
+  uploading: "uploading",
+  uploaded: "uploaded",
+  transcribing: "transcribing",
+  analyzing: "analyzing",
+  indexing: "indexing",
+  completed: "completed",
+  failed: "failed",
+  retrying: "retrying",
 } as const;

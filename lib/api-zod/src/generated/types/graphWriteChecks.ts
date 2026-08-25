@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { WriteCheck } from './writeCheck';
+import type { WriteCheck } from "./writeCheck";
 
 export interface GraphWriteChecks {
   nodesExist: WriteCheck;

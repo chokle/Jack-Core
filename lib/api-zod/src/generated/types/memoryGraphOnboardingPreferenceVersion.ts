@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryGraphOnboardingPreferenceVersion = typeof MemoryGraphOnboardingPreferenceVersion[keyof typeof MemoryGraphOnboardingPreferenceVersion];
-
+export type MemoryGraphOnboardingPreferenceVersion =
+  (typeof MemoryGraphOnboardingPreferenceVersion)[keyof typeof MemoryGraphOnboardingPreferenceVersion];
 
 export const MemoryGraphOnboardingPreferenceVersion = {
   NUMBER_1: 1,

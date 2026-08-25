@@ -6,14 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type KnowledgeCandidateStatus = typeof KnowledgeCandidateStatus[keyof typeof KnowledgeCandidateStatus];
-
+export type KnowledgeCandidateStatus =
+  (typeof KnowledgeCandidateStatus)[keyof typeof KnowledgeCandidateStatus];
 
 export const KnowledgeCandidateStatus = {
-  pending: 'pending',
-  accepted: 'accepted',
-  rejected: 'rejected',
-  merged: 'merged',
-  archived: 'archived',
-  restored: 'restored',
+  pending: "pending",
+  accepted: "accepted",
+  rejected: "rejected",
+  merged: "merged",
+  archived: "archived",
+  restored: "restored",
 } as const;

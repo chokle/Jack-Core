@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { GraphHealthWriteStatus } from './graphHealthWriteStatus';
-import type { GraphWriteChecks } from './graphWriteChecks';
+import type { GraphHealthWriteStatus } from "./graphHealthWriteStatus";
+import type { GraphWriteChecks } from "./graphWriteChecks";
 
 export interface GraphHealthWrite {
   id: string;

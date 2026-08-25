@@ -5,7 +5,7 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ExtractedKnowledgeItemOutcome } from './extractedKnowledgeItemOutcome';
+import type { ExtractedKnowledgeItemOutcome } from "./extractedKnowledgeItemOutcome";
 
 export interface ExtractedKnowledgeItem {
   id: string;
@@ -18,8 +18,8 @@ export interface ExtractedKnowledgeItem {
   /** How this concept landed in the knowledge graph: reinforced an existing concept, created a new concept, or queued as a pending candidate for review. */
   outcome?: ExtractedKnowledgeItemOutcome;
   /**
-     * Label of the existing concept this item reinforced, if any.
-     * @nullable
-     */
+   * Label of the existing concept this item reinforced, if any.
+   * @nullable
+   */
   matchedLabel?: string | null;
 }

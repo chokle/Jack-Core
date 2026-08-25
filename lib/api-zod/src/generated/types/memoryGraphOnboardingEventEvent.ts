@@ -6,13 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryGraphOnboardingEventEvent = typeof MemoryGraphOnboardingEventEvent[keyof typeof MemoryGraphOnboardingEventEvent];
-
+export type MemoryGraphOnboardingEventEvent =
+  (typeof MemoryGraphOnboardingEventEvent)[keyof typeof MemoryGraphOnboardingEventEvent];
 
 export const MemoryGraphOnboardingEventEvent = {
-  memory_onboarding_started: 'memory_onboarding_started',
-  memory_onboarding_step_viewed: 'memory_onboarding_step_viewed',
-  memory_onboarding_skipped: 'memory_onboarding_skipped',
-  memory_onboarding_completed: 'memory_onboarding_completed',
-  memory_onboarding_reopened: 'memory_onboarding_reopened',
+  memory_onboarding_started: "memory_onboarding_started",
+  memory_onboarding_step_viewed: "memory_onboarding_step_viewed",
+  memory_onboarding_skipped: "memory_onboarding_skipped",
+  memory_onboarding_completed: "memory_onboarding_completed",
+  memory_onboarding_reopened: "memory_onboarding_reopened",
 } as const;

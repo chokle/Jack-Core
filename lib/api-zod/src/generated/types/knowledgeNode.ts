@@ -5,8 +5,8 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { KnowledgeNodeKind } from './knowledgeNodeKind';
-import type { KnowledgeNodeMeta } from './knowledgeNodeMeta';
+import type { KnowledgeNodeKind } from "./knowledgeNodeKind";
+import type { KnowledgeNodeMeta } from "./knowledgeNodeMeta";
 
 export interface KnowledgeNode {
   id: string;

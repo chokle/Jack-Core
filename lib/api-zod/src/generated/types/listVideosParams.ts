@@ -5,17 +5,17 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ListVideosStatus } from './listVideosStatus';
+import type { ListVideosStatus } from "./listVideosStatus";
 
 export type ListVideosParams = {
-/**
- * Filter by trade category
- */
-trade?: string;
-/**
- * Filter by processing status
- */
-status?: ListVideosStatus;
-limit?: number;
-offset?: number;
+  /**
+   * Filter by trade category
+   */
+  trade?: string;
+  /**
+   * Filter by processing status
+   */
+  status?: ListVideosStatus;
+  limit?: number;
+  offset?: number;
 };

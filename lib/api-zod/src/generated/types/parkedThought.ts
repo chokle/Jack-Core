@@ -5,9 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ParkedThoughtContextItem } from './parkedThoughtContextItem';
-import type { ParkedThoughtSource } from './parkedThoughtSource';
-import type { ParkedThoughtStatus } from './parkedThoughtStatus';
+import type { ParkedThoughtContextItem } from "./parkedThoughtContextItem";
+import type { ParkedThoughtSource } from "./parkedThoughtSource";
+import type { ParkedThoughtStatus } from "./parkedThoughtStatus";
 
 export interface ParkedThought {
   id: string;

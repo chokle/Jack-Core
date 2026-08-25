@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MemoryGraphOnboardingEventVersion = typeof MemoryGraphOnboardingEventVersion[keyof typeof MemoryGraphOnboardingEventVersion];
-
+export type MemoryGraphOnboardingEventVersion =
+  (typeof MemoryGraphOnboardingEventVersion)[keyof typeof MemoryGraphOnboardingEventVersion];
 
 export const MemoryGraphOnboardingEventVersion = {
   NUMBER_1: 1,
