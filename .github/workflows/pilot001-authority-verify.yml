@@ -1,0 +1,48 @@
+name: Pilot001 Authority Verification
+
+on:
+  push:
+    branches:
+      - feature/code-authority-safety-gate
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Focused authority API tests
+        run: pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/authority-migration.test.ts src/lib/__tests__/code-authority.test.ts src/lib/__tests__/revision-feed-observer.test.ts src/routes/__tests__/chat.code-safety.test.ts
+      - name: Focused authority Jack tests
+        run: pnpm --filter @workspace/jack-core exec vitest run src/components/StructuredAnswer.official-source.test.tsx
+      - name: API contract codegen
+        run: pnpm --filter @workspace/api-spec codegen
+      - name: Generated contract cleanliness
+        run: git diff --exit-code -- lib/api-client-react/src/generated lib/api-zod/src/generated
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm run typecheck
+      - name: API build
+        run: pnpm --filter @workspace/api-server build
+      - name: Jack build
+        run: pnpm --filter @workspace/jack-core build
+      - name: Format check
+        run: pnpm exec prettier --check DAZ-HANDOFF-2026-08-11.md artifacts/api-server/src/lib/__tests__/authority-migration.test.ts artifacts/api-server/src/lib/__tests__/code-authority.test.ts artifacts/api-server/src/lib/__tests__/revision-feed-observer.test.ts artifacts/api-server/src/lib/code-authority.ts artifacts/api-server/src/lib/jurisdiction.ts artifacts/api-server/src/lib/revision-feed-observer.ts artifacts/api-server/src/routes/__tests__/chat.code-safety.test.ts artifacts/api-server/src/routes/chat.ts artifacts/jack-core/src/components/StructuredAnswer.official-source.test.tsx artifacts/jack-core/src/components/StructuredAnswer.tsx lib/api-spec/openapi.yaml lib/api-spec/orval.config.ts
+      - name: Diff check
+        run: git diff --check origin/main...HEAD
