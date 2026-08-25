@@ -17,7 +17,9 @@ function repairSession(): void {
     void window.__JACK_REPAIR_SESSION__();
     return;
   }
-  window.location.assign(`/api/auth/reset-session?reason=bootstrap&at=${Date.now()}`);
+  window.location.assign(
+    `/api/auth/reset-session?reason=bootstrap&at=${Date.now()}`,
+  );
 }
 
 function FailureScreen({ detail }: { detail: string }) {
@@ -27,7 +29,9 @@ function FailureScreen({ detail }: { detail: string }) {
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">
           Jack recovery
         </p>
-        <h1 className="mt-2 text-2xl font-bold">Jack could not finish loading</h1>
+        <h1 className="mt-2 text-2xl font-bold">
+          Jack could not finish loading
+        </h1>
         <p className="mt-3 text-sm text-muted-foreground">{detail}</p>
         <button
           type="button"

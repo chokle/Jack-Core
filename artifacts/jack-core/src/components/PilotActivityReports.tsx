@@ -98,7 +98,9 @@ interface EndOfDayResponse {
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "include", ...init });
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
   if (!response.ok) throw new Error(body.error || "Report request failed.");
   return body;
 }
@@ -127,16 +129,20 @@ export function PilotActivityReports() {
   const [scopes, setScopes] = useState<ReportScope[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [report, setReport] = useState<SummaryResponse | null>(null);
-  const [timeline, setTimeline] = useState<{ userId: string; events: TimelineEvent[] } | null>(
-    null,
-  );
+  const [timeline, setTimeline] = useState<{
+    userId: string;
+    events: TimelineEvent[];
+  } | null>(null);
   const [reportDate, setReportDate] = useState(utcToday);
   const [endOfDay, setEndOfDay] = useState<EndOfDayResponse | null>(null);
   const [endOfDayLoading, setEndOfDayLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const selected = useMemo(
-    () => scopes.find((scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey),
+    () =>
+      scopes.find(
+        (scope) => `${scope.organizationId}:${scope.pilotId}` === selectedKey,
+      ),
     [scopes, selectedKey],
   );
   const query = selected
@@ -150,7 +156,11 @@ export function PilotActivityReports() {
         const first = body.scopes[0];
         if (first) setSelectedKey(`${first.organizationId}:${first.pilotId}`);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, []);
 
   useEffect(() => {
@@ -159,7 +169,11 @@ export function PilotActivityReports() {
     setError(null);
     void json<SummaryResponse>(`/api/testing/reports/summary?${query}`)
       .then(setReport)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Reports unavailable."));
+      .catch((reason) =>
+        setError(
+          reason instanceof Error ? reason.message : "Reports unavailable.",
+        ),
+      );
   }, [query]);
 
   const loadEndOfDay = async () => {
@@ -173,7 +187,11 @@ export function PilotActivityReports() {
       setEndOfDay(body);
     } catch (reason) {
       setEndOfDay(null);
-      setError(reason instanceof Error ? reason.message : "End-of-day report unavailable.");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "End-of-day report unavailable.",
+      );
     } finally {
       setEndOfDayLoading(false);
     }
@@ -193,7 +211,9 @@ export function PilotActivityReports() {
       );
       setTimeline({ userId: body.actorUserId, events: body.events });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Timeline unavailable.");
+      setError(
+        reason instanceof Error ? reason.message : "Timeline unavailable.",
+      );
     }
   };
 
@@ -206,7 +226,9 @@ export function PilotActivityReports() {
         body: JSON.stringify({ reportType: "pilot_summary" }),
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Report generation failed.");
+      setError(
+        reason instanceof Error ? reason.message : "Report generation failed.",
+      );
     } finally {
       setGenerating(false);
     }
@@ -221,7 +243,10 @@ export function PilotActivityReports() {
         ["Verified active time", duration(endOfDay.report.verifiedActiveMs)],
         ["Feedback", endOfDay.report.feedbackSubmissionCount],
         ["Failed events", endOfDay.report.failedEventCount],
-        ["Telemetry complete", endOfDay.report.telemetryHealth.complete ? "Yes" : "No"],
+        [
+          "Telemetry complete",
+          endOfDay.report.telemetryHealth.complete ? "Yes" : "No",
+        ],
       ]
     : [];
 
@@ -230,24 +255,38 @@ export function PilotActivityReports() {
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-primary">Admin only</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-primary">
+              Admin only
+            </p>
             <h1 className="text-2xl font-bold">Pilot activity reports</h1>
             <p className="text-sm text-muted-foreground">
-              Organization-isolated, minimized telemetry. Ask Jack content is never shown here.
+              Organization-isolated, minimized telemetry. Ask Jack content is
+              never shown here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
-            <Button variant="outline" onClick={() => window.print()} disabled={!report}>
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              disabled={!report}
+            >
               Print
             </Button>
             <Button
               variant="outline"
               disabled={!query}
-              onClick={() => window.location.assign(`/api/testing/reports/export.csv?${query}`)}
+              onClick={() =>
+                window.location.assign(
+                  `/api/testing/reports/export.csv?${query}`,
+                )
+              }
             >
               Export CSV
             </Button>
-            <Button disabled={!query || generating} onClick={() => void generate()}>
+            <Button
+              disabled={!query || generating}
+              onClick={() => void generate()}
+            >
               {generating ? "Generating…" : "Generate report"}
             </Button>
           </div>
@@ -265,14 +304,21 @@ export function PilotActivityReports() {
                 key={`${scope.organizationId}:${scope.pilotId}`}
                 value={`${scope.organizationId}:${scope.pilotId}`}
               >
-                {scope.organizationName ?? "Organization"} — {scope.pilotName ?? "Pilot"}
+                {scope.organizationName ?? "Organization"} —{" "}
+                {scope.pilotName ?? "Pilot"}
               </option>
             ))}
           </select>
         </label>
 
-        {error && <p className="rounded-lg border border-destructive p-3 text-destructive">{error}</p>}
-        {scopes.length === 0 && !error && <p>No active report scope is assigned.</p>}
+        {error && (
+          <p className="rounded-lg border border-destructive p-3 text-destructive">
+            {error}
+          </p>
+        )}
+        {scopes.length === 0 && !error && (
+          <p>No active report scope is assigned.</p>
+        )}
 
         {report && (
           <>
@@ -281,13 +327,22 @@ export function PilotActivityReports() {
                 ["Participants", report.summary.participantCount],
                 ["Completed", report.summary.completedSessions],
                 ["Completion rate", percent(report.summary.completionRate)],
-                ["Onboarding complete", percent(report.summary.onboardingCompletionRate)],
-                ["Recording opt-in", percent(report.summary.recordingOptInRate)],
+                [
+                  "Onboarding complete",
+                  percent(report.summary.onboardingCompletionRate),
+                ],
+                [
+                  "Recording opt-in",
+                  percent(report.summary.recordingOptInRate),
+                ],
                 ["Feedback", report.summary.feedbackCount],
                 ["Dropped events", report.summary.droppedEventCount],
                 ["Rejected events", report.summary.rejectedEventCount],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-4">
+                <div
+                  key={label}
+                  className="rounded-lg border border-border bg-card p-4"
+                >
                   <p className="text-xs text-muted-foreground">{label}</p>
                   <p className="mt-1 text-2xl font-bold">{value}</p>
                 </div>
@@ -319,7 +374,9 @@ export function PilotActivityReports() {
                       <td className="p-3">{user.status}</td>
                       <td className="p-3">{user.onboardingStatus}</td>
                       <td className="p-3">{user.questionCount}</td>
-                      <td className="p-3">{new Date(user.lastActivityAt).toLocaleString()}</td>
+                      <td className="p-3">
+                        {new Date(user.lastActivityAt).toLocaleString()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -331,9 +388,12 @@ export function PilotActivityReports() {
         <section className="space-y-4 rounded-lg border border-border p-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="font-semibold">Deterministic end-of-day evidence</h2>
+              <h2 className="font-semibold">
+                Deterministic end-of-day evidence
+              </h2>
               <p className="text-sm text-muted-foreground">
-                UTC-day activity with explicit telemetry completeness and attribution state.
+                UTC-day activity with explicit telemetry completeness and
+                attribution state.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-2 print:hidden">
@@ -361,7 +421,10 @@ export function PilotActivityReports() {
             <>
               <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {endOfDayMetrics.map(([label, value]) => (
-                  <div key={label} className="rounded-lg border border-border bg-card p-4">
+                  <div
+                    key={label}
+                    className="rounded-lg border border-border bg-card p-4"
+                  >
                     <p className="text-xs text-muted-foreground">{label}</p>
                     <p className="mt-1 text-xl font-bold">{value}</p>
                   </div>
@@ -370,12 +433,15 @@ export function PilotActivityReports() {
 
               {!endOfDay.report.telemetryHealth.complete && (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-                  This day is not safe to present as verified usage yet. Telemetry coverage is incomplete or malformed.
+                  This day is not safe to present as verified usage yet.
+                  Telemetry coverage is incomplete or malformed.
                 </p>
               )}
               {endOfDay.report.outsideCohortActors.length > 0 && (
                 <p className="rounded-md border border-destructive p-3 text-sm text-destructive">
-                  Attribution anomaly: {endOfDay.report.outsideCohortActors.length} actor(s) are outside the assigned pilot cohort.
+                  Attribution anomaly:{" "}
+                  {endOfDay.report.outsideCohortActors.length} actor(s) are
+                  outside the assigned pilot cohort.
                 </p>
               )}
 
@@ -393,11 +459,20 @@ export function PilotActivityReports() {
                   </thead>
                   <tbody>
                     {endOfDay.report.users.map((user) => (
-                      <tr key={user.actorUserId} className="border-t border-border">
-                        <td className="p-3 font-mono text-xs">{user.actorUserId}</td>
-                        <td className="p-3">{user.authenticated ? "Yes" : "No"}</td>
+                      <tr
+                        key={user.actorUserId}
+                        className="border-t border-border"
+                      >
+                        <td className="p-3 font-mono text-xs">
+                          {user.actorUserId}
+                        </td>
+                        <td className="p-3">
+                          {user.authenticated ? "Yes" : "No"}
+                        </td>
                         <td className="p-3">{user.active ? "Yes" : "No"}</td>
-                        <td className="p-3">{duration(user.verifiedActiveMs)}</td>
+                        <td className="p-3">
+                          {duration(user.verifiedActiveMs)}
+                        </td>
                         <td className="p-3">
                           {user.firstActivityAt
                             ? new Date(user.firstActivityAt).toLocaleString()
@@ -415,7 +490,10 @@ export function PilotActivityReports() {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Window: {new Date(endOfDay.report.window.start).toLocaleString()} → {new Date(endOfDay.report.window.end).toLocaleString()} · Generated {new Date(endOfDay.generatedAt).toLocaleString()}
+                Window:{" "}
+                {new Date(endOfDay.report.window.start).toLocaleString()} →{" "}
+                {new Date(endOfDay.report.window.end).toLocaleString()} ·
+                Generated {new Date(endOfDay.generatedAt).toLocaleString()}
               </p>
             </>
           )}
@@ -426,10 +504,14 @@ export function PilotActivityReports() {
             <h2 className="font-semibold">Timeline: {timeline.userId}</h2>
             <ol className="mt-3 space-y-2">
               {timeline.events.map((event) => (
-                <li key={event.eventId} className="rounded bg-muted/40 p-3 text-sm">
+                <li
+                  key={event.eventId}
+                  className="rounded bg-muted/40 p-3 text-sm"
+                >
                   <span className="font-semibold">{event.eventType}</span>
                   <span className="ml-2 text-muted-foreground">
-                    {new Date(event.occurredAt).toLocaleString()} · {event.result}
+                    {new Date(event.occurredAt).toLocaleString()} ·{" "}
+                    {event.result}
                   </span>
                   {Object.keys(event.metadata).length > 0 && (
                     <span className="ml-2 font-mono text-xs">

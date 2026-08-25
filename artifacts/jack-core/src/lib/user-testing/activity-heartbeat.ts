@@ -43,11 +43,16 @@ export function initializeActivityHeartbeat(): () => void {
   };
 
   for (const eventName of ["pointerdown", "keydown", "touchstart"] as const) {
-    window.addEventListener(eventName, markMeaningfulActivity, { passive: true });
+    window.addEventListener(eventName, markMeaningfulActivity, {
+      passive: true,
+    });
   }
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  const interval = window.setInterval(() => void emit(), ACTIVITY_HEARTBEAT_INTERVAL_MS);
+  const interval = window.setInterval(
+    () => void emit(),
+    ACTIVITY_HEARTBEAT_INTERVAL_MS,
+  );
   void emit();
 
   return () => {

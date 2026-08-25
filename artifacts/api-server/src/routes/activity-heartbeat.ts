@@ -17,7 +17,9 @@ const UUID_RE =
 const DEVICE_CATEGORIES = new Set(["desktop", "tablet", "mobile"]);
 
 function retainedUntil(): string {
-  return new Date(Date.now() + RAW_EVENT_RETENTION_DAYS * 86_400_000).toISOString();
+  return new Date(
+    Date.now() + RAW_EVENT_RETENTION_DAYS * 86_400_000,
+  ).toISOString();
 }
 
 router.post("/testing/activity-heartbeat", async (req, res) => {
@@ -35,7 +37,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       return;
     }
     if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
+      return res
+        .status(403)
+        .json({ error: "Pilot telemetry is unavailable for this account." });
     }
 
     const body = req.body ?? {};
@@ -44,7 +48,13 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       typeof body !== "object" ||
       Array.isArray(body) ||
       Object.keys(body).some(
-        (key) => !["appSessionId", "visibility", "meaningfulActivity", "deviceCategory"].includes(key),
+        (key) =>
+          ![
+            "appSessionId",
+            "visibility",
+            "meaningfulActivity",
+            "deviceCategory",
+          ].includes(key),
       )
     ) {
       return res.status(400).json({ error: "Invalid activity heartbeat." });
@@ -83,7 +93,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       .maybeSingle();
     if (session.error) throw session.error;
     if (!session.data) {
-      return res.status(409).json({ error: "No active pilot session was found." });
+      return res
+        .status(409)
+        .json({ error: "No active pilot session was found." });
     }
 
     const consent = await latestConsent(
@@ -92,7 +104,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       "telemetry",
     );
     if (!currentConsentGranted(consent)) {
-      return res.status(412).json({ error: "Telemetry consent is not currently granted." });
+      return res
+        .status(412)
+        .json({ error: "Telemetry consent is not currently granted." });
     }
 
     const now = new Date().toISOString();
@@ -141,7 +155,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     return res.status(201).json({ accepted: true, eventId });
   } catch (error) {
     req.log.error({ err: error }, "Could not record activity heartbeat");
-    return res.status(503).json({ error: "Activity heartbeat could not be recorded." });
+    return res
+      .status(503)
+      .json({ error: "Activity heartbeat could not be recorded." });
   }
 });
 

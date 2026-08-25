@@ -44,9 +44,16 @@ async function requireReportScope(
   }
 
   const organizationId =
-    typeof req.query["organizationId"] === "string" ? req.query["organizationId"] : "";
-  const pilotId = typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
-  const authorization = await authorizeReportScope(identity.userId, organizationId, pilotId);
+    typeof req.query["organizationId"] === "string"
+      ? req.query["organizationId"]
+      : "";
+  const pilotId =
+    typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
+  const authorization = await authorizeReportScope(
+    identity.userId,
+    organizationId,
+    pilotId,
+  );
 
   await auditReportAccess({
     userId: identity.userId,
@@ -60,7 +67,11 @@ async function requireReportScope(
   });
 
   if (!authorization.allowed || !authorization.authority) {
-    res.status(403).json({ error: "No active report role exists for this organization and pilot." });
+    res
+      .status(403)
+      .json({
+        error: "No active report role exists for this organization and pilot.",
+      });
     return null;
   }
 
@@ -73,9 +84,13 @@ async function requireReportScope(
 }
 
 function utcDayWindow(value: unknown): { start: string; end: string } | null {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return null;
   const start = new Date(`${value}T00:00:00.000Z`);
-  if (!Number.isFinite(start.getTime()) || start.toISOString().slice(0, 10) !== value) {
+  if (
+    !Number.isFinite(start.getTime()) ||
+    start.toISOString().slice(0, 10) !== value
+  ) {
     return null;
   }
 
@@ -89,58 +104,71 @@ function utcDayWindow(value: unknown): { start: string; end: string } | null {
   };
 }
 
-async function loadRows(scope: AuthorizedScope, windowStart: string, windowEnd: string) {
-  const [memberships, sessions, events, feedback, failures] = await Promise.all([
-    db
-      .from("pilot_memberships")
-      .select("user_id,role,active,valid_from,valid_until")
-      .eq("organization_id", scope.organizationId)
-      .eq("pilot_id", scope.pilotId)
-      .eq("role", "tester"),
-    db
-      .from("test_sessions")
-      .select("*")
-      .eq("organization_id", scope.organizationId)
-      .eq("pilot_id", scope.pilotId)
-      .gte("last_activity_at", windowStart)
-      .lt("started_at", windowEnd),
-    db
-      .from("test_events")
-      .select("*")
-      .eq("organization_id", scope.organizationId)
-      .eq("pilot_id", scope.pilotId)
-      .gte("occurred_at", windowStart)
-      .lt("occurred_at", windowEnd)
-      .order("occurred_at", { ascending: true }),
-    db
-      .from("test_feedback")
-      .select("*")
-      .eq("organization_id", scope.organizationId)
-      .eq("pilot_id", scope.pilotId)
-      .gte("created_at", windowStart)
-      .lt("created_at", windowEnd),
-    db
-      .from("activity_ingest_failures")
-      .select("*")
-      .eq("organization_id", scope.organizationId)
-      .eq("pilot_id", scope.pilotId)
-      .gte("created_at", windowStart)
-      .lt("created_at", windowEnd),
-  ]);
+async function loadRows(
+  scope: AuthorizedScope,
+  windowStart: string,
+  windowEnd: string,
+) {
+  const [memberships, sessions, events, feedback, failures] = await Promise.all(
+    [
+      db
+        .from("pilot_memberships")
+        .select("user_id,role,active,valid_from,valid_until")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .eq("role", "tester"),
+      db
+        .from("test_sessions")
+        .select("*")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .gte("last_activity_at", windowStart)
+        .lt("started_at", windowEnd),
+      db
+        .from("test_events")
+        .select("*")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .gte("occurred_at", windowStart)
+        .lt("occurred_at", windowEnd)
+        .order("occurred_at", { ascending: true }),
+      db
+        .from("test_feedback")
+        .select("*")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .gte("created_at", windowStart)
+        .lt("created_at", windowEnd),
+      db
+        .from("activity_ingest_failures")
+        .select("*")
+        .eq("organization_id", scope.organizationId)
+        .eq("pilot_id", scope.pilotId)
+        .gte("created_at", windowStart)
+        .lt("created_at", windowEnd),
+    ],
+  );
 
-  const failed = [memberships, sessions, events, feedback, failures].find((result) => result.error);
+  const failed = [memberships, sessions, events, feedback, failures].find(
+    (result) => result.error,
+  );
   if (failed?.error) throw failed.error;
 
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
   return {
-    memberships: (memberships.data ?? []).filter((row: Record<string, unknown>) => {
-      const validFrom = Date.parse(String(row["valid_from"] ?? ""));
-      const validUntil = row["valid_until"]
-        ? Date.parse(String(row["valid_until"]))
-        : Infinity;
-      return (!Number.isFinite(validFrom) || validFrom < endMs) && validUntil > startMs;
-    }) as Array<Record<string, unknown>>,
+    memberships: (memberships.data ?? []).filter(
+      (row: Record<string, unknown>) => {
+        const validFrom = Date.parse(String(row["valid_from"] ?? ""));
+        const validUntil = row["valid_until"]
+          ? Date.parse(String(row["valid_until"]))
+          : Infinity;
+        return (
+          (!Number.isFinite(validFrom) || validFrom < endMs) &&
+          validUntil > startMs
+        );
+      },
+    ) as Array<Record<string, unknown>>,
     sessions: (sessions.data ?? []) as Array<Record<string, unknown>>,
     events: (events.data ?? []) as Array<Record<string, unknown>>,
     feedback: (feedback.data ?? []) as Array<Record<string, unknown>>,
@@ -155,7 +183,11 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
 
     const window = utcDayWindow(req.query["date"]);
     if (!window) {
-      return res.status(400).json({ error: "A valid current or past UTC report date is required." });
+      return res
+        .status(400)
+        .json({
+          error: "A valid current or past UTC report date is required.",
+        });
     }
 
     const rows = await loadRows(scope, window.start, window.end);
@@ -171,7 +203,11 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
       windowEnd: window.end,
       ...rows,
       telemetryHealth: hasHeartbeatEvidence
-        ? { windowStart: window.start, windowEnd: window.end, status: "healthy" }
+        ? {
+            windowStart: window.start,
+            windowEnd: window.end,
+            status: "healthy",
+          }
         : null,
     });
 
@@ -183,7 +219,9 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not generate end-of-day pilot report");
-    return res.status(503).json({ error: "End-of-day pilot report could not be generated." });
+    return res
+      .status(503)
+      .json({ error: "End-of-day pilot report could not be generated." });
   }
 });
 
