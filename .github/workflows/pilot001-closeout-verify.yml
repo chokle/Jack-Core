@@ -51,7 +51,20 @@ jobs:
         run: pnpm --filter @workspace/api-server build
       - name: Jack build
         run: pnpm --filter @workspace/jack-core build
-      - name: Format check
-        run: pnpm exec prettier --check artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/App.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/components/JackShell.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts
+      - name: Generate prettier reconciliation patch
+        id: prettier_patch
+        run: |
+          pnpm exec prettier --write artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/App.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/components/JackShell.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts
+          git diff -- artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/App.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/components/JackShell.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts > prettier-reconciliation.diff
+      - name: Upload prettier reconciliation patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prettier-reconciliation
+          path: prettier-reconciliation.diff
+          if-no-files-found: error
+          retention-days: 1
+      - name: Verify format clean
+        run: test ! -s prettier-reconciliation.diff
       - name: Diff check
         run: git diff --check HEAD^ HEAD
