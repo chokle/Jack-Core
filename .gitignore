@@ -58,3 +58,8 @@ _smoke_*
 # Local handoff notes
 DAZ-HANDOFF-*.md
 PR*-review-summary-for-daz.md
+
+# Cloudflare generated deployment state
+cloudflare/wrangler.generated.json
+.wrangler/
+.wrangler-dry-run/
