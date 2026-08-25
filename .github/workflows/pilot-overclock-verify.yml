@@ -48,7 +48,7 @@ jobs:
           artifacts/jack-core/src/components/PilotActivityReports.tsx
           artifacts/jack-core/src/main.tsx
 
-      - name: Commit formatting if needed
+      - name: Commit initial formatting if needed
         run: |
           if ! git diff --quiet; then
             git config user.name "github-actions[bot]"
@@ -76,6 +76,30 @@ jobs:
 
       - name: Production builds
         run: pnpm --filter @workspace/api-server build && pnpm --filter @workspace/jack-core build
+
+      - name: Normalize formatting after verification
+        run: >-
+          pnpm exec prettier --write
+          artifacts/api-server/src/lib/pilot-end-of-day-report.ts
+          artifacts/api-server/src/lib/__tests__/pilot-end-of-day-report.test.ts
+          artifacts/api-server/src/routes/activity-heartbeat.ts
+          artifacts/api-server/src/routes/pilot-end-of-day.ts
+          artifacts/api-server/src/routes/__tests__/activity-heartbeat.test.ts
+          artifacts/api-server/src/routes/__tests__/pilot-end-of-day.test.ts
+          artifacts/api-server/src/routes/index.ts
+          artifacts/jack-core/src/lib/user-testing/activity-heartbeat.ts
+          artifacts/jack-core/src/components/PilotActivityReports.tsx
+          artifacts/jack-core/src/main.tsx
+
+      - name: Commit final formatting if needed
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add artifacts/api-server/src artifacts/jack-core/src
+            git commit -m "style: normalize Pilot001 sources after verification"
+            git push origin HEAD:reconcile/pilot-eod-report-20260824
+          fi
 
       - name: Formatting check
         run: >-
