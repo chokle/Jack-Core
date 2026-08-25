@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { prepareBrowserUpgrade } from "./lib/bootstrap-recovery";
+import { initializeActivityHeartbeat } from "./lib/user-testing/activity-heartbeat";
 
 declare global {
   interface Window {
@@ -66,6 +67,7 @@ class StartupErrorBoundary extends Component<
 
 async function start(): Promise<void> {
   await prepareBrowserUpgrade();
+  initializeActivityHeartbeat();
   createRoot(document.getElementById("root")!).render(
     <StartupErrorBoundary>
       <App />
