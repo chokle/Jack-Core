@@ -29,7 +29,7 @@ config.containers = config.containers.map((container) => ({
     PUBLIC_SITE_URL: "https://jack.torchlabs.ca",
     VITE_CLERK_PUBLISHABLE_KEY: publishableKey,
     VITE_DISABLE_CLERK_PROXY: "true",
-    VITE_ENABLE_CLERK_PROXY: "false"
+    VITE_ENABLE_CLERK_PROXY: "false",
   },
 }));
 
