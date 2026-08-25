@@ -78,9 +78,14 @@ function utcDayWindow(value: unknown): { start: string; end: string } | null {
   if (!Number.isFinite(start.getTime()) || start.toISOString().slice(0, 10) !== value) {
     return null;
   }
+
+  const requestedEndMs = start.getTime() + 86_400_000;
+  const effectiveEndMs = Math.min(requestedEndMs, Date.now());
+  if (effectiveEndMs <= start.getTime()) return null;
+
   return {
     start: start.toISOString(),
-    end: new Date(start.getTime() + 86_400_000).toISOString(),
+    end: new Date(effectiveEndMs).toISOString(),
   };
 }
 
@@ -150,7 +155,7 @@ router.get("/testing/reports/end-of-day", async (req, res) => {
 
     const window = utcDayWindow(req.query["date"]);
     if (!window) {
-      return res.status(400).json({ error: "A valid UTC report date is required." });
+      return res.status(400).json({ error: "A valid current or past UTC report date is required." });
     }
 
     const rows = await loadRows(scope, window.start, window.end);
