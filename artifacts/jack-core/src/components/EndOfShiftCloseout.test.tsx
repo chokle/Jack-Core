@@ -108,7 +108,9 @@ describe("EndOfShiftCloseout", () => {
       ["What should next shift focus on?", "Prep for morning startup"],
     ] as const;
     for (const [label, value] of complete) {
-      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      fireEvent.change(await screen.findByLabelText(label), {
+        target: { value },
+      });
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
@@ -141,9 +143,12 @@ describe("EndOfShiftCloseout", () => {
     );
 
     expect(await screen.findByText("Closeout status: Draft")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("What tasks were completed today?"), {
-      target: { value: "edited answer" },
-    });
+    fireEvent.change(
+      await screen.findByLabelText("What tasks were completed today?"),
+      {
+        target: { value: "edited answer" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
     expect(screen.getByDisplayValue("Baseline notes")).toBeTruthy();
   });
