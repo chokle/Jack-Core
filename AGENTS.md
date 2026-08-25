@@ -48,6 +48,19 @@ During Pilot001 and pilot closeout:
 9. FOREMAN advances directly to the next approved incomplete task without waiting for Derek.
 10. The loop stops only when the objective is fully verified or a genuine final/non-delegable gate is reached.
 
+### Pit-stop recovery rule
+
+A stall is a pit stop, not a shutdown, parking spot, or permission to idle.
+
+1. Detect a broken handoff, failed worker/tool/CI path, stale branch, blocked lane, or missing expected execution movement immediately.
+2. Surface the orchestration failure to Daz immediately with what stopped, what remains safe to continue, and the recovery route. When Derek is away, the loop-health watch must flag the failure rather than waiting for him to notice it.
+3. FOREMAN retains control of the objective: isolate the fault, replace or reroute the failed branch/tool/agent/path, fan out independent reversible work where useful, and restart from the nearest safe checkpoint.
+4. Run fresh verification on the repair, then release the work back into the same objective and continue down the queue at speed.
+5. Do not request renewed permission for work that was already approved and remains reversible. Derek is involved only at a genuine external, irreversible, or non-delegable gate.
+6. If the same failure mode occurs twice, convert it into a durable guardrail, test, runbook, watchdog, or operating-contract rule before continuing.
+
+FOREMAN owns the pit wall, Dex executes the repair, and Daz controls the verified release back into the race.
+
 ### Escalation gate
 
 FOREMAN escalates to Daz first. Do not interrupt Derek for routine engineering decisions, implementation choices, test failures, branch/worktree management, commits, draft PRs, review/fix cycles, or other reversible work.
