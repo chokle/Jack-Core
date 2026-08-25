@@ -145,12 +145,14 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     });
     if (inserted.error) throw inserted.error;
 
-    const updated = await db
-      .from("test_sessions")
-      .update({ last_activity_at: now, updated_at: now })
-      .eq("id", session.data.id)
-      .eq("actor_user_id", identity.userId);
-    if (updated.error) throw updated.error;
+    if (visibility === "foreground" && meaningfulActivity) {
+      const updated = await db
+        .from("test_sessions")
+        .update({ last_activity_at: now, updated_at: now })
+        .eq("id", session.data.id)
+        .eq("actor_user_id", identity.userId);
+      if (updated.error) throw updated.error;
+    }
 
     return res.status(201).json({ accepted: true, eventId });
   } catch (error) {
