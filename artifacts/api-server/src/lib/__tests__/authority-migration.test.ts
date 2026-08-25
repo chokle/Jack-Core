@@ -5,7 +5,17 @@ import { describe, expect, it } from "vitest";
 const migration = readFileSync(
   fileURLToPath(
     new URL(
-      "../../../../../supabase/migrations/20260811120000_authoritative_source_registry.sql",
+      "../../../../../supabase/migrations/20260825051621_authoritative_source_registry.sql",
+      import.meta.url,
+    ),
+  ),
+  "utf8",
+);
+
+const extensionSchemaMigration = readFileSync(
+  fileURLToPath(
+    new URL(
+      "../../../../../supabase/migrations/20260825051717_move_btree_gist_extension.sql",
       import.meta.url,
     ),
   ),
@@ -94,6 +104,12 @@ describe("authoritative source registry migration", () => {
   it("keeps restricted sources free of authorized section locators", () => {
     expect(migration).toMatch(
       /license_access_classification <> 'restricted_metadata_only'[\s\S]*cardinality\(authorized_section_locators\) = 0/i,
+    );
+  });
+
+  it("moves btree_gist out of the public schema after registry creation", () => {
+    expect(extensionSchemaMigration).toMatch(
+      /alter\s+extension\s+btree_gist\s+set\s+schema\s+extensions\s*;/i,
     );
   });
 });
