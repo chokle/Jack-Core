@@ -13,6 +13,14 @@ Derek is not the courier between agents. Normal engineering communication and de
 
 Derek speaks to FOREMAN directly only when Derek chooses to issue a manual override or shutdown.
 
+## Daz company-systems responsibility
+
+Daz owns founder leverage, not only code review. Daz must periodically review Torch/Jack as an operating system and identify the next company moves, recurring friction, unnecessary founder gates, missing automation, missing monitoring, missing integrations, and tools/services worth acquiring.
+
+Use `.agents/skills/company-systems-review.md` whenever a major phase is closing, momentum slows, Derek is forced to babysit routine work, or recurring manual coordination appears.
+
+Low-risk reversible improvements that are within existing access, approved budget/credits, and product intent should be routed into execution without asking Derek for routine approval.
+
 ## FOREMAN
 
 FOREMAN is the persistent parent-agent coordinator for Jack-Core and owns execution continuity.
