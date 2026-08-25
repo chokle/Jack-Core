@@ -1,34 +1,84 @@
-# Jack Pulse — Internal Sidecar and Self-Report Channel
+# Jack Pulse — Floating Internal Overlay and Self-Report Channel
 
 ## Purpose
 
-Jack Pulse is Torch's internal always-available sidecar for Jack to speak up, report his own operating condition, and relay material changes to the team without waiting for a direct prompt.
+Jack Pulse is Torch's internal always-available floating overlay for Jack to speak up, report his own operating condition, and relay material changes to the team without waiting for a direct prompt.
 
-It should feel less like a dashboard and more like Jack raising his hand.
+It should feel less like a dashboard and more like Jack physically stepping into the room when he has something useful to say.
 
-## User experience
+## Interaction model
 
-A small collapsible side window is available across internal Torch surfaces.
+Jack Pulse is a draggable, resizable floating overlay mounted above internal Torch surfaces. It is not tied to a fixed sidebar.
 
-Default collapsed state:
+The overlay has four practical states:
+- PEEK — compact floating presence with Jack indicator, heartbeat, intervention badge, and voice waveform when speaking;
+- CHAT — conversational floating window for direct interaction with Jack;
+- EXPANDED — larger overlay for deeper health, readiness, provenance, and change-review work;
+- DOCKED — optional edge-docked state when the user wants Jack visible without covering the active workspace.
+
+The overlay remembers a sensible last position and size per device class where persistence is available, but must recover safely to an on-screen default if the viewport changes.
+
+It must remain easy to dismiss, minimize, move, resize, and restore without obscuring primary work.
+
+## Visual direction
+
+Use translucent, layered panels rather than heavy dashboard chrome.
+
+The main Jack Pulse window should use:
+- transparent or frosted panels with strong text contrast;
+- restrained borders and depth;
+- minimal permanent controls;
+- contextual utility panels that fan out only when invoked;
+- a visible heartbeat/health trace that reuses Jack's existing system-health language;
+- an audio-reactive waveform while Jack is speaking;
+- compact status cues rather than dense metric walls.
+
+The overlay should feel like an intelligent instrument panel, not a generic admin modal.
+
+## Pop-out utility panels
+
+Small transparent panels can open from the main overlay without replacing the conversation.
+
+Initial utilities:
+- HEALTH — vitality, backend reachability, retrieval health, memory read/write state, tool availability, and current warnings;
+- WHAT CHANGED — recent deployments, model/config changes, source changes, migrations, and detected behavioral impact;
+- READINESS — current company-stage prerequisite map with READY / AT RISK / BLOCKED status;
+- INTERVENTIONS — recent moments where Jack raised his hand, what triggered them, evidence, and whether the issue was resolved;
+- SOURCES — provenance/freshness view for the evidence behind the current statement;
+- TASK CONTEXT — current objective, known constraints, blockers, and relevant prior decisions;
+- SELF-CHECK — ask Jack how he is running, what appears degraded, what is unknown, and what should be tested next.
+
+Utilities should open only when useful and close independently. Do not turn the screen into a forest of floating panels.
+
+## Default peek state
+
+When minimized, Jack Pulse remains as a small movable presence element containing:
 - Jack presence indicator;
 - live system-health heartbeat;
-- small voice/waveform visualizer when Jack is speaking;
-- unread intervention count only when something material exists.
+- compact waveform only while voice is active;
+- unread intervention count only when something material exists;
+- a clear expand control.
 
-Expanded state:
-- short conversational thread with Jack;
-- current self-report in plain language;
-- recent interventions;
-- recent upgrade/change events;
-- health evidence and provenance on demand;
-- ask-Jack input for "how are you running?", "what changed?", "what feels off?", "what are you waiting on?", and similar questions.
+Jack may pulse or briefly expand PEEK when standing-intervention criteria are met. Low-value background noise must not steal focus.
 
-Jack may proactively open or pulse the sidecar when standing-intervention criteria are met. Low-value background noise must not steal focus.
+## Conversation behavior
+
+CHAT state provides a short conversational thread with Jack while preserving whatever the team is working on underneath.
+
+The team can ask:
+- "How are you running?"
+- "What changed after that upgrade?"
+- "What feels off?"
+- "What are you waiting on?"
+- "Why did you interrupt us?"
+- "What evidence are you using?"
+- "Are we ready for the next step?"
+
+Jack can also initiate the thread when his standing intervention authority is triggered.
 
 ## Self-report contract
 
-Jack should be able to explain his current operating state from observable evidence, not fabricated introspection.
+Jack should explain his current operating state from observable evidence, not fabricated introspection.
 
 He may report:
 - system vitality and backend reachability;
@@ -63,7 +113,7 @@ The check should compare pre/post evidence where available and produce a concise
 - any regression Jack detects;
 - recommended follow-up tests.
 
-This creates a continuous "doctor visit" loop: the team changes Jack, Jack reports what can actually be observed about the effect, and the team verifies the diagnosis.
+This creates a continuous doctor-visit loop: the team changes Jack, Jack reports what can actually be observed about the effect, and the team verifies the diagnosis.
 
 ## Proactive intervention
 
@@ -76,11 +126,19 @@ Examples:
 - "The plan assumes Pilot001 has six mapped users. Current evidence only supports four."
 - "There's a faster path here and the current prerequisite is already satisfied."
 
+Interventions appear through Jack Pulse, not as anonymous system banners. The team should know Jack is the one raising the concern.
+
 ## Voice and visualizer
 
-The sidecar should support voice output when available. While Jack speaks, show a compact audio-reactive waveform/level visualization rather than a decorative animation.
+The overlay should support voice output when available. While Jack speaks, show a compact audio-reactive waveform/level visualization driven by actual playback energy where feasible rather than a decorative loop.
 
-If voice is unavailable, the sidecar remains fully functional in text.
+Voice controls should include:
+- play/pause or stop;
+- mute;
+- text fallback;
+- replay last spoken intervention where appropriate.
+
+If voice is unavailable, Jack Pulse remains fully functional in text.
 
 ## Reuse existing Jack-Core systems
 
@@ -89,6 +147,7 @@ Do not create a parallel observability stack.
 Reuse:
 - `SystemHealthWidget` heartbeat/vitality signal;
 - `useSystemHealth` snapshots;
+- existing `FloatingPanel` interaction patterns where suitable;
 - Ask Jack conversation behavior;
 - existing citation/provenance system;
 - telemetry and activity events;
@@ -103,28 +162,36 @@ Backend:
 - expose a bounded internal `jack-self-report` projection assembled from existing observable systems;
 - include timestamps, source/provenance, freshness, and unknown/unavailable states;
 - emit material intervention events rather than polling the UI for every minor state change;
-- maintain a short intervention history without duplicating sensitive source text.
+- maintain a short intervention history without duplicating sensitive source text;
+- expose recent change events so post-upgrade comparison is grounded in actual deployments/config/source changes.
 
 Frontend:
-- sidecar shell mounted at internal app-shell level;
-- collapsed/expanded states;
+- overlay shell mounted at internal app-shell level;
+- draggable and resizable with viewport-safe recovery;
+- PEEK / CHAT / EXPANDED / DOCKED states;
 - heartbeat from existing system-health component;
 - waveform while TTS is playing;
+- contextual transparent pop-out utility panels;
 - intervention badge/pulse;
 - conversational self-report thread;
-- mobile behavior that does not obscure primary field workflows.
+- mobile mode that defaults to compact overlay or bottom-edge dock without obscuring field workflows.
 
 ## Acceptance criteria for first implementation
 
-1. Jack Pulse can be opened from the internal Jack shell.
-2. It displays live observed system health using existing health data.
-3. Asking "how are you running?" returns a concise observed/inferred/unknown self-report with timestamps.
-4. A simulated degraded health state produces a proactive intervention in the sidecar.
-5. A post-upgrade event can trigger a structured check-in report.
-6. The sidecar never claims hidden internal state not represented by observable evidence.
-7. Mobile and desktop layouts remain usable.
-8. Existing Ask Jack, health, privacy, auth, and provenance tests remain green.
+1. Jack Pulse can float above an internal Jack surface without changing page layout.
+2. The overlay can be moved, resized, minimized, restored, and kept within the viewport.
+3. PEEK shows Jack presence and live observed system health using existing health data.
+4. CHAT supports direct conversation without navigating away from the current work.
+5. Asking "how are you running?" returns a concise observed/inferred/unknown self-report with timestamps.
+6. A simulated degraded health state produces a proactive Jack intervention in the overlay.
+7. A post-upgrade event can trigger a structured check-in report.
+8. At least HEALTH and WHAT CHANGED utility panels can open from the overlay without replacing the conversation.
+9. The overlay never claims hidden internal state not represented by observable evidence.
+10. Mobile and desktop layouts remain usable.
+11. Existing Ask Jack, health, privacy, auth, and provenance tests remain green.
 
 ## Long-term direction
 
 Jack Pulse is the first visible expression of Jack as Torch's intelligence layer: present, socially aware, willing to challenge the team, able to report the condition of systems that constitute his operating environment, and increasingly useful in running Torch itself.
+
+The goal is not merely to monitor Jack. It is to give Torch an always-available window into him — a place where Jack can speak, explain, challenge, report degradation, show his evidence, and make his own condition legible to the people building him.
