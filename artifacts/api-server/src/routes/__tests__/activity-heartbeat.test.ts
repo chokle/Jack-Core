@@ -27,6 +27,7 @@ const PILOT_ID = "22222222-2222-4222-8222-222222222222";
 const SESSION_ID = "33333333-3333-4333-8333-333333333333";
 const APP_SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const CONSENT_ID = "55555555-5555-4555-8555-555555555555";
+const INITIAL_LAST_ACTIVITY = "2026-08-24T19:00:00.000Z";
 
 function app(): Express {
   const value = express();
@@ -57,8 +58,8 @@ beforeEach(() => {
       pilot_id: PILOT_ID,
       app_session_id: APP_SESSION_ID,
       status: "active",
-      started_at: "2026-08-24T19:00:00.000Z",
-      last_activity_at: "2026-08-24T19:00:00.000Z",
+      started_at: INITIAL_LAST_ACTIVITY,
+      last_activity_at: INITIAL_LAST_ACTIVITY,
     },
   ];
   fake.tables.telemetry_consents = [
@@ -71,7 +72,7 @@ beforeEach(() => {
       state: "granted",
       privacy_notice_version: "jack-pilot-privacy-2026-07-25",
       consent_version: "jack-pilot-consent-2026-07-25",
-      occurred_at: "2026-08-24T19:00:00.000Z",
+      occurred_at: INITIAL_LAST_ACTIVITY,
     },
   ];
   fake.tables.test_events = [];
@@ -107,7 +108,31 @@ describe("pilot activity heartbeat", () => {
       },
     });
     expect(fake.tables.test_sessions[0]?.last_activity_at).not.toBe(
-      "2026-08-24T19:00:00.000Z",
+      INITIAL_LAST_ACTIVITY,
+    );
+  });
+
+  it("records passive coverage without treating it as semantic activity", async () => {
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        appSessionId: APP_SESSION_ID,
+        visibility: "hidden",
+        meaningfulActivity: false,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(201);
+    expect(fake.tables.test_events).toHaveLength(1);
+    expect(fake.tables.test_events[0]).toMatchObject({
+      event_type: "activity_heartbeat",
+      metadata: {
+        visibility: "hidden",
+        meaningful_activity: false,
+      },
+    });
+    expect(fake.tables.test_sessions[0]?.last_activity_at).toBe(
+      INITIAL_LAST_ACTIVITY,
     );
   });
 
