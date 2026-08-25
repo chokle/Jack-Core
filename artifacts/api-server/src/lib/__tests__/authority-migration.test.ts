@@ -52,7 +52,7 @@ describe("authoritative source registry migration", () => {
     return migration.slice(markerIndex, terminatorIndex + 1);
   }
 
-  it("rejects overlapping active governing-primary windows", () => {
+  it("rejects overlapping governing-primary windows across lifecycle statuses", () => {
     const constraint = governingPrimaryConstraint();
     expect(migration).toContain(
       "authoritative_sources_no_overlapping_active_primary",
@@ -64,8 +64,9 @@ describe("authoritative source registry migration", () => {
       /jurisdiction with =[\s\S]*source_type with =[\s\S]*edition with =/i,
     );
     expect(constraint).toMatch(
-      /source_type in \('adopted_code', 'municipal_bylaw'\)[\s\S]*status in \('current', 'requires_review'\)/i,
+      /source_type in \('adopted_code', 'municipal_bylaw'\)/i,
     );
+    expect(constraint).not.toMatch(/status\s+in\s*\(/i);
   });
 
   it("rejects competing active primaries with different document titles", () => {
@@ -81,6 +82,12 @@ describe("authoritative source registry migration", () => {
     expect(constraint).not.toMatch(/authority\s+with\s+=/i);
     expect(constraint).toMatch(
       /jurisdiction with =[\s\S]*source_type with =[\s\S]*edition with =/i,
+    );
+  });
+
+  it("lets the service role persist reconciliation review state", () => {
+    expect(migration).toMatch(
+      /grant\s+select\s*,\s*update\s+on\s+table\s+public\.authoritative_sources\s+to\s+service_role\s*;/i,
     );
   });
 
