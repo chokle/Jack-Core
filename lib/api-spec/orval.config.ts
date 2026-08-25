@@ -13,6 +13,22 @@ const titleTransformer: InputTransformerFn = (config) => {
   return config;
 };
 
+const zodRuntimeStringDateTransformer: InputTransformerFn = (config) => {
+  titleTransformer(config);
+  const authorityContext = config.components?.schemas?.["AuthorityContext"];
+  if (authorityContext && "properties" in authorityContext) {
+    const permitApplicationDate =
+      authorityContext.properties?.["permitApplicationDate"];
+    if (permitApplicationDate && "format" in permitApplicationDate) {
+      // The API accepts this value as a YYYY-MM-DD string. Orval's Zod target
+      // otherwise combines z.coerce.date() with the existing string regex,
+      // which is invalid and would also change request parsing at runtime.
+      delete permitApplicationDate.format;
+    }
+  }
+  return config;
+};
+
 export default defineConfig({
   "api-client-react": {
     input: {
@@ -44,7 +60,7 @@ export default defineConfig({
     input: {
       target: "./openapi.yaml",
       override: {
-        transformer: titleTransformer,
+        transformer: zodRuntimeStringDateTransformer,
       },
     },
     output: {
@@ -58,10 +74,10 @@ export default defineConfig({
       override: {
         zod: {
           coerce: {
-            query: ['boolean', 'number', 'string'],
-            param: ['boolean', 'number', 'string'],
-            body: ['bigint', 'date'],
-            response: ['bigint', 'date'],
+            query: ["boolean", "number", "string"],
+            param: ["boolean", "number", "string"],
+            body: ["bigint", "date"],
+            response: ["bigint", "date"],
           },
         },
         useDates: true,

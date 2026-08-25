@@ -5,6 +5,9 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { CitationAmendmentIndicator } from './citationAmendmentIndicator';
+import type { CitationContentAvailability } from './citationContentAvailability';
+import type { CitationSourceStatus } from './citationSourceStatus';
 import type { CitationSourceType } from './citationSourceType';
 
 export interface Citation {
@@ -26,4 +29,21 @@ export interface Citation {
   verified?: boolean;
   /** How many independent sources corroborate this citation. For "video" citations it is the distinct source videos of the covering concept; for "knowledge" citations it is the field note's own evidence count (metadata `evidenceCount`). Drives a "confirmed across N videos" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal. */
   sourceCount?: number;
+  jurisdiction?: string;
+  authority?: string;
+  documentTitle?: string;
+  /** @nullable */
+  edition?: string | null;
+  /** @nullable */
+  revision?: string | null;
+  /** @nullable */
+  section?: string | null;
+  /** @nullable */
+  subsection?: string | null;
+  /** @nullable */
+  effectiveDateBasis?: string | null;
+  sourceStatus?: CitationSourceStatus;
+  officialSourceUrl?: string;
+  amendmentIndicator?: CitationAmendmentIndicator;
+  contentAvailability?: CitationContentAvailability;
 }

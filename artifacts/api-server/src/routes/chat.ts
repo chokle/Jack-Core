@@ -25,6 +25,20 @@ import {
   requestIdentifier,
   resolveActiveTesterScope,
 } from "../lib/activity-telemetry.js";
+import {
+  authoritativeSourceFromRow,
+  applicableRevisionFeeds,
+  classifyCodeSensitiveQuestion,
+  evaluateCodeSafetyGate,
+  formatCodeSafetyRefusal,
+  reconcileRevisionFeedObservations,
+  resolveJurisdiction,
+  scopeSourcesToResolvedJurisdiction,
+  type AuthoritativeSource,
+  type AuthorityCitation,
+  type JurisdictionResolution,
+} from "../lib/code-authority.js";
+import { createRevisionFeedFingerprintObserver } from "../lib/revision-feed-observer.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -40,6 +54,35 @@ const CUTTING_QUERY_KEYWORDS =
   /\b(oxy[-\s]*fuel|oxyfuel|gas cutting|flame cut|flame|cutting|torch cut|acetylene|plasma|kerf)\b/i;
 
 const router = Router();
+
+interface ChatCitation {
+  videoId: string;
+  videoTitle: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  thumbnailUrl: string | null;
+  sourceType: "video" | "knowledge" | "authority";
+  entryId?: string;
+  contributor?: string;
+  knowledgeNature?: "direct" | "inferred";
+  evidenceType?: string;
+  originalSource?: string;
+  verified?: boolean;
+  sourceCount?: number;
+  jurisdiction?: string;
+  authority?: string;
+  documentTitle?: string;
+  edition?: string | null;
+  revision?: string | null;
+  section?: string | null;
+  subsection?: string | null;
+  effectiveDateBasis?: string | null;
+  sourceStatus?: string;
+  officialSourceUrl?: string;
+  amendmentIndicator?: string;
+  contentAvailability?: string;
+}
 
 interface KnowledgeScope {
   organizationId: string;
@@ -87,7 +130,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.message });
 
-    const { message } = parsed.data;
+    const { message, authorityContext } = parsed.data;
 
     if (message.length > MAX_MESSAGE_LENGTH) {
       return res.status(400).json({
@@ -110,6 +153,57 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     }
     const session = resolveSession(req, res);
     const knowledgeScope = await resolveKnowledgeScope(userId);
+
+    const sensitivity = classifyCodeSensitiveQuestion(message);
+    if (sensitivity.isCodeSensitive) {
+      const jurisdiction = resolveJurisdiction(authorityContext);
+      const authoritativeSources = await loadAuthoritativeSources(
+        jurisdiction,
+        req.log,
+      );
+      const gateResult = evaluateCodeSafetyGate({
+        question: message,
+        context: authorityContext,
+        sources: authoritativeSources,
+      });
+      // A licensed-evidence answer path does not exist yet. Treat every other
+      // code-sensitive gate result, including future `allowed` values and any
+      // unrecognized value, as blocked at the route boundary. This must remain
+      // before every generic Ask Jack retrieval, model, memory, and learning path.
+      const codeSafety =
+        gateResult.outcome === "blocked"
+          ? gateResult
+          : {
+              ...gateResult,
+              outcome: "blocked" as const,
+              missing: [
+                ...gateResult.missing,
+                "Licensed authoritative answering path",
+              ],
+              reason:
+                "The authority gate did not return a supported blocked result, and no licensed-evidence answering path is implemented.",
+            };
+      const answer = formatCodeSafetyRefusal(codeSafety);
+      const citations = codeSafety.citations.map(toChatAuthorityCitation);
+      // Phase 1 has no authorized section-level, revision-reconciled answer
+      // path. Do not persist the request, refusal, or citations until that path
+      // exists; the content must also remain outside retrieval and learning.
+      await recordServerAskJackEvent({
+        req,
+        actorIdentity: await resolveIdentity(req),
+        eventType: "ask_jack_completed",
+        correlationId: session,
+        citationCount: citations.length,
+      });
+
+      return res.json({
+        answer,
+        citations,
+        usedInternalKnowledge: false,
+        learning: { status: "discarded", extractedCount: 0 },
+        codeSafety,
+      });
+    }
 
     const embedding = await createEmbedding(message);
 
@@ -155,22 +249,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     // segment; "knowledge" cites a Knowledge Entry (reusing videoTitle/text/
     // thumbnailUrl for the entry's title/snippet/image so the client renders it
     // without a bespoke shape — see the Citation schema in openapi.yaml).
-    const citations: Array<{
-      videoId: string;
-      videoTitle: string;
-      startTime: number;
-      endTime: number;
-      text: string;
-      thumbnailUrl: string | null;
-      sourceType: "video" | "knowledge";
-      entryId?: string;
-      contributor?: string;
-      knowledgeNature?: "direct" | "inferred";
-      evidenceType?: string;
-      originalSource?: string;
-      verified?: boolean;
-      sourceCount?: number;
-    }> = [];
+    const citations: ChatCitation[] = [];
 
     let contextText = "";
     const topicBias = inferPromptTopic(message);
@@ -599,6 +678,96 @@ router.delete("/chat/history", async (req, res) => {
     return res.status(500).json({ error: "Failed to clear chat history" });
   }
 });
+
+async function loadAuthoritativeSources(
+  resolved: JurisdictionResolution,
+  log: {
+    error: (obj: Record<string, unknown>, msg: string) => void;
+  },
+): Promise<AuthoritativeSource[]> {
+  const { data, error } = await supabase
+    .from("authoritative_sources")
+    .select("*");
+  if (error) {
+    log.error(
+      { err: error },
+      "authoritative source registry unavailable; code answer will fail closed",
+    );
+    return [];
+  }
+  const sources = ((data ?? []) as Array<Record<string, unknown>>)
+    .map(authoritativeSourceFromRow)
+    .filter((source): source is AuthoritativeSource => source !== null);
+  const scopedSources = scopeSourcesToResolvedJurisdiction(resolved, sources);
+  const applicableFeeds = applicableRevisionFeeds(resolved, scopedSources);
+  if (
+    applicableFeeds.length !== 1 ||
+    applicableFeeds[0]?.status === "superseded"
+  ) {
+    return scopedSources;
+  }
+  const [reconciledFeed] = await reconcileRevisionFeedObservations(
+    applicableFeeds,
+    {
+      observeFingerprint: observeRevisionFeedFingerprint,
+      persistRequiresReview: persistRevisionFeedRequiresReview,
+      onError: (reconciliationError, source) =>
+        log.error(
+          { err: reconciliationError, sourceId: source.sourceId },
+          "revision-feed reconciliation failed closed",
+        ),
+    },
+  );
+  return reconciledFeed
+    ? scopedSources.map((source) =>
+        source.sourceId === reconciledFeed.sourceId ? reconciledFeed : source,
+      )
+    : scopedSources;
+}
+
+const observeRevisionFeedFingerprint = createRevisionFeedFingerprintObserver();
+
+async function persistRevisionFeedRequiresReview(
+  sourceId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("authoritative_sources")
+    .update({ status: "requires_review", updated_at: new Date().toISOString() })
+    .eq("source_id", sourceId)
+    .select("source_id")
+    .single();
+  if (error) throw error;
+  if (!data) {
+    throw new Error(`Revision feed ${sourceId} was not updated`);
+  }
+}
+
+function toChatAuthorityCitation(citation: AuthorityCitation): ChatCitation {
+  return {
+    videoId: "",
+    videoTitle: citation.citationLabel,
+    startTime: 0,
+    endTime: 0,
+    text:
+      citation.contentAvailability === "metadata_only"
+        ? "Official source metadata only; no licensed section-level text is indexed."
+        : `Authoritative section ${citation.section ?? "available"}`,
+    thumbnailUrl: null,
+    sourceType: "authority",
+    jurisdiction: citation.jurisdiction,
+    authority: citation.authority,
+    documentTitle: citation.document,
+    edition: citation.edition,
+    revision: citation.revision,
+    section: citation.section,
+    subsection: citation.subsection,
+    effectiveDateBasis: citation.effectiveDateBasis,
+    sourceStatus: citation.sourceStatus,
+    officialSourceUrl: citation.officialSourceUrl,
+    amendmentIndicator: citation.amendmentIndicator,
+    contentAvailability: citation.contentAvailability,
+  };
+}
 
 interface GraphMemoryMatch {
   id: string;
