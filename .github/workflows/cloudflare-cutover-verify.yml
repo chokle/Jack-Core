@@ -46,13 +46,8 @@ jobs:
           node --check cloudflare/resolve-account-context.mjs
       - name: Account resolver regression tests
         run: node --test cloudflare/resolve-account-context.test.mjs
-      - name: Show resolver Prettier delta
-        shell: bash
-        run: |
-          cp cloudflare/resolve-account-context.mjs /tmp/resolver-before.mjs
-          pnpm exec prettier --write cloudflare/resolve-account-context.mjs
-          diff -u /tmp/resolver-before.mjs cloudflare/resolve-account-context.mjs || true
-          git diff --exit-code -- cloudflare/resolve-account-context.mjs
+      - name: Format check
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml
       - name: Cloudflare Worker dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
