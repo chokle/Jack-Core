@@ -26,6 +26,7 @@ import {
   resolveKnowledgeCandidate,
   getGraphHealth,
 } from "../lib/memory-graph.js";
+import { filterPublicGraph } from "../lib/public-memory-graph.js";
 import {
   requireAdmin,
   resolveAdminIdentity,
@@ -48,6 +49,11 @@ router.get("/graph", async (req, res) => {
       await rebuildGraph();
       graph = await getGraph();
     }
+
+    // The persisted graph doubles as the review ledger, so rejected concepts stay
+    // stored for audit/history. Public Living Memory is fail-closed: rejected
+    // knowledge and its incident edges never cross this API boundary.
+    graph = filterPublicGraph(graph);
 
     // Validate against the generated contract before returning so the persisted
     // graph (including distilled atomic-knowledge nodes/edges) always matches the
