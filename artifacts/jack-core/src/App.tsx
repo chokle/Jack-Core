@@ -67,6 +67,7 @@ import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from 
 const queryClient = new QueryClient();
 
 const configuredClerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+const pilotAuthBypass = import.meta.env.VITE_PILOT_AUTH_BYPASS === "true";
 const isLocalClerkHost =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1" ||
@@ -226,7 +227,7 @@ function stripBase(path: string): string {
     : path;
 }
 
-if (!clerkPubKey) {
+if (!pilotAuthBypass && !clerkPubKey) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
 }
 
@@ -1048,8 +1049,21 @@ function ManagedAppEntry() {
   );
 }
 
+function PilotBypassApp() {
+  useEffect(() => {
+    setAuthTokenGetter(null);
+    window.__JACK_MARK_READY__?.();
+    return () => setAuthTokenGetter(null);
+  }, []);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppSurface />
+    </QueryClientProvider>
+  );
+}
+
 function App() {
-  return <ManagedAppEntry />;
+  return pilotAuthBypass ? <PilotBypassApp /> : <ManagedAppEntry />;
 }
 
 export default App;

@@ -11,6 +11,7 @@ import { isPresentationIdentity, isUnavailableIdentity } from "../lib/identity.j
 import { hasAnyReportScope } from "../lib/activity-telemetry.js";
 
 const router = Router();
+const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
 
 const ONBOARDING_VERSION = 1 as const;
 const ONBOARDING_STATUSES = new Set(["completed", "skipped"]);
@@ -102,6 +103,7 @@ router.get("/me", async (req, res) => {
 });
 
 router.get("/me/preferences/memory-graph-onboarding", async (req, res) => {
+  if (pilotAuthBypass) return res.json(GetMemoryGraphOnboardingPreferenceResponse.parse({ preference: null }));
   const userId = authenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: "Unauthorized — sign in required." });
 
@@ -121,6 +123,7 @@ router.put("/me/preferences/memory-graph-onboarding", async (req, res) => {
 
   const preference = readPreference(req.body);
   if (!preference) return res.status(400).json({ error: "Invalid onboarding preference." });
+  if (pilotAuthBypass) return res.json(UpdateMemoryGraphOnboardingPreferenceResponse.parse({ preference }));
 
   try {
     await clerkClient.users.updateUserMetadata(userId, {

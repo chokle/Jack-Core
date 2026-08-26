@@ -16,6 +16,7 @@ import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
 
 const app: Express = express();
+const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
 
 app.use(
   pinoHttp({
@@ -40,7 +41,7 @@ app.use(
 // Clerk auth proxy — must run before the body parsers because it streams raw
 // request bytes to Clerk's Frontend API. No-op in dev (the browser hits Clerk's
 // dev FAPI directly); active in production where VITE_CLERK_PROXY_URL is set.
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+if (!pilotAuthBypass) app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 const allowedOrigins = (process.env["CORS_ALLOWED_ORIGINS"] || "")
   .split(",")
@@ -72,7 +73,9 @@ app.use(express.urlencoded({ extended: true }));
 // so getAuth(req) works in the auth gate and route handlers. The publishable
 // key is resolved from the request host to support multiple Clerk custom
 // domains, falling back to CLERK_PUBLISHABLE_KEY.
-app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
+if (!pilotAuthBypass) {
+  app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
+}
 
 // Recovery for a browser holding a session for a Clerk user that was deleted.
 // This must remain outside the /api auth gate because the stale token cannot

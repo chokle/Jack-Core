@@ -82,6 +82,18 @@ function displayName(user: { firstName: string | null; lastName: string | null }
  * trusted Clerk public metadata.
  */
 export async function resolveIdentity(req: Request): Promise<CallerIdentity | null> {
+  if (process.env["PILOT_AUTH_BYPASS"] === "true") {
+    const userId = req.userId ?? process.env["PILOT_AUTH_USER_ID"]?.trim() ?? "pilot001-bypass";
+    const email = process.env["PILOT_AUTH_EMAIL"]?.trim() || null;
+    return {
+      userId,
+      email,
+      name: process.env["PILOT_AUTH_NAME"]?.trim() || "Pilot001",
+      isAdmin: process.env["PILOT_AUTH_ADMIN"] === "true",
+      isPresentation: false,
+      classification: "resolved",
+    };
+  }
   let userId: string | null | undefined;
   try {
     userId = getAuth(req)?.userId;
@@ -146,10 +158,14 @@ export async function resolveAdminIdentity(req: Request): Promise<AdminIdentity 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   void (async () => {
     let userId: string | null | undefined;
-    try {
-      userId = getAuth(req)?.userId;
-    } catch {
-      userId = null;
+    if (process.env["PILOT_AUTH_BYPASS"] === "true") {
+      userId = req.userId ?? process.env["PILOT_AUTH_USER_ID"]?.trim() ?? "pilot001-bypass";
+    } else {
+      try {
+        userId = getAuth(req)?.userId;
+      } catch {
+        userId = null;
+      }
     }
     if (!userId) {
       res.status(401).json({ error: "Unauthorized — sign in required." });
