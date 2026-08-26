@@ -1,0 +1,119 @@
+name: Pilot001 Cloudflare Live Deploy
+
+on:
+  push:
+    branches:
+      - overclock/cloudflare-live-deploy-20260825-3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PILOT_AUTH_BYPASS: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+  SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+  ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+  FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
+  FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Preflight required deployment secrets
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            CLOUDFLARE_API_TOKEN \
+            CLOUDFLARE_ACCOUNT_ID \
+            SUPABASE_URL \
+            SUPABASE_SERVICE_ROLE_KEY \
+            SUPABASE_DB_URL \
+            OPENAI_API_KEY \
+            RESEND_API_KEY \
+            ADMIN_EMAILS \
+            FEEDBACK_FROM_EMAIL \
+            FEEDBACK_NOTIFICATION_RECIPIENTS
+          do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            printf 'MISSING_GITHUB_SECRETS=%s\n' "$(IFS=,; echo "${missing[*]}")"
+            exit 2
+          fi
+          echo "Deployment secret preflight passed."
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Cloudflare deploy config
+        run: node cloudflare/generate-deploy-config.mjs
+      - name: First deploy Worker + Container
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json 2>&1 | tee /tmp/wrangler-first-deploy.log
+      - name: Upload production runtime secrets
+        shell: bash
+        run: |
+          put_secret() {
+            local name="$1"
+            printf '%s' "${!name}" | npx --yes wrangler@latest secret put "$name" --config cloudflare/wrangler.generated.json
+          }
+          put_secret SUPABASE_URL
+          put_secret SUPABASE_SERVICE_ROLE_KEY
+          put_secret SUPABASE_DB_URL
+          put_secret OPENAI_API_KEY
+          put_secret RESEND_API_KEY
+          put_secret ADMIN_EMAILS
+          put_secret FEEDBACK_FROM_EMAIL
+          put_secret FEEDBACK_NOTIFICATION_RECIPIENTS
+      - name: Redeploy with runtime secrets
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json 2>&1 | tee /tmp/wrangler-final-deploy.log
+      - name: Resolve workers.dev URL
+        id: url
+        shell: bash
+        run: |
+          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/wrangler-final-deploy.log | tail -1 || true)
+          if [ -z "$url" ]; then
+            echo "Could not parse workers.dev URL from Wrangler output."
+            cat /tmp/wrangler-final-deploy.log
+            exit 3
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "WORKERS_DEV_URL=$url"
+      - name: Temporary-host health acceptance
+        shell: bash
+        env:
+          WORKERS_DEV_URL: ${{ steps.url.outputs.url }}
+        run: |
+          for attempt in $(seq 1 24); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$WORKERS_DEV_URL/api/healthz" || true)
+            if [ "$code" = "200" ]; then
+              echo "WORKERS_DEV_HEALTH=200"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "health attempt $attempt -> HTTP $code"
+            sleep 5
+          done
+          echo "Temporary-host health acceptance failed."
+          cat /tmp/health.json 2>/dev/null || true
+          exit 4
