@@ -99,31 +99,33 @@ function graph(): KnowledgeGraph {
 }
 
 describe("filterPublicGraph", () => {
-  it("removes rejected knowledge and every incident edge while keeping trusted knowledge", () => {
-    const result = filterPublicGraph(graph());
+  it(
+    "removes rejected knowledge and every incident edge while keeping trusted knowledge",
+    () => {
+      const result = filterPublicGraph(graph());
 
-    expect(result.nodes.map((node) => node.id)).toEqual([
-      "__jack__",
-      "topic:Welder",
-      "k:concept:trusted",
-    ]);
-    expect(result.edges.map((edge) => edge.id)).toEqual([
-      "e:core-topic",
-      "e:trusted-topic",
-    ]);
-    expect(result.counts).toEqual({
-      nodes: 3,
-      edges: 2,
-      topics: 1,
-      competencies: 0,
-      videos: 0,
-      knowledge: 1,
-    });
-  });
+      expect(result.nodes.map((node) => node.id)).toEqual([
+        "__jack__",
+        "topic:Welder",
+        "k:concept:trusted",
+      ]);
+      expect(result.edges.map((edge) => edge.id)).toEqual(["e:core-topic", "e:trusted-topic"]);
+      expect(result.counts).toEqual({
+        nodes: 3,
+        edges: 2,
+        topics: 1,
+        competencies: 0,
+        videos: 0,
+        knowledge: 1,
+      });
+    },
+  );
 
   it("returns the original snapshot when there is nothing to hide", () => {
     const input = graph();
-    input.nodes = input.nodes.filter((node) => node.verificationStatus !== "rejected");
+    input.nodes = input.nodes.filter(
+      (node) => node.verificationStatus !== "rejected",
+    );
     input.edges = input.edges.filter((edge) => edge.id !== "e:rejected-topic");
     input.counts = { ...input.counts, nodes: 3, edges: 2, knowledge: 1 };
 
