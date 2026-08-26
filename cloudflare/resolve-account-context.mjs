@@ -41,10 +41,14 @@ export async function resolveCloudflareAccountId({
       `/zones?name=${encodeURIComponent(zoneName)}&per_page=50`,
     );
     const zone = zones.find(
-      (entry) => entry && entry.name === zoneName && entry.account && entry.account.id,
+      (entry) =>
+        entry && entry.name === zoneName && entry.account && entry.account.id,
     );
     if (zone) {
-      return { accountId: zone.account.id, source: `${zoneName} zone ownership` };
+      return {
+        accountId: zone.account.id,
+        source: `${zoneName} zone ownership`,
+      };
     }
   } catch (error) {
     zoneDiscoveryError = error;
