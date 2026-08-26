@@ -55,70 +55,7 @@ jobs:
           NODE
 
       - name: Resolve Cloudflare account context
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-
-          const token = process.env.CLOUDFLARE_API_TOKEN;
-          const configuredAccountId = (process.env.CONFIGURED_CLOUDFLARE_ACCOUNT_ID || "").trim();
-
-          async function cloudflare(path) {
-            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-            });
-            const payload = await response.json();
-            if (!response.ok || payload.success === false) {
-              const errors = Array.isArray(payload.errors)
-                ? payload.errors.map((entry) => entry.message || entry.code).join("; ")
-                : "unknown Cloudflare API error";
-              throw new Error(`${response.status} ${errors}`);
-            }
-            return Array.isArray(payload.result) ? payload.result : [];
-          }
-
-          let accountId = configuredAccountId;
-          let source = configuredAccountId ? "optional repository override" : "";
-
-          if (!accountId) {
-            try {
-              const zones = await cloudflare("/zones?name=torchlabs.ca&per_page=50");
-              const zone = zones.find(
-                (entry) => entry && entry.name === "torchlabs.ca" && entry.account && entry.account.id,
-              );
-              if (zone) {
-                accountId = zone.account.id;
-                source = "torchlabs.ca zone ownership";
-              }
-            } catch (error) {
-              console.warn(`Zone-based account discovery unavailable: ${error.message}`);
-            }
-          }
-
-          if (!accountId) {
-            const accounts = await cloudflare("/accounts?per_page=50");
-            const unique = [...new Map(accounts.filter((entry) => entry && entry.id).map((entry) => [entry.id, entry])).values()];
-            const torchMatches = unique.filter((entry) => /\btorch\b/i.test(entry.name || ""));
-            const candidate = torchMatches.length === 1 ? torchMatches[0] : unique.length === 1 ? unique[0] : null;
-            if (!candidate) {
-              console.error(
-                `Unable to resolve a single Torch Cloudflare account from token scope (${unique.length} accounts visible).`,
-              );
-              console.error(
-                "Optional fallback: set CLOUDFLARE_ACCOUNT_ID as a repository Actions secret, then rerun.",
-              );
-              process.exit(1);
-            }
-            accountId = candidate.id;
-            source = torchMatches.length === 1 ? "unique Torch-named account" : "single token-visible account";
-          }
-
-          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_ACCOUNT_ID=${accountId}\n`);
-          console.log(`Cloudflare account context resolved via ${source}.`);
-          NODE
+        run: node cloudflare/resolve-account-context.mjs
 
       - name: Verify Cloudflare authentication
         run: npx --yes wrangler@latest whoami
@@ -126,11 +63,16 @@ jobs:
       - name: Generate Cloudflare deploy config
         run: node cloudflare/generate-deploy-config.mjs
 
-      - name: Validate Worker syntax
-        run: node --check cloudflare/worker.mjs
+      - name: Validate Cloudflare helper syntax
+        run: |
+          node --check cloudflare/worker.mjs
+          node --check cloudflare/resolve-account-context.mjs
+
+      - name: Account resolver regression tests
+        run: node --test cloudflare/resolve-account-context.test.mjs
 
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
 
       - name: Wrangler dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
