@@ -12,16 +12,13 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PILOT_AUTH_BYPASS: "true"
+  SUPABASE_URL: https://mdqdswhzkocglbnxvxth.supabase.co
+  PILOT_001_ID: 394314ad-782b-4683-bc5d-65a0a3ba2552
+  PILOT_001_ORGANIZATION_ID: 40817dd6-d2b8-4087-a6f2-f416500ab4e6
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-  SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-  ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-  FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
-  FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
 
 jobs:
   deploy:
@@ -36,21 +33,31 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Preflight required deployment secrets
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Cloudflare deploy config
+        run: node cloudflare/generate-deploy-config.mjs
+      - name: Validate deployment lane before provider mutation
+        shell: bash
+        run: |
+          node --check cloudflare/worker.mjs
+          pnpm exec prettier --check \
+            cloudflare/worker.mjs \
+            cloudflare/generate-deploy-config.mjs \
+            cloudflare/wrangler.base.json \
+            .github/workflows/pilot001-cloudflare-live-deploy.yml
+          npx --yes wrangler@latest deploy \
+            --dry-run \
+            --config cloudflare/wrangler.generated.json \
+            --outdir .wrangler-live-dry-run
+      - name: Preflight only non-derivable deployment secrets
         shell: bash
         run: |
           missing=()
           for name in \
             CLOUDFLARE_API_TOKEN \
             CLOUDFLARE_ACCOUNT_ID \
-            SUPABASE_URL \
             SUPABASE_SERVICE_ROLE_KEY \
-            SUPABASE_DB_URL \
-            OPENAI_API_KEY \
-            RESEND_API_KEY \
-            ADMIN_EMAILS \
-            FEEDBACK_FROM_EMAIL \
-            FEEDBACK_NOTIFICATION_RECIPIENTS
+            OPENAI_API_KEY
           do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
@@ -59,61 +66,133 @@ jobs:
             exit 2
           fi
           echo "Deployment secret preflight passed."
-      - run: pnpm install --frozen-lockfile
-      - name: Generate Cloudflare deploy config
-        run: node cloudflare/generate-deploy-config.mjs
-      - name: First deploy Worker + Container
+      - name: Verify Cloudflare account authentication
+        run: npx --yes wrangler@latest whoami
+      - name: Prepare ephemeral runtime secret file
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { writeFileSync } = require("node:fs");
+          const names = ["SUPABASE_SERVICE_ROLE_KEY", "OPENAI_API_KEY"];
+          const secrets = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+          writeFileSync("/tmp/jack-cloudflare-secrets.json", JSON.stringify(secrets), {
+            mode: 0o600,
+          });
+          NODE
+      - name: Deploy Worker + Container to workers.dev
         shell: bash
         run: |
           set -o pipefail
-          npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json 2>&1 | tee /tmp/wrangler-first-deploy.log
-      - name: Upload production runtime secrets
-        shell: bash
-        run: |
-          put_secret() {
-            local name="$1"
-            printf '%s' "${!name}" | npx --yes wrangler@latest secret put "$name" --config cloudflare/wrangler.generated.json
-          }
-          put_secret SUPABASE_URL
-          put_secret SUPABASE_SERVICE_ROLE_KEY
-          put_secret SUPABASE_DB_URL
-          put_secret OPENAI_API_KEY
-          put_secret RESEND_API_KEY
-          put_secret ADMIN_EMAILS
-          put_secret FEEDBACK_FROM_EMAIL
-          put_secret FEEDBACK_NOTIFICATION_RECIPIENTS
-      - name: Redeploy with runtime secrets
-        shell: bash
-        run: |
-          set -o pipefail
-          npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json 2>&1 | tee /tmp/wrangler-final-deploy.log
+          npx --yes wrangler@latest deploy \
+            --config cloudflare/wrangler.generated.json \
+            --secrets-file /tmp/jack-cloudflare-secrets.json \
+            --containers-rollout immediate \
+            2>&1 | tee /tmp/wrangler-temporary-deploy.log
       - name: Resolve workers.dev URL
         id: url
         shell: bash
         run: |
-          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/wrangler-final-deploy.log | tail -1 || true)
+          url=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/wrangler-temporary-deploy.log | tail -1 || true)
           if [ -z "$url" ]; then
             echo "Could not parse workers.dev URL from Wrangler output."
-            cat /tmp/wrangler-final-deploy.log
+            cat /tmp/wrangler-temporary-deploy.log
             exit 3
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "WORKERS_DEV_URL=$url"
-      - name: Temporary-host health acceptance
+      - name: Temporary-host health and shell acceptance
         shell: bash
         env:
           WORKERS_DEV_URL: ${{ steps.url.outputs.url }}
         run: |
-          for attempt in $(seq 1 24); do
-            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$WORKERS_DEV_URL/api/healthz" || true)
-            if [ "$code" = "200" ]; then
+          for attempt in $(seq 1 36); do
+            health_code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$WORKERS_DEV_URL/api/healthz" || true)
+            root_code=$(curl -sS -o /tmp/root.html -w '%{http_code}' "$WORKERS_DEV_URL/" || true)
+            if [ "$health_code" = "200" ] && [ "$root_code" = "200" ]; then
               echo "WORKERS_DEV_HEALTH=200"
+              echo "WORKERS_DEV_ROOT=200"
               cat /tmp/health.json
               exit 0
             fi
-            echo "health attempt $attempt -> HTTP $code"
+            echo "acceptance attempt $attempt -> health=$health_code root=$root_code"
             sleep 5
           done
-          echo "Temporary-host health acceptance failed."
+          echo "Temporary-host acceptance failed."
           cat /tmp/health.json 2>/dev/null || true
           exit 4
+      - name: Seed Pilot001 site knowledge through embedding-backed path
+        run: pnpm --filter @workspace/api-server run seed:knowledge
+      - name: Verify Pilot001 knowledge IDs and embeddings
+        shell: bash
+        run: |
+          node <<'NODE'
+          const ids = Array.from({ length: 8 }, (_, index) => {
+            const n = index + 6;
+            const number = String(n).padStart(4, "0");
+            const suffix = String(n).padStart(12, "0");
+            return `e1e1e1e1-${number}-4001-8001-${suffix}`;
+          });
+          const params = new URLSearchParams({
+            id: `in.(${ids.join(",")})`,
+            select: "id,embedding",
+          });
+          const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/knowledge_entries?${params}`, {
+            headers: {
+              apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+              Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`knowledge verification HTTP ${response.status}`);
+          }
+          const rows = await response.json();
+          const embedded = new Set(
+            rows.filter((row) => row.embedding !== null && row.embedding !== undefined).map((row) => row.id),
+          );
+          const missing = ids.filter((id) => !embedded.has(id));
+          if (rows.length !== ids.length || missing.length > 0) {
+            throw new Error(
+              `Pilot001 knowledge verification failed: rows=${rows.length}/${ids.length}, embedded=${embedded.size}/${ids.length}, missing=${missing.join(",")}`,
+            );
+          }
+          console.log(`PILOT001_KNOWLEDGE_ROWS=${rows.length}`);
+          console.log(`PILOT001_EMBEDDED_ROWS=${embedded.size}`);
+          NODE
+      - name: Add Jack production custom domain
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const path = "cloudflare/wrangler.generated.json";
+          const config = JSON.parse(readFileSync(path, "utf8"));
+          config.routes = [{ pattern: "jack.torchlabs.ca", custom_domain: true }];
+          writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+          set -o pipefail
+          npx --yes wrangler@latest deploy \
+            --config cloudflare/wrangler.generated.json \
+            --secrets-file /tmp/jack-cloudflare-secrets.json \
+            --containers-rollout none \
+            2>&1 | tee /tmp/wrangler-production-bind.log
+      - name: Production hostname acceptance
+        shell: bash
+        run: |
+          for attempt in $(seq 1 36); do
+            health_code=$(curl -sS -o /tmp/prod-health.json -w '%{http_code}' https://jack.torchlabs.ca/api/healthz || true)
+            root_code=$(curl -sS -o /tmp/prod-root.html -w '%{http_code}' https://jack.torchlabs.ca/ || true)
+            if [ "$health_code" = "200" ] && [ "$root_code" = "200" ]; then
+              echo "PRODUCTION_HEALTH=200"
+              echo "PRODUCTION_ROOT=200"
+              cat /tmp/prod-health.json
+              exit 0
+            fi
+            echo "production attempt $attempt -> health=$health_code root=$root_code"
+            sleep 5
+          done
+          echo "Production hostname acceptance failed."
+          cat /tmp/prod-health.json 2>/dev/null || true
+          exit 5
+      - name: Remove ephemeral runtime secret file
+        if: always()
+        shell: bash
+        run: rm -f /tmp/jack-cloudflare-secrets.json
