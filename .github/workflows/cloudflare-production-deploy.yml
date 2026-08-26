@@ -14,16 +14,6 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PILOT_AUTH_BYPASS: "true"
   PILOT_AUTH_USER_ID: "pilot001-bypass"
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-  SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-  ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-  FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
-  FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
   WRANGLER_OUTPUT_FILE_PATH: .wrangler-output.json
   WRANGLER_LOG_SANITIZE: "true"
 
@@ -31,6 +21,17 @@ jobs:
   verify-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+      FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
+      FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
     steps:
       - uses: actions/checkout@v4
         with:
