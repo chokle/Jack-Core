@@ -7,10 +7,15 @@ const sourcePath = path.join(here, "wrangler.base.json");
 const outputPath = path.join(here, "wrangler.generated.json");
 
 const publishableKey =
-  process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY || "";
+  process.env.VITE_CLERK_PUBLISHABLE_KEY ||
+  process.env.CLERK_PUBLISHABLE_KEY ||
+  "";
 const pilotAuthBypass = process.env.PILOT_AUTH_BYPASS !== "false";
 
-if (!pilotAuthBypass && (!publishableKey || !/^pk_(?:live|test)_/.test(publishableKey))) {
+if (
+  !pilotAuthBypass &&
+  (!publishableKey || !/^pk_(?:live|test)_/.test(publishableKey))
+) {
   throw new Error(
     "VITE_CLERK_PUBLISHABLE_KEY (or CLERK_PUBLISHABLE_KEY) is required when pilot auth bypass is disabled.",
   );
