@@ -10,65 +10,63 @@ This preserves the current long-lived job, feedback-notification, telemetry-rete
 
 ## Authentication boundary
 
-This cutover uses Wrangler to deploy a Worker + Container. A `cloudflared.exe service install <TUNNEL_TOKEN>` command is for Cloudflare Tunnel and is **not** part of this production architecture; it would connect a separate origin host and should not be used as a substitute for the Container deployment.
+This cutover uses Wrangler to deploy a Worker + Container. A `cloudflared.exe service install <TUNNEL_TOKEN>` command is for Cloudflare Tunnel and is **not** part of this production architecture.
 
-Authenticate Wrangler with a Cloudflare API token/account ID in the local shell or supported CI secret store, then verify the authenticated account before deployment:
+The GitHub production deploy lane requires one credential secret:
+
+- `CLOUDFLARE_API_TOKEN`
+
+`CLOUDFLARE_ACCOUNT_ID` is an optional override, not a required handoff. If it is absent, the workflow resolves account context from the `torchlabs.ca` zone ownership and falls back to a single token-visible account or a unique Torch-named account. Resolution fails closed if the token can see multiple ambiguous accounts.
+
+For a local manual run, both values can still be supplied explicitly:
 
 ```bash
 CLOUDFLARE_API_TOKEN='...' CLOUDFLARE_ACCOUNT_ID='...' npx wrangler whoami
 ```
 
-Never commit either value. The generated Wrangler config declares the production runtime secrets as required so deployment fails closed if any are missing.
+Never commit credential material.
 
-## Pre-cutover verification
+## Runtime secrets
 
-1. Export the current production values from Railway. Do not commit them.
-2. Set `VITE_CLERK_PUBLISHABLE_KEY` in the shell and generate a deployment config:
+Encrypted production runtime secrets remain in Cloudflare and are not duplicated into GitHub Actions. The generated Wrangler config declares the required bindings so deployment fails closed if Cloudflare is missing any required runtime secret.
 
-   ```bash
-   VITE_CLERK_PUBLISHABLE_KEY='pk_live_...' node cloudflare/generate-deploy-config.mjs
-   ```
+The Pilot001 Cloudflare path uses the rollback-safe pilot auth bypass, so Clerk is not on the pilot deployment critical path.
 
-3. Authenticate Wrangler and set runtime secrets against the generated config:
+## Automated temporary-host deployment
 
-   ```bash
-   npx wrangler whoami
-   npx wrangler secret put CLERK_SECRET_KEY --config cloudflare/wrangler.generated.json
-   npx wrangler secret put SUPABASE_URL --config cloudflare/wrangler.generated.json
-   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config cloudflare/wrangler.generated.json
-   npx wrangler secret put SUPABASE_DB_URL --config cloudflare/wrangler.generated.json
-   npx wrangler secret put OPENAI_API_KEY --config cloudflare/wrangler.generated.json
-   npx wrangler secret put RESEND_API_KEY --config cloudflare/wrangler.generated.json
-   npx wrangler secret put ADMIN_EMAILS --config cloudflare/wrangler.generated.json
-   npx wrangler secret put FEEDBACK_FROM_EMAIL --config cloudflare/wrangler.generated.json
-   npx wrangler secret put FEEDBACK_NOTIFICATION_RECIPIENTS --config cloudflare/wrangler.generated.json
-   ```
+`.github/workflows/cloudflare-production-deploy.yml` runs on `main` and can also be dispatched manually. It performs the critical path as one fail-closed batch:
 
-4. Deploy to the temporary `workers.dev` hostname first:
+1. install with the frozen lockfile;
+2. require `CLOUDFLARE_API_TOKEN`;
+3. resolve Cloudflare account context automatically unless the optional override exists;
+4. verify Wrangler authentication;
+5. generate and validate the deployment config;
+6. run formatting, Wrangler dry-run, Container build, full API and Jack tests, workspace typecheck/build, and diff checks;
+7. deploy Worker + Container to the temporary `workers.dev` target;
+8. resolve the deployed target/version from Wrangler structured output;
+9. smoke-test the public shell and `/api/healthz`;
+10. record deployment evidence in the workflow summary.
 
-   ```bash
-   npx wrangler deploy --config cloudflare/wrangler.generated.json
-   ```
-
-5. Verify the temporary hostname before touching `jack.torchlabs.ca`:
-   - public application shell loads
-   - `/api/healthz` responds
-   - unauthenticated protected API routes remain denied
-   - approved pilot sign-in works
-   - Ask Jack returns a cited answer
-   - Library and Living Memory load
-   - telemetry event + EOD closeout write successfully
-   - background worker heartbeat/sweeps resume in production Supabase logs
+Production DNS remains unchanged during this lane so Railway stays available as rollback.
 
 ## Production cutover
 
-Only after the temporary deployment passes, bind `jack.torchlabs.ca` to the Worker in Cloudflare. Re-run the same acceptance set on the production hostname.
+Only after the temporary `workers.dev` deployment passes acceptance, bind `jack.torchlabs.ca` to the accepted Worker and repeat the acceptance set on the production hostname:
 
-Do not delete `railway.json`, Railway environment values, or Railway routing until the Cloudflare production hostname has passed acceptance and the background-worker heartbeat is confirmed.
+- public application shell loads;
+- `/api/healthz` responds;
+- approved Pilot001 access works through the configured pilot auth path;
+- Ask Jack returns a cited answer;
+- Library and Living Memory load;
+- telemetry event + EOD closeout write successfully;
+- background worker heartbeat/sweeps are visible in production Supabase logs.
+
+Do not delete `railway.json`, Railway environment values, or Railway routing until Cloudflare production acceptance and the background-worker heartbeat are confirmed.
 
 ## Post-cutover
 
-1. Seed the deterministic Pilot001 knowledge through the embedding-backed seed path; never direct-SQL the knowledge rows.
-2. Verify all 13 deterministic entries exist, especially Rob's 8 Pilot001 site-specific entries, and verify retrieval.
-3. Complete the six-person Clerk/Command Centre reconciliation.
-4. Close/supersede stale Railway deployment artifacts only after production verification.
+1. Seed deterministic Pilot001 knowledge through the embedding-backed seed path; never direct-SQL the knowledge rows.
+2. Verify all 13 deterministic entries exist, especially Rob's eight Pilot001 site-specific entries (`0006`-`0013`), and verify retrieval.
+3. Complete the six-person account/Command Centre reconciliation.
+4. Run full Pilot001 E2E/EOD acceptance and export closeout evidence.
+5. Close or supersede stale Railway deployment artifacts only after production verification.

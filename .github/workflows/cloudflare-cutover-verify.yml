@@ -40,10 +40,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Generate Cloudflare deploy config
         run: node cloudflare/generate-deploy-config.mjs
-      - name: Validate Worker syntax
-        run: node --check cloudflare/worker.mjs
+      - name: Validate Cloudflare helper syntax
+        run: |
+          node --check cloudflare/worker.mjs
+          node --check cloudflare/resolve-account-context.mjs
+      - name: Account resolver regression tests
+        run: node --test cloudflare/resolve-account-context.test.mjs
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml
       - name: Cloudflare Worker dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
