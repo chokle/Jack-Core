@@ -27,14 +27,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
-      FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
-      FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,28 +43,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Fail closed on required deployment secrets
+      - name: Fail closed on Cloudflare deployment credentials
         shell: bash
         run: |
           node <<'NODE'
-          const required = [
-            "CLOUDFLARE_API_TOKEN",
-            "CLOUDFLARE_ACCOUNT_ID",
-            "SUPABASE_URL",
-            "SUPABASE_SERVICE_ROLE_KEY",
-            "SUPABASE_DB_URL",
-            "OPENAI_API_KEY",
-            "RESEND_API_KEY",
-            "ADMIN_EMAILS",
-            "FEEDBACK_FROM_EMAIL",
-            "FEEDBACK_NOTIFICATION_RECIPIENTS",
-          ];
+          const required = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"];
           const missing = required.filter((name) => !process.env[name]);
           if (missing.length) {
             console.error(`Missing required GitHub Actions secrets: ${missing.join(", ")}`);
             process.exit(1);
           }
-          console.log(`Deployment secret preflight passed (${required.length}/${required.length}).`);
+          console.log(`Cloudflare deployment credential preflight passed (${required.length}/${required.length}).`);
           NODE
 
       - name: Verify Cloudflare authentication
@@ -108,27 +89,8 @@ jobs:
       - name: Diff check
         run: git diff --check HEAD^
 
-      - name: Create ephemeral Cloudflare secrets file
-        shell: bash
-        run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-          const names = [
-            "SUPABASE_URL",
-            "SUPABASE_SERVICE_ROLE_KEY",
-            "SUPABASE_DB_URL",
-            "OPENAI_API_KEY",
-            "RESEND_API_KEY",
-            "ADMIN_EMAILS",
-            "FEEDBACK_FROM_EMAIL",
-            "FEEDBACK_NOTIFICATION_RECIPIENTS",
-          ];
-          const secrets = Object.fromEntries(names.map((name) => [name, process.env[name]]));
-          fs.writeFileSync(".cloudflare-secrets.json", JSON.stringify(secrets));
-          NODE
-
       - name: Deploy Worker + Container to workers.dev
-        run: npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json --secrets-file .cloudflare-secrets.json
+        run: npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json
 
       - name: Resolve deployed workers.dev target
         id: deployment
@@ -171,7 +133,3 @@ jobs:
             echo "- /api/healthz: PASS"
             echo "- production DNS: unchanged (Railway rollback preserved)"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove ephemeral secrets file
-        if: always()
-        run: rm -f .cloudflare-secrets.json
