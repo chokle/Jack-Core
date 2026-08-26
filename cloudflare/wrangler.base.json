@@ -51,9 +51,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": [
-        "JackProductionContainer"
-      ]
+      "new_sqlite_classes": ["JackProductionContainer"]
     }
   ]
 }
