@@ -1,0 +1,177 @@
+name: Cloudflare Production Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-production-deploy
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PILOT_AUTH_BYPASS: "true"
+  PILOT_AUTH_USER_ID: "pilot001-bypass"
+  WRANGLER_OUTPUT_FILE_PATH: .wrangler-output.json
+  WRANGLER_LOG_SANITIZE: "true"
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+      FEEDBACK_FROM_EMAIL: ${{ secrets.FEEDBACK_FROM_EMAIL }}
+      FEEDBACK_NOTIFICATION_RECIPIENTS: ${{ secrets.FEEDBACK_NOTIFICATION_RECIPIENTS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Fail closed on required deployment secrets
+        shell: bash
+        run: |
+          node <<'NODE'
+          const required = [
+            "CLOUDFLARE_API_TOKEN",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SUPABASE_DB_URL",
+            "OPENAI_API_KEY",
+            "RESEND_API_KEY",
+            "ADMIN_EMAILS",
+            "FEEDBACK_FROM_EMAIL",
+            "FEEDBACK_NOTIFICATION_RECIPIENTS",
+          ];
+          const missing = required.filter((name) => !process.env[name]);
+          if (missing.length) {
+            console.error(`Missing required GitHub Actions secrets: ${missing.join(", ")}`);
+            process.exit(1);
+          }
+          console.log(`Deployment secret preflight passed (${required.length}/${required.length}).`);
+          NODE
+
+      - name: Verify Cloudflare authentication
+        run: npx --yes wrangler@latest whoami
+
+      - name: Generate Cloudflare deploy config
+        run: node cloudflare/generate-deploy-config.mjs
+
+      - name: Validate Worker syntax
+        run: node --check cloudflare/worker.mjs
+
+      - name: Format check
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
+
+      - name: Wrangler dry run
+        run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
+
+      - name: Build production container image
+        run: docker build -f Dockerfile.cloudflare -t jack-core-cloudflare:deploy .
+
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+
+      - name: Workspace typecheck
+        run: pnpm typecheck
+
+      - name: Workspace build
+        run: pnpm build
+
+      - name: Diff check
+        run: git diff --check HEAD^
+
+      - name: Create ephemeral Cloudflare secrets file
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const names = [
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SUPABASE_DB_URL",
+            "OPENAI_API_KEY",
+            "RESEND_API_KEY",
+            "ADMIN_EMAILS",
+            "FEEDBACK_FROM_EMAIL",
+            "FEEDBACK_NOTIFICATION_RECIPIENTS",
+          ];
+          const secrets = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+          fs.writeFileSync(".cloudflare-secrets.json", JSON.stringify(secrets));
+          NODE
+
+      - name: Deploy Worker + Container to workers.dev
+        run: npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json --secrets-file .cloudflare-secrets.json
+
+      - name: Resolve deployed workers.dev target
+        id: deployment
+        shell: bash
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const rows = fs
+            .readFileSync(process.env.WRANGLER_OUTPUT_FILE_PATH, "utf8")
+            .trim()
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+          const deploy = [...rows].reverse().find((row) => row.type === "deploy");
+          if (!deploy || !Array.isArray(deploy.targets) || !deploy.targets.length) {
+            console.error("Wrangler deploy output did not contain a deployment target.");
+            process.exit(1);
+          }
+          const target = deploy.targets.find((value) => value.includes("workers.dev")) || deploy.targets[0];
+          console.log(`target=${target}`);
+          console.log(`version_id=${deploy.version_id || "unknown"}`);
+          NODE
+
+      - name: Smoke-test workers.dev deployment
+        shell: bash
+        run: |
+          target="${{ steps.deployment.outputs.target }}"
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-all-errors --max-time 30 "$target/" > /dev/null
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-all-errors --max-time 30 "$target/api/healthz" | tee /tmp/healthz.json
+          node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/healthz.json","utf8")); if(body.status!=="ok") process.exit(1)'
+
+      - name: Record deployment evidence
+        shell: bash
+        run: |
+          {
+            echo "## Cloudflare workers.dev acceptance"
+            echo "- target: ${{ steps.deployment.outputs.target }}"
+            echo "- version: ${{ steps.deployment.outputs.version_id }}"
+            echo "- public shell: PASS"
+            echo "- /api/healthz: PASS"
+            echo "- production DNS: unchanged (Railway rollback preserved)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral secrets file
+        if: always()
+        run: rm -f .cloudflare-secrets.json
