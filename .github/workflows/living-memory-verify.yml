@@ -1,0 +1,53 @@
+name: Living Memory Verification
+
+on:
+  push:
+    branches:
+      - hotfix/living-memory-trust-gate
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "artifacts/api-server/src/routes/graph.ts"
+      - "artifacts/api-server/src/lib/public-memory-graph.ts"
+      - "artifacts/api-server/src/lib/__tests__/public-memory-graph.test.ts"
+      - "artifacts/jack-core/src/lib/memory-graph.ts"
+      - "artifacts/jack-core/src/lib/use-memory-graph.ts"
+      - "artifacts/jack-core/src/components/MemoryGraphView.tsx"
+      - ".github/workflows/living-memory-verify.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Focused Living Memory trust test
+        run: pnpm --filter @workspace/api-server exec vitest run src/lib/__tests__/public-memory-graph.test.ts
+      - name: API full tests
+        run: pnpm --filter @workspace/api-server test
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Workspace build
+        run: pnpm build
+      - name: Format check
+        run: pnpm exec prettier --check artifacts/api-server/src/routes/graph.ts artifacts/api-server/src/lib/public-memory-graph.ts artifacts/api-server/src/lib/__tests__/public-memory-graph.test.ts .github/workflows/living-memory-verify.yml
+      - name: Diff check
+        run: git diff --check origin/main...HEAD
