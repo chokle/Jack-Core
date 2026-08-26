@@ -53,10 +53,14 @@ export async function resolveCloudflareAccountId({
   const accounts = await cloudflare("/accounts?per_page=50");
   const unique = [
     ...new Map(
-      accounts.filter((entry) => entry && entry.id).map((entry) => [entry.id, entry]),
+      accounts
+        .filter((entry) => entry && entry.id)
+        .map((entry) => [entry.id, entry]),
     ).values(),
   ];
-  const torchMatches = unique.filter((entry) => /\btorch\b/i.test(entry.name || ""));
+  const torchMatches = unique.filter((entry) =>
+    /\btorch\b/i.test(entry.name || ""),
+  );
   const candidate =
     torchMatches.length === 1
       ? torchMatches[0]
@@ -76,7 +80,9 @@ export async function resolveCloudflareAccountId({
   return {
     accountId: candidate.id,
     source:
-      torchMatches.length === 1 ? "unique Torch-named account" : "single token-visible account",
+      torchMatches.length === 1
+        ? "unique Torch-named account"
+        : "single token-visible account",
   };
 }
 
@@ -92,7 +98,11 @@ async function main() {
     );
   }
 
-  await appendFile(process.env.GITHUB_ENV, `CLOUDFLARE_ACCOUNT_ID=${accountId}\n`, "utf8");
+  await appendFile(
+    process.env.GITHUB_ENV,
+    `CLOUDFLARE_ACCOUNT_ID=${accountId}\n`,
+    "utf8",
+  );
   console.log(`Cloudflare account context resolved via ${source}.`);
 }
 
