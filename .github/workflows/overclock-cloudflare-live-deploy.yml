@@ -1,0 +1,80 @@
+name: OVERCLOCK Cloudflare live deploy
+
+on:
+  push:
+    branches:
+      - overclock/cloudflare-live-deploy-20260825
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PILOT_AUTH_BYPASS: "true"
+  PILOT_AUTH_USER_ID: "pilot001-bypass"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Verify Cloudflare CI authentication is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "BLOCKER:CLOUDFLARE_API_TOKEN_MISSING"; exit 41; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "BLOCKER:CLOUDFLARE_ACCOUNT_ID_MISSING"; exit 42; }
+      - name: Verify authenticated Cloudflare account
+        run: npx --yes wrangler@latest whoami
+      - name: Generate Pilot001 bypass deploy config
+        run: node cloudflare/generate-deploy-config.mjs
+      - name: Validate Worker syntax
+        run: node --check cloudflare/worker.mjs
+      - name: Deploy Worker + Container
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json 2>&1 | tee /tmp/wrangler-deploy.log
+          cp /tmp/wrangler-deploy.log "$GITHUB_WORKSPACE/wrangler-deploy.log"
+      - name: Extract temporary deployment URL and health-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' wrangler-deploy.log | tail -n1 || true)
+          if [ -z "$url" ]; then
+            echo "BLOCKER:WORKERS_DEV_URL_NOT_FOUND"
+            cat wrangler-deploy.log
+            exit 43
+          fi
+          echo "WORKERS_DEV_URL=$url" >> "$GITHUB_ENV"
+          echo "workers_dev=$url" >> "$GITHUB_STEP_SUMMARY"
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/health-body -w '%{http_code}' "$url/api/healthz" || true)
+            if [ "$code" = "200" ]; then
+              echo "healthz=200" >> "$GITHUB_STEP_SUMMARY"
+              cat /tmp/health-body
+              exit 0
+            fi
+            echo "attempt=$i code=$code"
+            cat /tmp/health-body 2>/dev/null || true
+            sleep 10
+          done
+          echo "BLOCKER:WORKERS_DEV_HEALTHCHECK_FAILED url=$url"
+          exit 44
+      - name: Public shell check
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/root-body -w '%{http_code}' "$WORKERS_DEV_URL/" || true)
+          echo "root_http=$code" >> "$GITHUB_STEP_SUMMARY"
+          test "$code" = "200"
