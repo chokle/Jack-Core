@@ -123,7 +123,9 @@ describe("filterPublicGraph", () => {
 
   it("returns the original snapshot when there is nothing to hide", () => {
     const input = graph();
-    input.nodes = input.nodes.filter((node) => node.verificationStatus !== "rejected");
+    input.nodes = input.nodes.filter(
+      (node) => node.verificationStatus !== "rejected",
+    );
     input.edges = input.edges.filter((edge) => edge.id !== "e:rejected-topic");
     input.counts = { ...input.counts, nodes: 3, edges: 2, knowledge: 1 };
 
