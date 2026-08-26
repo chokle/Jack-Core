@@ -13,11 +13,12 @@
     "PUBLIC_SITE_URL": "https://jack.torchlabs.ca",
     "CORS_ALLOWED_ORIGINS": "https://jack.torchlabs.ca",
     "PILOT_001_ID": "394314ad-782b-4683-bc5d-65a0a3ba2552",
-    "PILOT_001_ORGANIZATION_ID": "40817dd6-d2b8-4087-a6f2-f416500ab4e6"
+    "PILOT_001_ORGANIZATION_ID": "40817dd6-d2b8-4087-a6f2-f416500ab4e6",
+    "PILOT_AUTH_BYPASS": "true",
+    "PILOT_AUTH_USER_ID": "pilot001-bypass"
   },
   "secrets": {
     "required": [
-      "CLERK_SECRET_KEY",
       "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
       "SUPABASE_DB_URL",
@@ -50,7 +51,9 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["JackProductionContainer"]
+      "new_sqlite_classes": [
+        "JackProductionContainer"
+      ]
     }
   ]
 }
