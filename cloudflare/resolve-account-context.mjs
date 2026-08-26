@@ -37,7 +37,9 @@ export async function resolveCloudflareAccountId({
 
   let zoneDiscoveryError = null;
   try {
-    const zones = await cloudflare(`/zones?name=${encodeURIComponent(zoneName)}&per_page=50`);
+    const zones = await cloudflare(
+      `/zones?name=${encodeURIComponent(zoneName)}&per_page=50`,
+    );
     const zone = zones.find(
       (entry) => entry && entry.name === zoneName && entry.account && entry.account.id,
     );
@@ -56,7 +58,11 @@ export async function resolveCloudflareAccountId({
   ];
   const torchMatches = unique.filter((entry) => /\btorch\b/i.test(entry.name || ""));
   const candidate =
-    torchMatches.length === 1 ? torchMatches[0] : unique.length === 1 ? unique[0] : null;
+    torchMatches.length === 1
+      ? torchMatches[0]
+      : unique.length === 1
+        ? unique[0]
+        : null;
 
   if (!candidate) {
     const zoneNote = zoneDiscoveryError
@@ -69,7 +75,8 @@ export async function resolveCloudflareAccountId({
 
   return {
     accountId: candidate.id,
-    source: torchMatches.length === 1 ? "unique Torch-named account" : "single token-visible account",
+    source:
+      torchMatches.length === 1 ? "unique Torch-named account" : "single token-visible account",
   };
 }
 
@@ -80,7 +87,9 @@ async function main() {
   });
 
   if (!process.env.GITHUB_ENV) {
-    throw new Error("GITHUB_ENV is required when running the account resolver as a workflow step.");
+    throw new Error(
+      "GITHUB_ENV is required when running the account resolver as a workflow step.",
+    );
   }
 
   await appendFile(process.env.GITHUB_ENV, `CLOUDFLARE_ACCOUNT_ID=${accountId}\n`, "utf8");
