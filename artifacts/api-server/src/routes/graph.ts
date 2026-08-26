@@ -52,8 +52,12 @@ router.get("/graph", async (req, res) => {
 
     // The persisted graph doubles as the review ledger, so rejected concepts stay
     // stored for audit/history. Public Living Memory is fail-closed: rejected
-    // knowledge and its incident edges never cross this API boundary.
-    graph = filterPublicGraph(graph);
+    // knowledge and its incident edges never cross the public API boundary.
+    // Signed admins retain the full snapshot so a mistaken rejection remains
+    // visible in the existing review UI and can be reset safely.
+    if (!(await resolveAdminIdentity(req))) {
+      graph = filterPublicGraph(graph);
+    }
 
     // Validate against the generated contract before returning so the persisted
     // graph (including distilled atomic-knowledge nodes/edges) always matches the
