@@ -10,8 +10,13 @@ on:
     paths:
       - "artifacts/api-server/**"
       - "artifacts/jack-core/**"
+      - "lib/**"
       - "cloudflare/**"
       - "Dockerfile.cloudflare"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".npmrc"
       - ".dockerignore"
       - ".env.cloudflare.example"
       - ".github/workflows/cloudflare-cutover-verify.yml"
