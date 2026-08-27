@@ -1,0 +1,70 @@
+name: Live Security Header Verification
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "artifacts/api-server/**"
+      - "artifacts/jack-core/**"
+      - "cloudflare/**"
+      - "Dockerfile.cloudflare"
+      - ".github/workflows/live-security-header-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify-live-csp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify CSP on jack.torchlabs.ca
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target="https://jack.torchlabs.ca/"
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          verified=false
+
+          for attempt in $(seq 1 60); do
+            : > "$headers"
+            : > "$body"
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --max-time 30 \
+              --header "Cache-Control: no-cache" \
+              --header "Pragma: no-cache" \
+              --dump-header "$headers" \
+              --output "$body" \
+              "${target}?csp_verify=${GITHUB_SHA}-${attempt}"; then
+              if grep --ignore-case --quiet '^content-security-policy:' "$headers" \
+                && grep --ignore-case --fixed-strings --quiet "default-src 'self'" "$headers" \
+                && grep --ignore-case --fixed-strings --quiet "object-src 'none'" "$headers"; then
+                verified=true
+                break
+              fi
+            fi
+
+            sleep 10
+          done
+
+          echo "Final response headers:"
+          cat "$headers"
+
+          if [[ "$verified" != "true" ]]; then
+            echo "::error::jack.torchlabs.ca did not return the required Content-Security-Policy header."
+            exit 1
+          fi
+
+          echo "Live CSP verification passed."
