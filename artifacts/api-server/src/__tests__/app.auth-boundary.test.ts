@@ -57,6 +57,20 @@ describe("app-wide authentication composition", () => {
     expect(response.body).toEqual({ ok: true });
   });
 
+  it.each(["/", "/api/healthz"])(
+    "sets the HTTP Content-Security-Policy header on %s",
+    async (path) => {
+      const response = await request(app).get(path);
+      const policy = response.headers["content-security-policy"];
+
+      expect(policy).toContain("default-src 'self'");
+      expect(policy).toContain("https://challenges.cloudflare.com");
+      expect(policy).toContain("https://*.supabase.co");
+      expect(policy).toContain("object-src 'none'");
+      expect(policy).toContain("base-uri 'self'");
+    },
+  );
+
   it("preserves a verified Clerk subject for authenticated routes", async () => {
     getAuth.mockReturnValue({ userId: "user_secure" });
 
