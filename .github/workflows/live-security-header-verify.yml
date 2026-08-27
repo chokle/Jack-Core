@@ -7,8 +7,13 @@ on:
     paths:
       - "artifacts/api-server/**"
       - "artifacts/jack-core/**"
+      - "lib/**"
       - "cloudflare/**"
       - "Dockerfile.cloudflare"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".npmrc"
       - ".github/workflows/live-security-header-verify.yml"
   workflow_dispatch:
 
