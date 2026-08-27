@@ -54,6 +54,38 @@ jobs:
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
         run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" -t jack-core-cloudflare:verify .
+      - name: Production container CSP smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run -d --rm -p 18080:8080 \
+            -e PILOT_AUTH_BYPASS=true \
+            -e PILOT_AUTH_USER_ID=pilot001-bypass \
+            -e SUPABASE_URL=http://127.0.0.1:9 \
+            -e SUPABASE_SERVICE_ROLE_KEY=test-service-role \
+            -e OPENAI_API_KEY=test-openai \
+            jack-core-cloudflare:verify)"
+          cleanup() {
+            docker logs "$container_id" || true
+            docker stop "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --silent --fail \
+              --dump-header /tmp/jack-root-headers.txt \
+              --output /tmp/jack-root-body.html \
+              http://127.0.0.1:18080/; then
+              break
+            fi
+            sleep 1
+          done
+
+          test -s /tmp/jack-root-headers.txt
+          cat /tmp/jack-root-headers.txt
+          grep -i -F "content-security-policy:" /tmp/jack-root-headers.txt
+          grep -i -F "default-src 'self'" /tmp/jack-root-headers.txt
+          grep -i -F "object-src 'none'" /tmp/jack-root-headers.txt
       - name: API full tests
         run: pnpm --filter @workspace/api-server test
       - name: Jack full tests
