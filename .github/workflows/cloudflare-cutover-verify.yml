@@ -16,6 +16,7 @@ on:
       - ".env.cloudflare.example"
       - ".github/workflows/cloudflare-cutover-verify.yml"
       - ".github/workflows/cloudflare-production-deploy.yml"
+      - ".github/workflows/live-security-header-verify.yml"
 
 permissions:
   contents: read
@@ -49,7 +50,7 @@ jobs:
       - name: Account resolver regression tests
         run: node --test cloudflare/resolve-account-context.test.mjs
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml .github/workflows/live-security-header-verify.yml
       - name: Cloudflare Worker dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
