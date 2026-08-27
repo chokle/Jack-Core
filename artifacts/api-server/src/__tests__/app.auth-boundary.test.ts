@@ -57,19 +57,26 @@ describe("app-wide authentication composition", () => {
     expect(response.body).toEqual({ ok: true });
   });
 
-  it.each(["/", "/api/healthz"])(
-    "sets the HTTP Content-Security-Policy header on %s",
-    async (path) => {
-      const response = await request(app).get(path);
-      const policy = response.headers["content-security-policy"];
+  it("sets Jack's enforced HTTP Content-Security-Policy on successful responses", async () => {
+    const response = await request(app).get("/api/healthz");
+    const policy = response.headers["content-security-policy"];
 
-      expect(policy).toContain("default-src 'self'");
-      expect(policy).toContain("https://challenges.cloudflare.com");
-      expect(policy).toContain("https://*.supabase.co");
-      expect(policy).toContain("object-src 'none'");
-      expect(policy).toContain("base-uri 'self'");
-    },
-  );
+    expect(policy).toContain("default-src 'self'");
+    expect(policy).toContain("https://challenges.cloudflare.com");
+    expect(policy).toContain("https://*.supabase.co");
+    expect(policy).toContain("object-src 'none'");
+    expect(policy).toContain("base-uri 'self'");
+  });
+
+  it("keeps a CSP header on the root path when the frontend build is absent", async () => {
+    const response = await request(app).get("/");
+
+    // In source-only unit tests there is no dist/public build, so Express emits
+    // its synthetic 404 with the stricter `default-src 'none'` policy. The
+    // production-container smoke test verifies Jack's exact policy on the built
+    // root document.
+    expect(response.headers["content-security-policy"]).toBeTruthy();
+  });
 
   it("preserves a verified Clerk subject for authenticated routes", async () => {
     getAuth.mockReturnValue({ userId: "user_secure" });
