@@ -28,6 +28,7 @@ permissions:
 
 env:
   VITE_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k"
+  VITE_PUBLIC_DEMO_URL: "https://demo.test.torchlabs.ca/"
 
 jobs:
   verify:
@@ -58,8 +59,8 @@ jobs:
       - name: Cloudflare Worker dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
-        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:verify .
-      - name: Production container CSP smoke test
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PUBLIC_DEMO_URL="$VITE_PUBLIC_DEMO_URL" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:verify .
+      - name: Production container CSP and demo-link smoke test
         shell: bash
         run: |
           set -euo pipefail
@@ -91,6 +92,7 @@ jobs:
           grep -i -F "content-security-policy:" /tmp/jack-root-headers.txt
           grep -i -F "default-src 'self'" /tmp/jack-root-headers.txt
           grep -i -F "object-src 'none'" /tmp/jack-root-headers.txt
+          grep -R -F "$VITE_PUBLIC_DEMO_URL" artifacts/jack-core/dist/public/assets
       - name: API full tests
         run: pnpm --filter @workspace/api-server test
       - name: Jack full tests
