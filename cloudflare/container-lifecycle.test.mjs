@@ -16,8 +16,9 @@ test("Cloudflare production uses the supported Container readiness lifecycle", a
     worker,
     /import \{ Container, getContainer \} from "@cloudflare\/containers"/,
   );
+  assert.match(worker, /const CONTAINER_PORT = 8080/);
   assert.match(worker, /class JackProductionContainer extends Container/);
-  assert.match(worker, /defaultPort = 8080/);
+  assert.match(worker, /defaultPort = CONTAINER_PORT/);
   assert.match(worker, /requiredPorts = \[CONTAINER_PORT\]/);
   assert.match(worker, /sleepAfter = "10m"/);
   assert.match(worker, /pingEndpoint = "localhost\/api\/healthz"/);
