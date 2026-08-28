@@ -61,7 +61,10 @@ async function withTimeout(promise, timeoutMs) {
       promise,
       new Promise((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`container port probe timed out after ${timeoutMs}ms`)),
+          () =>
+            reject(
+              new Error(`container port probe timed out after ${timeoutMs}ms`),
+            ),
           timeoutMs,
         );
       }),
@@ -103,7 +106,9 @@ export class JackProductionContainer extends DurableObject {
           STARTUP_PROBE_TIMEOUT_MS,
         );
         if (response.ok) return;
-        lastError = new Error(`container health probe returned HTTP ${response.status}`);
+        lastError = new Error(
+          `container health probe returned HTTP ${response.status}`,
+        );
       } catch (error) {
         lastError = error;
       }
