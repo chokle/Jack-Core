@@ -91,6 +91,8 @@ jobs:
         run: npx --yes wrangler@latest whoami
 
       - name: Generate Cloudflare deploy config
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: node cloudflare/generate-deploy-config.mjs
 
       - name: Validate Cloudflare helper syntax
@@ -206,9 +208,12 @@ jobs:
             --header "X-Jack-Diagnostic:ci-smoke" > "$log_path" 2>&1 &
           tail_pid=$!
           sleep 8
-          curl --silent --show-error --max-time 30 \
-            --header "X-Jack-Diagnostic: ci-smoke" \
-            "${{ steps.deployment.outputs.target }}/api/healthz" > /dev/null || true
+          target="${{ steps.deployment.outputs.target }}"
+          if [[ -n "$target" ]]; then
+            curl --silent --show-error --max-time 30 \
+              --header "X-Jack-Diagnostic: ci-smoke" \
+              "$target/api/healthz" > /dev/null || true
+          fi
           wait "$tail_pid" || true
           node - "$log_path" <<'NODE'
           const { readFileSync } = require("node:fs");

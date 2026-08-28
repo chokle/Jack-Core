@@ -31,6 +31,15 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /--secrets-file/);
   assert.match(workflow, /cloudflare-secrets\.json/);
   assert.match(workflow, /X-Jack-Diagnostic:ci-smoke/);
+  assert.match(
+    workflow,
+    /- name: Generate Cloudflare deploy config\n\s+env:\n\s+VITE_CLERK_PUBLISHABLE_KEY: \$\{\{ secrets\.VITE_CLERK_PUBLISHABLE_KEY \}\}/,
+  );
+  assert.equal(
+    workflow.match(/secrets\.VITE_CLERK_PUBLISHABLE_KEY/g)?.length,
+    3,
+    "Clerk publishable key must be bound to preflight, config generation, and container build",
+  );
 
   const jobHeader = workflow.slice(
     workflow.indexOf("jobs:"),
