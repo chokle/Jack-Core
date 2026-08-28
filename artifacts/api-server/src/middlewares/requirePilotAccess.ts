@@ -3,6 +3,11 @@ import { resolveIdentity } from "../lib/admin-auth.js";
 import { resolveActiveTesterScope } from "../lib/activity-telemetry.js";
 import { isPublicApiPath } from "./requireAuth.js";
 
+function usesRouteScopedAuthorization(req: Request): boolean {
+  if (req.method === "DELETE" && req.path === "/account") return true;
+  return req.path === "/testing/progress" || req.path.startsWith("/testing/reports");
+}
+
 /**
  * Server-enforced authorization boundary for the controlled pilot environment.
  * Authentication alone is insufficient: callers must have a current active
@@ -13,7 +18,11 @@ export function requirePilotAccess(
   res: Response,
   next: NextFunction,
 ): void {
-  if (req.method === "OPTIONS" || isPublicApiPath(req.path)) {
+  if (
+    req.method === "OPTIONS" ||
+    isPublicApiPath(req.path) ||
+    usesRouteScopedAuthorization(req)
+  ) {
     next();
     return;
   }
