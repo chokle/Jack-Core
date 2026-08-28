@@ -1,0 +1,141 @@
+name: Find Railway Staging Trigger
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+    paths:
+      - ".github/workflows/find-railway-staging-trigger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Inspect every recent ref for Railway deployment statuses
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import fs from 'node:fs';
+
+          const owner = 'chokle';
+          const repo = 'Jack-Core';
+          const token = process.env.GH_TOKEN;
+          const cutoff = new Date('2026-08-20T00:00:00Z');
+          const api = async (path) => {
+            const response = await fetch(`https://api.github.com${path}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!response.ok) throw new Error(`${path} returned ${response.status}: ${(await response.text()).slice(0, 300)}`);
+            return response.json();
+          };
+
+          const refLines = execFileSync('git', ['for-each-ref', '--format=%(refname:short)|%(objectname)', 'refs/remotes/origin'], { encoding: 'utf8' })
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .filter((line) => !line.startsWith('origin/HEAD|'));
+
+          const branchByCommit = new Map();
+          for (const line of refLines) {
+            const [ref] = line.split('|');
+            let shas = [];
+            try {
+              shas = execFileSync('git', ['log', ref, '--since=2026-08-20T00:00:00Z', '--format=%H', '-n', '50'], { encoding: 'utf8' })
+                .trim().split('\n').filter(Boolean);
+            } catch {}
+            for (const sha of shas) {
+              const branches = branchByCommit.get(sha) ?? [];
+              branches.push(ref.replace(/^origin\//, ''));
+              branchByCommit.set(sha, branches);
+            }
+          }
+
+          const shas = [...branchByCommit.keys()];
+          console.log(`Inspecting ${shas.length} unique commits across ${refLines.length} remote branches since ${cutoff.toISOString()}`);
+          const findings = [];
+          const allRailway = [];
+          for (let index = 0; index < shas.length; index += 1) {
+            const sha = shas[index];
+            const status = await api(`/repos/${owner}/${repo}/commits/${sha}/status`);
+            for (const entry of status.statuses ?? []) {
+              const haystack = `${entry.context ?? ''} ${entry.description ?? ''} ${entry.target_url ?? ''}`.toLowerCase();
+              if (!haystack.includes('railway')) continue;
+              const finding = {
+                sha,
+                branches: branchByCommit.get(sha),
+                state: entry.state,
+                context: entry.context,
+                description: entry.description,
+                target_url: entry.target_url,
+                created_at: entry.created_at,
+              };
+              allRailway.push(finding);
+              if (/staging|h3r6mycb|environmentid=/i.test(haystack)) findings.push(finding);
+            }
+            if ((index + 1) % 50 === 0) console.log(`checked ${index + 1}/${shas.length}`);
+          }
+
+          const summarizeTarget = (url) => {
+            try {
+              const parsed = new URL(url);
+              const parts = parsed.pathname.split('/').filter(Boolean);
+              return {
+                projectId: parts[1] ?? null,
+                serviceId: parts[3] ?? null,
+                deploymentId: parsed.searchParams.get('id'),
+                environmentId: parsed.searchParams.get('environmentId'),
+              };
+            } catch { return {}; }
+          };
+
+          const normalized = allRailway.map((entry) => ({ ...entry, ...summarizeTarget(entry.target_url) }));
+          const groups = {};
+          for (const entry of normalized) {
+            const key = `${entry.serviceId}|${entry.environmentId}|${entry.description}`;
+            const group = groups[key] ?? { serviceId: entry.serviceId, environmentId: entry.environmentId, description: entry.description, occurrences: 0, branches: new Set(), newest: null, examples: [] };
+            group.occurrences += 1;
+            for (const branch of entry.branches ?? []) group.branches.add(branch);
+            if (!group.newest || String(entry.created_at) > String(group.newest)) group.newest = entry.created_at;
+            if (group.examples.length < 5) group.examples.push({ sha: entry.sha, branches: entry.branches, created_at: entry.created_at, target_url: entry.target_url });
+            groups[key] = group;
+          }
+          const report = {
+            generatedAt: new Date().toISOString(),
+            branchCount: refLines.length,
+            commitCount: shas.length,
+            railwayStatusCount: normalized.length,
+            serviceEnvironmentGroups: Object.values(groups).map((group) => ({ ...group, branches: [...group.branches] })),
+            explicitStagingMatches: findings.map((entry) => ({ ...entry, ...summarizeTarget(entry.target_url) })),
+          };
+          fs.writeFileSync('/tmp/railway-trigger-report.json', JSON.stringify(report, null, 2));
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: railway-trigger-report
+          path: /tmp/railway-trigger-report.json
+          retention-days: 2
