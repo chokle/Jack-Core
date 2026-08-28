@@ -57,6 +57,7 @@ export class JackProductionContainer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.runtimeEnv = containerEnv(env);
+    this.monitoring = false;
   }
 
   startIfNeeded() {
@@ -71,6 +72,21 @@ export class JackProductionContainer extends DurableObject {
         "./artifacts/api-server/dist/index.mjs",
       ],
     });
+
+    if (!this.monitoring) {
+      this.monitoring = true;
+      this.ctx.waitUntil(
+        this.ctx.container
+          .monitor()
+          .then(() => console.error("Jack production container exited"))
+          .catch((error) =>
+            console.error("Jack production container startup error", error),
+          )
+          .finally(() => {
+            this.monitoring = false;
+          }),
+      );
+    }
   }
 
   async fetch(request) {

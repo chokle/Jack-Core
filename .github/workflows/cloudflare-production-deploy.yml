@@ -216,12 +216,21 @@ jobs:
             .split(/\r?\n/)
             .flatMap((line) => {
               try {
-                const row = JSON.parse(line);
-                return [{
-                  outcome: row.outcome,
-                  exceptions: row.exceptions,
-                  logs: row.logs,
-                }];
+              const row = JSON.parse(line);
+              const trace =
+                row.event &&
+                typeof row.event === "object" &&
+                ("outcome" in row.event || "logs" in row.event)
+                  ? row.event
+                  : row;
+              return [{
+                envelopeKeys: Object.keys(row),
+                traceKeys: Object.keys(trace),
+                outcome: trace.outcome,
+                exceptions: trace.exceptions,
+                logs: trace.logs,
+                diagnosticsChannelEvents: trace.diagnosticsChannelEvents,
+              }];
               } catch {
                 return [];
               }
