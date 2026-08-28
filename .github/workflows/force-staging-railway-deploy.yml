@@ -1,0 +1,74 @@
+name: Force Staging Railway Deploy
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  RAILWAY_PROJECT_ID: e85bd8fa-bd9a-43e5-b740-c14cd5b95699
+  RAILWAY_SERVICE_ID: 74f4985d-15c1-4f03-95f2-1ade5b3000fa
+  RAILWAY_ENVIRONMENT: staging
+  RAILWAY_STAGING_TOKEN_VALUE: ${{ secrets.RAILWAY_STAGING_TOKEN }}
+  STAGING_RAILWAY_TOKEN_VALUE: ${{ secrets.STAGING_RAILWAY_TOKEN }}
+  RAILWAY_TOKEN_VALUE: ${{ secrets.RAILWAY_TOKEN }}
+  RAILWAY_API_TOKEN_VALUE: ${{ secrets.RAILWAY_API_TOKEN }}
+  RAILWAY_STAGING_DEPLOY_HOOK: ${{ secrets.RAILWAY_STAGING_DEPLOY_HOOK }}
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Select a staging-capable Railway credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in RAILWAY_STAGING_TOKEN_VALUE STAGING_RAILWAY_TOKEN_VALUE RAILWAY_TOKEN_VALUE RAILWAY_API_TOKEN_VALUE RAILWAY_STAGING_DEPLOY_HOOK; do
+            if [ -n "${!name:-}" ]; then echo "$name=present"; else echo "$name=absent"; fi
+          done
+
+          if [ -n "${RAILWAY_STAGING_TOKEN_VALUE:-}" ]; then
+            echo "RAILWAY_TOKEN=${RAILWAY_STAGING_TOKEN_VALUE}" >> "$GITHUB_ENV"
+            echo "RAILWAY_AUTH_MODE=staging-project-token" >> "$GITHUB_ENV"
+          elif [ -n "${STAGING_RAILWAY_TOKEN_VALUE:-}" ]; then
+            echo "RAILWAY_TOKEN=${STAGING_RAILWAY_TOKEN_VALUE}" >> "$GITHUB_ENV"
+            echo "RAILWAY_AUTH_MODE=staging-project-token-alias" >> "$GITHUB_ENV"
+          elif [ -n "${RAILWAY_API_TOKEN_VALUE:-}" ]; then
+            echo "RAILWAY_API_TOKEN=${RAILWAY_API_TOKEN_VALUE}" >> "$GITHUB_ENV"
+            echo "RAILWAY_AUTH_MODE=account-token" >> "$GITHUB_ENV"
+          elif [ -n "${RAILWAY_TOKEN_VALUE:-}" ]; then
+            echo "RAILWAY_TOKEN=${RAILWAY_TOKEN_VALUE}" >> "$GITHUB_ENV"
+            echo "RAILWAY_AUTH_MODE=generic-project-token" >> "$GITHUB_ENV"
+          elif [ -n "${RAILWAY_STAGING_DEPLOY_HOOK:-}" ]; then
+            echo "RAILWAY_AUTH_MODE=deploy-hook" >> "$GITHUB_ENV"
+          else
+            echo "No Railway staging credential or deploy hook is configured in GitHub Actions." >&2
+            exit 1
+          fi
+      - name: Deploy current main to Railway staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Auth mode: $RAILWAY_AUTH_MODE"
+          if [ "$RAILWAY_AUTH_MODE" = "deploy-hook" ]; then
+            curl --fail-with-body --silent --show-error --request POST "$RAILWAY_STAGING_DEPLOY_HOOK"
+            echo "Staging deploy hook accepted."
+            exit 0
+          fi
+
+          npx -y @railway/cli@latest up \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --ci
