@@ -6,16 +6,21 @@ Canonical goal: #49 steps 1 and 11.
 
 `jack.torchlabs.ca` -> Cloudflare Worker -> one named Cloudflare Container -> existing Jack Node/Express app -> Supabase.
 
-This preserves the current long-lived job, feedback-notification, telemetry-retention, and vitality loops during the pilot. Supabase remains the data/backend layer. Railway is not removed until the Cloudflare deployment passes acceptance.
+The Worker uses Cloudflare's supported `@cloudflare/containers` `Container` class for process startup, port-8080 readiness, request forwarding, and idle shutdown. This preserves the current long-lived job, feedback-notification, telemetry-retention, and vitality loops during the pilot. Supabase remains the data/backend layer. Railway is not removed until the Cloudflare deployment passes acceptance.
 
 ## Authentication boundary
 
 This cutover uses Wrangler to deploy a Worker + Container. A `cloudflared.exe service install <TUNNEL_TOKEN>` command is for Cloudflare Tunnel and is **not** part of this production architecture.
 
-The GitHub production deploy lane requires two repository Actions secrets:
+The GitHub production deploy lane requires these repository Actions secrets:
 
 - `CLOUDFLARE_API_TOKEN`
 - `VITE_CLERK_PUBLISHABLE_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CLERK_SECRET_KEY`
+- `OPENAI_API_KEY`
+- `ADMIN_EMAILS`
 
 `CLOUDFLARE_ACCOUNT_ID` is an optional override, not a required handoff. If it is absent, the workflow resolves account context from the `torchlabs.ca` zone ownership and falls back to a single token-visible account or a unique Torch-named account. Resolution fails closed if the token can see multiple ambiguous accounts.
 
@@ -29,24 +34,26 @@ Never commit credential material.
 
 ## Runtime secrets
 
-Encrypted production runtime secrets remain in Cloudflare and are not duplicated into GitHub Actions. The generated Wrangler config declares the required bindings so deployment fails closed if Cloudflare is missing any required runtime secret.
+Production runtime secrets are stored as GitHub Actions secrets and exposed only to the specific preflight and secret-handoff steps that need them. The workflow writes a mode-`0600` temporary JSON file on the ephemeral runner, passes it to Wrangler's `--secrets-file` option, and never commits or exposes the values job-wide. After deployment, Cloudflare stores them as encrypted Worker secret bindings and forwards them into the Container environment at startup.
 
-The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLERK_PUBLISHABLE_KEY` is provided to the production build through GitHub Actions, while `CLERK_SECRET_KEY` remains an encrypted Cloudflare runtime secret. The build and runtime fail closed unless both sides are configured. The shared pilot auth bypass is test-only and must never be enabled for a production deployment.
+The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLERK_PUBLISHABLE_KEY` is provided to the production build through GitHub Actions, while `CLERK_SECRET_KEY` is delivered as an encrypted Cloudflare runtime secret. The build and runtime fail closed unless both sides are configured. The shared pilot auth bypass is test-only and must never be enabled for a production deployment.
 
 ## Automated temporary-host deployment
 
 `.github/workflows/cloudflare-production-deploy.yml` runs on `main` and can also be dispatched manually. It performs the critical path as one fail-closed batch:
 
 1. install with the frozen lockfile;
-2. require both GitHub Actions handoff secrets: `CLOUDFLARE_API_TOKEN` and `VITE_CLERK_PUBLISHABLE_KEY`;
+2. require all deployment/build/runtime credential handoffs;
 3. resolve Cloudflare account context automatically unless the optional override exists;
 4. verify Wrangler authentication;
 5. generate and validate the deployment config;
 6. run formatting, Wrangler dry-run, Container build, full API and Jack tests, workspace typecheck/build, and diff checks;
-7. deploy Worker + Container to the temporary `workers.dev` target;
-8. resolve the deployed target/version from Wrangler structured output;
-9. smoke-test the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
-10. record deployment evidence in the workflow summary.
+7. hand runtime secrets to Wrangler without exposing them job-wide;
+8. deploy Worker + Container to the temporary `workers.dev` target;
+9. resolve the deployed target/version from Wrangler structured output;
+10. wait for the supported Container lifecycle to report the app port ready;
+11. smoke-test the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
+12. record deployment evidence in the workflow summary.
 
 Production DNS remains unchanged during this lane so Railway stays available as rollback.
 
@@ -67,8 +74,7 @@ Do not delete `railway.json`, Railway environment values, or Railway routing unt
 
 ## Post-cutover
 
-1. Seed deterministic Pilot001 knowledge through the embedding-backed seed path; never direct-SQL the knowledge rows.
-2. Verify all 13 deterministic entries exist, especially Rob's eight Pilot001 site-specific entries (`0006`-`0013`), and verify retrieval.
-3. Complete the six-person account/Command Centre reconciliation.
-4. Run full Pilot001 E2E/EOD acceptance and export closeout evidence.
-5. Close or supersede stale Railway deployment artifacts only after production verification.
+1. Verify all 13 deterministic entries exist, especially Rob's eight Pilot001 site-specific entries (`0006`-`0013`), and verify retrieval.
+2. Complete the six-person account/Command Centre reconciliation.
+3. Run full Pilot001 E2E/EOD acceptance and export closeout evidence.
+4. Close or supersede stale Railway deployment artifacts only after production verification.
