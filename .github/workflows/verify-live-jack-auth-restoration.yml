@@ -1,0 +1,156 @@
+name: Verify Live Jack Auth Restoration
+
+on:
+  push:
+    branches:
+      - hotfix/clerk-fapi-csp-20260828
+    paths:
+      - ".ops/verify-live-jack-auth-20260828.txt"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  live-mobile-auth-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install browser runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jack-live-auth"
+          cd "$RUNNER_TEMP/jack-live-auth"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run live mobile auth acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/jack-live-auth"
+          cat > smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Live-Auth-Acceptance/2026-08-28',
+            });
+            const page = await context.newPage();
+            const pageErrors = [];
+            const failedRequests = [];
+            const clerkUiResponses = [];
+
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('requestfailed', (request) => {
+              failedRequests.push({
+                url: request.url(),
+                error: request.failure()?.errorText || 'unknown',
+              });
+            });
+            page.on('response', (response) => {
+              if (response.url().includes('/npm/@clerk/ui@1/')) {
+                clerkUiResponses.push({
+                  url: response.url(),
+                  status: response.status(),
+                  contentType: response.headers()['content-type'] || '',
+                });
+              }
+            });
+
+            const response = await page.goto('https://jack.torchlabs.ca/sign-in', {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await page.waitForTimeout(12000);
+
+            const headerCsp = response?.headers()['content-security-policy'] || '';
+            const metaCsp = await page
+              .locator('meta[http-equiv="Content-Security-Policy"]')
+              .getAttribute('content')
+              .catch(() => null);
+            const body = (await page.locator('body').innerText()).slice(0, 3000);
+            const emailInputs = await page
+              .locator('input[type="email"], input[name="email"], input[name="identifier"]')
+              .count();
+            const authUnavailable = await page
+              .getByText('Sign-in is temporarily unavailable', { exact: true })
+              .count();
+            const health = await context.request.get('https://jack.torchlabs.ca/api/healthz', {
+              timeout: 30000,
+            });
+
+            const result = {
+              checkedAt: new Date().toISOString(),
+              status: response?.status() || null,
+              url: page.url(),
+              headerCsp,
+              metaCsp,
+              body,
+              emailInputs,
+              authUnavailable,
+              pageErrors,
+              failedRequests,
+              clerkUiResponses,
+              health: { status: health.status(), body: await health.text() },
+            };
+
+            fs.writeFileSync('result.json', JSON.stringify(result, null, 2));
+            await page.screenshot({ path: 'sign-in-live.png', fullPage: true });
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.status !== 200) fatal.push(`sign-in status ${result.status}`);
+            if (!result.headerCsp.includes('https://clerk.torchlabs.ca')) {
+              fatal.push('HTTP CSP does not allow clerk.torchlabs.ca');
+            }
+            if (!String(result.metaCsp || '').includes('https://clerk.torchlabs.ca')) {
+              fatal.push('HTML CSP does not allow clerk.torchlabs.ca');
+            }
+            if (result.authUnavailable > 0) fatal.push('secure-session fallback remains visible');
+            if (result.emailInputs < 1) fatal.push('email sign-in input did not render');
+            if (!result.clerkUiResponses.some((entry) => entry.status >= 200 && entry.status < 300)) {
+              fatal.push('Clerk UI bundle did not load successfully');
+            }
+            if (result.failedRequests.some((entry) => entry.url.includes('@clerk/ui'))) {
+              fatal.push('Clerk UI request still failed');
+            }
+            if (result.pageErrors.some((value) => /failed to load Clerk UI|failed_to_load_clerk_ui/i.test(value))) {
+              fatal.push('Clerk UI page error remains');
+            }
+            if (result.health.status !== 200 || !result.health.body.includes('"status":"ok"')) {
+              fatal.push('production health check failed');
+            }
+
+            await browser.close();
+            if (fatal.length) {
+              console.error(`LIVE_JACK_AUTH_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('LIVE_JACK_AUTH_PASSED');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          node smoke.cjs
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-jack-auth-restoration-evidence
+          path: |
+            ${{ runner.temp }}/jack-live-auth/result.json
+            ${{ runner.temp }}/jack-live-auth/sign-in-live.png
+          if-no-files-found: warn
+          retention-days: 7
