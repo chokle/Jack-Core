@@ -17,6 +17,7 @@ describe("Clerk Content Security Policy", () => {
     const connectSrc = directives?.find((directive) => directive.startsWith("connect-src "));
     const frameSrc = directives?.find((directive) => directive.startsWith("frame-src "));
 
+    expect(scriptSrc).toContain("https://clerk.torchlabs.ca");
     expect(scriptSrc).toContain("https://clerk.jack.torchlabs.ca");
     expect(scriptSrc).toContain("https://clerk.staging.jack.torchlabs.ca");
     expect(connectSrc).toContain("https://clerk.torchlabs.ca");

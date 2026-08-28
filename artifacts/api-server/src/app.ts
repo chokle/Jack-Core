@@ -167,3 +167,5 @@ if (existsSync(frontendIndex)) {
 }
 
 export default app;
+
+// Railway release sync: rebuild frontend CSP artifact for clerk.torchlabs.ca.

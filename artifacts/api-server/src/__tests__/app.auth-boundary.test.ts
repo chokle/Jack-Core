@@ -64,6 +64,7 @@ describe("app-wide authentication composition", () => {
     expect(policy).toContain("default-src 'self'");
     expect(policy).toContain("https://challenges.cloudflare.com");
     expect(policy).toContain("https://*.supabase.co");
+    expect(policy).toContain("https://clerk.torchlabs.ca");
     expect(policy).toContain("https://clerk.jack.torchlabs.ca");
     expect(policy).toContain("https://clerk.staging.jack.torchlabs.ca");
     expect(policy).not.toContain("https://*.torchlabs.ca");
