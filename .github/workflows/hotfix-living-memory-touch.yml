@@ -1,0 +1,115 @@
+name: Hotfix Living Memory Touch Selection
+
+on:
+  push:
+    branches:
+      - hotfix/living-memory-touch-selection-20260828
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: ${{ !contains(github.event.head_commit.message, '[living-memory-hotfix-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Apply touch-selection hotfix and focused regression coverage
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('artifacts/jack-core/src/components/SpatialBrainCanvas.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'const BIRTH_MS = 1600;\n',
+              '''const BIRTH_MS = 1600;\n\n/** Minimum screen-space hit radius. Touch targets stay at least 44px wide. */\nexport function graphNodeHitRadius(\n  screenRadius: number,\n  pointerType: string,\n): number {\n  const minimum = pointerType === "touch" ? 22 : pointerType === "pen" ? 18 : 12;\n  return Math.max(screenRadius + 8, minimum);\n}\n\n/** Movement tolerated before a press becomes an orbit gesture. */\nexport function graphTapSlop(pointerType: string): number {\n  return pointerType === "touch" ? 14 : pointerType === "pen" ? 10 : 6;\n}\n\n/** Keep the node pressed at pointer-down stable while the animated graph moves. */\nexport function resolveGraphTapTarget(\n  pressedId: string | null,\n  releasedId: string | null,\n  pressedStillVisible: boolean,\n): string | null {\n  return pressedId && pressedStillVisible ? pressedId : releasedId;\n}\n''',
+          )
+
+          replace_once(
+              '      const pick = (sx: number, sy: number): SN | null => {\n',
+              '''      const pick = (\n        sx: number,\n        sy: number,\n        pointerType: string = "mouse",\n      ): SN | null => {\n''',
+          )
+          replace_once(
+              '          const hit = n.sr + 8;\n',
+              '          const hit = graphNodeHitRadius(n.sr, pointerType);\n',
+          )
+
+          replace_once(
+              '''      let dragging = false;\n      let moved = 0;\n      let last = { x: 0, y: 0 };\n      let pinchDist = 0;\n''',
+              '''      let dragging = false;\n      let moved = 0;\n      let last = { x: 0, y: 0 };\n      let pressStart = { x: 0, y: 0 };\n      let pressHitId: string | null = null;\n      let pressPointerType = "mouse";\n      let pinchDist = 0;\n''',
+          )
+
+          replace_once(
+              '''        if (pointers.size === 1) {\n          dragging = true;\n          moved = 0;\n          last = p;\n        } else if (pointers.size === 2) {\n          dragging = false;\n          const pts = [...pointers.values()];\n          pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);\n        }\n''',
+              '''        if (pointers.size === 1) {\n          dragging = true;\n          moved = 0;\n          last = p;\n          pressStart = p;\n          pressPointerType = e.pointerType || "mouse";\n          pressHitId = pick(p.x, p.y, pressPointerType)?.id ?? null;\n        } else if (pointers.size === 2) {\n          dragging = false;\n          pressHitId = null;\n          const pts = [...pointers.values()];\n          pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);\n        }\n''',
+          )
+
+          replace_once(
+              '''        if (dragging && !locked) {\n          const dx = p.x - last.x;\n          const dy = p.y - last.y;\n          moved += Math.abs(dx) + Math.abs(dy);\n          const cam = camRef.current;\n          cam.yaw += dx * ORBIT_SPEED;\n          cam.pitch = clampPitch(cam.pitch - dy * ORBIT_SPEED);\n          last = p;\n        } else {\n          const hit = pick(p.x, p.y);\n''',
+              '''        if (dragging && !locked) {\n          const dx = p.x - last.x;\n          const dy = p.y - last.y;\n          moved = Math.max(\n            moved,\n            Math.hypot(p.x - pressStart.x, p.y - pressStart.y),\n          );\n          // Ignore ordinary tap jitter. Orbiting begins only after the pointer\n          // clears the device-appropriate movement slop.\n          if (moved <= graphTapSlop(pressPointerType)) {\n            last = p;\n            return;\n          }\n          const cam = camRef.current;\n          cam.yaw += dx * ORBIT_SPEED;\n          cam.pitch = clampPitch(cam.pitch - dy * ORBIT_SPEED);\n          last = p;\n        } else {\n          const hit = pick(p.x, p.y, e.pointerType || "mouse");\n''',
+          )
+
+          replace_once(
+              '''      const onPointerUp = (e: PointerEvent) => {\n        const wasDragging = dragging;\n        pointers.delete(e.pointerId);\n        if (pointers.size < 2) pinchDist = 0;\n        try {\n          canvas.releasePointerCapture(e.pointerId);\n        } catch {\n          /* ignore */\n        }\n        if (locked) return;\n        if (wasDragging && moved < 6) {\n          const p = localXY(e);\n          const hit = pick(p.x, p.y);\n          // Only (re)select on a real node hit. An empty-space click no longer\n          // clears the selection — the floating inspector is a window, not a\n          // modal, so it stays open (and the node stays highlighted) until the\n          // user closes it via X or Escape.\n          if (hit) onSelect(hit.id);\n        }\n        dragging = false;\n      };\n''',
+              '''      const onPointerUp = (e: PointerEvent) => {\n        const wasDragging = dragging;\n        pointers.delete(e.pointerId);\n        if (pointers.size < 2) pinchDist = 0;\n        try {\n          canvas.releasePointerCapture(e.pointerId);\n        } catch {\n          /* ignore */\n        }\n        if (locked) return;\n        if (pointers.size > 0) {\n          // A pinch ended. Do not reinterpret the remaining contact as a tap.\n          dragging = false;\n          pressHitId = null;\n          return;\n        }\n        if (wasDragging && moved <= graphTapSlop(pressPointerType)) {\n          const p = localXY(e);\n          const releaseHit = pick(p.x, p.y, pressPointerType);\n          const pressedHit = pressHitId\n            ? nodesRef.current.get(pressHitId)\n            : null;\n          const targetId = resolveGraphTapTarget(\n            pressHitId,\n            releaseHit?.id ?? null,\n            Boolean(pressedHit && pressedHit.vis >= 0.15),\n          );\n          // Anchor a tap to the node hit at pointer-down. Child nodes keep\n          // easing after a trade expands, so re-picking only at pointer-up can\n          // otherwise miss the node even though the user's finger was correct.\n          if (targetId) onSelect(targetId);\n        }\n        dragging = false;\n        pressHitId = null;\n      };\n\n      const onPointerCancel = (e: PointerEvent) => {\n        pointers.delete(e.pointerId);\n        dragging = false;\n        moved = 0;\n        pinchDist = 0;\n        pressHitId = null;\n      };\n''',
+          )
+
+          replace_once(
+              '        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);\n',
+              '        const hit = pick(e.clientX - rect.left, e.clientY - rect.top, "mouse");\n',
+          )
+
+          replace_once(
+              '''      canvas.addEventListener("pointerup", onPointerUp);\n      canvas.addEventListener("pointerleave", onLeave);\n''',
+              '''      canvas.addEventListener("pointerup", onPointerUp);\n      canvas.addEventListener("pointercancel", onPointerCancel);\n      canvas.addEventListener("pointerleave", onLeave);\n''',
+          )
+          replace_once(
+              '''        canvas.removeEventListener("pointerup", onPointerUp);\n        canvas.removeEventListener("pointerleave", onLeave);\n''',
+              '''        canvas.removeEventListener("pointerup", onPointerUp);\n        canvas.removeEventListener("pointercancel", onPointerCancel);\n        canvas.removeEventListener("pointerleave", onLeave);\n''',
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          test_path = Path('artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts')
+          test_path.write_text('''import { describe, expect, it } from "vitest";\nimport {\n  graphNodeHitRadius,\n  graphTapSlop,\n  resolveGraphTapTarget,\n} from "./SpatialBrainCanvas";\n\ndescribe("SpatialBrainCanvas pointer selection", () => {\n  it("gives small touch nodes a 44px target", () => {\n    expect(graphNodeHitRadius(4, "touch")).toBe(22);\n    expect(graphNodeHitRadius(4, "pen")).toBe(18);\n    expect(graphNodeHitRadius(4, "mouse")).toBe(12);\n  });\n\n  it("preserves the rendered radius for already-large nodes", () => {\n    expect(graphNodeHitRadius(30, "touch")).toBe(38);\n  });\n\n  it("accepts ordinary touch jitter without treating it as orbit", () => {\n    expect(graphTapSlop("touch")).toBe(14);\n    expect(graphTapSlop("pen")).toBe(10);\n    expect(graphTapSlop("mouse")).toBe(6);\n  });\n\n  it("keeps the pointer-down node stable while animated children move", () => {\n    expect(resolveGraphTapTarget("concept:1", null, true)).toBe("concept:1");\n    expect(resolveGraphTapTarget("concept:1", "concept:2", true)).toBe(\n      "concept:1",\n    );\n  });\n\n  it("falls back to the release hit when the pressed node disappeared", () => {\n    expect(resolveGraphTapTarget("concept:1", "concept:2", false)).toBe(\n      "concept:2",\n    );\n  });\n});\n''', encoding='utf-8')
+          PY
+      - run: pnpm install --frozen-lockfile
+      - name: Jack frontend tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Jack production build
+        run: pnpm --filter @workspace/jack-core build
+      - name: Format check
+        run: pnpm exec prettier --check artifacts/jack-core/src/components/SpatialBrainCanvas.tsx artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts
+      - name: Diff check
+        run: git diff --check
+      - name: Commit verified hotfix
+        shell: bash
+        run: |
+          rm .github/workflows/hotfix-living-memory-touch.yml
+          git config user.name "daz-hotfix"
+          git config user.email "24825492+chokle@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Living Memory child-node touch selection [living-memory-hotfix-applied]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
