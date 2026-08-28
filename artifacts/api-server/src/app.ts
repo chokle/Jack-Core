@@ -11,6 +11,7 @@ import {
   clerkProxyMiddleware,
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
+import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -109,13 +110,23 @@ app.get("/api/auth/reset-session", (_req, res) => {
   res.redirect(302, `/sign-in?session_reset=${Date.now()}`);
 });
 
+// The production pilot is invite-only. Direct navigation to Clerk's historical
+// self-service sign-up path is redirected before the SPA can mount it.
+app.get(/^\/sign-up(?:\/.*)?$/, (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.redirect(302, "/sign-in");
+});
+
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
-// Preserve a verified Clerk subject for ownership checks. This is the actual
-// security boundary: the frontend sign-in wall is convenience only.
 app.use("/api", requireAuth);
+
+// Authentication alone does not authorize the controlled production pilot.
+// Require a current tester membership, or explicit server-resolved admin role,
+// before any protected API route can read or write real Jack data.
+app.use("/api", requirePilotAccess);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
