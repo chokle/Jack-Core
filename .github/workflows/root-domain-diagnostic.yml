@@ -54,7 +54,7 @@ jobs:
           fi
 
           echo '=== Pages projects and custom domains ==='
-          pages_url="https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects?per_page=50"
+          pages_url="https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects"
           pages_body="$(mktemp)"
           pages_status="$(curl --silent --show-error --output "$pages_body" --write-out '%{http_code}' \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
