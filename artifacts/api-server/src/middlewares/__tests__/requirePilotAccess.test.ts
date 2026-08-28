@@ -136,29 +136,36 @@ describe("requirePilotAccess", () => {
     });
   });
 
-  it("keeps account deletion available after pilot membership ends", async () => {
-    getAuth.mockReturnValue({ userId: "user_former_pilot" });
-
-    const res = await request(app).delete("/api/account");
-
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ ok: true, userId: "user_former_pilot" });
-    expect(resolveActiveTesterScope).not.toHaveBeenCalled();
-    expect(resolveIdentity).not.toHaveBeenCalled();
-  });
-
-  it.each(["/api/testing/reports/scopes", "/api/testing/reports/summary", "/api/testing/progress"])(
-    "preserves route-scoped report authorization for %s",
+  it.each(["/api/account", "/api/account/"])(
+    "keeps account deletion available after pilot membership ends for %s",
     async (path) => {
-      getAuth.mockReturnValue({ userId: "user_report_admin" });
+      getAuth.mockReturnValue({ userId: "user_former_pilot" });
 
-      const res = await request(app).get(path);
+      const res = await request(app).delete(path);
 
       expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ ok: true, userId: "user_former_pilot" });
       expect(resolveActiveTesterScope).not.toHaveBeenCalled();
       expect(resolveIdentity).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    "/api/testing/reports/scopes",
+    "/api/testing/reports/summary",
+    "/api/testing/progress",
+    "/api/testing/reports/scopes/",
+    "/api/testing/reports/summary/",
+    "/api/testing/progress/",
+  ])("preserves route-scoped report authorization for %s", async (path) => {
+    getAuth.mockReturnValue({ userId: "user_report_admin" });
+
+    const res = await request(app).get(path);
+
+    expect(res.status).toBe(200);
+    expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+    expect(resolveIdentity).not.toHaveBeenCalled();
+  });
 
   it("preserves the explicit local/test auth bypass", async () => {
     process.env["PILOT_AUTH_BYPASS"] = "true";
