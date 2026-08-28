@@ -31,4 +31,27 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /--secrets-file/);
   assert.match(workflow, /cloudflare-secrets\.json/);
   assert.match(workflow, /X-Jack-Diagnostic:ci-smoke/);
+
+  const jobHeader = workflow.slice(
+    workflow.indexOf("jobs:"),
+    workflow.indexOf("    steps:"),
+  );
+  for (const secretName of [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "CLERK_SECRET_KEY",
+    "OPENAI_API_KEY",
+    "ADMIN_EMAILS",
+  ]) {
+    assert.doesNotMatch(
+      jobHeader,
+      new RegExp(secretName),
+      `${secretName} must not be exposed job-wide`,
+    );
+    assert.equal(
+      workflow.match(new RegExp(`secrets\\.${secretName}`, "g"))?.length,
+      2,
+      `${secretName} should be bound only to preflight and secret handoff`,
+    );
+  }
 });
