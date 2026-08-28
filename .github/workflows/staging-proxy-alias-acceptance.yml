@@ -1,0 +1,94 @@
+name: Staging Proxy Alias Acceptance
+
+on:
+  push:
+    branches: [ops/staging-proxy-alias-20260828]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  PUBLIC_HOST: staging-jack.torchlabs.ca
+  ORIGIN_HOST: staging.jack.torchlabs.ca
+  SCRIPT: jack-staging-proxy-stable-20260828
+
+jobs:
+  deploy-and-accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Create TLS-safe alias, Worker proxy, and route
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token=process.env.CLOUDFLARE_API_TOKEN,pub=process.env.PUBLIC_HOST,origin=process.env.ORIGIN_HOST,script=process.env.SCRIPT;
+          async function cf(path,options={}){const headers={Authorization:`Bearer ${token}`,...(options.headers??{})};if(!(options.body instanceof FormData))headers['Content-Type']='application/json';const r=await fetch(`https://api.cloudflare.com/client/v4${path}`,{...options,headers}),t=await r.text();let p;try{p=JSON.parse(t)}catch{p={success:r.ok,result:t}}if(!r.ok||p.success===false)throw new Error(`${options.method??'GET'} ${path}: ${r.status} ${JSON.stringify(p.errors??p)}`);return p.result}
+          const zones=await cf('/zones?name=torchlabs.ca&status=active&per_page=50');if(!Array.isArray(zones)||zones.length!==1)throw new Error('Zone not uniquely resolved');const z=zones[0];
+          const originRecords=await cf(`/zones/${z.id}/dns_records?type=CNAME&name=${origin}&per_page=100`);if(!Array.isArray(originRecords)||originRecords.length!==1||originRecords[0].proxied!==false)throw new Error('Origin staging DNS is not restored to direct Railway');
+          let aliasRecords=await cf(`/zones/${z.id}/dns_records?name=${pub}&per_page=100`),alias=aliasRecords[0]??null,created=false;
+          if(alias&&alias.type!=='CNAME')throw new Error(`Alias exists as ${alias.type}`);
+          const aliasBody={type:'CNAME',name:pub,content:origin,proxied:true,ttl:1,comment:'TLS-safe staging proxy alias for Jack, 2026-08-28'};
+          if(alias)alias=await cf(`/zones/${z.id}/dns_records/${alias.id}`,{method:'PATCH',body:JSON.stringify(aliasBody)});else{alias=await cf(`/zones/${z.id}/dns_records`,{method:'POST',body:JSON.stringify(aliasBody)});created=true}
+          const source=`
+          const PUB='${pub}',ORIGIN='${origin}',REQUIRED={
+            'script-src':['https://clerk.staging.jack.torchlabs.ca','https://static.cloudflareinsights.com'],
+            'connect-src':['https://clerk.staging.jack.torchlabs.ca','https://cloudflareinsights.com','https://static.cloudflareinsights.com'],
+            'frame-src':['https://clerk.staging.jack.torchlabs.ca']};
+          function patch(v){if(!v)return v;const ds=v.split(';').map(x=>x.trim()).filter(Boolean),m=new Map(ds.map(d=>[d.split(/\\s+/,1)[0],d]));for(const[n,ss]of Object.entries(REQUIRED)){const c=m.get(n)||n,t=new Set(c.split(/\\s+/));m.set(n,c+ss.filter(s=>!t.has(s)).map(s=>' '+s).join(''))}const seen=new Set(),out=ds.map(d=>{const n=d.split(/\\s+/,1)[0];seen.add(n);return m.get(n)||d});for(const n of Object.keys(REQUIRED))if(!seen.has(n))out.push(m.get(n));return out.join('; ')}
+          export default{async fetch(req){const u=new URL(req.url);u.hostname=ORIGIN;const headers=new Headers(req.headers);headers.set('Host',ORIGIN);const upstream=await fetch(new Request(u,{method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:req.body,redirect:'manual'}));const res=new Response(upstream.body,upstream),p=res.headers.get('Content-Security-Policy');if(p)res.headers.set('Content-Security-Policy',patch(p));const loc=res.headers.get('Location');if(loc)res.headers.set('Location',loc.replaceAll(ORIGIN,PUB));for(const cookie of res.headers.getSetCookie?.()??[]){if(cookie.includes(ORIGIN)){res.headers.delete('Set-Cookie');res.headers.append('Set-Cookie',cookie.replaceAll(ORIGIN,PUB))}}res.headers.set('X-Jack-Staging-Proxy','stable-20260828');const type=res.headers.get('Content-Type')||'';if(!type.toLowerCase().includes('text/html'))return res;return new HTMLRewriter().on('meta[http-equiv="Content-Security-Policy"]',{element(e){const c=e.getAttribute('content');if(c)e.setAttribute('content',patch(c))}}).transform(res)}};`;
+          const form=new FormData();form.append('metadata',new Blob([JSON.stringify({main_module:'worker.mjs',compatibility_date:'2026-08-28',bindings:[]})],{type:'application/json'}),'metadata.json');form.append('worker.mjs',new Blob([source],{type:'application/javascript+module'}),'worker.mjs');await cf(`/accounts/${z.account.id}/workers/scripts/${script}`,{method:'PUT',body:form});
+          const pattern=`${pub}/*`,routes=await cf(`/zones/${z.id}/workers/routes`),route=routes.find(r=>r.pattern===pattern);if(route)await cf(`/zones/${z.id}/workers/routes/${route.id}`,{method:'PUT',body:JSON.stringify({pattern,script})});else await cf(`/zones/${z.id}/workers/routes`,{method:'POST',body:JSON.stringify({pattern,script})});
+          fs.writeFileSync('/tmp/state.json',JSON.stringify({account:z.account.id,zone:z.id,aliasId:alias.id,aliasCreated:created,script,pattern},null,2));console.log(JSON.stringify({alias:{name:pub,content:origin,proxied:true},script,pattern},null,2));
+          NODE
+      - name: Wait for alias TLS, Worker marker, and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for attempt in $(seq 1 45); do
+            root="$(curl -sS -L -D /tmp/h -o /tmp/root -w '%{http_code}' -H 'Cache-Control: no-cache' "https://$PUBLIC_HOST/?accept=$(date +%s%N)" || true)"
+            health="$(curl -sS -L -o /tmp/health -w '%{http_code}' -H 'Cache-Control: no-cache' "https://$PUBLIC_HOST/api/healthz?accept=$(date +%s%N)" || true)"
+            marker="$(awk 'BEGIN{IGNORECASE=1}/^x-jack-staging-proxy:/{gsub(/\r/,"");print $2}' /tmp/h|tail -1)"
+            if [ "$root" = 200 ] && [ "$health" = 200 ] && [ "$marker" = stable-20260828 ] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/health;then ok=true;echo "Staging proxy accepted on attempt $attempt";break;fi
+            echo "attempt=$attempt root=$root health=$health marker=${marker:-none}";sleep 4
+          done
+          test "$ok" = true
+      - name: Install browser runner
+        shell: bash
+        run: |
+          command -v google-chrome
+          mkdir -p /tmp/staging-proxy && cd /tmp/staging-proxy
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright-core@1.55.0
+      - name: Run strict mobile acceptance on alias
+        shell: bash
+        run: |
+          cd /tmp/staging-proxy
+          cat > accept.cjs <<'NODE'
+          const{chromium}=require('playwright-core');const fs=require('node:fs');
+          (async()=>{const origin='https://staging-jack.torchlabs.ca',browser=await chromium.launch({headless:true,executablePath:'/usr/bin/google-chrome',args:['--no-sandbox']}),ctx=await browser.newContext({viewport:{width:430,height:932},userAgent:'Jack-Staging-Proxy-Acceptance/2026-08-28'}),page=await ctx.newPage(),pageErrors=[],consoleErrors=[],failedRequests=[],clerk=[];page.on('pageerror',e=>pageErrors.push(String(e)));page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});page.on('requestfailed',r=>failedRequests.push({url:r.url(),error:r.failure()?.errorText??'unknown'}));page.on('response',r=>{if(/clerk/i.test(r.url()))clerk.push({url:r.url(),status:r.status()})});const res=await page.goto(`${origin}/sign-in?accept=${Date.now()}`,{waitUntil:'domcontentloaded',timeout:30000});await page.waitForTimeout(10000);const body=(await page.locator('body').innerText()).slice(0,4000),result={checkedAt:new Date().toISOString(),signIn:{status:res?.status()??null,url:page.url(),title:await page.title(),body,email:await page.locator('input[type="email"],input[name="identifier"]').count(),action:await page.getByRole('button',{name:/continue|sign in/i}).count(),starting:await page.getByText('Starting Jack…',{exact:true}).count(),unavailable:await page.getByText('Sign-in is temporarily unavailable',{exact:true}).count(),blur:await page.locator('[class*="backdrop-blur"]:visible').count()},health:{},edge:{},pageErrors,consoleErrors,failedRequests,clerk};await page.screenshot({path:'staging-proxy-sign-in.png',fullPage:true});const health=await ctx.request.get(`${origin}/api/healthz?accept=${Date.now()}`);result.health={status:health.status(),body:(await health.text()).slice(0,1000)};const edge=await ctx.request.get(`${origin}/?header=${Date.now()}`);result.edge={status:edge.status(),marker:edge.headers()['x-jack-staging-proxy']??null,csp:edge.headers()['content-security-policy']??null};fs.writeFileSync('result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));const fatal=[];if(result.signIn.status!==200||!result.signIn.title.includes('Jack'))fatal.push('shell failed');if(result.signIn.email<1||result.signIn.action<1)fatal.push('Clerk form missing');if(result.signIn.starting||result.signIn.unavailable||result.signIn.blur)fatal.push('startup/auth blocker');if(!clerk.some(r=>r.url.includes('/v1/environment')&&r.status<400))fatal.push('Clerk environment failed');if(!clerk.some(r=>r.url.includes('/v1/client')&&r.status<400))fatal.push('Clerk client failed');if(result.health.status!==200||!result.health.body.includes('"status":"ok"'))fatal.push('health failed');if(result.edge.marker!=='stable-20260828')fatal.push('proxy marker missing');for(const s of['https://clerk.staging.jack.torchlabs.ca','https://static.cloudflareinsights.com','https://cloudflareinsights.com'])if(!String(result.edge.csp).includes(s))fatal.push(`CSP missing ${s}`);if(pageErrors.length)fatal.push(`${pageErrors.length} page errors`);if(consoleErrors.length)fatal.push(`${consoleErrors.length} console errors`);if(failedRequests.length)fatal.push(`${failedRequests.length} failed requests`);await browser.close();if(fatal.length){console.error(`STAGING_PROXY_FAILED: ${fatal.join('; ')}`);process.exit(1)}console.log('JACK_STAGING_PROXY_ACCEPTANCE_PASSED')})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node accept.cjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jack-staging-proxy-acceptance
+          path: |
+            /tmp/staging-proxy/result.json
+            /tmp/staging-proxy/staging-proxy-sign-in.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove alias if acceptance fails
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          node --input-type=module <<'NODE'
+          import fs from'node:fs';if(!fs.existsSync('/tmp/state.json'))process.exit(0);const s=JSON.parse(fs.readFileSync('/tmp/state.json','utf8')),token=process.env.CLOUDFLARE_API_TOKEN;async function call(path,method='DELETE'){const r=await fetch(`https://api.cloudflare.com/client/v4${path}`,{method,headers:{Authorization:`Bearer ${token}`}});console.log(`${method} ${path}: ${r.status}`)}const routes=await fetch(`https://api.cloudflare.com/client/v4/zones/${s.zone}/workers/routes`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());for(const route of routes.result??[])if(route.pattern===s.pattern)await call(`/zones/${s.zone}/workers/routes/${route.id}`);if(s.aliasCreated)await call(`/zones/${s.zone}/dns_records/${s.aliasId}`);await call(`/accounts/${s.account}/workers/scripts/${s.script}`);
+          NODE
