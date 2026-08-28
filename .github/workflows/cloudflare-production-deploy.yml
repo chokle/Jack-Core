@@ -110,7 +110,8 @@ jobs:
       - name: Build production container image
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
-        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
+          VITE_PUBLIC_DEMO_URL: ${{ vars.VITE_PUBLIC_DEMO_URL }}
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PUBLIC_DEMO_URL="$VITE_PUBLIC_DEMO_URL" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
 
       - name: API full tests
         run: pnpm --filter @workspace/api-server test
