@@ -1,9 +1,7 @@
-import { DurableObject } from "cloudflare:workers";
+import { Container, getContainer } from "@cloudflare/containers";
 
 const CONTAINER_PORT = 8080;
 const CONTAINER_NAME = "jack-production";
-const STARTUP_RETRIES = 40;
-const STARTUP_RETRY_MS = 250;
 
 const RUNTIME_ENV_KEYS = [
   "NODE_ENV",
@@ -49,56 +47,32 @@ function containerEnv(env) {
   return resolved;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/**
+ * Cloudflare's supported Container lifecycle helper owns startup, port
+ * readiness, request forwarding and idle shutdown. This replaces the previous
+ * manual low-level Durable Object loop, which could observe a running instance
+ * before port 8080 was actually ready and leave workers.dev requests hanging.
+ */
+export class JackProductionContainer extends Container {
+  defaultPort = CONTAINER_PORT;
+  requiredPorts = [CONTAINER_PORT];
+  sleepAfter = "10m";
+  entrypoint = [
+    "node",
+    "--enable-source-maps",
+    "./artifacts/api-server/dist/index.mjs",
+  ];
+  enableInternet = true;
+  pingEndpoint = "localhost/api/healthz";
 
-export class JackProductionContainer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.runtimeEnv = containerEnv(env);
-  }
-
-  startIfNeeded() {
-    if (this.ctx.container.running) return;
-
-    this.ctx.container.start({
-      env: this.runtimeEnv,
-      enableInternet: true,
-      entrypoint: [
-        "node",
-        "--enable-source-maps",
-        "./artifacts/api-server/dist/index.mjs",
-      ],
-    });
-  }
-
-  async fetch(request) {
-    this.startIfNeeded();
-    const port = this.ctx.container.getTcpPort(CONTAINER_PORT);
-    let lastError;
-
-    for (let attempt = 0; attempt < STARTUP_RETRIES; attempt += 1) {
-      try {
-        return await port.fetch(request);
-      } catch (error) {
-        lastError = error;
-        if (!this.ctx.container.running) this.startIfNeeded();
-        await sleep(STARTUP_RETRY_MS);
-      }
-    }
-
-    console.error("Jack production container failed readiness", lastError);
-    return new Response("Jack production container unavailable", {
-      status: 503,
-      headers: { "cache-control": "no-store" },
-    });
+    this.envVars = containerEnv(env);
   }
 }
 
 export default {
   async fetch(request, env) {
-    const instance = env.JACK_CONTAINER.getByName(CONTAINER_NAME);
-    return instance.fetch(request);
+    return getContainer(env.JACK_CONTAINER, CONTAINER_NAME).fetch(request);
   },
 };
