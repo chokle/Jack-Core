@@ -1,0 +1,144 @@
+name: Live UI Smoke Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  live-ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install browser diagnostic
+        shell: bash
+        run: |
+          mkdir -p /tmp/jack-live-smoke
+          cd /tmp/jack-live-smoke
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Verify production shell, Clerk sign-in, health, and visible blockers
+        shell: bash
+        run: |
+          cd /tmp/jack-live-smoke
+          cat > smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Live-Smoke/2026-08-28',
+            });
+            const pageErrors = [];
+            const consoleErrors = [];
+            const failedRequests = [];
+            const page = await context.newPage();
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('requestfailed', (request) => {
+              failedRequests.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' });
+            });
+
+            const result = {
+              checkedAt: new Date().toISOString(),
+              signIn: {},
+              root: {},
+              health: {},
+              pageErrors,
+              consoleErrors,
+              failedRequests,
+            };
+
+            const signInResponse = await page.goto('https://jack.torchlabs.ca/sign-in', {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await page.waitForTimeout(8000);
+            result.signIn = {
+              status: signInResponse?.status() ?? null,
+              url: page.url(),
+              title: await page.title(),
+              body: (await page.locator('body').innerText()).slice(0, 2000),
+              welcomeBack: await page.getByText('Welcome back', { exact: true }).count(),
+              emailInputs: await page.locator('input[type="email"], input[name="identifier"]').count(),
+              startingJack: await page.getByText('Starting Jack…', { exact: true }).count(),
+              authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+              blurOverlays: await page.locator('[class*="backdrop-blur"]').count(),
+            };
+            await page.screenshot({ path: 'sign-in.png', fullPage: true });
+
+            const rootResponse = await page.goto('https://jack.torchlabs.ca/', {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await page.waitForTimeout(8000);
+            result.root = {
+              status: rootResponse?.status() ?? null,
+              url: page.url(),
+              title: await page.title(),
+              body: (await page.locator('body').innerText()).slice(0, 2000),
+              startingJack: await page.getByText('Starting Jack…', { exact: true }).count(),
+              authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+              blurOverlays: await page.locator('[class*="backdrop-blur"]').count(),
+            };
+            await page.screenshot({ path: 'root.png', fullPage: true });
+
+            const healthResponse = await context.request.get('https://jack.torchlabs.ca/api/healthz', {
+              timeout: 30000,
+            });
+            result.health = {
+              status: healthResponse.status(),
+              body: (await healthResponse.text()).slice(0, 2000),
+            };
+
+            fs.writeFileSync('result.json', JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.signIn.status !== 200) fatal.push(`sign-in status ${result.signIn.status}`);
+            if (result.signIn.authUnavailable > 0) fatal.push('Clerk startup timed out');
+            if (result.signIn.startingJack > 0) fatal.push('Clerk startup overlay remained after 8 seconds');
+            if (result.signIn.welcomeBack < 1 || result.signIn.emailInputs < 1) fatal.push('sign-in form did not render');
+            if (result.health.status !== 200) fatal.push(`health status ${result.health.status}`);
+            if (!String(result.health.body).includes('"status":"ok"')) fatal.push('health body was not status ok');
+            if (pageErrors.length > 0) fatal.push(`${pageErrors.length} page error(s)`);
+
+            await browser.close();
+            if (fatal.length) {
+              console.error(`LIVE_SMOKE_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('LIVE_SMOKE_PASSED');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          node smoke.cjs
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-ui-smoke-evidence
+          path: |
+            /tmp/jack-live-smoke/result.json
+            /tmp/jack-live-smoke/sign-in.png
+            /tmp/jack-live-smoke/root.png
+          if-no-files-found: warn
+          retention-days: 3
