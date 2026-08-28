@@ -212,6 +212,30 @@ const FULL_MAX_HOPS = 8;
 const ORBIT_SPEED = 0.006;
 const BIRTH_MS = 1600;
 
+/** Minimum screen-space hit radius. Touch targets stay at least 44px wide. */
+export function graphNodeHitRadius(
+  screenRadius: number,
+  pointerType: string,
+): number {
+  const minimum =
+    pointerType === "touch" ? 22 : pointerType === "pen" ? 18 : 12;
+  return Math.max(screenRadius + 8, minimum);
+}
+
+/** Movement tolerated before a press becomes an orbit gesture. */
+export function graphTapSlop(pointerType: string): number {
+  return pointerType === "touch" ? 14 : pointerType === "pen" ? 10 : 6;
+}
+
+/** Keep the node pressed at pointer-down stable while the animated graph moves. */
+export function resolveGraphTapTarget(
+  pressedId: string | null,
+  releasedId: string | null,
+  pressedStillVisible: boolean,
+): string | null {
+  return pressedId && pressedStillVisible ? pressedId : releasedId;
+}
+
 const EMPTY_PINNED: Set<string> = new Set();
 
 const PULSE_STATE_RGB: Record<string, RGB> = {
@@ -739,7 +763,11 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       ro.observe(canvas);
 
       // ----- picking (nearest projected node under the cursor) --------------
-      const pick = (sx: number, sy: number): SN | null => {
+      const pick = (
+        sx: number,
+        sy: number,
+        pointerType: string = "mouse",
+      ): SN | null => {
         let best: SN | null = null;
         let bestDepth = Infinity;
         for (const n of nodesRef.current.values()) {
@@ -747,7 +775,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           const dx = n.sx - sx;
           const dy = n.sy - sy;
           const d = Math.hypot(dx, dy);
-          const hit = n.sr + 8;
+          const hit = graphNodeHitRadius(n.sr, pointerType);
           // Prefer the nearest-to-viewer node among overlapping hits.
           if (d < hit && n.depth < bestDepth) {
             best = n;
@@ -767,6 +795,9 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       let dragging = false;
       let moved = 0;
       let last = { x: 0, y: 0 };
+      let pressStart = { x: 0, y: 0 };
+      let pressHitId: string | null = null;
+      let pressPointerType = "mouse";
       let pinchDist = 0;
 
       const onPointerDown = (e: PointerEvent) => {
@@ -779,8 +810,12 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           dragging = true;
           moved = 0;
           last = p;
+          pressStart = p;
+          pressPointerType = e.pointerType || "mouse";
+          pressHitId = pick(p.x, p.y, pressPointerType)?.id ?? null;
         } else if (pointers.size === 2) {
           dragging = false;
+          pressHitId = null;
           const pts = [...pointers.values()];
           pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         }
@@ -806,13 +841,22 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         if (dragging && !locked) {
           const dx = p.x - last.x;
           const dy = p.y - last.y;
-          moved += Math.abs(dx) + Math.abs(dy);
+          moved = Math.max(
+            moved,
+            Math.hypot(p.x - pressStart.x, p.y - pressStart.y),
+          );
+          // Ignore ordinary tap jitter. Orbiting begins only after the pointer
+          // clears the device-appropriate movement slop.
+          if (moved <= graphTapSlop(pressPointerType)) {
+            last = p;
+            return;
+          }
           const cam = camRef.current;
           cam.yaw += dx * ORBIT_SPEED;
           cam.pitch = clampPitch(cam.pitch - dy * ORBIT_SPEED);
           last = p;
         } else {
-          const hit = pick(p.x, p.y);
+          const hit = pick(p.x, p.y, e.pointerType || "mouse");
           const id = hit?.id ?? null;
           if (id !== hoverRef.current) {
             hoverRef.current = id;
@@ -832,16 +876,38 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           /* ignore */
         }
         if (locked) return;
-        if (wasDragging && moved < 6) {
+        if (pointers.size > 0) {
+          // A pinch ended. Do not reinterpret the remaining contact as a tap.
+          dragging = false;
+          pressHitId = null;
+          return;
+        }
+        if (wasDragging && moved <= graphTapSlop(pressPointerType)) {
           const p = localXY(e);
-          const hit = pick(p.x, p.y);
-          // Only (re)select on a real node hit. An empty-space click no longer
-          // clears the selection — the floating inspector is a window, not a
-          // modal, so it stays open (and the node stays highlighted) until the
-          // user closes it via X or Escape.
-          if (hit) onSelect(hit.id);
+          const releaseHit = pick(p.x, p.y, pressPointerType);
+          const pressedHit = pressHitId
+            ? nodesRef.current.get(pressHitId)
+            : null;
+          const targetId = resolveGraphTapTarget(
+            pressHitId,
+            releaseHit?.id ?? null,
+            Boolean(pressedHit && pressedHit.vis >= 0.15),
+          );
+          // Anchor a tap to the node hit at pointer-down. Child nodes keep
+          // easing after a trade expands, so re-picking only at pointer-up can
+          // otherwise miss the node even though the user's finger was correct.
+          if (targetId) onSelect(targetId);
         }
         dragging = false;
+        pressHitId = null;
+      };
+
+      const onPointerCancel = (e: PointerEvent) => {
+        pointers.delete(e.pointerId);
+        dragging = false;
+        moved = 0;
+        pinchDist = 0;
+        pressHitId = null;
       };
 
       const onWheel = (e: WheelEvent) => {
@@ -860,13 +926,14 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       const onDblClick = (e: MouseEvent) => {
         if (locked) return;
         const rect = canvas.getBoundingClientRect();
-        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
+        const hit = pick(e.clientX - rect.left, e.clientY - rect.top, "mouse");
         if (hit && hit.kind !== "core") onTogglePinRef.current?.(hit.id);
       };
 
       canvas.addEventListener("pointerdown", onPointerDown);
       canvas.addEventListener("pointermove", onPointerMove);
       canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerCancel);
       canvas.addEventListener("pointerleave", onLeave);
       canvas.addEventListener("dblclick", onDblClick);
       canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -1139,6 +1206,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         canvas.removeEventListener("pointerdown", onPointerDown);
         canvas.removeEventListener("pointermove", onPointerMove);
         canvas.removeEventListener("pointerup", onPointerUp);
+        canvas.removeEventListener("pointercancel", onPointerCancel);
         canvas.removeEventListener("pointerleave", onLeave);
         canvas.removeEventListener("dblclick", onDblClick);
         canvas.removeEventListener("wheel", onWheel);
