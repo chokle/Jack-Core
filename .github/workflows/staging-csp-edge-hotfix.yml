@@ -1,0 +1,460 @@
+name: Staging CSP Edge Hotfix
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+    paths:
+      - "cloudflare/staging-csp-hotfix.mjs"
+      - ".github/workflows/staging-csp-edge-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  ZONE_NAME: torchlabs.ca
+  STAGING_HOST: staging.jack.torchlabs.ca
+  ORIGIN_ALIAS: staging-origin.jack.torchlabs.ca
+  RAILWAY_TARGET: h3r6mycb.up.railway.app
+  WORKER_NAME: jack-staging-csp-hotfix
+  ROUTE_PATTERN: staging.jack.torchlabs.ca/*
+
+jobs:
+  deploy-and-accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Validate Worker syntax
+        run: node --check cloudflare/staging-csp-hotfix.mjs
+
+      - name: Capture Cloudflare state and prepare a DNS-only origin alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          if (!token) throw new Error('Missing CLOUDFLARE_API_TOKEN');
+
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...(options.headers ?? {}),
+              },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.success === false) {
+              throw new Error(`Cloudflare API ${options.method ?? 'GET'} ${path} failed: ${response.status} ${JSON.stringify(payload.errors ?? [])}`);
+            }
+            return payload.result;
+          }
+
+          const zones = await cf(`/zones?name=${process.env.ZONE_NAME}&status=active&per_page=50`);
+          if (!Array.isArray(zones) || zones.length !== 1) throw new Error('Active Torch zone was not uniquely resolved');
+          const zone = zones[0];
+
+          const stagingRecords = await cf(`/zones/${zone.id}/dns_records?type=CNAME&name=${process.env.STAGING_HOST}&per_page=100`);
+          if (!Array.isArray(stagingRecords) || stagingRecords.length !== 1) {
+            throw new Error(`Expected one staging CNAME, found ${stagingRecords?.length ?? 0}`);
+          }
+          const stagingRecord = stagingRecords[0];
+          if (String(stagingRecord.content).toLowerCase() !== process.env.RAILWAY_TARGET) {
+            throw new Error(`Staging CNAME target changed unexpectedly: ${stagingRecord.content}`);
+          }
+
+          const routes = await cf(`/zones/${zone.id}/workers/routes`);
+          const matchingRoute = (routes ?? []).find((route) => route.pattern === process.env.ROUTE_PATTERN) ?? null;
+          if (matchingRoute && matchingRoute.script && matchingRoute.script !== process.env.WORKER_NAME) {
+            throw new Error(`Staging route is already owned by another Worker: ${matchingRoute.script}`);
+          }
+
+          const aliases = await cf(`/zones/${zone.id}/dns_records?name=${process.env.ORIGIN_ALIAS}&per_page=100`);
+          let alias = Array.isArray(aliases) ? aliases[0] : null;
+          let aliasCreated = false;
+          if (Array.isArray(aliases) && aliases.length > 1) throw new Error('Multiple staging origin alias records exist');
+          if (alias) {
+            if (
+              alias.type !== 'CNAME' ||
+              String(alias.content).toLowerCase() !== process.env.RAILWAY_TARGET ||
+              alias.proxied !== false
+            ) {
+              throw new Error('Existing staging origin alias conflicts with the verified Railway target');
+            }
+          } else {
+            alias = await cf(`/zones/${zone.id}/dns_records`, {
+              method: 'POST',
+              body: JSON.stringify({
+                type: 'CNAME',
+                name: process.env.ORIGIN_ALIAS,
+                content: process.env.RAILWAY_TARGET,
+                proxied: false,
+                ttl: 1,
+                comment: 'Temporary DNS-only resolveOverride alias for verified staging CSP edge repair 2026-08-28',
+              }),
+            });
+            aliasCreated = true;
+          }
+
+          const state = {
+            zoneId: zone.id,
+            accountId: zone.account?.id,
+            stagingRecord: {
+              id: stagingRecord.id,
+              type: stagingRecord.type,
+              name: stagingRecord.name,
+              content: stagingRecord.content,
+              proxied: stagingRecord.proxied,
+              ttl: stagingRecord.ttl,
+              comment: stagingRecord.comment ?? null,
+            },
+            aliasId: alias.id,
+            aliasCreated,
+            routeId: matchingRoute?.id ?? null,
+            routeCreated: false,
+            workerDeployed: false,
+            dnsChanged: false,
+          };
+          if (!state.accountId) throw new Error('Cloudflare account ID was not returned with the zone');
+          fs.writeFileSync('/tmp/staging-hotfix-state.json', JSON.stringify(state, null, 2));
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_ACCOUNT_ID=${state.accountId}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_ZONE_ID=${state.zoneId}\n`);
+          console.log(JSON.stringify({
+            zone: process.env.ZONE_NAME,
+            stagingRecord: { content: stagingRecord.content, proxied: stagingRecord.proxied },
+            originAlias: { name: process.env.ORIGIN_ALIAS, created: aliasCreated },
+            route: matchingRoute ? { id: matchingRoute.id, script: matchingRoute.script } : null,
+          }, null, 2));
+          NODE
+
+      - name: Generate isolated Worker config
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const config = {
+            name: process.env.WORKER_NAME,
+            main: './staging-csp-hotfix.mjs',
+            compatibility_date: '2026-08-28',
+            account_id: process.env.CLOUDFLARE_ACCOUNT_ID,
+            workers_dev: false,
+            observability: { enabled: true },
+          };
+          fs.writeFileSync('cloudflare/wrangler.staging-hotfix.json', `${JSON.stringify(config, null, 2)}\n`);
+          NODE
+
+      - name: Authenticate and deploy isolated Worker script
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest whoami
+          npx --yes wrangler@latest deploy --config wrangler.staging-hotfix.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = '/tmp/staging-hotfix-state.json';
+          const state = JSON.parse(fs.readFileSync(path, 'utf8'));
+          state.workerDeployed = true;
+          fs.writeFileSync(path, JSON.stringify(state, null, 2));
+          NODE
+
+      - name: Attach the Worker route and proxy staging through Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const statePath = '/tmp/staging-hotfix-state.json';
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...(options.headers ?? {}),
+              },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.success === false) {
+              throw new Error(`Cloudflare API ${options.method ?? 'GET'} ${path} failed: ${response.status} ${JSON.stringify(payload.errors ?? [])}`);
+            }
+            return payload.result;
+          }
+
+          if (!state.routeId) {
+            const route = await cf(`/zones/${state.zoneId}/workers/routes`, {
+              method: 'POST',
+              body: JSON.stringify({ pattern: process.env.ROUTE_PATTERN, script: process.env.WORKER_NAME }),
+            });
+            state.routeId = route.id;
+            state.routeCreated = true;
+            fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+          }
+
+          const updated = await cf(`/zones/${state.zoneId}/dns_records/${state.stagingRecord.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              type: 'CNAME',
+              name: process.env.STAGING_HOST,
+              content: process.env.RAILWAY_TARGET,
+              proxied: true,
+              ttl: 1,
+              comment: 'Cloudflare edge enabled for reversible staging CSP hotfix 2026-08-28',
+            }),
+          });
+          state.dnsChanged = true;
+          fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+          console.log(JSON.stringify({ routeId: state.routeId, stagingProxy: updated.proxied }, null, 2));
+          NODE
+
+      - name: Wait for edge root, health, and both CSP layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted="false"
+          for attempt in $(seq 1 40); do
+            nonce="$(date +%s%N)"
+            root_code="$(curl --silent --show-error --location --dump-header /tmp/edge-root-headers.txt --output /tmp/edge-root.html --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://$STAGING_HOST/?edge_acceptance=$nonce" || true)"
+            health_code="$(curl --silent --show-error --location --dump-header /tmp/edge-health-headers.txt --output /tmp/edge-health.json --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://$STAGING_HOST/api/healthz?edge_acceptance=$nonce" || true)"
+            echo "attempt=$attempt root=$root_code health=$health_code"
+            if [ "$root_code" = "200" ] \
+              && grep -Eqi '^x-jack-staging-csp-hotfix:[[:space:]]*2026-08-28' /tmp/edge-root-headers.txt \
+              && grep -Eqi '^content-security-policy:.*https://clerk\.staging\.jack\.torchlabs\.ca' /tmp/edge-root-headers.txt \
+              && grep -Eqi '<meta http-equiv="Content-Security-Policy" content="[^"]*https://clerk\.staging\.jack\.torchlabs\.ca' /tmp/edge-root.html \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/edge-root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/edge-health.json; then
+              accepted="true"
+              break
+            fi
+            sleep 3
+          done
+          if [ "$accepted" != "true" ]; then
+            echo "Staging edge acceptance failed before browser testing." >&2
+            echo "Root headers:" >&2
+            cat /tmp/edge-root-headers.txt >&2 || true
+            echo "Root prefix:" >&2
+            head -c 500 /tmp/edge-root.html >&2 || true
+            echo >&2
+            echo "Health body:" >&2
+            cat /tmp/edge-health.json >&2 || true
+            exit 1
+          fi
+          echo "STAGING_EDGE_ROOT_HEALTH_AND_CSP_ACCEPTED"
+
+      - name: Install mobile browser diagnostic
+        shell: bash
+        run: |
+          mkdir -p /tmp/jack-staging-edge-smoke
+          cd /tmp/jack-staging-edge-smoke
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run strict mobile Clerk acceptance
+        shell: bash
+        run: |
+          cd /tmp/jack-staging-edge-smoke
+          cat > smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+
+          (async () => {
+            const origin = 'https://staging.jack.torchlabs.ca';
+            const clerkOrigin = 'https://clerk.staging.jack.torchlabs.ca';
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Staging-Edge-Smoke/2026-08-28',
+            });
+            const pageErrors = [];
+            const consoleErrors = [];
+            const failedRequests = [];
+            const clerkResponses = [];
+            const page = await context.newPage();
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('requestfailed', (request) => {
+              failedRequests.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' });
+            });
+            page.on('response', (response) => {
+              if (response.url().startsWith(`${clerkOrigin}/v1/`)) {
+                clerkResponses.push({ url: response.url(), status: response.status() });
+              }
+            });
+
+            const signInResponse = await page.goto(`${origin}/sign-in?edge_acceptance=${Date.now()}`, {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await page.waitForTimeout(8000);
+
+            const metaPolicy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
+            const result = {
+              checkedAt: new Date().toISOString(),
+              signIn: {
+                status: signInResponse?.status() ?? null,
+                url: page.url(),
+                title: await page.title(),
+                body: (await page.locator('body').innerText()).slice(0, 2000),
+                welcomeBack: await page.getByText('Welcome back', { exact: true }).count(),
+                emailInputs: await page.locator('input[type="email"], input[name="identifier"]').count(),
+                startingJack: await page.getByText('Starting Jack…', { exact: true }).count(),
+                authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+                visibleBlurOverlays: await page.locator('[class*="backdrop-blur"]:visible').count(),
+                metaPolicyHasStagingClerk: String(metaPolicy).includes(clerkOrigin),
+              },
+              pageErrors,
+              consoleErrors,
+              failedRequests,
+              clerkResponses,
+            };
+            await page.screenshot({ path: 'staging-edge-sign-in.png', fullPage: true });
+
+            const healthResponse = await context.request.get(`${origin}/api/healthz?edge_acceptance=${Date.now()}`, { timeout: 30000 });
+            result.health = {
+              status: healthResponse.status(),
+              body: (await healthResponse.text()).slice(0, 2000),
+              hotfixHeader: healthResponse.headers()['x-jack-staging-csp-hotfix'] ?? null,
+            };
+
+            fs.writeFileSync('staging-edge-result.json', JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.signIn.status !== 200) fatal.push(`sign-in status ${result.signIn.status}`);
+            if (result.signIn.authUnavailable > 0) fatal.push('Clerk startup timed out');
+            if (result.signIn.startingJack > 0) fatal.push('Clerk startup overlay remained after 8 seconds');
+            if (result.signIn.welcomeBack < 1 || result.signIn.emailInputs < 1) fatal.push('sign-in form did not render');
+            if (result.signIn.visibleBlurOverlays > 0) fatal.push('visible blur overlay remained on sign-in');
+            if (!result.signIn.metaPolicyHasStagingClerk) fatal.push('HTML meta CSP was not rewritten');
+            if (!clerkResponses.some((response) => response.url.includes('/v1/environment') && response.status < 400)) fatal.push('Clerk environment request did not succeed');
+            if (!clerkResponses.some((response) => response.url.includes('/v1/client') && response.status < 400)) fatal.push('Clerk client request did not succeed');
+            if (result.health.status !== 200 || !String(result.health.body).includes('"status":"ok"')) fatal.push('health endpoint failed');
+            if (result.health.hotfixHeader !== '2026-08-28') fatal.push('edge hotfix header missing');
+            if (pageErrors.length > 0) fatal.push(`${pageErrors.length} page error(s)`);
+            if (consoleErrors.length > 0) fatal.push(`${consoleErrors.length} console error(s)`);
+            if (failedRequests.length > 0) fatal.push(`${failedRequests.length} failed request(s)`);
+
+            await browser.close();
+            if (fatal.length) {
+              console.error(`STAGING_EDGE_SMOKE_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('STAGING_EDGE_SMOKE_PASSED_STRICT');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          node smoke.cjs
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-csp-edge-hotfix-evidence
+          path: |
+            /tmp/jack-staging-edge-smoke/staging-edge-result.json
+            /tmp/jack-staging-edge-smoke/staging-edge-sign-in.png
+            /tmp/edge-root-headers.txt
+            /tmp/edge-root.html
+            /tmp/edge-health.json
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Record successful staging recovery
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "## Jack staging CSP edge recovery"
+            echo "- Railway origin: PASS"
+            echo "- Cloudflare edge proxy: PASS"
+            echo "- HTTP CSP rewritten: PASS"
+            echo "- HTML meta CSP rewritten: PASS"
+            echo "- Clerk environment/client: PASS"
+            echo "- mobile sign-in render: PASS"
+            echo "- visible blur/startup blocker: NONE"
+            echo "- page/console/network errors: NONE"
+            echo "- /api/healthz: PASS"
+            echo "- production routing: UNCHANGED"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Roll back staging edge changes on any failed gate
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const statePath = '/tmp/staging-hotfix-state.json';
+          if (!fs.existsSync(statePath)) {
+            console.error('No hotfix state file exists; no Cloudflare mutation was recorded.');
+            process.exit(0);
+          }
+          const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...(options.headers ?? {}),
+              },
+            });
+            let payload = null;
+            try { payload = await response.json(); } catch {}
+            if (!response.ok || payload?.success === false) {
+              throw new Error(`Rollback API ${options.method ?? 'GET'} ${path} failed: ${response.status} ${JSON.stringify(payload?.errors ?? [])}`);
+            }
+            return payload?.result;
+          }
+
+          if (state.dnsChanged) {
+            await cf(`/zones/${state.zoneId}/dns_records/${state.stagingRecord.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                type: state.stagingRecord.type,
+                name: state.stagingRecord.name,
+                content: state.stagingRecord.content,
+                proxied: state.stagingRecord.proxied,
+                ttl: state.stagingRecord.ttl,
+                comment: state.stagingRecord.comment,
+              }),
+            });
+            console.log('Restored the original staging DNS record.');
+          }
+          if (state.routeCreated && state.routeId) {
+            await cf(`/zones/${state.zoneId}/workers/routes/${state.routeId}`, { method: 'DELETE' });
+            console.log('Removed the temporary staging Worker route.');
+          }
+          if (state.workerDeployed && state.accountId) {
+            await cf(`/accounts/${state.accountId}/workers/scripts/${process.env.WORKER_NAME}`, { method: 'DELETE' });
+            console.log('Removed the temporary staging Worker script.');
+          }
+          if (state.aliasCreated && state.aliasId) {
+            await cf(`/zones/${state.zoneId}/dns_records/${state.aliasId}`, { method: 'DELETE' });
+            console.log('Removed the temporary origin alias.');
+          }
+          console.log('STAGING_EDGE_HOTFIX_ROLLED_BACK');
+          NODE
