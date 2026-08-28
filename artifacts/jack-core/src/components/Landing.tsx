@@ -1,15 +1,19 @@
 import { Link } from "wouter";
 import {
   ArrowRight,
-  Network,
-  Mic,
   Clock,
+  ExternalLink,
+  Mic,
+  Network,
   ShieldCheck,
   Video,
 } from "lucide-react";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const logoUrl = `${basePath}/logo.svg`;
+const publicDemoUrl =
+  import.meta.env.VITE_PUBLIC_DEMO_URL?.trim() ||
+  "https://jack-core-demo-ycf4yh.v2.appdeploy.ai/";
 
 const features = [
   {
@@ -37,7 +41,8 @@ const features = [
 /**
  * Public landing page. Deliberately API-free: it is the only surface an
  * anonymous visitor can reach, so it must render without any authenticated
- * request. Sign-in / sign-up CTAs route to the dedicated Clerk pages.
+ * request. Pilot access routes to Clerk; everyone else can use the isolated
+ * sample-data demo without weakening the real app's authorization boundary.
  */
 export function Landing() {
   return (
@@ -78,14 +83,17 @@ export function Landing() {
               href="/sign-in"
               className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
-              Sign in
+              Pilot sign in
             </Link>
-            <Link
-              href="/sign-up"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_0_20px_rgba(255,100,0,0.35)] transition-colors hover:bg-primary/90"
+            <a
+              href={publicDemoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_0_20px_rgba(255,100,0,0.35)] transition-colors hover:bg-primary/90"
             >
-              Get started
-            </Link>
+              Try demo
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
           </div>
         </header>
 
@@ -93,10 +101,10 @@ export function Landing() {
         <main className="flex flex-1 flex-col items-center justify-center py-16 text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3.5 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            AI Trade Intelligence Engine
+            Controlled field pilot · Public demo available
           </div>
           <h1 className="max-w-3xl text-balance text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
-            The trade knowledge in your crew's head,{" "}
+            The trade knowledge in your crew&apos;s head,{" "}
             <span className="text-primary">searchable forever.</span>
           </h1>
           <p className="mt-6 max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
@@ -105,20 +113,35 @@ export function Landing() {
             while mentor experience adds deeper field context to his Living
             Memory.
           </p>
+
+          <div className="mt-7 max-w-2xl rounded-2xl border border-primary/30 bg-primary/5 px-5 py-4 text-left shadow-[0_0_35px_rgba(255,100,0,0.08)]">
+            <p className="text-sm font-semibold text-foreground">
+              Jack is currently running a controlled field pilot.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Pilot participants use their assigned access link or account.
+              Everyone else can try the public demo using sample trade knowledge.
+              The demo contains no live crew, company, or site data.
+            </p>
+          </div>
+
           <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row">
             <Link
-              href="/sign-up"
+              href="/sign-in"
               className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-[0_0_25px_rgba(255,100,0,0.4)] transition-colors hover:bg-primary/90"
             >
-              Get started
+              Pilot participant — open Jack
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
-            <Link
-              href="/sign-in"
-              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-card/50 px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted/60"
+            <a
+              href={publicDemoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-card/50 px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted/60"
             >
-              Sign in
-            </Link>
+              Try Jack demo
+              <ExternalLink className="h-4 w-4" />
+            </a>
           </div>
 
           {/* Feature grid */}
@@ -143,7 +166,7 @@ export function Landing() {
           <span>Jack — inside Torch. Built for the field.</span>
           <span className="flex items-center gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5" />
-            Private &amp; access-controlled
+            Pilot access controlled · Demo sample-only
           </span>
         </footer>
       </div>
