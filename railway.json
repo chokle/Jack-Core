@@ -14,6 +14,8 @@
     ]
   },
   "deploy": {
+    "preDeployCommand": "PILOT_001_ID=394314ad-782b-4683-bc5d-65a0a3ba2552 PILOT_001_ORGANIZATION_ID=40817dd6-d2b8-4087-a6f2-f416500ab4e6 pnpm --filter ./artifacts/api-server run seed:knowledge",
+    "preDeployTimeoutSeconds": 600,
     "startCommand": "pnpm --filter ./artifacts/api-server start",
     "healthcheckPath": "/api/healthz",
     "healthcheckTimeout": 60,
