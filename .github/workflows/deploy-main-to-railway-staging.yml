@@ -1,0 +1,159 @@
+name: Deploy Main to Railway Staging
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  RAILWAY_PROJECT_ID: e85bd8fa-bd9a-43e5-b740-c14cd5b95699
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out merged main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install Railway CLI
+        shell: bash
+        run: npm install --global @railway/cli
+      - name: Resolve Railway staging and deploy merged main
+        shell: bash
+        env:
+          PROJECT_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ACCOUNT_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${ACCOUNT_TOKEN:-}" ]; then
+            export RAILWAY_API_TOKEN="$ACCOUNT_TOKEN"
+            unset RAILWAY_TOKEN PROJECT_TOKEN
+            auth_kind="account/workspace"
+          elif [ -n "${PROJECT_TOKEN:-}" ]; then
+            export RAILWAY_TOKEN="$PROJECT_TOKEN"
+            unset RAILWAY_API_TOKEN ACCOUNT_TOKEN
+            auth_kind="project"
+          else
+            echo "No RAILWAY_API_TOKEN or RAILWAY_TOKEN secret is configured in GitHub." >&2
+            exit 78
+          fi
+          echo "Using an existing masked Railway ${auth_kind} token."
+          railway --version
+
+          rm -rf .railway
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment staging \
+            --json > /tmp/railway-link.json
+
+          railway service list --json > /tmp/railway-services.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const raw = JSON.parse(fs.readFileSync('/tmp/railway-services.json', 'utf8'));
+          const services = Array.isArray(raw)
+            ? raw
+            : Array.isArray(raw.services)
+              ? raw.services
+              : Array.isArray(raw.result)
+                ? raw.result
+                : [];
+          const normalized = services
+            .map((service) => ({
+              id: service.id ?? service.serviceId ?? service.service?.id ?? null,
+              name: service.name ?? service.serviceName ?? service.service?.name ?? null,
+            }))
+            .filter((service) => service.id && service.name);
+          console.log(`Railway staging services: ${normalized.map((service) => service.name).join(', ') || 'none resolved'}`);
+          if (!normalized.length) {
+            console.error(`Unrecognized service-list shape: ${JSON.stringify(raw).slice(0, 1500)}`);
+            process.exit(1);
+          }
+          const preferred = normalized.find((service) => service.name === 'jack-core')
+            ?? normalized.find((service) => service.name === '@workspace/api-server')
+            ?? normalized.find((service) => /jack|api-server/i.test(service.name))
+            ?? (normalized.length === 1 ? normalized[0] : null);
+          if (!preferred) {
+            console.error(`Could not choose the staging app service safely from: ${normalized.map((service) => service.name).join(', ')}`);
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `RAILWAY_STAGING_SERVICE_ID=${preferred.id}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `RAILWAY_STAGING_SERVICE_NAME=${preferred.name}\n`);
+          console.log(`Selected staging service: ${preferred.name} (${preferred.id})`);
+          NODE
+
+          railway domain list \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment staging \
+            --service "$RAILWAY_STAGING_SERVICE_ID" \
+            --json > /tmp/railway-domains.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const raw = JSON.parse(fs.readFileSync('/tmp/railway-domains.json', 'utf8'));
+          const text = JSON.stringify(raw);
+          if (!text.includes('staging.jack.torchlabs.ca') && !text.includes('h3r6mycb.up.railway.app')) {
+            console.error('Selected service does not own the known Jack staging domain; deployment stopped before upload.');
+            console.error(text.slice(0, 1800));
+            process.exit(1);
+          }
+          console.log('Selected Railway service owns the known Jack staging route.');
+          NODE
+
+          railway up \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment staging \
+            --service "$RAILWAY_STAGING_SERVICE_ID" \
+            --ci \
+            --message "Deploy merged CSP repair 825d2c5 for Pilot001 staging acceptance"
+      - name: Wait for Railway staging deployment success
+        shell: bash
+        env:
+          PROJECT_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ACCOUNT_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ACCOUNT_TOKEN:-}" ]; then
+            export RAILWAY_API_TOKEN="$ACCOUNT_TOKEN"
+            unset RAILWAY_TOKEN PROJECT_TOKEN
+          else
+            export RAILWAY_TOKEN="$PROJECT_TOKEN"
+            unset RAILWAY_API_TOKEN ACCOUNT_TOKEN
+          fi
+
+          accepted="false"
+          for attempt in $(seq 1 60); do
+            railway deployment list \
+              --environment staging \
+              --service "$RAILWAY_STAGING_SERVICE_ID" \
+              --limit 1 \
+              --json > /tmp/latest-deployment.json
+            status="$(node -e "const x=require('/tmp/latest-deployment.json'); const d=Array.isArray(x)?x[0]:(x.deployments?.[0]??x.result?.[0]??x); process.stdout.write(String(d?.status??d?.deploymentStatus??''))")"
+            echo "attempt=$attempt staging_deployment_status=$status"
+            case "$status" in
+              SUCCESS)
+                accepted="true"
+                break
+                ;;
+              FAILED|CRASHED|REMOVED)
+                echo "Railway staging deployment ended in $status." >&2
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          if [ "$accepted" != "true" ]; then
+            echo "Railway staging deployment did not reach SUCCESS before timeout." >&2
+            exit 1
+          fi
+          echo "RAILWAY_STAGING_DEPLOYMENT_SUCCESS"
