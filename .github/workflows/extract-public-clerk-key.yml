@@ -1,0 +1,61 @@
+name: Extract Deployed Public Clerk Key
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  extract-public-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Extract public Clerk key from deployed frontend asset
+        shell: bash
+        run: |
+          node <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const origin = 'https://jack.torchlabs.ca';
+          const htmlResponse = await fetch(`${origin}/`, { redirect: 'follow' });
+          if (!htmlResponse.ok) throw new Error(`Root returned ${htmlResponse.status}`);
+          const html = await htmlResponse.text();
+          const sources = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((match) => new URL(match[1], origin).href);
+          if (!sources.length) throw new Error('No frontend script assets found');
+
+          let key = null;
+          let source = null;
+          for (const url of sources) {
+            const response = await fetch(url);
+            if (!response.ok) continue;
+            const text = await response.text();
+            const match = text.match(/pk_(?:live|test)_[A-Za-z0-9_-]{20,}/);
+            if (match) {
+              key = match[0];
+              source = url;
+              break;
+            }
+          }
+          if (!key) throw new Error('No Clerk publishable key found in deployed assets');
+          fs.writeFileSync('/tmp/clerk-publishable-key.txt', `${key}\n`, { mode: 0o600 });
+          const fingerprint = crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+          console.log(`Found ${key.startsWith('pk_live_') ? 'live' : 'test'} Clerk publishable key in ${new URL(source).pathname}`);
+          console.log(`Fingerprint: ${fingerprint}`);
+          NODE
+      - name: Upload key for controlled workflow repair
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-public-clerk-key
+          path: /tmp/clerk-publishable-key.txt
+          if-no-files-found: error
+          retention-days: 1
