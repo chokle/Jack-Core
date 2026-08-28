@@ -1,0 +1,1 @@
+Verify the deployed production sign-in path, both CSP layers, Clerk UI bundle, and health endpoint.
