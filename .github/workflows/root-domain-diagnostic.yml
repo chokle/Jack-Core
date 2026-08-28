@@ -1,4 +1,4 @@
-name: Root Domain Sites Mapping Recovery
+name: Root Domain Former Origin Validation
 
 on:
   push:
@@ -12,38 +12,50 @@ permissions:
   contents: read
 
 jobs:
-  inspect-sites-mapping:
+  validate-former-origin:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Test current ChatGPT Sites edge and recover historical mapping evidence
+      - name: Validate former Totalum landing deployment and custom-host routing
         shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          api_root='https://api.cloudflare.com/client/v4'
-          auth_header="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-          zone_json="$(curl --silent --show-error --fail-with-body \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            "${api_root}/zones?name=torchlabs.ca&status=active&per_page=50")"
-          zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
-          account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
-          [[ -n "$zone_id" && -n "$account_id" ]] || { echo 'Cloudflare context not resolved'; exit 1; }
+          target='dnv-9793f3846a98471cb2b0-fm6h0p.totalum-project.com'
 
-          echo '=== Current ChatGPT Sites edge IPs ==='
-          mapfile -t sites_ips < <(dig +short A chatgpt.site | grep -E '^[0-9.]+$' | sort -u)
-          printf '%s\n' "${sites_ips[@]}"
-          if (( ${#sites_ips[@]} == 0 )); then
-            echo 'No chatgpt.site A records resolved'
-            exit 1
-          fi
+          echo '=== Former target DNS ==='
+          echo 'CNAME:'
+          dig +short CNAME "$target" || true
+          echo 'A:'
+          mapfile -t target_ips < <(dig +short A "$target" | grep -E '^[0-9.]+$' | sort -u)
+          printf '%s\n' "${target_ips[@]:-}"
+          echo 'AAAA:'
+          dig +short AAAA "$target" || true
 
-          echo '=== Direct custom-host routing tests against current Sites edge ==='
+          echo '=== Direct target HTTPS ==='
+          direct_body="$(mktemp)"
+          direct_headers="$(mktemp)"
+          direct_code="$(curl --silent --show-error --location --max-time 30 \
+            --dump-header "$direct_headers" \
+            --output "$direct_body" \
+            --write-out '%{http_code}' \
+            "https://${target}/" || true)"
+          echo "HTTP ${direct_code:-000}"
+          awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^content-type:/ || /^cf-cache-status:/ || /^x-powered-by:/ {gsub(/\r/,""); print}' "$direct_headers" || true
+          direct_title="$(grep -Eio '<title>[^<]*</title>' "$direct_body" | head -1 | sed -E 's#</?title>##Ig' || true)"
+          echo "title=${direct_title}"
+          direct_markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$direct_body" | head -10 | tr '\n' ' ' || true)"
+          echo "markers=${direct_markers}"
+          echo -n 'body_sha256='; sha256sum "$direct_body" | awk '{print $1}'
+          echo -n 'body_bytes='; wc -c < "$direct_body"
+
+          echo '=== Direct target HTTP ==='
+          curl --silent --show-error --head --max-time 30 "http://${target}/" || true
+
+          echo '=== Custom-host tests through former target IPs ==='
           accepted=0
           for host in torchlabs.ca www.torchlabs.ca; do
-            for ip in "${sites_ips[@]}"; do
+            for ip in "${target_ips[@]:-}"; do
+              [[ -n "$ip" ]] || continue
               echo "--- ${host} via ${ip}"
               body="$(mktemp)"
               headers="$(mktemp)"
@@ -54,68 +66,20 @@ jobs:
                 --write-out '%{http_code}' \
                 "https://${host}/" || true)"
               echo "HTTP ${code:-000}"
-              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ || /^content-type:/ {gsub(/\r/,""); print}' "$headers" || true
+              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^content-type:/ || /^cf-cache-status:/ || /^x-powered-by:/ {gsub(/\r/,""); print}' "$headers" || true
               title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
               echo "title=${title}"
-              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,120}|Torch didn.t start in a boardroom|Built for the field|AI journeyman' "$body" | head -6 | tr '\n' ' ' || true)"
+              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$body" | head -10 | tr '\n' ' ' || true)"
               echo "markers=${markers}"
               echo -n 'body_sha256='; sha256sum "$body" | awk '{print $1}'
-              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Built for the field' "$body"; then
+              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$body"; then
                 accepted=$((accepted + 1))
               fi
             done
           done
-          echo "sites_custom_host_acceptances=${accepted}"
+          echo "former_origin_acceptances=${accepted}"
 
-          echo '=== May DNS history for root and www ==='
-          may_body="$(mktemp)"
-          may_status="$(curl --silent --show-error --get \
-            --output "$may_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            --data-urlencode 'since=2026-05-01T00:00:00Z' \
-            --data-urlencode 'before=2026-06-01T00:00:00Z' \
-            --data-urlencode "zone_id=${zone_id}" \
-            "${api_root}/accounts/${account_id}/logs/audit")"
-          echo "May audit HTTP ${may_status}"
-          if [[ "$may_status" =~ ^2 ]]; then
-            jq -c '[.result[] | select((.resource.product // "") == "dns_records") | select(((.resource.request.name // .resource.response.name // "") == "torchlabs.ca") or ((.resource.request.name // .resource.response.name // "") == "www.torchlabs.ca")) | {id,action,actor,resource,zone}] | sort_by(.action.time)' "$may_body"
-          else
-            cat "$may_body"
-          fi
-
-          echo '=== May account-wide ChatGPT Sites/custom-host evidence ==='
-          account_body="$(mktemp)"
-          account_status="$(curl --silent --show-error --get \
-            --output "$account_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            --data-urlencode 'since=2026-05-01T00:00:00Z' \
-            --data-urlencode 'before=2026-06-01T00:00:00Z' \
-            "${api_root}/accounts/${account_id}/logs/audit")"
-          echo "Account audit HTTP ${account_status}"
-          if [[ "$account_status" =~ ^2 ]]; then
-            jq -c '[.result[] | select((tostring | test("chatgpt\\.site|torchlabs\\.ca|custom_hostname|custom host"; "i"))) | {id,action,actor,raw,resource,zone}] | sort_by(.action.time)' "$account_body"
-          else
-            cat "$account_body"
-          fi
-
-          echo '=== History expansion for the August 25 www update ==='
-          history_body="$(mktemp)"
-          history_status="$(curl --silent --show-error --get \
-            --output "$history_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            --data-urlencode 'since=2026-05-01T00:00:00Z' \
-            --data-urlencode 'before=2026-08-26T00:00:00Z' \
-            "${api_root}/accounts/${account_id}/logs/audit/01a03964-11d2-7601-b739-26d640c2d3e8/history")"
-          echo "History HTTP ${history_status}"
-          if [[ "$history_status" =~ ^2 ]]; then
-            jq -c '.result' "$history_body"
-          else
-            cat "$history_body"
-          fi
-
-          if (( accepted == 0 )); then
-            echo 'Current Sites edge does not recognize the landing custom hostname.'
+          if [[ ! "$direct_code" =~ ^2 ]] || [[ ! -s "$direct_body" ]]; then
+            echo 'Former deployment is not serving a usable HTTPS response.'
+            exit 1
           fi
