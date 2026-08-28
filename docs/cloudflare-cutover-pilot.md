@@ -30,7 +30,7 @@ Never commit credential material.
 
 Encrypted production runtime secrets remain in Cloudflare and are not duplicated into GitHub Actions. The generated Wrangler config declares the required bindings so deployment fails closed if Cloudflare is missing any required runtime secret.
 
-The Pilot001 Cloudflare path uses the rollback-safe pilot auth bypass, so Clerk is not on the pilot deployment critical path.
+The Pilot001 Cloudflare production path requires Clerk authentication. The build and runtime fail closed unless the Clerk publishable and secret keys are configured. The shared pilot auth bypass is test-only and must never be enabled for a production deployment.
 
 ## Automated temporary-host deployment
 
@@ -44,7 +44,7 @@ The Pilot001 Cloudflare path uses the rollback-safe pilot auth bypass, so Clerk 
 6. run formatting, Wrangler dry-run, Container build, full API and Jack tests, workspace typecheck/build, and diff checks;
 7. deploy Worker + Container to the temporary `workers.dev` target;
 8. resolve the deployed target/version from Wrangler structured output;
-9. smoke-test the public shell and `/api/healthz`;
+9. smoke-test the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
 10. record deployment evidence in the workflow summary.
 
 Production DNS remains unchanged during this lane so Railway stays available as rollback.
