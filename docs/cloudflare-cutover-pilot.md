@@ -12,13 +12,14 @@ This preserves the current long-lived job, feedback-notification, telemetry-rete
 
 This cutover uses Wrangler to deploy a Worker + Container. A `cloudflared.exe service install <TUNNEL_TOKEN>` command is for Cloudflare Tunnel and is **not** part of this production architecture.
 
-The GitHub production deploy lane requires one credential secret:
+The GitHub production deploy lane requires two repository Actions secrets:
 
 - `CLOUDFLARE_API_TOKEN`
+- `VITE_CLERK_PUBLISHABLE_KEY`
 
 `CLOUDFLARE_ACCOUNT_ID` is an optional override, not a required handoff. If it is absent, the workflow resolves account context from the `torchlabs.ca` zone ownership and falls back to a single token-visible account or a unique Torch-named account. Resolution fails closed if the token can see multiple ambiguous accounts.
 
-For a local manual run, both values can still be supplied explicitly:
+For a local manual run, Cloudflare account values can still be supplied explicitly:
 
 ```bash
 CLOUDFLARE_API_TOKEN='...' CLOUDFLARE_ACCOUNT_ID='...' npx wrangler whoami
@@ -30,21 +31,21 @@ Never commit credential material.
 
 Encrypted production runtime secrets remain in Cloudflare and are not duplicated into GitHub Actions. The generated Wrangler config declares the required bindings so deployment fails closed if Cloudflare is missing any required runtime secret.
 
-The Pilot001 Cloudflare path uses the rollback-safe pilot auth bypass, so Clerk is not on the pilot deployment critical path.
+The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLERK_PUBLISHABLE_KEY` is provided to the production build through GitHub Actions, while `CLERK_SECRET_KEY` remains an encrypted Cloudflare runtime secret. The build and runtime fail closed unless both sides are configured. The shared pilot auth bypass is test-only and must never be enabled for a production deployment.
 
 ## Automated temporary-host deployment
 
 `.github/workflows/cloudflare-production-deploy.yml` runs on `main` and can also be dispatched manually. It performs the critical path as one fail-closed batch:
 
 1. install with the frozen lockfile;
-2. require `CLOUDFLARE_API_TOKEN`;
+2. require both GitHub Actions handoff secrets: `CLOUDFLARE_API_TOKEN` and `VITE_CLERK_PUBLISHABLE_KEY`;
 3. resolve Cloudflare account context automatically unless the optional override exists;
 4. verify Wrangler authentication;
 5. generate and validate the deployment config;
 6. run formatting, Wrangler dry-run, Container build, full API and Jack tests, workspace typecheck/build, and diff checks;
 7. deploy Worker + Container to the temporary `workers.dev` target;
 8. resolve the deployed target/version from Wrangler structured output;
-9. smoke-test the public shell and `/api/healthz`;
+9. smoke-test the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
 10. record deployment evidence in the workflow summary.
 
 Production DNS remains unchanged during this lane so Railway stays available as rollback.
@@ -55,7 +56,8 @@ Only after the temporary `workers.dev` deployment passes acceptance, bind `jack.
 
 - public application shell loads;
 - `/api/healthz` responds;
-- approved Pilot001 access works through the configured pilot auth path;
+- approved Pilot001 access works through Clerk authentication;
+- anonymous `/api/me` remains rejected;
 - Ask Jack returns a cited answer;
 - Library and Living Memory load;
 - telemetry event + EOD closeout write successfully;

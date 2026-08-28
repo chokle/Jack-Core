@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PILOT_AUTH_BYPASS: "true"
-  PILOT_AUTH_USER_ID: "pilot001-bypass"
+  PILOT_AUTH_BYPASS: "false"
   WRANGLER_OUTPUT_FILE_PATH: .wrangler-output.json
   WRANGLER_LOG_SANITIZE: "true"
 
@@ -28,6 +27,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CONFIGURED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,7 +44,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Fail closed on Cloudflare API token
+      - name: Fail closed on production credentials
         shell: bash
         run: |
           node <<'NODE'
@@ -52,7 +52,11 @@ jobs:
             console.error("Missing required GitHub Actions secret: CLOUDFLARE_API_TOKEN");
             process.exit(1);
           }
-          console.log("Cloudflare API token preflight passed.");
+          if (!/^pk_(?:live|test)_/.test(process.env.VITE_CLERK_PUBLISHABLE_KEY || "")) {
+            console.error("Missing or invalid GitHub Actions secret: VITE_CLERK_PUBLISHABLE_KEY");
+            process.exit(1);
+          }
+          console.log("Cloudflare and Clerk credential preflight passed.");
           NODE
 
       - name: Resolve Cloudflare account context
@@ -69,17 +73,17 @@ jobs:
           node --check cloudflare/worker.mjs
           node --check cloudflare/resolve-account-context.mjs
 
-      - name: Account resolver regression tests
-        run: node --test cloudflare/resolve-account-context.test.mjs
+      - name: Cloudflare configuration regression tests
+        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs
 
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
 
       - name: Wrangler dry run
         run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
 
       - name: Build production container image
-        run: docker build -f Dockerfile.cloudflare -t jack-core-cloudflare:deploy .
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
 
       - name: API full tests
         run: pnpm --filter @workspace/api-server test
@@ -128,6 +132,9 @@ jobs:
           curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-all-errors --max-time 30 "$target/" > /dev/null
           curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-all-errors --max-time 30 "$target/api/healthz" | tee /tmp/healthz.json
           node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/healthz.json","utf8")); if(body.status!=="ok") process.exit(1)'
+          auth_status="$(curl --silent --show-error --output /tmp/unauthorized.json --write-out '%{http_code}' --max-time 30 "$target/api/me")"
+          test "$auth_status" = "401"
+          node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/unauthorized.json","utf8")); if(!String(body.error||"").includes("sign in required")) process.exit(1)'
 
       - name: Record deployment evidence
         shell: bash
@@ -138,5 +145,7 @@ jobs:
             echo "- version: ${{ steps.deployment.outputs.version_id }}"
             echo "- public shell: PASS"
             echo "- /api/healthz: PASS"
+            echo "- anonymous /api/me rejected: PASS (401)"
+            echo "- approved Clerk sign-in: REQUIRES LIVE ACCEPTANCE"
             echo "- production DNS: unchanged (Railway rollback preserved)"
           } >> "$GITHUB_STEP_SUMMARY"

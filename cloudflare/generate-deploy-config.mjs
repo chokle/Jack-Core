@@ -10,7 +10,7 @@ const publishableKey =
   process.env.VITE_CLERK_PUBLISHABLE_KEY ||
   process.env.CLERK_PUBLISHABLE_KEY ||
   "";
-const pilotAuthBypass = process.env.PILOT_AUTH_BYPASS !== "false";
+const pilotAuthBypass = process.env.PILOT_AUTH_BYPASS === "true";
 
 if (
   !pilotAuthBypass &&
@@ -25,7 +25,11 @@ const config = JSON.parse(await readFile(sourcePath, "utf8"));
 config.vars = {
   ...config.vars,
   PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
-  PILOT_AUTH_USER_ID: process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
+  ...(pilotAuthBypass
+    ? {
+        PILOT_AUTH_USER_ID: process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
+      }
+    : {}),
   ...(publishableKey ? { CLERK_PUBLISHABLE_KEY: publishableKey } : {}),
 };
 config.containers = config.containers.map((container) => ({
@@ -37,7 +41,12 @@ config.containers = config.containers.map((container) => ({
     ...(publishableKey ? { VITE_CLERK_PUBLISHABLE_KEY: publishableKey } : {}),
     VITE_PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
     PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
-    PILOT_AUTH_USER_ID: process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
+    ...(pilotAuthBypass
+      ? {
+          PILOT_AUTH_USER_ID:
+            process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
+        }
+      : {}),
     VITE_DISABLE_CLERK_PROXY: "true",
     VITE_ENABLE_CLERK_PROXY: "false",
   },
