@@ -1,0 +1,57 @@
+name: Rollback Staging Cloudflare Proxy
+
+on:
+  push:
+    branches: [ops/staging-ssl-rollback-20260828]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  HOST: staging.jack.torchlabs.ca
+  TARGET: h3r6mycb.up.railway.app
+  SCRIPT: jack-staging-csp-stable-20260828
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Restore direct Railway DNS and remove staging Worker route
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN,host=process.env.HOST,target=process.env.TARGET,script=process.env.SCRIPT;
+          async function cf(path,options={}){const r=await fetch(`https://api.cloudflare.com/client/v4${path}`,{...options,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(options.headers??{})}}),p=await r.json();if(!r.ok||p.success===false)throw new Error(`${options.method??'GET'} ${path}: ${r.status} ${JSON.stringify(p.errors??p)}`);return p.result}
+          const zones=await cf('/zones?name=torchlabs.ca&status=active&per_page=50');if(!Array.isArray(zones)||zones.length!==1)throw new Error('Zone not uniquely resolved');const z=zones[0];
+          const records=await cf(`/zones/${z.id}/dns_records?type=CNAME&name=${host}&per_page=100`);if(!Array.isArray(records)||records.length!==1)throw new Error(`Expected one ${host} CNAME`);const record=records[0];if(String(record.content).toLowerCase()!==target)throw new Error(`Unexpected staging origin ${record.content}`);
+          const updated=await cf(`/zones/${z.id}/dns_records/${record.id}`,{method:'PATCH',body:JSON.stringify({type:'CNAME',name:host,content:target,proxied:false,ttl:1,comment:'Direct Railway staging restored after Cloudflare TLS mismatch, 2026-08-28'})});
+          const routes=await cf(`/zones/${z.id}/workers/routes`);for(const route of routes.filter(r=>r.pattern===`${host}/*`)){await cf(`/zones/${z.id}/workers/routes/${route.id}`,{method:'DELETE'})}
+          try{await cf(`/accounts/${z.account.id}/workers/scripts/${script}`,{method:'DELETE'})}catch(error){console.log(`Worker deletion skipped: ${error.message}`)}
+          console.log(JSON.stringify({dns:{name:updated.name,content:updated.content,proxied:updated.proxied,ttl:updated.ttl},removedRoute:`${host}/*`},null,2));
+          NODE
+      - name: Verify direct Railway custom-host route and public recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t IPS < <(getent ahostsv4 "$TARGET" | awk '{print $1}' | sort -u)
+          test "${#IPS[@]}" -gt 0
+          origin=false
+          for ip in "${IPS[@]}"; do
+            root="$(curl -sS -L -o /tmp/origin-root -w '%{http_code}' --resolve "$HOST:443:$ip" "https://$HOST/?origin=$(date +%s%N)" || true)"
+            health="$(curl -sS -L -o /tmp/origin-health -w '%{http_code}' --resolve "$HOST:443:$ip" "https://$HOST/api/healthz?origin=$(date +%s%N)" || true)"
+            if [ "$root" = 200 ] && [ "$health" = 200 ] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/origin-health; then origin=true; echo "Railway staging origin accepted on $ip"; break; fi
+          done
+          test "$origin" = true
+          public=false
+          for attempt in $(seq 1 45); do
+            root="$(curl -sS -L -o /tmp/public-root -w '%{http_code}' -H 'Cache-Control: no-cache' "https://$HOST/?rollback=$(date +%s%N)" || true)"
+            health="$(curl -sS -L -o /tmp/public-health -w '%{http_code}' -H 'Cache-Control: no-cache' "https://$HOST/api/healthz?rollback=$(date +%s%N)" || true)"
+            if [ "$root" = 200 ] && [ "$health" = 200 ] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/public-health; then public=true; echo "Public staging direct route accepted on attempt $attempt"; break; fi
+            echo "attempt=$attempt root=$root health=$health"; sleep 4
+          done
+          test "$public" = true
