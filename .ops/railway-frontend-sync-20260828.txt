@@ -1,0 +1,1 @@
+Force Railway to rebuild and serve the corrected frontend CSP, then run live mobile auth acceptance.
