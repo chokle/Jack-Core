@@ -15,12 +15,38 @@ env:
 jobs:
   staging-ui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+      - name: Wait for staging CSP deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted="false"
+          for attempt in $(seq 1 72); do
+            curl --silent --show-error --dump-header /tmp/staging-headers.txt --output /tmp/staging-health.json \
+              -H 'Cache-Control: no-cache' \
+              "https://staging.jack.torchlabs.ca/api/healthz?csp_acceptance=$(date +%s%N)" || true
+            if grep -Eqi '^content-security-policy:.*https://clerk\.staging\.jack\.torchlabs\.ca' /tmp/staging-headers.txt \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/staging-health.json; then
+              accepted="true"
+              echo "Staging is serving the patched CSP and a healthy API."
+              break
+            fi
+            echo "attempt=$attempt waiting for patched staging CSP"
+            sleep 8
+          done
+          if [ "$accepted" != "true" ]; then
+            echo "Staging did not serve the patched CSP before the acceptance timeout." >&2
+            echo "Headers:" >&2
+            cat /tmp/staging-headers.txt >&2 || true
+            echo "Health body:" >&2
+            cat /tmp/staging-health.json >&2 || true
+            exit 1
+          fi
       - name: Install browser diagnostic
         shell: bash
         run: |
@@ -29,7 +55,7 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm install --no-audit --no-fund playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Verify staging shell, Clerk sign-in, health, and visible blockers
+      - name: Verify staging Clerk traffic, shell, health, and visible blockers
         shell: bash
         run: |
           cd /tmp/jack-staging-smoke
@@ -39,6 +65,7 @@ jobs:
 
           (async () => {
             const origin = 'https://staging.jack.torchlabs.ca';
+            const clerkOrigin = 'https://clerk.staging.jack.torchlabs.ca';
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               viewport: { width: 430, height: 932 },
@@ -47,6 +74,7 @@ jobs:
             const pageErrors = [];
             const consoleErrors = [];
             const failedRequests = [];
+            const clerkResponses = [];
             const page = await context.newPage();
             page.on('pageerror', (error) => pageErrors.push(String(error)));
             page.on('console', (message) => {
@@ -54,6 +82,11 @@ jobs:
             });
             page.on('requestfailed', (request) => {
               failedRequests.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' });
+            });
+            page.on('response', (response) => {
+              if (response.url().startsWith(`${clerkOrigin}/v1/`)) {
+                clerkResponses.push({ url: response.url(), status: response.status() });
+              }
             });
 
             const result = {
@@ -64,6 +97,7 @@ jobs:
               pageErrors,
               consoleErrors,
               failedRequests,
+              clerkResponses,
             };
 
             const signInResponse = await page.goto(`${origin}/sign-in`, {
@@ -116,17 +150,25 @@ jobs:
             if (result.signIn.startingJack > 0) fatal.push('Clerk startup overlay remained after 8 seconds');
             if (result.signIn.welcomeBack < 1 || result.signIn.emailInputs < 1) fatal.push('sign-in form did not render');
             if (result.signIn.visibleBlurOverlays > 0) fatal.push('visible blur overlay remained on sign-in');
+            if (!clerkResponses.some((response) => response.url.includes('/v1/environment') && response.status < 400)) {
+              fatal.push('Clerk environment request did not succeed');
+            }
+            if (!clerkResponses.some((response) => response.url.includes('/v1/client') && response.status < 400)) {
+              fatal.push('Clerk client request did not succeed');
+            }
             if (result.root.status !== 200 || !result.root.title.includes('Jack')) fatal.push('Jack landing shell did not render');
             if (result.health.status !== 200) fatal.push(`health status ${result.health.status}`);
             if (!String(result.health.body).includes('"status":"ok"')) fatal.push('health body was not status ok');
             if (pageErrors.length > 0) fatal.push(`${pageErrors.length} page error(s)`);
+            if (consoleErrors.length > 0) fatal.push(`${consoleErrors.length} console error(s)`);
+            if (failedRequests.length > 0) fatal.push(`${failedRequests.length} failed request(s)`);
 
             await browser.close();
             if (fatal.length) {
               console.error(`STAGING_SMOKE_FAILED: ${fatal.join('; ')}`);
               process.exit(1);
             }
-            console.log('STAGING_SMOKE_PASSED');
+            console.log('STAGING_SMOKE_PASSED_STRICT');
           })().catch((error) => {
             console.error(error);
             process.exit(1);
