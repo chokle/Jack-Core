@@ -40,6 +40,11 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     3,
     "Clerk publishable key must be bound to preflight, config generation, and container build",
   );
+  assert.match(workflow, /- name: Wait for workers\.dev container readiness/);
+  assert.match(workflow, /timeout-minutes: 8/);
+  assert.match(workflow, /for attempt in \$\(seq 1 42\)/);
+  assert.match(workflow, /containers list --json/);
+  assert.match(workflow, /containers instances "\$application_id" --json/);
 
   const jobHeader = workflow.slice(
     workflow.indexOf("jobs:"),
