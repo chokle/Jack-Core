@@ -94,6 +94,8 @@ jobs:
           test_path.write_text('''import { describe, expect, it } from "vitest";\nimport {\n  graphNodeHitRadius,\n  graphTapSlop,\n  resolveGraphTapTarget,\n} from "./SpatialBrainCanvas";\n\ndescribe("SpatialBrainCanvas pointer selection", () => {\n  it("gives small touch nodes a 44px target", () => {\n    expect(graphNodeHitRadius(4, "touch")).toBe(22);\n    expect(graphNodeHitRadius(4, "pen")).toBe(18);\n    expect(graphNodeHitRadius(4, "mouse")).toBe(12);\n  });\n\n  it("preserves the rendered radius for already-large nodes", () => {\n    expect(graphNodeHitRadius(30, "touch")).toBe(38);\n  });\n\n  it("accepts ordinary touch jitter without treating it as orbit", () => {\n    expect(graphTapSlop("touch")).toBe(14);\n    expect(graphTapSlop("pen")).toBe(10);\n    expect(graphTapSlop("mouse")).toBe(6);\n  });\n\n  it("keeps the pointer-down node stable while animated children move", () => {\n    expect(resolveGraphTapTarget("concept:1", null, true)).toBe("concept:1");\n    expect(resolveGraphTapTarget("concept:1", "concept:2", true)).toBe(\n      "concept:1",\n    );\n  });\n\n  it("falls back to the release hit when the pressed node disappeared", () => {\n    expect(resolveGraphTapTarget("concept:1", "concept:2", false)).toBe(\n      "concept:2",\n    );\n  });\n});\n''', encoding='utf-8')
           PY
       - run: pnpm install --frozen-lockfile
+      - name: Format hotfix files
+        run: pnpm exec prettier --write artifacts/jack-core/src/components/SpatialBrainCanvas.tsx artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts
       - name: Jack frontend tests
         run: pnpm --filter @workspace/jack-core test
       - name: Workspace typecheck
