@@ -5,11 +5,12 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Cloudflare production defaults require authenticated Clerk users", async () => {
-  const [baseText, generator, dockerfile, workflow] = await Promise.all([
+  const [baseText, generator, dockerfile, workflow, worker] = await Promise.all([
     read("cloudflare/wrangler.base.json"),
     read("cloudflare/generate-deploy-config.mjs"),
     read("Dockerfile.cloudflare"),
     read(".github/workflows/cloudflare-production-deploy.yml"),
+    read("cloudflare/worker.mjs"),
   ]);
   const base = JSON.parse(baseText);
 
@@ -45,6 +46,8 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /for attempt in \$\(seq 1 42\)/);
   assert.match(workflow, /containers list --json/);
   assert.match(workflow, /containers instances "\$application_id" --json/);
+  assert.match(worker, /http:\/\/container\$\{url\.pathname\}\$\{url\.search\}/);
+  assert.match(worker, /port\.fetch\(containerRequest\(request\)\)/);
 
   const jobHeader = workflow.slice(
     workflow.indexOf("jobs:"),

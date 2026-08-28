@@ -53,6 +53,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function containerRequest(request) {
+  const url = new URL(request.url);
+  const target = `http://container${url.pathname}${url.search}`;
+  return new Request(target, request);
+}
+
 export class JackProductionContainer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -80,7 +86,7 @@ export class JackProductionContainer extends DurableObject {
 
     for (let attempt = 0; attempt < STARTUP_RETRIES; attempt += 1) {
       try {
-        return await port.fetch(request);
+        return await port.fetch(containerRequest(request));
       } catch (error) {
         lastError = error;
         if (!this.ctx.container.running) this.startIfNeeded();
