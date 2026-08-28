@@ -1,0 +1,153 @@
+name: Final Production Browser Only
+
+on:
+  push:
+    branches:
+      - ops/final-browser-only-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  mobile-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install lightweight browser driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+          google-chrome --version
+          mkdir -p /tmp/jack-browser-only
+          cd /tmp/jack-browser-only
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright-core@1.55.0
+      - name: Verify the live pilot sign-in with zero browser errors
+        shell: bash
+        run: |
+          cd /tmp/jack-browser-only
+          cat > acceptance.cjs <<'NODE'
+          const { chromium } = require('playwright-core');
+          const fs = require('node:fs');
+
+          (async () => {
+            const origin = 'https://jack.torchlabs.ca';
+            const browser = await chromium.launch({
+              headless: true,
+              executablePath: '/usr/bin/google-chrome',
+              args: ['--no-sandbox'],
+            });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Pilot-Final-Acceptance/2026-08-28',
+            });
+            const page = await context.newPage();
+            const pageErrors = [];
+            const consoleErrors = [];
+            const failedRequests = [];
+            const clerkResponses = [];
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('requestfailed', (request) => failedRequests.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' }));
+            page.on('response', (response) => {
+              if (/clerk/i.test(response.url())) clerkResponses.push({ url: response.url(), status: response.status() });
+            });
+
+            const result = {
+              checkedAt: new Date().toISOString(),
+              signIn: {},
+              root: {},
+              health: {},
+              edge: {},
+              pageErrors,
+              consoleErrors,
+              failedRequests,
+              clerkResponses,
+            };
+
+            const signInResponse = await page.goto(`${origin}/sign-in?browser_acceptance=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(10000);
+            const body = (await page.locator('body').innerText()).slice(0, 4000);
+            result.signIn = {
+              status: signInResponse?.status() ?? null,
+              url: page.url(),
+              title: await page.title(),
+              body,
+              emailInputs: await page.locator('input[type="email"], input[name="identifier"]').count(),
+              passwordInputs: await page.locator('input[type="password"]').count(),
+              signInButtons: await page.getByRole('button', { name: /sign in/i }).count(),
+              pilotAccessCopy: /Pilot participant access/i.test(body),
+              startingJack: await page.getByText('Starting Jack…', { exact: true }).count(),
+              authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+              visibleBlurOverlays: await page.locator('[class*="backdrop-blur"]:visible').count(),
+            };
+            await page.screenshot({ path: 'final-sign-in.png', fullPage: true });
+
+            const rootResponse = await page.goto(`${origin}/?browser_acceptance=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(4000);
+            result.root = { status: rootResponse?.status() ?? null, title: await page.title(), url: page.url() };
+            await page.screenshot({ path: 'final-root.png', fullPage: true });
+
+            const healthResponse = await context.request.get(`${origin}/api/healthz?browser_acceptance=${Date.now()}`, { timeout: 30000 });
+            result.health = { status: healthResponse.status(), body: (await healthResponse.text()).slice(0, 1000) };
+            const edgeResponse = await context.request.get(`${origin}/?edge_header=${Date.now()}`, { timeout: 30000 });
+            result.edge = {
+              status: edgeResponse.status(),
+              recovery: edgeResponse.headers()['x-jack-edge-recovery'] ?? null,
+              csp: edgeResponse.headers()['content-security-policy'] ?? null,
+            };
+
+            fs.writeFileSync('final-result.json', JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.signIn.status !== 200) fatal.push(`sign-in status ${result.signIn.status}`);
+            if (!result.signIn.title.includes('Jack')) fatal.push('sign-in title is not Jack');
+            if (result.signIn.emailInputs < 1) fatal.push('email input did not render');
+            if (result.signIn.passwordInputs < 1) fatal.push('password input did not render');
+            if (result.signIn.signInButtons < 1) fatal.push('sign-in button did not render');
+            if (!result.signIn.pilotAccessCopy) fatal.push('pilot access screen did not render');
+            if (result.signIn.startingJack > 0) fatal.push('startup overlay remained');
+            if (result.signIn.authUnavailable > 0) fatal.push('auth unavailable screen rendered');
+            if (result.signIn.visibleBlurOverlays > 0) fatal.push('visible blur overlay remained');
+            if (!clerkResponses.some((response) => response.status < 400)) fatal.push('no successful Clerk response was observed');
+            if (result.root.status !== 200 || !result.root.title.includes('Jack')) fatal.push('Jack root shell failed');
+            if (result.health.status !== 200 || !String(result.health.body).includes('"status":"ok"')) fatal.push('health endpoint failed');
+            if (result.edge.recovery !== 'clerk-csp-final-20260828') fatal.push(`final edge Worker was not observed: ${result.edge.recovery}`);
+            if (!String(result.edge.csp).includes('https://clerk.torchlabs.ca')) fatal.push('Clerk production origin missing from CSP');
+            if (!String(result.edge.csp).includes('https://static.cloudflareinsights.com')) fatal.push('Cloudflare Insights script origin missing from CSP');
+            if (!String(result.edge.csp).includes('https://cloudflareinsights.com')) fatal.push('Cloudflare Insights beacon origin missing from CSP');
+            if (pageErrors.length > 0) fatal.push(`${pageErrors.length} page error(s)`);
+            if (consoleErrors.length > 0) fatal.push(`${consoleErrors.length} console error(s)`);
+            if (failedRequests.length > 0) fatal.push(`${failedRequests.length} failed request(s)`);
+
+            await browser.close();
+            if (fatal.length) {
+              console.error(`FINAL_BROWSER_ACCEPTANCE_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('JACK_PRODUCTION_FINAL_BROWSER_ACCEPTANCE_PASSED');
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+          node acceptance.cjs
+      - name: Upload final browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jack-production-final-browser-evidence
+          path: |
+            /tmp/jack-browser-only/final-result.json
+            /tmp/jack-browser-only/final-sign-in.png
+            /tmp/jack-browser-only/final-root.png
+          if-no-files-found: warn
+          retention-days: 7
