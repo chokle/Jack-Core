@@ -1,0 +1,47 @@
+name: Inspect Staging DNS Edge
+
+on:
+  push:
+    branches: [ops/staging-dns-inspect-20260828]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare public resolvers and force-test Cloudflare edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== default resolver ==='
+          dig +noall +answer staging.jack.torchlabs.ca A || true
+          dig +noall +answer staging.jack.torchlabs.ca CNAME || true
+          for resolver in 1.1.1.1 8.8.8.8; do
+            echo "=== resolver $resolver ==="
+            dig @$resolver +noall +answer staging.jack.torchlabs.ca A || true
+            dig @$resolver +noall +answer staging.jack.torchlabs.ca CNAME || true
+          done
+          echo '=== production Cloudflare A candidates ==='
+          mapfile -t IPS < <(dig +short jack.torchlabs.ca A | sort -u)
+          printf '%s\n' "${IPS[@]}"
+          test "${#IPS[@]}" -gt 0
+          for ip in "${IPS[@]}"; do
+            echo "=== force staging through Cloudflare $ip ==="
+            curl -sS -L --resolve "staging.jack.torchlabs.ca:443:$ip" -D /tmp/h -o /tmp/root "https://staging.jack.torchlabs.ca/?forced=$(date +%s%N)" || true
+            grep -Ei '^(HTTP/|server:|cf-ray:|x-jack-edge-recovery:|content-security-policy:)' /tmp/h || true
+            head -c 180 /tmp/root | tr '\n' ' '; echo
+          done
+      - name: Confirm Cloudflare control-plane state
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const token=process.env.CLOUDFLARE_API_TOKEN;async function cf(path){const r=await fetch(`https://api.cloudflare.com/client/v4${path}`,{headers:{Authorization:`Bearer ${token}`}}),p=await r.json();if(!r.ok||p.success===false)throw new Error(JSON.stringify(p.errors??p));return p.result}const zones=await cf('/zones?name=torchlabs.ca&status=active&per_page=50'),z=zones[0],records=await cf(`/zones/${z.id}/dns_records?name=staging.jack.torchlabs.ca&per_page=100`),routes=await cf(`/zones/${z.id}/workers/routes`);console.log('DNS',JSON.stringify(records.map(r=>({id:r.id,type:r.type,name:r.name,content:r.content,proxied:r.proxied,ttl:r.ttl,modified_on:r.modified_on})),null,2));console.log('ROUTES',JSON.stringify(routes.filter(r=>r.pattern.includes('staging.jack.torchlabs.ca')).map(r=>({id:r.id,pattern:r.pattern,script:r.script})),null,2));
+          NODE
