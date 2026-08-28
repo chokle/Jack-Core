@@ -4,8 +4,9 @@ import { resolveActiveTesterScope } from "../lib/activity-telemetry.js";
 import { isPublicApiPath } from "./requireAuth.js";
 
 function usesRouteScopedAuthorization(req: Request): boolean {
-  if (req.method === "DELETE" && req.path === "/account") return true;
-  return req.path === "/testing/progress" || req.path.startsWith("/testing/reports");
+  const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
+  if (req.method === "DELETE" && path === "/account") return true;
+  return path === "/testing/progress" || path.startsWith("/testing/reports");
 }
 
 /**
