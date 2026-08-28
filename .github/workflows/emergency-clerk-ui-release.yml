@@ -1,0 +1,119 @@
+name: Emergency Clerk UI Release
+
+on:
+  push:
+    branches:
+      - hotfix/clerk-ui-fapi-20260828
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+
+jobs:
+  patch-test-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Replace invalid Clerk UI CDN origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'artifacts/jack-core/src/App.tsx';
+          const source = fs.readFileSync(path, 'utf8');
+          const oldBlock = [
+            'const localClerkUiUrl = useDirectClerkAssets',
+            '  ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"',
+            '  : useClerkAssetsFromProxy',
+            '  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`',
+            '  : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";',
+          ].join('\n');
+          const newBlock = [
+            '// Clerk UI is served by the instance Frontend API, not the public npm CDN.',
+            '// Derive that origin from the configured publishable key as Clerk documents.',
+            'const clerkFrontendApiOrigin = (() => {',
+            '  const encodedFrontendApi = clerkPubKey?.split("_")[2];',
+            '  if (!encodedFrontendApi) return undefined;',
+            '',
+            '  try {',
+            '    const frontendApiHost = atob(encodedFrontendApi).slice(0, -1);',
+            '    return frontendApiHost ? `https://${frontendApiHost}` : undefined;',
+            '  } catch {',
+            '    return undefined;',
+            '  }',
+            '})();',
+            'const localClerkUiUrl = useClerkAssetsFromProxy',
+            '  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`',
+            '  : `${clerkFrontendApiOrigin ?? window.location.origin}/npm/@clerk/ui@1/dist/ui.browser.js`;',
+          ].join('\n');
+          const matches = source.split(oldBlock).length - 1;
+          if (matches !== 1) throw new Error(`Expected one Clerk UI block; found ${matches}`);
+          const patched = source.replace(oldBlock, newBlock);
+          if (patched.includes('https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js')) {
+            throw new Error('Broken Clerk UI jsDelivr URL remains');
+          }
+          fs.writeFileSync(path, patched);
+          NODE
+          test "$(git diff --name-only)" = "artifacts/jack-core/src/App.tsx"
+          git diff --check
+          git diff -- artifacts/jack-core/src/App.tsx
+
+      - name: Verify live Clerk Frontend API bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VITE_CLERK_PUBLISHABLE_KEY:-}"
+          node <<'NODE' > "$RUNNER_TEMP/clerk-ui-url"
+          const encoded = process.env.VITE_CLERK_PUBLISHABLE_KEY?.split('_')[2];
+          if (!encoded) throw new Error('Invalid Clerk publishable key');
+          const host = Buffer.from(encoded, 'base64url').toString('utf8').slice(0, -1);
+          if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Invalid Clerk Frontend API host');
+          process.stdout.write(`https://${host}/npm/@clerk/ui@1/dist/ui.browser.js`);
+          NODE
+          curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --max-time 30 \
+            "$(cat "$RUNNER_TEMP/clerk-ui-url")" --output "$RUNNER_TEMP/clerk-ui.browser.js"
+          test "$(wc -c < "$RUNNER_TEMP/clerk-ui.browser.js")" -gt 1000
+          grep -q "__internal_ClerkUICtor" "$RUNNER_TEMP/clerk-ui.browser.js"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Frontend typecheck
+        run: pnpm --filter @workspace/jack-core typecheck
+
+      - name: Frontend tests
+        run: pnpm --filter @workspace/jack-core test
+
+      - name: Frontend production build
+        run: pnpm --filter @workspace/jack-core build
+
+      - name: Release tested fix to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only)" = "artifacts/jack-core/src/App.tsx"
+          git diff --check
+          git config user.name "Torch Emergency Release"
+          git config user.email "actions@users.noreply.github.com"
+          git add artifacts/jack-core/src/App.tsx
+          git commit -m "fix(auth): load Clerk UI from Frontend API"
+          git push origin HEAD:main
+          echo "Released $(git rev-parse HEAD) to main."
