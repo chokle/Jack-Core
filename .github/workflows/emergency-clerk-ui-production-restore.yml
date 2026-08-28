@@ -1,0 +1,298 @@
+name: Emergency Clerk UI Production Restore
+
+on:
+  push:
+    branches:
+      - hotfix/clerk-ui-fapi-20260828
+    paths:
+      - ".github/workflows/emergency-clerk-ui-production-restore.yml"
+
+permissions:
+  contents: write
+  statuses: read
+
+concurrency:
+  group: emergency-clerk-ui-production-restore
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+
+jobs:
+  patch-test-deploy-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Patch Clerk UI bundle origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'artifacts/jack-core/src/App.tsx';
+          const source = fs.readFileSync(path, 'utf8');
+          const oldBlock = [
+            'const localClerkUiUrl = useDirectClerkAssets',
+            '  ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"',
+            '  : useClerkAssetsFromProxy',
+            '  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`',
+            '  : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";',
+          ].join('\n');
+          const newBlock = [
+            '// Clerk UI is served by the instance Frontend API, not the public npm CDN.',
+            '// Derive that origin from the configured publishable key as Clerk documents.',
+            'const clerkFrontendApiOrigin = (() => {',
+            '  const encodedFrontendApi = clerkPubKey?.split("_")[2];',
+            '  if (!encodedFrontendApi) return undefined;',
+            '',
+            '  try {',
+            '    const frontendApiHost = atob(encodedFrontendApi).slice(0, -1);',
+            '    return frontendApiHost ? `https://${frontendApiHost}` : undefined;',
+            '  } catch {',
+            '    return undefined;',
+            '  }',
+            '})();',
+            'const localClerkUiUrl = useClerkAssetsFromProxy',
+            '  ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`',
+            '  : `${clerkFrontendApiOrigin ?? window.location.origin}/npm/@clerk/ui@1/dist/ui.browser.js`;',
+          ].join('\n');
+
+          const matches = source.split(oldBlock).length - 1;
+          if (matches !== 1) {
+            throw new Error(`Expected exactly one Clerk UI bootstrap block; found ${matches}`);
+          }
+          const patched = source.replace(oldBlock, newBlock);
+          if (patched.includes('https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js')) {
+            throw new Error('Broken Clerk UI jsDelivr URL remains after patch');
+          }
+          fs.writeFileSync(path, patched);
+          NODE
+
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "artifacts/jack-core/src/App.tsx"
+          git diff --check
+          git diff -- artifacts/jack-core/src/App.tsx
+
+      - name: Verify configured Clerk Frontend API serves the UI bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VITE_CLERK_PUBLISHABLE_KEY:-}"
+          node <<'NODE' > "$RUNNER_TEMP/clerk-ui-url"
+          const key = process.env.VITE_CLERK_PUBLISHABLE_KEY;
+          const encoded = key?.split('_')[2];
+          if (!encoded) throw new Error('Invalid Clerk publishable key');
+          const host = Buffer.from(encoded, 'base64url').toString('utf8').slice(0, -1);
+          if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Invalid Clerk Frontend API host');
+          process.stdout.write(`https://${host}/npm/@clerk/ui@1/dist/ui.browser.js`);
+          NODE
+          clerk_ui_url="$(cat "$RUNNER_TEMP/clerk-ui-url")"
+          curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --max-time 30 \
+            "$clerk_ui_url" --output "$RUNNER_TEMP/clerk-ui.browser.js"
+          test "$(wc -c < "$RUNNER_TEMP/clerk-ui.browser.js")" -gt 1000
+          grep -q "__internal_ClerkUICtor" "$RUNNER_TEMP/clerk-ui.browser.js"
+          echo "Clerk Frontend API UI bundle preflight passed."
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend typecheck
+        run: pnpm --filter @workspace/jack-core typecheck
+
+      - name: Frontend tests
+        run: pnpm --filter @workspace/jack-core test
+
+      - name: Frontend production build
+        run: pnpm --filter @workspace/jack-core build
+
+      - name: Commit tested hotfix directly to main
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "artifacts/jack-core/src/App.tsx"
+          git diff --check
+          git config user.name "Torch Emergency Release"
+          git config user.email "actions@users.noreply.github.com"
+          git add artifacts/jack-core/src/App.tsx
+          git commit -m "fix(auth): load Clerk UI from Frontend API"
+          release_sha="$(git rev-parse HEAD)"
+          git push origin HEAD:main
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "Released $release_sha to main."
+
+      - name: Wait for Railway production deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 72); do
+            payload="$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}/status")"
+            state="$(node -e '
+              const payload = JSON.parse(process.argv[1]);
+              const rows = payload.statuses || [];
+              const row = rows.find((entry) =>
+                String(entry.context || "").includes("jack-core") &&
+                String(entry.description || "").includes("jack.torchlabs.ca")
+              );
+              process.stdout.write(row?.state || "waiting");
+            ' "$payload")"
+            echo "Railway production status: $state (attempt $attempt/72)"
+            if [ "$state" = "success" ]; then
+              exit 0
+            fi
+            if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
+              echo "$payload"
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Railway did not report successful production deployment in time."
+          exit 1
+
+      - name: Install browser verification runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jack-auth-smoke"
+          cd "$RUNNER_TEMP/jack-auth-smoke"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Verify live production sign-in and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/jack-auth-smoke"
+          cat > smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Emergency-Auth-Smoke/2026-08-28',
+            });
+            const page = await context.newPage();
+            const pageErrors = [];
+            const failedRequests = [];
+            const clerkUiResponses = [];
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('requestfailed', (request) => {
+              failedRequests.push({ url: request.url(), error: request.failure()?.errorText || 'unknown' });
+            });
+            page.on('response', (response) => {
+              if (response.url().includes('/npm/@clerk/ui@1/')) {
+                clerkUiResponses.push({
+                  url: response.url(),
+                  status: response.status(),
+                  contentType: response.headers()['content-type'] || '',
+                });
+              }
+            });
+
+            const response = await page.goto('https://jack.torchlabs.ca/sign-in', {
+              waitUntil: 'domcontentloaded',
+              timeout: 30000,
+            });
+            await page.waitForTimeout(10000);
+            const body = (await page.locator('body').innerText()).slice(0, 3000);
+            const result = {
+              checkedAt: new Date().toISOString(),
+              status: response?.status() || null,
+              url: page.url(),
+              body,
+              emailInputs: await page.locator('input[type="email"], input[name="identifier"]').count(),
+              authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+              pageErrors,
+              failedRequests,
+              clerkUiResponses,
+            };
+            const health = await context.request.get('https://jack.torchlabs.ca/api/healthz', { timeout: 30000 });
+            result.health = { status: health.status(), body: await health.text() };
+            fs.writeFileSync('result.json', JSON.stringify(result, null, 2));
+            await page.screenshot({ path: 'sign-in-restored.png', fullPage: true });
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.status !== 200) fatal.push(`sign-in status ${result.status}`);
+            if (result.authUnavailable > 0) fatal.push('secure-session fallback remains visible');
+            if (result.emailInputs < 1) fatal.push('email sign-in input did not render');
+            if (!result.clerkUiResponses.some((entry) => entry.status === 200 && /javascript/i.test(entry.contentType))) {
+              fatal.push('Clerk UI bundle did not return executable JavaScript');
+            }
+            if (result.pageErrors.some((value) => /Clerk|clerk/i.test(value))) {
+              fatal.push('Clerk page error remains');
+            }
+            if (result.failedRequests.some((entry) => entry.url.includes('@clerk/ui'))) {
+              fatal.push('Clerk UI request still failed');
+            }
+            if (result.health.status !== 200 || !String(result.health.body).includes('"status":"ok"')) {
+              fatal.push('production health check failed');
+            }
+            await browser.close();
+            if (fatal.length) {
+              console.error(`PRODUCTION_AUTH_SMOKE_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('PRODUCTION_AUTH_SMOKE_PASSED');
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+          node smoke.cjs
+
+      - name: Upload live verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emergency-clerk-ui-production-evidence
+          path: |
+            ${{ runner.temp }}/jack-auth-smoke/result.json
+            ${{ runner.temp }}/jack-auth-smoke/sign-in-restored.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Record verified release
+        if: success()
+        run: |
+          {
+            echo "## Jack production auth restored"
+            echo "- release: ${{ steps.release.outputs.sha }}"
+            echo "- frontend typecheck: PASS"
+            echo "- frontend tests: PASS"
+            echo "- frontend production build: PASS"
+            echo "- Railway production deployment: PASS"
+            echo "- live Clerk UI JavaScript: PASS"
+            echo "- live email sign-in form: PASS"
+            echo "- live /api/healthz: PASS"
+          } >> "$GITHUB_STEP_SUMMARY"
