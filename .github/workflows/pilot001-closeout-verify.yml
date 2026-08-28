@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -21,7 +24,7 @@ jobs:
           version: 11.7.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Focused API closeout tests
@@ -41,6 +44,6 @@ jobs:
       - name: Jack build
         run: pnpm --filter @workspace/jack-core build
       - name: Format check
-        run: pnpm exec prettier --check artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts
+        run: pnpm exec prettier --check artifacts/api-server/src/routes/__tests__/end-of-shift-closeout.test.ts artifacts/api-server/src/routes/end-of-shift-closeout.ts artifacts/api-server/src/routes/index.ts artifacts/jack-core/src/components/EndOfShiftCloseout.test.tsx artifacts/jack-core/src/components/EndOfShiftCloseout.tsx artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts .github/workflows/pilot001-closeout-verify.yml package.json .node-version
       - name: Diff check
         run: git diff --check origin/main...HEAD
