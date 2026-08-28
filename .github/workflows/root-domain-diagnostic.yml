@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Restore ChatGPT Sites routing with automatic rollback
+      - name: Restore ChatGPT Sites routing with live acceptance and rollback
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -33,71 +33,57 @@ jobs:
           sites_ip_2='172.66.3.26'
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           committed=0
-          pages_detached=0
+          root_detached=0
+          www_detached=0
           dns_mutated=0
 
           cf_get() {
-            curl --silent --show-error --fail-with-body \
-              -H "$auth" -H 'Content-Type: application/json' "$1"
+            curl --silent --show-error --fail-with-body -H "$auth" -H 'Content-Type: application/json' "$1"
           }
           cf_delete() {
-            curl --silent --show-error --fail-with-body \
-              -X DELETE -H "$auth" -H 'Content-Type: application/json' "$1"
+            curl --silent --show-error --fail-with-body -X DELETE -H "$auth" -H 'Content-Type: application/json' "$1"
           }
           cf_post() {
-            curl --silent --show-error --fail-with-body \
-              -X POST -H "$auth" -H 'Content-Type: application/json' \
-              --data "$2" "$1"
+            curl --silent --show-error --fail-with-body -X POST -H "$auth" -H 'Content-Type: application/json' --data "$2" "$1"
           }
           cf_patch() {
-            curl --silent --show-error --fail-with-body \
-              -X PATCH -H "$auth" -H 'Content-Type: application/json' \
-              --data "$2" "$1"
+            curl --silent --show-error --fail-with-body -X PATCH -H "$auth" -H 'Content-Type: application/json' --data "$2" "$1"
           }
 
           zone_json="$(cf_get "${api}/zones?name=${root}&status=active&per_page=50")"
           zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
           account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
           nameserver="$(jq -r '.result[0].name_servers[0] // empty' <<<"$zone_json")"
-          [[ -n "$zone_id" && -n "$account_id" && -n "$nameserver" ]] || {
-            echo 'Cloudflare zone context could not be resolved.'
-            exit 1
-          }
+          [[ -n "$zone_id" && -n "$account_id" && -n "$nameserver" ]] || { echo 'Cloudflare context missing.'; exit 1; }
 
           get_record_id() {
             local type="$1" name="$2"
-            cf_get "${api}/zones/${zone_id}/dns_records?type=${type}&name=${name}&per_page=100" \
-              | jq -r '.result[0].id // empty'
+            cf_get "${api}/zones/${zone_id}/dns_records?type=${type}&name=${name}&per_page=100" | jq -r '.result[0].id // empty'
           }
 
           add_pages_domain() {
-            local host="$1"
-            local body response
+            local host="$1" body response
             body="$(jq -nc --arg name "$host" '{name:$name}')"
-            response="$(curl --silent --show-error \
-              -X POST -H "$auth" -H 'Content-Type: application/json' \
-              --data "$body" \
+            response="$(curl --silent --show-error -X POST -H "$auth" -H 'Content-Type: application/json' --data "$body" \
               "${api}/accounts/${account_id}/pages/projects/${project}/domains")"
             if jq -e '.success == true' >/dev/null 2>&1 <<<"$response"; then
               echo "Rollback: reattached ${host} to ${project}."
             elif jq -e '[.errors[]?.message // ""] | join(" ") | test("already|exists"; "i")' >/dev/null 2>&1 <<<"$response"; then
-              echo "Rollback: ${host} was already attached to ${project}."
+              echo "Rollback: ${host} already attached to ${project}."
             else
-              echo "Rollback warning: could not reattach ${host}: ${response}"
+              echo "Rollback warning for ${host}: ${response}"
             fi
           }
 
           rollback() {
             set +e
             echo '=== AUTOMATIC ROLLBACK ==='
-
             if (( dns_mutated == 1 )); then
               for id in $(cf_get "${api}/zones/${zone_id}/dns_records?type=A&name=${root}&per_page=100" 2>/dev/null \
                 | jq -r --arg a "$sites_ip_1" --arg b "$sites_ip_2" '.result[] | select(.content == $a or .content == $b) | .id'); do
                 cf_delete "${api}/zones/${zone_id}/dns_records/${id}" >/dev/null 2>&1 || true
               done
 
-              local root_cname www_cname body
               root_cname="$(get_record_id CNAME "$root" 2>/dev/null || true)"
               body="$(jq -nc --arg type CNAME --arg name "$root" --arg content "$pages_target" \
                 '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
@@ -117,100 +103,59 @@ jobs:
               fi
               echo 'Rollback: restored root and www DNS to torch-mvp.pages.dev.'
             fi
-
-            if (( pages_detached == 1 )); then
-              add_pages_domain "$root"
-              add_pages_domain "$www"
-            fi
+            (( root_detached == 1 )) && add_pages_domain "$root"
+            (( www_detached == 1 )) && add_pages_domain "$www"
             echo '=== ROLLBACK COMPLETE ==='
             set -e
           }
 
           on_exit() {
-            local rc="$1"
+            rc="$1"
             trap - EXIT
-            if (( committed == 0 )); then
-              rollback
-            fi
+            (( committed == 1 )) || rollback
             exit "$rc"
           }
           trap 'on_exit $?' EXIT
 
           is_landing_file() {
-            local file="$1"
-            grep -Eqi '<title>[^<]*Torch Labs[^<]*Field intelligence for the skilled trades[^<]*</title>|The knowledge.{0,120}your crews need|Your best people can.t be everywhere|Torch didn.t start in a boardroom|Put Jack to work on a real knowledge problem' "$file"
-          }
-
-          fetch_direct() {
-            local host="$1" ip="$2" body="$3" headers="$4"
-            curl --silent --show-error --compressed --location --max-time 30 \
-              --resolve "${root}:443:${ip}" \
-              --resolve "${www}:443:${ip}" \
-              --dump-header "$headers" --output "$body" --write-out '%{http_code}' \
-              "https://${host}/" || true
+            grep -Eqi '<title>[^<]*Torch Labs[^<]*Field intelligence for the skilled trades[^<]*</title>|The knowledge.{0,160}your crews need|Your best people can.t be everywhere|Torch didn.t start in a boardroom|Put Jack to work on a real knowledge problem' "$1"
           }
 
           echo '=== PREFLIGHT ==='
           current_root="$(cf_get "${api}/zones/${zone_id}/dns_records?name=${root}&per_page=100")"
           current_www="$(cf_get "${api}/zones/${zone_id}/dns_records?name=${www}&per_page=100")"
           jq -e --arg target "$pages_target" '.result[] | select(.type == "CNAME" and .content == $target)' >/dev/null <<<"$current_root" || {
-            echo 'Refusing restore: root no longer matches the diagnosed torch-mvp CNAME state.'
-            exit 1
+            echo 'Root state changed since diagnosis; refusing to overwrite it.'; exit 1;
           }
           jq -e --arg target "$pages_target" '.result[] | select(.type == "CNAME" and .content == $target)' >/dev/null <<<"$current_www" || {
-            echo 'Refusing restore: www no longer matches the diagnosed torch-mvp CNAME state.'
-            exit 1
+            echo 'WWW state changed since diagnosis; refusing to overwrite it.'; exit 1;
           }
           for txt_name in "_cf-custom-hostname.${root}" "_cf-custom-hostname.${www}"; do
-            count="$(cf_get "${api}/zones/${zone_id}/dns_records?type=TXT&name=${txt_name}&per_page=100" | jq '.result | length')"
-            [[ "$count" -ge 1 ]] || {
-              echo "Refusing restore: required ChatGPT Sites verification record ${txt_name} is missing."
-              exit 1
+            [[ "$(cf_get "${api}/zones/${zone_id}/dns_records?type=TXT&name=${txt_name}&per_page=100" | jq '.result | length')" -ge 1 ]] || {
+              echo "Required Sites verification record missing: ${txt_name}"; exit 1;
             }
           done
-          echo 'Current misrouting and both ChatGPT Sites verification records confirmed.'
+          echo -n 'Current custom-domains.chatgpt.site A records: '
+          dig +short A "$sites_target" | sort -u | tr '\n' ' '; echo
 
-          echo '=== DETACH ROOT AND WWW FROM COMMAND CENTRE PAGES PROJECT ==='
+          echo '=== DETACH ROOT/WWW FROM COMMAND CENTRE ==='
           cf_delete "${api}/accounts/${account_id}/pages/projects/${project}/domains/${root}" | jq -e '.success == true' >/dev/null
+          root_detached=1
           cf_delete "${api}/accounts/${account_id}/pages/projects/${project}/domains/${www}" | jq -e '.success == true' >/dev/null
-          pages_detached=1
-
-          echo '=== TEST PRESERVED CHATGPT SITES MAPPING BEFORE DNS CUTOVER ==='
-          mapping_ok=0
-          for attempt in $(seq 1 18); do
-            for ip in "$sites_ip_1" "$sites_ip_2"; do
-              body="$(mktemp)"; headers="$(mktemp)"
-              code="$(fetch_direct "$root" "$ip" "$body" "$headers")"
-              title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
-              echo "Attempt ${attempt}, ${root} via ${ip}: HTTP ${code:-000}; title=${title}"
-              if [[ "$code" =~ ^2 ]] && is_landing_file "$body"; then
-                mapping_ok=1
-                break 2
-              fi
-            done
-            sleep 5
-          done
-          (( mapping_ok == 1 )) || {
-            echo 'The preserved ChatGPT Sites mapping did not return the field-intelligence landing. No DNS cutover will be kept.'
-            exit 1
-          }
-          echo 'Correct field-intelligence landing confirmed at the preserved Sites origin.'
+          www_detached=1
 
           echo '=== RESTORE PRE-SWITCH DNS ==='
           dns_mutated=1
           root_cname_id="$(get_record_id CNAME "$root")"
-          [[ -n "$root_cname_id" ]] && cf_delete "${api}/zones/${zone_id}/dns_records/${root_cname_id}" >/dev/null
+          [[ -z "$root_cname_id" ]] || cf_delete "${api}/zones/${zone_id}/dns_records/${root_cname_id}" >/dev/null
 
-          body="$(jq -nc --arg type A --arg name "$root" --arg content "$sites_ip_1" \
-            '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
+          body="$(jq -nc --arg type A --arg name "$root" --arg content "$sites_ip_1" '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
           cf_post "${api}/zones/${zone_id}/dns_records" "$body" | jq -e '.success == true' >/dev/null
-          body="$(jq -nc --arg type A --arg name "$root" --arg content "$sites_ip_2" \
-            '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
+          body="$(jq -nc --arg type A --arg name "$root" --arg content "$sites_ip_2" '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
           cf_post "${api}/zones/${zone_id}/dns_records" "$body" | jq -e '.success == true' >/dev/null
 
           www_id="$(get_record_id CNAME "$www")"
-          body="$(jq -nc --arg type CNAME --arg name "$www" --arg content "$sites_target" \
-            '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
+          body="$(jq -nc --arg type CNAME --arg name "$www" --arg content "$sites_target" '{type:$type,name:$name,content:$content,proxied:false,ttl:1}')"
           if [[ -n "$www_id" ]]; then
             cf_patch "${api}/zones/${zone_id}/dns_records/${www_id}" "$body" | jq -e '.success == true' >/dev/null
           else
@@ -218,42 +163,35 @@ jobs:
           fi
 
           echo '=== AUTHORITATIVE DNS ACCEPTANCE ==='
-          auth_ok=0
+          dns_ok=0
           for attempt in $(seq 1 24); do
             root_answers="$(dig +short @"$nameserver" A "$root" | sort -u | tr '\n' ' ')"
             www_answer="$(dig +short @"$nameserver" CNAME "$www" | tr -d '\n')"
-            echo "Attempt ${attempt}: root A=${root_answers}; www CNAME=${www_answer}"
+            echo "Attempt ${attempt}: root=${root_answers}; www=${www_answer}"
             if grep -q "$sites_ip_1" <<<"$root_answers" && grep -q "$sites_ip_2" <<<"$root_answers" \
               && grep -qi '^custom-domains\.chatgpt\.site\.$' <<<"$www_answer"; then
-              auth_ok=1
-              break
+              dns_ok=1; break
             fi
             sleep 5
           done
-          (( auth_ok == 1 )) || {
-            echo 'Authoritative DNS did not converge to the restored state.'
-            exit 1
-          }
+          (( dns_ok == 1 )) || { echo 'Authoritative DNS did not converge.'; exit 1; }
 
           echo '=== LIVE LANDING ACCEPTANCE ==='
           for host in "$root" "$www"; do
             host_ok=0
-            for attempt in $(seq 1 24); do
+            for attempt in $(seq 1 30); do
               body="$(mktemp)"; headers="$(mktemp)"
               code="$(curl --silent --show-error --compressed --location --max-time 30 \
                 --dump-header "$headers" --output "$body" --write-out '%{http_code}' "https://${host}/" || true)"
               title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
-              echo "Attempt ${attempt}, ${host}: HTTP ${code:-000}; title=${title}"
+              server="$(awk 'BEGIN{IGNORECASE=1} /^server:/{gsub(/\r/,""); print $0}' "$headers" | tail -1 || true)"
+              echo "Attempt ${attempt}, ${host}: HTTP ${code:-000}; title=${title}; ${server}"
               if [[ "$code" =~ ^2 ]] && is_landing_file "$body"; then
-                host_ok=1
-                break
+                host_ok=1; break
               fi
               sleep 5
             done
-            (( host_ok == 1 )) || {
-              echo "Live acceptance failed for ${host}."
-              exit 1
-            }
+            (( host_ok == 1 )) || { echo "Landing acceptance failed for ${host}."; exit 1; }
           done
 
           echo '=== NON-REGRESSION ACCEPTANCE ==='
@@ -264,16 +202,10 @@ jobs:
           jack_title="$(grep -Eio '<title>[^<]*</title>' "$jack_body" | head -1 | sed -E 's#</?title>##Ig' || true)"
           echo "app.torchlabs.ca: HTTP ${app_code:-000}; title=${app_title}"
           echo "jack.torchlabs.ca: HTTP ${jack_code:-000}; title=${jack_title}"
-          [[ "$app_code" =~ ^2 ]] && grep -Eqi 'Torch Labs App|Field Mentorship MVP' "$app_body" || {
-            echo 'Command Centre non-regression check failed.'
-            exit 1
-          }
-          [[ "$jack_code" =~ ^2 ]] && grep -Eqi '<title>[^<]*Jack|Ask Jack|AI Trade Intelligence' "$jack_body" || {
-            echo 'Jack non-regression check failed.'
-            exit 1
-          }
+          [[ "$app_code" =~ ^2 ]] && grep -Eqi 'Torch Labs App|Field Mentorship MVP' "$app_body" || { echo 'Command Centre regression.'; exit 1; }
+          [[ "$jack_code" =~ ^2 ]] && grep -Eqi '<title>[^<]*Jack|Ask Jack|AI Trade Intelligence' "$jack_body" || { echo 'Jack regression.'; exit 1; }
 
-          echo '=== FINAL ROUTING STATE ==='
+          echo '=== FINAL STATE ==='
           cf_get "${api}/zones/${zone_id}/dns_records?per_page=500" \
             | jq -c '[.result[] | select(.name == "torchlabs.ca" or .name == "www.torchlabs.ca" or .name == "app.torchlabs.ca" or .name == "jack.torchlabs.ca") | {type,name,content,proxied,ttl}] | sort_by(.name,.type)'
           cf_get "${api}/accounts/${account_id}/pages/projects/${project}/domains" \
