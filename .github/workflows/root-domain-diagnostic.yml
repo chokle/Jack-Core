@@ -1,4 +1,4 @@
-name: Root Domain Audit Recovery
+name: Root Domain Origin Validation
 
 on:
   push:
@@ -12,68 +12,69 @@ permissions:
   contents: read
 
 jobs:
-  inspect-audit:
+  validate-origin:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Recover prior root-domain DNS target from Cloudflare audit logs
+      - name: Validate the pre-August-25 landing origin
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-            echo "Missing CLOUDFLARE_API_TOKEN"
-            exit 1
-          fi
-
           api_root='https://api.cloudflare.com/client/v4'
           auth_header="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           zone_json="$(curl --silent --show-error --fail-with-body \
             --header "$auth_header" \
             --header 'Content-Type: application/json' \
             "${api_root}/zones?name=torchlabs.ca&status=active&per_page=50")"
-          zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
           account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
-          if [[ -z "$zone_id" || -z "$account_id" ]]; then
-            echo 'Could not resolve active torchlabs.ca zone/account'
+          [[ -n "$account_id" ]] || { echo 'Cloudflare account not resolved'; exit 1; }
+
+          echo '=== Audit resource history: www update ==='
+          history_body="$(mktemp)"
+          history_status="$(curl --silent --show-error \
+            --output "$history_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            "${api_root}/accounts/${account_id}/logs/audit/01a03964-11d2-7601-b739-26d640c2d3e8/history")"
+          echo "History HTTP ${history_status}"
+          if [[ "$history_status" =~ ^2 ]]; then
+            jq -c '[.result[] | {id,action,raw,resource,zone}]' "$history_body"
+          else
+            cat "$history_body"
+          fi
+
+          echo '=== Current DNS for chatgpt.site ==='
+          dig +short A chatgpt.site || true
+          dig +short AAAA chatgpt.site || true
+
+          echo '=== Direct origin acceptance ==='
+          passed=0
+          for host in torchlabs.ca www.torchlabs.ca; do
+            for ip in 162.159.143.30 172.66.3.26; do
+              echo "--- ${host} via ${ip}"
+              body="$(mktemp)"
+              headers="$(mktemp)"
+              code="$(curl --silent --show-error --location --max-time 30 \
+                --resolve "${host}:443:${ip}" \
+                --dump-header "$headers" \
+                --output "$body" \
+                --write-out '%{http_code}' \
+                "https://${host}/" || true)"
+              echo "HTTP ${code:-000}"
+              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ {gsub(/\r/,""); print}' "$headers" || true
+              title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
+              echo "title=${title}"
+              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,80}|Torch didn.t start in a boardroom|Field intelligence for the skilled trades' "$body" | head -4 | tr '\n' ' ' || true)"
+              echo "markers=${markers}"
+              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Field intelligence for the skilled trades' "$body"; then
+                passed=$((passed + 1))
+              fi
+            done
+          done
+          echo "validated_origin_responses=${passed}"
+          if (( passed == 0 )); then
+            echo 'No original landing response validated; refusing blind DNS restore.'
             exit 1
-          fi
-
-          since='2026-08-25T14:30:00Z'
-          before='2026-08-25T17:20:00Z'
-
-          echo '=== Legacy account audit endpoint ==='
-          legacy_body="$(mktemp)"
-          legacy_status="$(curl --silent --show-error --get \
-            --output "$legacy_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            --data-urlencode "since=${since}" \
-            --data-urlencode "before=${before}" \
-            --data-urlencode 'per_page=1000' \
-            --data-urlencode 'direction=asc' \
-            "${api_root}/accounts/${account_id}/audit_logs")"
-          echo "Legacy audit HTTP ${legacy_status}"
-          if [[ "$legacy_status" =~ ^2 ]]; then
-            jq -c '[.result[] | select((tostring | test("torchlabs\\.ca|dns|record|9d1491d202988497ca6e161887f99bf0|4f8af1675e9d7231222b3d21fd069af7"; "i"))) | {id,when,action,actor:{id,email,type,interface},resource,oldValue,newValue,metadata}]' "$legacy_body"
-          else
-            cat "$legacy_body"
-          fi
-
-          echo '=== Version 2 account audit endpoint ==='
-          v2_body="$(mktemp)"
-          v2_status="$(curl --silent --show-error --get \
-            --output "$v2_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            --data-urlencode "since=${since}" \
-            --data-urlencode "before=${before}" \
-            --data-urlencode "zone_id=${zone_id}" \
-            "${api_root}/accounts/${account_id}/logs/audit")"
-          echo "V2 audit HTTP ${v2_status}"
-          if [[ "$v2_status" =~ ^2 ]]; then
-            jq -c '[.result[] | select((tostring | test("torchlabs\\.ca|dns|record|9d1491d202988497ca6e161887f99bf0|4f8af1675e9d7231222b3d21fd069af7"; "i"))) | {id,action,actor:{id,email,type,context,token_name},raw:{method,status_code,uri},resource,zone}]' "$v2_body"
-          else
-            cat "$v2_body"
           fi
