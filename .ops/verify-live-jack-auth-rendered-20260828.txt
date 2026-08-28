@@ -1,0 +1,1 @@
+Verify that the live production pilot sign-in is visibly rendered and usable after the Clerk restoration.
