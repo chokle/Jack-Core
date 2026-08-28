@@ -1,4 +1,4 @@
-name: Root Landing Archive Recovery
+name: Root Domain Pre-Switch State Recovery
 
 on:
   push:
@@ -12,116 +12,73 @@ permissions:
   contents: read
 
 jobs:
-  recover-archives:
+  recover-pre-switch-state:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Locate archived copies of the newer Torch landing page
+      - name: Reconstruct DNS and Pages state before August 25 switch
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/recovery
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          zone_json="$(curl -fsS -H "$auth" -H 'Content-Type: application/json' "${api}/zones?name=torchlabs.ca&status=active&per_page=50")"
+          zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
+          account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
+          [[ -n "$zone_id" && -n "$account_id" ]] || { echo 'Cloudflare context missing'; exit 1; }
 
-          echo '=== Internet Archive CDX: apex ==='
-          cdx_apex='https://web.archive.org/cdx/search/cdx?url=torchlabs.ca%2F&from=2026&to=2026&output=json&filter=statuscode%3A200&filter=mimetype%3Atext%2Fhtml&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest%2Clength&collapse=digest'
-          curl --silent --show-error --location --max-time 60 "$cdx_apex" | tee /tmp/recovery/cdx-apex.json || true
-          echo
+          fetch_audit() {
+            local since="$1" before="$2" output="$3"
+            curl -fsS --get -H "$auth" -H 'Content-Type: application/json' \
+              --data-urlencode "since=${since}" \
+              --data-urlencode "before=${before}" \
+              --data-urlencode "zone_id=${zone_id}" \
+              "${api}/accounts/${account_id}/logs/audit" > "$output"
+          }
 
-          echo '=== Internet Archive CDX: www ==='
-          cdx_www='https://web.archive.org/cdx/search/cdx?url=www.torchlabs.ca%2F&from=2026&to=2026&output=json&filter=statuscode%3A200&filter=mimetype%3Atext%2Fhtml&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest%2Clength&collapse=digest'
-          curl --silent --show-error --location --max-time 60 "$cdx_www" | tee /tmp/recovery/cdx-www.json || true
-          echo
+          mkdir -p /tmp/audit
+          fetch_audit '2026-06-01T00:00:00Z' '2026-07-01T00:00:00Z' /tmp/audit/june.json
+          fetch_audit '2026-07-01T00:00:00Z' '2026-08-01T00:00:00Z' /tmp/audit/july.json
+          fetch_audit '2026-08-01T00:00:00Z' '2026-08-26T00:00:00Z' /tmp/audit/august.json
 
-          echo '=== Fetch latest Wayback snapshot before August 25, if present ==='
-          timestamp="$(python3 - <<'PY'
-          import json
-          from pathlib import Path
-          rows=[]
-          for path in ['/tmp/recovery/cdx-apex.json','/tmp/recovery/cdx-www.json']:
-              try:
-                  data=json.loads(Path(path).read_text())
-              except Exception:
-                  continue
-              if isinstance(data,list) and len(data)>1:
-                  header=data[0]
-                  for row in data[1:]:
-                      item=dict(zip(header,row))
-                      ts=item.get('timestamp','')
-                      if ts and ts < '20260825000000': rows.append(item)
-          rows.sort(key=lambda x:x['timestamp'])
-          print(rows[-1]['timestamp'] if rows else '')
-          PY
-          )"
-          echo "wayback_timestamp=${timestamp}"
-          if [[ -n "$timestamp" ]]; then
-            snapshot="https://web.archive.org/web/${timestamp}id_/https://torchlabs.ca/"
-            curl --silent --show-error --location --max-time 120 --output /tmp/recovery/wayback.html "$snapshot" || true
-            echo -n 'wayback_bytes='; wc -c < /tmp/recovery/wayback.html
-            grep -Eio '<title>[^<]*</title>' /tmp/recovery/wayback.html | head -1 || true
-            grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field' /tmp/recovery/wayback.html | head -10 || true
-            echo 'Wayback asset candidates:'
-            grep -Eo '(src|href)="[^"]+"' /tmp/recovery/wayback.html | sed -E 's/^[^=]+="//;s/"$//' | head -80 || true
-          fi
+          jq -s '{result: ([.[].result[]])}' /tmp/audit/june.json /tmp/audit/july.json /tmp/audit/august.json > /tmp/audit/all.json
 
-          echo '=== Common Crawl collections ==='
-          curl --silent --show-error --location --max-time 60 'https://index.commoncrawl.org/collinfo.json' --output /tmp/recovery/collinfo.json
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          data=json.loads(Path('/tmp/recovery/collinfo.json').read_text())
-          for row in data[:8]: print(row.get('id'), row.get('cdx-api'))
-          PY
+          echo '=== Every root/www DNS mutation June 1 through August 25 ==='
+          jq -c '[.result[]
+            | select((.resource.product // "") == "dns_records")
+            | select(
+                ((.resource.request.name // "") == "torchlabs.ca") or
+                ((.resource.request.name // "") == "www.torchlabs.ca") or
+                ((.resource.response.name // "") == "torchlabs.ca") or
+                ((.resource.response.name // "") == "www.torchlabs.ca") or
+                ((.resource.id // "") == "d50fc7415cb8741d42dc8012fce3708e") or
+                ((.resource.id // "") == "a3bddf86ebd459ef3e6c292da827c13e") or
+                ((.resource.id // "") == "4f8af1675e9d7231222b3d21fd069af7") or
+                ((.resource.id // "") == "9d1491d202988497ca6e161887f99bf0")
+              )
+            | {
+                id,
+                time:.action.time,
+                action:.action.description,
+                type:.action.type,
+                result:.action.result,
+                actor:{context:.actor.context,email:.actor.email,ip:.actor.ip_address,token_name:.actor.token.name},
+                resource_id:.resource.id,
+                request:.resource.request,
+                response:.resource.response,
+                raw:.raw
+              }
+          ] | sort_by(.time)' /tmp/audit/all.json
 
-          echo '=== Common Crawl URL index hits ==='
-          python3 - <<'PY'
-          import json, urllib.parse, urllib.request
-          from pathlib import Path
-          collections=json.loads(Path('/tmp/recovery/collinfo.json').read_text())[:12]
-          all_hits=[]
-          for collection in collections:
-              endpoint=collection.get('cdx-api')
-              if not endpoint: continue
-              url=endpoint+'?'+urllib.parse.urlencode({'url':'torchlabs.ca/','output':'json','filter':'status:200','matchType':'exact'})
-              try:
-                  with urllib.request.urlopen(url, timeout=45) as r:
-                      body=r.read().decode('utf-8','replace')
-              except Exception as e:
-                  print(collection.get('id'),'ERROR',repr(e))
-                  continue
-              hits=[]
-              for line in body.splitlines():
-                  try: hits.append(json.loads(line))
-                  except Exception: pass
-              print(collection.get('id'),'hits',len(hits))
-              for hit in hits[-5:]:
-                  keep={k:hit.get(k) for k in ['timestamp','url','status','mime','digest','filename','offset','length']}
-                  print(json.dumps(keep,separators=(',',':')))
-                  all_hits.append((collection.get('id'),hit))
-          if all_hits:
-              all_hits.sort(key=lambda x:x[1].get('timestamp',''))
-              Path('/tmp/recovery/commoncrawl-latest.json').write_text(json.dumps({'collection':all_hits[-1][0],'hit':all_hits[-1][1]}))
-          PY
+          echo '=== Any Pages/custom-domain/Sites-related mutations ==='
+          jq -c '[.result[]
+            | select((tostring | test("pages|custom.domain|hostname|chatgpt|sites|162\\.159\\.143\\.30|172\\.66\\.3\\.26"; "i")))
+            | {id,time:.action.time,action:.action.description,type:.action.type,actor:{context:.actor.context,email:.actor.email,token_name:.actor.token.name},raw:.raw,resource:.resource}
+          ] | sort_by(.time)' /tmp/audit/all.json
 
-          echo '=== Recover latest Common Crawl response, if present ==='
-          if [[ -s /tmp/recovery/commoncrawl-latest.json ]]; then
-            python3 - <<'PY'
-          import gzip, io, json, urllib.request
-          from pathlib import Path
-          meta=json.loads(Path('/tmp/recovery/commoncrawl-latest.json').read_text())['hit']
-          filename=meta['filename']; offset=int(meta['offset']); length=int(meta['length'])
-          req=urllib.request.Request('https://data.commoncrawl.org/'+filename, headers={'Range':f'bytes={offset}-{offset+length-1}'})
-          with urllib.request.urlopen(req, timeout=120) as r: blob=r.read()
-          raw=gzip.GzipFile(fileobj=io.BytesIO(blob)).read()
-          split=raw.find(b'\r\n\r\n')
-          warc_payload=raw[split+4:] if split>=0 else raw
-          split2=warc_payload.find(b'\r\n\r\n')
-          http_payload=warc_payload[split2+4:] if split2>=0 else warc_payload
-          Path('/tmp/recovery/commoncrawl.html').write_bytes(http_payload)
-          print('commoncrawl_timestamp='+meta.get('timestamp',''))
-          print('commoncrawl_bytes='+str(len(http_payload)))
-          PY
-            grep -Eio '<title>[^<]*</title>' /tmp/recovery/commoncrawl.html | head -1 || true
-            grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field' /tmp/recovery/commoncrawl.html | head -10 || true
-            echo 'Common Crawl asset candidates:'
-            grep -Eo '(src|href)="[^"]+"' /tmp/recovery/commoncrawl.html | sed -E 's/^[^=]+="//;s/"$//' | head -80 || true
-          fi
+          echo '=== Current Pages domains ==='
+          curl -fsS -H "$auth" -H 'Content-Type: application/json' \
+            "${api}/accounts/${account_id}/pages/projects/torch-mvp/domains" \
+            | jq -c '[.result[] | {id,name,status,created_on,validation_data,verification_data}]'
