@@ -3,6 +3,10 @@ import { useSignIn } from "@clerk/react/legacy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+const publicDemoUrl =
+  import.meta.env.VITE_PUBLIC_DEMO_URL?.trim() ||
+  "https://jack-core-demo-ycf4yh.v2.appdeploy.ai/";
+
 type ClerkError = {
   errors?: Array<{ longMessage?: string; message?: string }>;
 };
@@ -76,8 +80,26 @@ export function EmailCodeSignIn() {
       <div className="space-y-6 p-7 sm:p-9">
         <div className="text-center">
           <img src="/logo.svg" alt="" className="mx-auto mb-4 h-10 w-10" />
-          <h1 className="text-xl font-semibold text-foreground">Welcome back</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Sign in to Jack — your trade intelligence engine</p>
+          <h1 className="text-xl font-semibold text-foreground">Pilot participant access</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sign in with the account assigned to you for the controlled field pilot.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm leading-6 text-muted-foreground">
+          <p className="font-semibold text-foreground">Not part of the pilot?</p>
+          <p>
+            The real Jack environment is restricted to approved participants.
+            You can still try the public demo with sample trade knowledge.
+          </p>
+          <a
+            href={publicDemoUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex font-semibold text-primary hover:underline"
+          >
+            Try Jack demo
+          </a>
         </div>
 
         {step === "email" ? (
@@ -135,7 +157,7 @@ export function EmailCodeSignIn() {
         )}
       </div>
       <div className="border-t border-border bg-muted/20 px-6 py-4 text-center text-sm text-muted-foreground">
-        Don&apos;t have an account? <a href="/sign-up" className="font-medium text-primary hover:underline">Sign up</a>
+        Need a pilot account? Contact your Torch pilot lead for an assigned access link.
       </div>
     </div>
   );
