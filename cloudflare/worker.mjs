@@ -4,6 +4,7 @@ const CONTAINER_PORT = 8080;
 const CONTAINER_NAME = "jack-production";
 const STARTUP_RETRIES = 40;
 const STARTUP_RETRY_MS = 250;
+const STARTUP_PROBE_TIMEOUT_MS = 2000;
 
 const RUNTIME_ENV_KEYS = [
   "NODE_ENV",
@@ -53,6 +54,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function withTimeout(promise, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`container port probe timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export class JackProductionContainer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -73,26 +91,44 @@ export class JackProductionContainer extends DurableObject {
     });
   }
 
-  async fetch(request) {
-    this.startIfNeeded();
-    const port = this.ctx.container.getTcpPort(CONTAINER_PORT);
+  async waitForReadiness(port) {
     let lastError;
 
     for (let attempt = 0; attempt < STARTUP_RETRIES; attempt += 1) {
       try {
-        return await port.fetch(request);
+        const response = await withTimeout(
+          port.fetch(`http://localhost:${CONTAINER_PORT}/api/healthz`, {
+            method: "GET",
+          }),
+          STARTUP_PROBE_TIMEOUT_MS,
+        );
+        if (response.ok) return;
+        lastError = new Error(`container health probe returned HTTP ${response.status}`);
       } catch (error) {
         lastError = error;
-        if (!this.ctx.container.running) this.startIfNeeded();
-        await sleep(STARTUP_RETRY_MS);
       }
+
+      if (!this.ctx.container.running) this.startIfNeeded();
+      if (attempt + 1 < STARTUP_RETRIES) await sleep(STARTUP_RETRY_MS);
     }
 
-    console.error("Jack production container failed readiness", lastError);
-    return new Response("Jack production container unavailable", {
-      status: 503,
-      headers: { "cache-control": "no-store" },
-    });
+    throw lastError ?? new Error("container port did not become ready");
+  }
+
+  async fetch(request) {
+    this.startIfNeeded();
+    const port = this.ctx.container.getTcpPort(CONTAINER_PORT);
+
+    try {
+      await this.waitForReadiness(port);
+      return await port.fetch(request);
+    } catch (error) {
+      console.error("Jack production container failed readiness", error);
+      return new Response("Jack production container unavailable", {
+        status: 503,
+        headers: { "cache-control": "no-store" },
+      });
+    }
   }
 }
 
