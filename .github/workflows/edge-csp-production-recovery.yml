@@ -1,0 +1,186 @@
+name: Edge CSP Production Recovery
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+jobs:
+  recover-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Verify current Railway origin and resolve Cloudflare context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+
+          root_code="$(curl --silent --show-error --location --output /tmp/pre-root.html --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://jack.torchlabs.ca/?edge_preflight=$(date +%s%N)")"
+          health_code="$(curl --silent --show-error --location --output /tmp/pre-health.json --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://jack.torchlabs.ca/api/healthz?edge_preflight=$(date +%s%N)")"
+          test "$root_code" = "200"
+          test "$health_code" = "200"
+          grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/pre-root.html
+          grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/pre-health.json
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.success === false) throw new Error(`${options.method ?? 'GET'} ${path}: ${response.status} ${JSON.stringify(payload.errors ?? [])}`);
+            return payload.result;
+          }
+          const zones = await cf('/zones?name=torchlabs.ca&status=active&per_page=50');
+          if (!Array.isArray(zones) || zones.length !== 1) throw new Error('Active torchlabs.ca zone was not uniquely resolved');
+          const zone = zones[0];
+          const records = await cf(`/zones/${zone.id}/dns_records?type=CNAME&name=jack.torchlabs.ca&per_page=100`);
+          if (!Array.isArray(records) || records.length !== 1) throw new Error(`Expected one production CNAME; found ${records?.length ?? 0}`);
+          const record = records[0];
+          if (String(record.content).toLowerCase() !== '065w3uja.up.railway.app') throw new Error(`Unexpected production origin ${record.content}; stopped before mutation`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CF_ACCOUNT_ID=${zone.account.id}\nCF_ZONE_ID=${zone.id}\nCF_DNS_RECORD_ID=${record.id}\nCF_DNS_CONTENT=${record.content}\nCF_DNS_PROXIED_BEFORE=${record.proxied}\nCF_DNS_TTL_BEFORE=${record.ttl}\n`);
+          console.log(JSON.stringify({ account: zone.account.id, zone: zone.id, record: { id: record.id, content: record.content, proxied: record.proxied } }, null, 2));
+          NODE
+
+      - name: Deploy reversible CSP response Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/jack-edge-csp
+          cat > /tmp/jack-edge-csp/worker.mjs <<'WORKER'
+          const CLERK_UI_ORIGIN = 'https://clerk.torchlabs.ca';
+
+          function patchPolicy(value) {
+            if (!value) return value;
+            const directives = value.split(';').map((part) => part.trim()).filter(Boolean);
+            let found = false;
+            const patched = directives.map((directive) => {
+              if (!directive.startsWith('script-src ')) return directive;
+              found = true;
+              return directive.includes(CLERK_UI_ORIGIN) ? directive : `${directive} ${CLERK_UI_ORIGIN}`;
+            });
+            if (!found) patched.push(`script-src 'self' ${CLERK_UI_ORIGIN}`);
+            return patched.join('; ');
+          }
+
+          export default {
+            async fetch(request) {
+              const upstream = await fetch(request);
+              const response = new Response(upstream.body, upstream);
+              const policy = response.headers.get('Content-Security-Policy');
+              if (policy) response.headers.set('Content-Security-Policy', patchPolicy(policy));
+              response.headers.set('X-Jack-Edge-Recovery', 'clerk-csp-20260828');
+
+              const contentType = response.headers.get('Content-Type') || '';
+              if (!contentType.toLowerCase().includes('text/html')) return response;
+
+              return new HTMLRewriter()
+                .on('meta[http-equiv="Content-Security-Policy"]', {
+                  element(element) {
+                    const content = element.getAttribute('content');
+                    if (content) element.setAttribute('content', patchPolicy(content));
+                  },
+                })
+                .transform(response);
+            },
+          };
+          WORKER
+
+          cat > /tmp/jack-edge-csp/wrangler.jsonc <<EOF
+          {
+            "name": "jack-production-csp-recovery",
+            "main": "worker.mjs",
+            "compatibility_date": "2026-08-28",
+            "account_id": "$CF_ACCOUNT_ID",
+            "workers_dev": false,
+            "routes": [
+              { "pattern": "jack.torchlabs.ca/*", "zone_name": "torchlabs.ca" }
+            ]
+          }
+          EOF
+
+          cd /tmp/jack-edge-csp
+          npx --yes wrangler@latest deploy --config wrangler.jsonc
+
+      - name: Enable Cloudflare proxy for the verified Railway origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${process.env.CF_ZONE_ID}/dns_records/${process.env.CF_DNS_RECORD_ID}`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'CNAME',
+              name: 'jack.torchlabs.ca',
+              content: process.env.CF_DNS_CONTENT,
+              proxied: true,
+              ttl: 1,
+              comment: 'Temporary reversible CSP edge recovery for Pilot001, 2026-08-28',
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok || payload.success === false) throw new Error(`DNS proxy enable failed: ${response.status} ${JSON.stringify(payload.errors ?? [])}`);
+          console.log(JSON.stringify({ name: payload.result.name, content: payload.result.content, proxied: payload.result.proxied }, null, 2));
+          NODE
+
+      - name: Accept live production shell, health, and both CSP layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for attempt in $(seq 1 36); do
+            curl --silent --show-error --location --dump-header /tmp/live-headers.txt --output /tmp/live-root.html \
+              -H 'Cache-Control: no-cache' "https://jack.torchlabs.ca/?edge_acceptance=$(date +%s%N)" || true
+            health_code="$(curl --silent --show-error --location --output /tmp/live-health.json --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' "https://jack.torchlabs.ca/api/healthz?edge_acceptance=$(date +%s%N)" || true)"
+            if grep -Eqi '^x-jack-edge-recovery:[[:space:]]*clerk-csp-20260828' /tmp/live-headers.txt \
+              && grep -Eqi '^content-security-policy:.*script-src[^\r\n]*https://clerk\.torchlabs\.ca' /tmp/live-headers.txt \
+              && grep -Eqi 'http-equiv="Content-Security-Policy"[^>]+script-src[^>]+https://clerk\.torchlabs\.ca' /tmp/live-root.html \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/live-root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/live-health.json; then
+              accepted=true
+              echo "EDGE_CSP_RECOVERY_ACCEPTED"
+              break
+            fi
+            echo "attempt=$attempt waiting for proxied Worker route"
+            sleep 5
+          done
+          test "$accepted" = true
+
+      - name: Roll back Cloudflare proxy on failed acceptance
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${CF_ZONE_ID:-}" ] && [ -n "${CF_DNS_RECORD_ID:-}" ]; then
+            node --input-type=module <<'NODE'
+            const token = process.env.CLOUDFLARE_API_TOKEN;
+            const proxiedBefore = String(process.env.CF_DNS_PROXIED_BEFORE).toLowerCase() === 'true';
+            const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${process.env.CF_ZONE_ID}/dns_records/${process.env.CF_DNS_RECORD_ID}`, {
+              method: 'PATCH',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: 'CNAME', name: 'jack.torchlabs.ca', content: process.env.CF_DNS_CONTENT, proxied: proxiedBefore, ttl: proxiedBefore ? 1 : Number(process.env.CF_DNS_TTL_BEFORE || 1) }),
+            });
+            console.log(`DNS rollback status: ${response.status}`);
+            NODE
+          fi
+          cd /tmp/jack-edge-csp 2>/dev/null && npx --yes wrangler@latest delete jack-production-csp-recovery --force --config wrangler.jsonc || true
