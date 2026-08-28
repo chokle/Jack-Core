@@ -18,6 +18,7 @@ import pilotEndOfDayRouter from "./pilot-end-of-day.js";
 import activityHeartbeatRouter from "./activity-heartbeat.js";
 import endOfShiftCloseoutRouter from "./end-of-shift-closeout.js";
 import accountRouter from "./account.js";
+import pilotEnrollmentsRouter from "./pilot-enrollments.js";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use(pilotEndOfDayRouter);
 router.use(activityHeartbeatRouter);
 router.use(endOfShiftCloseoutRouter);
 router.use(accountRouter);
+router.use(pilotEnrollmentsRouter);
 
 export default router;
