@@ -99,11 +99,22 @@ const localClerkJsUrl = useDirectClerkAssets
   : useClerkAssetsFromProxy
   ? `${window.location.origin}/api/__clerk/npm/@clerk/clerk-js@6/dist/clerk.browser.js`
   : "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
-const localClerkUiUrl = useDirectClerkAssets
-  ? "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js"
-  : useClerkAssetsFromProxy
+// Clerk UI is served by the instance Frontend API, not the public npm CDN.
+// Derive that origin from the configured publishable key as Clerk documents.
+const clerkFrontendApiOrigin = (() => {
+  const encodedFrontendApi = clerkPubKey?.split("_")[2];
+  if (!encodedFrontendApi) return undefined;
+
+  try {
+    const frontendApiHost = atob(encodedFrontendApi).slice(0, -1);
+    return frontendApiHost ? `https://${frontendApiHost}` : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+const localClerkUiUrl = useClerkAssetsFromProxy
   ? `${window.location.origin}/api/__clerk/npm/@clerk/ui@1/dist/ui.browser.js`
-  : "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
+  : `${clerkFrontendApiOrigin ?? window.location.origin}/npm/@clerk/ui@1/dist/ui.browser.js`;
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TORCH_INTERVIEW_HANDOFF_KEY = "jack.torchInterviewHandoff";
