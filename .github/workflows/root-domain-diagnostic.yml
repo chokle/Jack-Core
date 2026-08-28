@@ -1,4 +1,4 @@
-name: Root Domain Diagnostic
+name: Root Domain Audit Recovery
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  inspect-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Inspect Cloudflare hostname bindings
+      - name: Recover prior root-domain DNS target from Cloudflare audit logs
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -27,63 +27,53 @@ jobs:
             exit 1
           fi
 
-          cf() {
-            curl --silent --show-error --fail-with-body \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              --header "Content-Type: application/json" \
-              "$1"
-          }
-
-          zone_json="$(cf 'https://api.cloudflare.com/client/v4/zones?name=torchlabs.ca&status=active&per_page=50')"
+          api_root='https://api.cloudflare.com/client/v4'
+          auth_header="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          zone_json="$(curl --silent --show-error --fail-with-body \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            "${api_root}/zones?name=torchlabs.ca&status=active&per_page=50")"
           zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
           account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
           if [[ -z "$zone_id" || -z "$account_id" ]]; then
-            echo "Could not resolve active torchlabs.ca zone/account"
+            echo 'Could not resolve active torchlabs.ca zone/account'
             exit 1
           fi
 
-          echo '=== Relevant DNS records ==='
-          dns_json="$(cf "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?per_page=500")"
-          jq -c '[.result[] | select(.name == "torchlabs.ca" or .name == "www.torchlabs.ca" or .name == "app.torchlabs.ca" or .name == "jack.torchlabs.ca" or .name == "staging.jack.torchlabs.ca") | {id,type,name,content,proxied,ttl,comment,created_on,modified_on}] | sort_by(.name,.type)' <<<"$dns_json"
+          since='2026-08-25T14:30:00Z'
+          before='2026-08-25T17:20:00Z'
 
-          echo '=== Relevant Worker routes ==='
-          if routes_json="$(cf "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes" 2>/tmp/routes-error)"; then
-            jq -c '[.result[] | select((.pattern // "") | contains("torchlabs.ca")) | {id,pattern,script}]' <<<"$routes_json"
+          echo '=== Legacy account audit endpoint ==='
+          legacy_body="$(mktemp)"
+          legacy_status="$(curl --silent --show-error --get \
+            --output "$legacy_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            --data-urlencode "since=${since}" \
+            --data-urlencode "before=${before}" \
+            --data-urlencode 'per_page=1000' \
+            --data-urlencode 'direction=asc' \
+            "${api_root}/accounts/${account_id}/audit_logs")"
+          echo "Legacy audit HTTP ${legacy_status}"
+          if [[ "$legacy_status" =~ ^2 ]]; then
+            jq -c '[.result[] | select((tostring | test("torchlabs\\.ca|dns|record|9d1491d202988497ca6e161887f99bf0|4f8af1675e9d7231222b3d21fd069af7"; "i"))) | {id,when,action,actor:{id,email,type,interface},resource,oldValue,newValue,metadata}]' "$legacy_body"
           else
-            echo "Worker routes unavailable: $(tr '\n' ' ' </tmp/routes-error)"
+            cat "$legacy_body"
           fi
 
-          echo '=== Pages projects and custom domains ==='
-          pages_url="https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects"
-          pages_body="$(mktemp)"
-          pages_status="$(curl --silent --show-error --output "$pages_body" --write-out '%{http_code}' \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --header "Content-Type: application/json" \
-            "$pages_url")"
-          echo "Pages list HTTP ${pages_status}"
-          if [[ "$pages_status" =~ ^2 ]]; then
-            pages_json="$(cat "$pages_body")"
-            jq -c '[.result[] | {name,subdomain,production_branch,domains,source:(.source.config // null),canonical:(.canonical_deployment | if . == null then null else {id,url,created_on,environment,aliases,trigger:(.deployment_trigger.metadata // null)} end),latest:(.latest_deployment | if . == null then null else {id,url,created_on,environment,aliases,trigger:(.deployment_trigger.metadata // null)} end)}]' <<<"$pages_json"
-            while IFS= read -r project; do
-              [[ -n "$project" ]] || continue
-              echo "--- domains for ${project}"
-              if domains_json="$(cf "https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects/${project}/domains")"; then
-                jq -c '[.result[] | {id,name,status,created_on,certificate_authority,validation_data,verification_data}]' <<<"$domains_json"
-              fi
-            done < <(jq -r '.result[].name' <<<"$pages_json")
+          echo '=== Version 2 account audit endpoint ==='
+          v2_body="$(mktemp)"
+          v2_status="$(curl --silent --show-error --get \
+            --output "$v2_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            --data-urlencode "since=${since}" \
+            --data-urlencode "before=${before}" \
+            --data-urlencode "zone_id=${zone_id}" \
+            "${api_root}/accounts/${account_id}/logs/audit")"
+          echo "V2 audit HTTP ${v2_status}"
+          if [[ "$v2_status" =~ ^2 ]]; then
+            jq -c '[.result[] | select((tostring | test("torchlabs\\.ca|dns|record|9d1491d202988497ca6e161887f99bf0|4f8af1675e9d7231222b3d21fd069af7"; "i"))) | {id,action,actor:{id,email,type,context,token_name},raw:{method,status_code,uri},resource,zone}]' "$v2_body"
           else
-            cat "$pages_body"
+            cat "$v2_body"
           fi
-
-          echo '=== Live host fingerprints ==='
-          for host in torchlabs.ca www.torchlabs.ca app.torchlabs.ca jack.torchlabs.ca; do
-            echo "--- ${host}"
-            curl --silent --show-error --location --max-time 30 \
-              --dump-header "/tmp/${host}.headers" \
-              --output "/tmp/${host}.html" \
-              "https://${host}/"
-            awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ || /^x-powered-by:/ || /^x-deployment-id:/ || /^x-vercel-id:/ {gsub(/\r/,""); print}' "/tmp/${host}.headers"
-            printf 'sha256='; sha256sum "/tmp/${host}.html" | awk '{print $1}'
-            title="$(grep -Eio '<title>[^<]*</title>' "/tmp/${host}.html" | head -1 | sed -E 's#</?title>##Ig' || true)"
-            echo "title=${title}"
-          done
