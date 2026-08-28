@@ -1,0 +1,143 @@
+name: Restore Jack Railway DNS v2
+
+on:
+  push:
+    branches:
+      - ops/live-ui-smoke-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+jobs:
+  restore-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Verify Railway custom-host route before changing DNS
+        shell: bash
+        env:
+          JACK_HOST: jack.torchlabs.ca
+          RAILWAY_TARGET: 065w3uja.up.railway.app
+        run: |
+          set -euo pipefail
+          mapfile -t IPS < <(getent ahostsv4 "$RAILWAY_TARGET" | awk '{print $1}' | sort -u)
+          if [ "${#IPS[@]}" -eq 0 ]; then
+            echo "No IPv4 addresses resolved for $RAILWAY_TARGET" >&2
+            exit 1
+          fi
+
+          verified_ip=""
+          for ip in "${IPS[@]}"; do
+            echo "Testing Railway edge $ip with Host/SNI $JACK_HOST"
+            root_code="$(curl --silent --show-error --location --output /tmp/root.html --write-out '%{http_code}' --resolve "$JACK_HOST:443:$ip" "https://$JACK_HOST/?origin_preflight=$(date +%s%N)" || true)"
+            health_code="$(curl --silent --show-error --location --output /tmp/health.json --write-out '%{http_code}' --resolve "$JACK_HOST:443:$ip" "https://$JACK_HOST/api/healthz?origin_preflight=$(date +%s%N)" || true)"
+            echo "root=$root_code health=$health_code"
+            if [ "$root_code" = "200" ] \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/health.json; then
+              verified_ip="$ip"
+              break
+            fi
+          done
+
+          if [ -z "$verified_ip" ]; then
+            echo "Railway custom-host route did not pass Jack root + health acceptance. DNS left unchanged." >&2
+            echo "Root prefix: $(head -c 200 /tmp/root.html 2>/dev/null || true)" >&2
+            echo "Health prefix: $(head -c 200 /tmp/health.json 2>/dev/null || true)" >&2
+            exit 1
+          fi
+
+          echo "VERIFIED_RAILWAY_EDGE_IP=$verified_ip" >> "$GITHUB_ENV"
+          echo "Railway custom-host preflight passed on $verified_ip"
+
+      - name: Restore Cloudflare CNAME to verified Railway target
+        shell: bash
+        env:
+          JACK_HOST: jack.torchlabs.ca
+          RAILWAY_TARGET: 065w3uja.up.railway.app
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const host = process.env.JACK_HOST;
+          const target = process.env.RAILWAY_TARGET;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          if (!token) throw new Error('CLOUDFLARE_API_TOKEN is unavailable');
+
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...(options.headers ?? {}),
+              },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.success === false) {
+              throw new Error(`Cloudflare API ${options.method ?? 'GET'} ${path} failed: ${response.status} ${JSON.stringify(payload.errors ?? [])}`);
+            }
+            return payload.result;
+          }
+
+          const zones = await cf('/zones?name=torchlabs.ca&status=active&per_page=50');
+          if (!Array.isArray(zones) || zones.length !== 1) throw new Error('Active torchlabs.ca zone not uniquely resolved');
+          const records = await cf(`/zones/${zones[0].id}/dns_records?type=CNAME&name=${host}&per_page=100`);
+          if (!Array.isArray(records) || records.length !== 1) throw new Error(`Expected one ${host} CNAME; found ${records?.length ?? 0}`);
+
+          const record = records[0];
+          console.log(JSON.stringify({ before: { id: record.id, name: record.name, content: record.content, proxied: record.proxied, ttl: record.ttl } }, null, 2));
+          if (record.content.toLowerCase() !== target || record.proxied !== false) {
+            const updated = await cf(`/zones/${zones[0].id}/dns_records/${record.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                type: 'CNAME',
+                name: host,
+                content: target,
+                proxied: false,
+                ttl: 1,
+                comment: 'Verified Railway fallback restored for Pilot001 incident recovery 2026-08-28',
+              }),
+            });
+            console.log(JSON.stringify({ after: { id: updated.id, name: updated.name, content: updated.content, proxied: updated.proxied, ttl: updated.ttl } }, null, 2));
+          } else {
+            console.log('DNS record already matches the verified Railway fallback.');
+          }
+          NODE
+
+      - name: Verify public Jack root and health
+        shell: bash
+        env:
+          JACK_HOST: jack.torchlabs.ca
+        run: |
+          set -euo pipefail
+          accepted="false"
+          for attempt in $(seq 1 30); do
+            root_code="$(curl --silent --show-error --location --output /tmp/public-root.html --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://$JACK_HOST/?dns_acceptance=$(date +%s%N)" || true)"
+            health_code="$(curl --silent --show-error --location --output /tmp/public-health.json --write-out '%{http_code}' -H 'Cache-Control: no-cache' "https://$JACK_HOST/api/healthz?dns_acceptance=$(date +%s%N)" || true)"
+            echo "attempt=$attempt root=$root_code health=$health_code"
+            if [ "$root_code" = "200" ] \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/public-root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/public-health.json; then
+              accepted="true"
+              break
+            fi
+            sleep 4
+          done
+
+          if [ "$accepted" != "true" ]; then
+            echo "Public DNS has not converged yet; verified Railway route remains healthy." >&2
+            echo "Root prefix: $(head -c 200 /tmp/public-root.html 2>/dev/null || true)" >&2
+            echo "Health prefix: $(head -c 200 /tmp/public-health.json 2>/dev/null || true)" >&2
+            exit 1
+          fi
+          echo "JACK_PUBLIC_ROOT_AND_HEALTH_ACCEPTED"
