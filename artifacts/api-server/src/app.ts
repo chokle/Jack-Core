@@ -20,7 +20,7 @@ const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://clerk.jack.torchlabs.ca https://clerk.staging.jack.torchlabs.ca https://*.clerk.accounts.dev https://*.clerk.com https://frontend-api.clerk.dev https://challenges.cloudflare.com",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://clerk.torchlabs.ca https://clerk.jack.torchlabs.ca https://clerk.staging.jack.torchlabs.ca https://*.clerk.accounts.dev https://*.clerk.com https://frontend-api.clerk.dev https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: https:",
