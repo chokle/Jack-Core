@@ -1,4 +1,4 @@
-name: Root Domain Origin Validation
+name: Root Domain Sites Mapping Recovery
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  validate-origin:
+  inspect-sites-mapping:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Validate the pre-August-25 landing origin
+      - name: Test current ChatGPT Sites edge and recover historical mapping evidence
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,31 +28,22 @@ jobs:
             --header "$auth_header" \
             --header 'Content-Type: application/json' \
             "${api_root}/zones?name=torchlabs.ca&status=active&per_page=50")"
+          zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
           account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
-          [[ -n "$account_id" ]] || { echo 'Cloudflare account not resolved'; exit 1; }
+          [[ -n "$zone_id" && -n "$account_id" ]] || { echo 'Cloudflare context not resolved'; exit 1; }
 
-          echo '=== Audit resource history: www update ==='
-          history_body="$(mktemp)"
-          history_status="$(curl --silent --show-error \
-            --output "$history_body" --write-out '%{http_code}' \
-            --header "$auth_header" \
-            --header 'Content-Type: application/json' \
-            "${api_root}/accounts/${account_id}/logs/audit/01a03964-11d2-7601-b739-26d640c2d3e8/history")"
-          echo "History HTTP ${history_status}"
-          if [[ "$history_status" =~ ^2 ]]; then
-            jq -c '[.result[] | {id,action,raw,resource,zone}]' "$history_body"
-          else
-            cat "$history_body"
+          echo '=== Current ChatGPT Sites edge IPs ==='
+          mapfile -t sites_ips < <(dig +short A chatgpt.site | grep -E '^[0-9.]+$' | sort -u)
+          printf '%s\n' "${sites_ips[@]}"
+          if (( ${#sites_ips[@]} == 0 )); then
+            echo 'No chatgpt.site A records resolved'
+            exit 1
           fi
 
-          echo '=== Current DNS for chatgpt.site ==='
-          dig +short A chatgpt.site || true
-          dig +short AAAA chatgpt.site || true
-
-          echo '=== Direct origin acceptance ==='
-          passed=0
+          echo '=== Direct custom-host routing tests against current Sites edge ==='
+          accepted=0
           for host in torchlabs.ca www.torchlabs.ca; do
-            for ip in 162.159.143.30 172.66.3.26; do
+            for ip in "${sites_ips[@]}"; do
               echo "--- ${host} via ${ip}"
               body="$(mktemp)"
               headers="$(mktemp)"
@@ -63,18 +54,68 @@ jobs:
                 --write-out '%{http_code}' \
                 "https://${host}/" || true)"
               echo "HTTP ${code:-000}"
-              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ {gsub(/\r/,""); print}' "$headers" || true
+              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ || /^content-type:/ {gsub(/\r/,""); print}' "$headers" || true
               title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
               echo "title=${title}"
-              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,80}|Torch didn.t start in a boardroom|Field intelligence for the skilled trades' "$body" | head -4 | tr '\n' ' ' || true)"
+              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,120}|Torch didn.t start in a boardroom|Built for the field|AI journeyman' "$body" | head -6 | tr '\n' ' ' || true)"
               echo "markers=${markers}"
-              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Field intelligence for the skilled trades' "$body"; then
-                passed=$((passed + 1))
+              echo -n 'body_sha256='; sha256sum "$body" | awk '{print $1}'
+              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Built for the field' "$body"; then
+                accepted=$((accepted + 1))
               fi
             done
           done
-          echo "validated_origin_responses=${passed}"
-          if (( passed == 0 )); then
-            echo 'No original landing response validated; refusing blind DNS restore.'
-            exit 1
+          echo "sites_custom_host_acceptances=${accepted}"
+
+          echo '=== May DNS history for root and www ==='
+          may_body="$(mktemp)"
+          may_status="$(curl --silent --show-error --get \
+            --output "$may_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            --data-urlencode 'since=2026-05-01T00:00:00Z' \
+            --data-urlencode 'before=2026-06-01T00:00:00Z' \
+            --data-urlencode "zone_id=${zone_id}" \
+            "${api_root}/accounts/${account_id}/logs/audit")"
+          echo "May audit HTTP ${may_status}"
+          if [[ "$may_status" =~ ^2 ]]; then
+            jq -c '[.result[] | select((.resource.product // "") == "dns_records") | select(((.resource.request.name // .resource.response.name // "") == "torchlabs.ca") or ((.resource.request.name // .resource.response.name // "") == "www.torchlabs.ca")) | {id,action,actor,resource,zone}] | sort_by(.action.time)' "$may_body"
+          else
+            cat "$may_body"
+          fi
+
+          echo '=== May account-wide ChatGPT Sites/custom-host evidence ==='
+          account_body="$(mktemp)"
+          account_status="$(curl --silent --show-error --get \
+            --output "$account_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            --data-urlencode 'since=2026-05-01T00:00:00Z' \
+            --data-urlencode 'before=2026-06-01T00:00:00Z' \
+            "${api_root}/accounts/${account_id}/logs/audit")"
+          echo "Account audit HTTP ${account_status}"
+          if [[ "$account_status" =~ ^2 ]]; then
+            jq -c '[.result[] | select((tostring | test("chatgpt\\.site|torchlabs\\.ca|custom_hostname|custom host"; "i"))) | {id,action,actor,raw,resource,zone}] | sort_by(.action.time)' "$account_body"
+          else
+            cat "$account_body"
+          fi
+
+          echo '=== History expansion for the August 25 www update ==='
+          history_body="$(mktemp)"
+          history_status="$(curl --silent --show-error --get \
+            --output "$history_body" --write-out '%{http_code}' \
+            --header "$auth_header" \
+            --header 'Content-Type: application/json' \
+            --data-urlencode 'since=2026-05-01T00:00:00Z' \
+            --data-urlencode 'before=2026-08-26T00:00:00Z' \
+            "${api_root}/accounts/${account_id}/logs/audit/01a03964-11d2-7601-b739-26d640c2d3e8/history")"
+          echo "History HTTP ${history_status}"
+          if [[ "$history_status" =~ ^2 ]]; then
+            jq -c '.result' "$history_body"
+          else
+            cat "$history_body"
+          fi
+
+          if (( accepted == 0 )); then
+            echo 'Current Sites edge does not recognize the landing custom hostname.'
           fi
