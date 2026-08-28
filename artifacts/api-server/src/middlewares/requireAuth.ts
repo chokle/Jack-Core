@@ -13,6 +13,10 @@ import { getAuth } from "@clerk/express";
  */
 const PUBLIC_API_PATHS: ReadonlySet<string> = new Set(["/", "/healthz", "/system-health"]);
 
+export function isPublicApiPath(path: string): boolean {
+  return PUBLIC_API_PATHS.has(path) || path.startsWith("/__clerk");
+}
+
 /**
  * The server-enforced authentication boundary for the whole API. Mounted at the
  * `/api` composition layer (after `clerkMiddleware`) rather than inside routers,
@@ -36,9 +40,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  const isClerkProxyRequest = req.path.startsWith("/__clerk");
-
-  if (PUBLIC_API_PATHS.has(req.path) || isClerkProxyRequest) {
+  if (isPublicApiPath(req.path)) {
     next();
     return;
   }
