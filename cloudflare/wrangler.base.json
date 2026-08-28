@@ -20,13 +20,9 @@
     "required": [
       "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
-      "SUPABASE_DB_URL",
       "CLERK_SECRET_KEY",
       "OPENAI_API_KEY",
-      "RESEND_API_KEY",
-      "ADMIN_EMAILS",
-      "FEEDBACK_FROM_EMAIL",
-      "FEEDBACK_NOTIFICATION_RECIPIENTS"
+      "ADMIN_EMAILS"
     ]
   },
   "containers": [
