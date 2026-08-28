@@ -1,0 +1,366 @@
+name: Final Edge Production Acceptance
+
+on:
+  push:
+    branches:
+      - ops/edge-csp-final-20260828
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  JACK_HOST: jack.torchlabs.ca
+  RAILWAY_TARGET: 065w3uja.up.railway.app
+  EDGE_SCRIPT: jack-production-csp-final-20260828
+
+jobs:
+  recover-and-accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Verify the Railway origin with Jack's custom hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t IPS < <(getent ahostsv4 "$RAILWAY_TARGET" | awk '{print $1}' | sort -u)
+          test "${#IPS[@]}" -gt 0
+          accepted=false
+          for ip in "${IPS[@]}"; do
+            root_code="$(curl --silent --show-error --location --output /tmp/origin-root.html --write-out '%{http_code}' --resolve "$JACK_HOST:443:$ip" "https://$JACK_HOST/?final_origin=$(date +%s%N)" || true)"
+            health_code="$(curl --silent --show-error --location --output /tmp/origin-health.json --write-out '%{http_code}' --resolve "$JACK_HOST:443:$ip" "https://$JACK_HOST/api/healthz?final_origin=$(date +%s%N)" || true)"
+            if [ "$root_code" = "200" ] \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/origin-root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/origin-health.json; then
+              accepted=true
+              echo "Verified Railway origin on $ip"
+              break
+            fi
+          done
+          test "$accepted" = true
+
+      - name: Deploy a reversible final CSP Worker and bind the production route
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const host = process.env.JACK_HOST;
+          const railwayTarget = process.env.RAILWAY_TARGET;
+          const scriptName = process.env.EDGE_SCRIPT;
+          if (!token) throw new Error('CLOUDFLARE_API_TOKEN is unavailable');
+
+          async function cf(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: {
+                Authorization: `Bearer ${token}`,
+                ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+                ...(options.headers ?? {}),
+              },
+            });
+            const text = await response.text();
+            let payload;
+            try { payload = JSON.parse(text); } catch { payload = { success: response.ok, result: text }; }
+            if (!response.ok || payload.success === false) {
+              throw new Error(`${options.method ?? 'GET'} ${path} failed: ${response.status} ${JSON.stringify(payload.errors ?? payload)}`);
+            }
+            return payload.result;
+          }
+
+          const zones = await cf('/zones?name=torchlabs.ca&status=active&per_page=50');
+          if (!Array.isArray(zones) || zones.length !== 1) throw new Error('Active torchlabs.ca zone was not uniquely resolved');
+          const zone = zones[0];
+          const records = await cf(`/zones/${zone.id}/dns_records?type=CNAME&name=${host}&per_page=100`);
+          if (!Array.isArray(records) || records.length !== 1) throw new Error(`Expected one ${host} CNAME; found ${records?.length ?? 0}`);
+          const record = records[0];
+          if (String(record.content).toLowerCase() !== railwayTarget) {
+            throw new Error(`Unexpected production origin ${record.content}; no mutation performed`);
+          }
+
+          const routes = await cf(`/zones/${zone.id}/workers/routes`);
+          const pattern = `${host}/*`;
+          const existingRoute = (routes ?? []).find((route) => route.pattern === pattern) ?? null;
+          const state = {
+            accountId: zone.account.id,
+            zoneId: zone.id,
+            dnsRecordId: record.id,
+            dnsContent: record.content,
+            dnsProxied: record.proxied,
+            dnsTtl: record.ttl,
+            routeId: existingRoute?.id ?? null,
+            routeScript: existingRoute?.script ?? null,
+            routePattern: pattern,
+            newScript: scriptName,
+          };
+          fs.writeFileSync('/tmp/jack-edge-state.json', JSON.stringify(state, null, 2));
+          console.log(JSON.stringify({ before: state }, null, 2));
+
+          const workerSource = `
+          const REQUIRED = {
+            'script-src': ['https://clerk.torchlabs.ca', 'https://static.cloudflareinsights.com'],
+            'connect-src': ['https://clerk.torchlabs.ca', 'https://cloudflareinsights.com', 'https://static.cloudflareinsights.com'],
+            'frame-src': ['https://clerk.torchlabs.ca']
+          };
+
+          function patchPolicy(value) {
+            if (!value) return value;
+            const directives = value.split(';').map((part) => part.trim()).filter(Boolean);
+            const byName = new Map(directives.map((directive) => [directive.split(/\\s+/, 1)[0], directive]));
+            for (const [name, sources] of Object.entries(REQUIRED)) {
+              const current = byName.get(name) || name;
+              const additions = sources.filter((source) => !current.split(/\\s+/).includes(source));
+              byName.set(name, additions.length ? current + ' ' + additions.join(' ') : current);
+            }
+            const seen = new Set();
+            const ordered = directives.map((directive) => {
+              const name = directive.split(/\\s+/, 1)[0];
+              seen.add(name);
+              return byName.get(name) || directive;
+            });
+            for (const name of Object.keys(REQUIRED)) {
+              if (!seen.has(name)) ordered.push(byName.get(name));
+            }
+            return ordered.join('; ');
+          }
+
+          export default {
+            async fetch(request) {
+              const upstream = await fetch(request);
+              const response = new Response(upstream.body, upstream);
+              const policy = response.headers.get('Content-Security-Policy');
+              if (policy) response.headers.set('Content-Security-Policy', patchPolicy(policy));
+              response.headers.set('X-Jack-Edge-Recovery', 'clerk-csp-final-20260828');
+              const type = response.headers.get('Content-Type') || '';
+              if (!type.toLowerCase().includes('text/html')) return response;
+              return new HTMLRewriter()
+                .on('meta[http-equiv="Content-Security-Policy"]', {
+                  element(element) {
+                    const content = element.getAttribute('content');
+                    if (content) element.setAttribute('content', patchPolicy(content));
+                  }
+                })
+                .transform(response);
+            }
+          };
+          `;
+
+          const form = new FormData();
+          form.append('metadata', new Blob([JSON.stringify({
+            main_module: 'worker.mjs',
+            compatibility_date: '2026-08-28',
+            bindings: [],
+          })], { type: 'application/json' }), 'metadata.json');
+          form.append('worker.mjs', new Blob([workerSource], { type: 'application/javascript+module' }), 'worker.mjs');
+          await cf(`/accounts/${zone.account.id}/workers/scripts/${scriptName}`, { method: 'PUT', body: form });
+          console.log(`Uploaded Worker ${scriptName}`);
+
+          if (existingRoute) {
+            await cf(`/zones/${zone.id}/workers/routes/${existingRoute.id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ pattern, script: scriptName }),
+            });
+            console.log(`Switched route ${existingRoute.id} from ${existingRoute.script ?? 'none'} to ${scriptName}`);
+          } else {
+            const created = await cf(`/zones/${zone.id}/workers/routes`, {
+              method: 'POST',
+              body: JSON.stringify({ pattern, script: scriptName }),
+            });
+            state.createdRouteId = created.id;
+            fs.writeFileSync('/tmp/jack-edge-state.json', JSON.stringify(state, null, 2));
+            console.log(`Created route ${created.id} for ${scriptName}`);
+          }
+
+          if (record.proxied !== true) {
+            await cf(`/zones/${zone.id}/dns_records/${record.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                type: 'CNAME',
+                name: host,
+                content: record.content,
+                proxied: true,
+                ttl: 1,
+                comment: 'Reversible final Jack CSP recovery and acceptance, 2026-08-28',
+              }),
+            });
+            console.log('Enabled the Cloudflare proxy for the verified Railway origin');
+          }
+          NODE
+
+      - name: Wait for the final edge policy and healthy Jack response
+        shell: bash
+        run: |
+          set -euo pipefail
+          accepted=false
+          for attempt in $(seq 1 48); do
+            curl --silent --show-error --location --dump-header /tmp/final-headers.txt --output /tmp/final-root.html \
+              -H 'Cache-Control: no-cache' "https://$JACK_HOST/?final_edge=$(date +%s%N)" || true
+            health_code="$(curl --silent --show-error --location --output /tmp/final-health.json --write-out '%{http_code}' \
+              -H 'Cache-Control: no-cache' "https://$JACK_HOST/api/healthz?final_edge=$(date +%s%N)" || true)"
+            if grep -Eqi '^x-jack-edge-recovery:[[:space:]]*clerk-csp-final-20260828' /tmp/final-headers.txt \
+              && grep -Eqi '^content-security-policy:.*script-src[^\r\n]*https://clerk\.torchlabs\.ca' /tmp/final-headers.txt \
+              && grep -Eqi '^content-security-policy:.*script-src[^\r\n]*https://static\.cloudflareinsights\.com' /tmp/final-headers.txt \
+              && grep -Eqi '^content-security-policy:.*connect-src[^\r\n]*https://cloudflareinsights\.com' /tmp/final-headers.txt \
+              && grep -Eqi 'Jack — AI Trade Intelligence Engine|application-name[^>]+content="Jack"' /tmp/final-root.html \
+              && [ "$health_code" = "200" ] \
+              && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' /tmp/final-health.json; then
+              accepted=true
+              echo "Final edge policy and Jack health accepted on attempt $attempt"
+              break
+            fi
+            echo "attempt=$attempt waiting for final edge route"
+            sleep 5
+          done
+          test "$accepted" = true
+
+      - name: Install the mobile browser acceptance runner
+        shell: bash
+        run: |
+          mkdir -p /tmp/jack-final-smoke
+          cd /tmp/jack-final-smoke
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run strict live mobile sign-in acceptance
+        shell: bash
+        run: |
+          cd /tmp/jack-final-smoke
+          cat > final-smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+
+          (async () => {
+            const origin = 'https://jack.torchlabs.ca';
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 430, height: 932 },
+              userAgent: 'Jack-Final-Pilot-Acceptance/2026-08-28',
+            });
+            const pageErrors = [];
+            const consoleErrors = [];
+            const failedRequests = [];
+            const page = await context.newPage();
+            page.on('pageerror', (error) => pageErrors.push(String(error)));
+            page.on('console', (message) => {
+              if (message.type() === 'error') consoleErrors.push(message.text());
+            });
+            page.on('requestfailed', (request) => {
+              failedRequests.push({ url: request.url(), error: request.failure()?.errorText ?? 'unknown' });
+            });
+
+            const result = { checkedAt: new Date().toISOString(), signIn: {}, root: {}, health: {}, pageErrors, consoleErrors, failedRequests };
+            const signInResponse = await page.goto(`${origin}/sign-in?final_acceptance=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(10000);
+            const body = (await page.locator('body').innerText()).slice(0, 3000);
+            result.signIn = {
+              status: signInResponse?.status() ?? null,
+              url: page.url(),
+              title: await page.title(),
+              body,
+              emailInputs: await page.locator('input[type="email"], input[name="identifier"]').count(),
+              passwordInputs: await page.locator('input[type="password"]').count(),
+              signInButtons: await page.getByRole('button', { name: /sign in/i }).count(),
+              pilotAccessCopy: /Pilot participant access/i.test(body),
+              startingJack: await page.getByText('Starting Jack…', { exact: true }).count(),
+              authUnavailable: await page.getByText('Sign-in is temporarily unavailable', { exact: true }).count(),
+              visibleBlurOverlays: await page.locator('[class*="backdrop-blur"]:visible').count(),
+            };
+            await page.screenshot({ path: 'final-sign-in.png', fullPage: true });
+
+            const rootResponse = await page.goto(`${origin}/?final_acceptance=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.waitForTimeout(5000);
+            result.root = { status: rootResponse?.status() ?? null, url: page.url(), title: await page.title() };
+            await page.screenshot({ path: 'final-root.png', fullPage: true });
+
+            const healthResponse = await context.request.get(`${origin}/api/healthz?final_acceptance=${Date.now()}`, { timeout: 30000 });
+            result.health = { status: healthResponse.status(), body: (await healthResponse.text()).slice(0, 2000) };
+            fs.writeFileSync('final-result.json', JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(result, null, 2));
+
+            const fatal = [];
+            if (result.signIn.status !== 200) fatal.push(`sign-in status ${result.signIn.status}`);
+            if (!result.signIn.title.includes('Jack')) fatal.push('sign-in title is not Jack');
+            if (result.signIn.emailInputs < 1) fatal.push('email input did not render');
+            if (result.signIn.passwordInputs < 1) fatal.push('password input did not render');
+            if (result.signIn.signInButtons < 1) fatal.push('sign-in button did not render');
+            if (!result.signIn.pilotAccessCopy) fatal.push('pilot access screen did not render');
+            if (result.signIn.startingJack > 0) fatal.push('startup overlay remained');
+            if (result.signIn.authUnavailable > 0) fatal.push('auth unavailable error rendered');
+            if (result.signIn.visibleBlurOverlays > 0) fatal.push('visible blur overlay remained');
+            if (result.root.status !== 200 || !result.root.title.includes('Jack')) fatal.push('Jack root shell failed');
+            if (result.health.status !== 200 || !String(result.health.body).includes('"status":"ok"')) fatal.push('health endpoint failed');
+            if (pageErrors.length > 0) fatal.push(`${pageErrors.length} page error(s)`);
+            if (consoleErrors.length > 0) fatal.push(`${consoleErrors.length} console error(s)`);
+            if (failedRequests.length > 0) fatal.push(`${failedRequests.length} failed request(s)`);
+
+            await browser.close();
+            if (fatal.length) {
+              console.error(`FINAL_ACCEPTANCE_FAILED: ${fatal.join('; ')}`);
+              process.exit(1);
+            }
+            console.log('JACK_PRODUCTION_FINAL_ACCEPTANCE_PASSED');
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+          node final-smoke.cjs
+
+      - name: Upload final acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jack-production-final-acceptance
+          path: |
+            /tmp/jack-final-smoke/final-result.json
+            /tmp/jack-final-smoke/final-sign-in.png
+            /tmp/jack-final-smoke/final-root.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Restore the prior route and DNS state if final acceptance fails
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          if (!fs.existsSync('/tmp/jack-edge-state.json')) process.exit(0);
+          const state = JSON.parse(fs.readFileSync('/tmp/jack-edge-state.json', 'utf8'));
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          async function call(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+            });
+            console.log(`${options.method ?? 'GET'} ${path}: ${response.status}`);
+            return response;
+          }
+          const routeId = state.routeId ?? state.createdRouteId;
+          if (state.routeId) {
+            await call(`/zones/${state.zoneId}/workers/routes/${state.routeId}`, {
+              method: 'PUT',
+              body: JSON.stringify({ pattern: state.routePattern, script: state.routeScript }),
+            });
+          } else if (routeId) {
+            await call(`/zones/${state.zoneId}/workers/routes/${routeId}`, { method: 'DELETE' });
+          }
+          await call(`/zones/${state.zoneId}/dns_records/${state.dnsRecordId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              type: 'CNAME',
+              name: process.env.JACK_HOST,
+              content: state.dnsContent,
+              proxied: state.dnsProxied,
+              ttl: state.dnsProxied ? 1 : state.dnsTtl,
+            }),
+          });
+          await call(`/accounts/${state.accountId}/workers/scripts/${state.newScript}`, { method: 'DELETE' });
+          NODE
