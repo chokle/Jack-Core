@@ -1,0 +1,74 @@
+name: Root Domain Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/diagnose-root-domain-20260828
+    paths:
+      - .github/workflows/root-domain-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect Cloudflare hostname bindings
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "Missing CLOUDFLARE_API_TOKEN"
+            exit 1
+          fi
+
+          cf() {
+            curl --silent --show-error --fail-with-body \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Content-Type: application/json" \
+              "$1"
+          }
+
+          zone_json="$(cf 'https://api.cloudflare.com/client/v4/zones?name=torchlabs.ca&status=active')"
+          zone_id="$(jq -r '.result[0].id // empty' <<<"$zone_json")"
+          account_id="$(jq -r '.result[0].account.id // empty' <<<"$zone_json")"
+          if [[ -z "$zone_id" || -z "$account_id" ]]; then
+            echo "Could not resolve active torchlabs.ca zone/account"
+            exit 1
+          fi
+
+          echo '=== Relevant DNS records ==='
+          dns_json="$(cf "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?per_page=500")"
+          jq -c '[.result[] | select(.name == "torchlabs.ca" or .name == "www.torchlabs.ca" or .name == "app.torchlabs.ca" or .name == "jack.torchlabs.ca" or .name == "staging.jack.torchlabs.ca") | {id,type,name,content,proxied,ttl,comment}] | sort_by(.name,.type)' <<<"$dns_json"
+
+          echo '=== Relevant Worker routes ==='
+          if routes_json="$(cf "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes" 2>/tmp/routes-error)"; then
+            jq -c '[.result[] | select((.pattern // "") | contains("torchlabs.ca")) | {id,pattern,script}]' <<<"$routes_json"
+          else
+            echo "Worker routes unavailable: $(tr '\n' ' ' </tmp/routes-error)"
+          fi
+
+          echo '=== Pages projects and custom domains ==='
+          if pages_json="$(cf "https://api.cloudflare.com/client/v4/accounts/${account_id}/pages/projects?per_page=100" 2>/tmp/pages-error)"; then
+            jq -c '[.result[] | {name,subdomain,production_branch,domains,source:(.source.config // null),latest_production:(.latest_production_deployment | if . == null then null else {id,url,created_on,environment,aliases} end)}]' <<<"$pages_json"
+          else
+            echo "Pages projects unavailable: $(tr '\n' ' ' </tmp/pages-error)"
+          fi
+
+          echo '=== Live host fingerprints ==='
+          for host in torchlabs.ca www.torchlabs.ca app.torchlabs.ca jack.torchlabs.ca; do
+            echo "--- ${host}"
+            curl --silent --show-error --location --max-time 30 \
+              --dump-header "/tmp/${host}.headers" \
+              --output "/tmp/${host}.html" \
+              "https://${host}/"
+            awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^cf-cache-status:/ || /^x-powered-by:/ || /^x-deployment-id:/ || /^x-vercel-id:/ {gsub(/\r/,""); print}' "/tmp/${host}.headers"
+            printf 'sha256='; sha256sum "/tmp/${host}.html" | awk '{print $1}'
+            title="$(grep -Eio '<title>[^<]*</title>' "/tmp/${host}.html" | head -1 | sed -E 's#</?title>##Ig' || true)"
+            echo "title=${title}"
+          done
