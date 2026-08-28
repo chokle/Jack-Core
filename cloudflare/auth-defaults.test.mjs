@@ -5,11 +5,12 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Cloudflare production defaults require authenticated Clerk users", async () => {
-  const [baseText, generator, dockerfile, workflow] = await Promise.all([
+  const [baseText, generator, dockerfile, workflow, worker] = await Promise.all([
     read("cloudflare/wrangler.base.json"),
     read("cloudflare/generate-deploy-config.mjs"),
     read("Dockerfile.cloudflare"),
     read(".github/workflows/cloudflare-production-deploy.yml"),
+    read("cloudflare/worker.mjs"),
   ]);
   const base = JSON.parse(baseText);
 
@@ -45,6 +46,16 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /for attempt in \$\(seq 1 42\)/);
   assert.match(workflow, /containers list --json/);
   assert.match(workflow, /containers instances "\$application_id" --json/);
+
+  assert.match(worker, /STARTUP_PROBE_TIMEOUT_MS = 2000/);
+  assert.match(worker, /Promise\.race/);
+  assert.match(worker, /\/api\/healthz/);
+  assert.match(worker, /await this\.waitForReadiness\(port\)/);
+  assert.match(worker, /return await port\.fetch\(request\)/);
+
+  const readinessIndex = worker.indexOf("await this.waitForReadiness(port)");
+  const forwardIndex = worker.indexOf("return await port.fetch(request)");
+  assert.ok(readinessIndex >= 0 && forwardIndex > readinessIndex);
 
   const jobHeader = workflow.slice(
     workflow.indexOf("jobs:"),
