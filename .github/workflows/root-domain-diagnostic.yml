@@ -1,4 +1,4 @@
-name: Root Domain Former Origin Validation
+name: Root Landing Archive Recovery
 
 on:
   push:
@@ -12,74 +12,116 @@ permissions:
   contents: read
 
 jobs:
-  validate-former-origin:
+  recover-archives:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Validate former Totalum landing deployment and custom-host routing
+      - name: Locate archived copies of the newer Torch landing page
         shell: bash
         run: |
           set -euo pipefail
-          target='dnv-9793f3846a98471cb2b0-fm6h0p.totalum-project.com'
+          mkdir -p /tmp/recovery
 
-          echo '=== Former target DNS ==='
-          echo 'CNAME:'
-          dig +short CNAME "$target" || true
-          echo 'A:'
-          mapfile -t target_ips < <(dig +short A "$target" | grep -E '^[0-9.]+$' | sort -u)
-          printf '%s\n' "${target_ips[@]:-}"
-          echo 'AAAA:'
-          dig +short AAAA "$target" || true
+          echo '=== Internet Archive CDX: apex ==='
+          cdx_apex='https://web.archive.org/cdx/search/cdx?url=torchlabs.ca%2F&from=2026&to=2026&output=json&filter=statuscode%3A200&filter=mimetype%3Atext%2Fhtml&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest%2Clength&collapse=digest'
+          curl --silent --show-error --location --max-time 60 "$cdx_apex" | tee /tmp/recovery/cdx-apex.json || true
+          echo
 
-          echo '=== Direct target HTTPS ==='
-          direct_body="$(mktemp)"
-          direct_headers="$(mktemp)"
-          direct_code="$(curl --silent --show-error --location --max-time 30 \
-            --dump-header "$direct_headers" \
-            --output "$direct_body" \
-            --write-out '%{http_code}' \
-            "https://${target}/" || true)"
-          echo "HTTP ${direct_code:-000}"
-          awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^content-type:/ || /^cf-cache-status:/ || /^x-powered-by:/ {gsub(/\r/,""); print}' "$direct_headers" || true
-          direct_title="$(grep -Eio '<title>[^<]*</title>' "$direct_body" | head -1 | sed -E 's#</?title>##Ig' || true)"
-          echo "title=${direct_title}"
-          direct_markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$direct_body" | head -10 | tr '\n' ' ' || true)"
-          echo "markers=${direct_markers}"
-          echo -n 'body_sha256='; sha256sum "$direct_body" | awk '{print $1}'
-          echo -n 'body_bytes='; wc -c < "$direct_body"
+          echo '=== Internet Archive CDX: www ==='
+          cdx_www='https://web.archive.org/cdx/search/cdx?url=www.torchlabs.ca%2F&from=2026&to=2026&output=json&filter=statuscode%3A200&filter=mimetype%3Atext%2Fhtml&fl=timestamp%2Coriginal%2Cstatuscode%2Cdigest%2Clength&collapse=digest'
+          curl --silent --show-error --location --max-time 60 "$cdx_www" | tee /tmp/recovery/cdx-www.json || true
+          echo
 
-          echo '=== Direct target HTTP ==='
-          curl --silent --show-error --head --max-time 30 "http://${target}/" || true
+          echo '=== Fetch latest Wayback snapshot before August 25, if present ==='
+          timestamp="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[]
+          for path in ['/tmp/recovery/cdx-apex.json','/tmp/recovery/cdx-www.json']:
+              try:
+                  data=json.loads(Path(path).read_text())
+              except Exception:
+                  continue
+              if isinstance(data,list) and len(data)>1:
+                  header=data[0]
+                  for row in data[1:]:
+                      item=dict(zip(header,row))
+                      ts=item.get('timestamp','')
+                      if ts and ts < '20260825000000': rows.append(item)
+          rows.sort(key=lambda x:x['timestamp'])
+          print(rows[-1]['timestamp'] if rows else '')
+          PY
+          )"
+          echo "wayback_timestamp=${timestamp}"
+          if [[ -n "$timestamp" ]]; then
+            snapshot="https://web.archive.org/web/${timestamp}id_/https://torchlabs.ca/"
+            curl --silent --show-error --location --max-time 120 --output /tmp/recovery/wayback.html "$snapshot" || true
+            echo -n 'wayback_bytes='; wc -c < /tmp/recovery/wayback.html
+            grep -Eio '<title>[^<]*</title>' /tmp/recovery/wayback.html | head -1 || true
+            grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field' /tmp/recovery/wayback.html | head -10 || true
+            echo 'Wayback asset candidates:'
+            grep -Eo '(src|href)="[^"]+"' /tmp/recovery/wayback.html | sed -E 's/^[^=]+="//;s/"$//' | head -80 || true
+          fi
 
-          echo '=== Custom-host tests through former target IPs ==='
-          accepted=0
-          for host in torchlabs.ca www.torchlabs.ca; do
-            for ip in "${target_ips[@]:-}"; do
-              [[ -n "$ip" ]] || continue
-              echo "--- ${host} via ${ip}"
-              body="$(mktemp)"
-              headers="$(mktemp)"
-              code="$(curl --silent --show-error --location --max-time 30 \
-                --resolve "${host}:443:${ip}" \
-                --dump-header "$headers" \
-                --output "$body" \
-                --write-out '%{http_code}' \
-                "https://${host}/" || true)"
-              echo "HTTP ${code:-000}"
-              awk 'BEGIN{IGNORECASE=1} /^HTTP\// || /^server:/ || /^location:/ || /^content-type:/ || /^cf-cache-status:/ || /^x-powered-by:/ {gsub(/\r/,""); print}' "$headers" || true
-              title="$(grep -Eio '<title>[^<]*</title>' "$body" | head -1 | sed -E 's#</?title>##Ig' || true)"
-              echo "title=${title}"
-              markers="$(grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$body" | head -10 | tr '\n' ' ' || true)"
-              echo "markers=${markers}"
-              echo -n 'body_sha256='; sha256sum "$body" | awk '{print $1}'
-              if [[ "$code" =~ ^2 ]] && grep -Eqi 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge|Torch didn.t start in a boardroom|Built for the field|Structured mentorship|Red Seal' "$body"; then
-                accepted=$((accepted + 1))
-              fi
-            done
-          done
-          echo "former_origin_acceptances=${accepted}"
+          echo '=== Common Crawl collections ==='
+          curl --silent --show-error --location --max-time 60 'https://index.commoncrawl.org/collinfo.json' --output /tmp/recovery/collinfo.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('/tmp/recovery/collinfo.json').read_text())
+          for row in data[:8]: print(row.get('id'), row.get('cdx-api'))
+          PY
 
-          if [[ ! "$direct_code" =~ ^2 ]] || [[ ! -s "$direct_body" ]]; then
-            echo 'Former deployment is not serving a usable HTTPS response.'
-            exit 1
+          echo '=== Common Crawl URL index hits ==='
+          python3 - <<'PY'
+          import json, urllib.parse, urllib.request
+          from pathlib import Path
+          collections=json.loads(Path('/tmp/recovery/collinfo.json').read_text())[:12]
+          all_hits=[]
+          for collection in collections:
+              endpoint=collection.get('cdx-api')
+              if not endpoint: continue
+              url=endpoint+'?'+urllib.parse.urlencode({'url':'torchlabs.ca/','output':'json','filter':'status:200','matchType':'exact'})
+              try:
+                  with urllib.request.urlopen(url, timeout=45) as r:
+                      body=r.read().decode('utf-8','replace')
+              except Exception as e:
+                  print(collection.get('id'),'ERROR',repr(e))
+                  continue
+              hits=[]
+              for line in body.splitlines():
+                  try: hits.append(json.loads(line))
+                  except Exception: pass
+              print(collection.get('id'),'hits',len(hits))
+              for hit in hits[-5:]:
+                  keep={k:hit.get(k) for k in ['timestamp','url','status','mime','digest','filename','offset','length']}
+                  print(json.dumps(keep,separators=(',',':')))
+                  all_hits.append((collection.get('id'),hit))
+          if all_hits:
+              all_hits.sort(key=lambda x:x[1].get('timestamp',''))
+              Path('/tmp/recovery/commoncrawl-latest.json').write_text(json.dumps({'collection':all_hits[-1][0],'hit':all_hits[-1][1]}))
+          PY
+
+          echo '=== Recover latest Common Crawl response, if present ==='
+          if [[ -s /tmp/recovery/commoncrawl-latest.json ]]; then
+            python3 - <<'PY'
+          import gzip, io, json, urllib.request
+          from pathlib import Path
+          meta=json.loads(Path('/tmp/recovery/commoncrawl-latest.json').read_text())['hit']
+          filename=meta['filename']; offset=int(meta['offset']); length=int(meta['length'])
+          req=urllib.request.Request('https://data.commoncrawl.org/'+filename, headers={'Range':f'bytes={offset}-{offset+length-1}'})
+          with urllib.request.urlopen(req, timeout=120) as r: blob=r.read()
+          raw=gzip.GzipFile(fileobj=io.BytesIO(blob)).read()
+          split=raw.find(b'\r\n\r\n')
+          warc_payload=raw[split+4:] if split>=0 else raw
+          split2=warc_payload.find(b'\r\n\r\n')
+          http_payload=warc_payload[split2+4:] if split2>=0 else warc_payload
+          Path('/tmp/recovery/commoncrawl.html').write_bytes(http_payload)
+          print('commoncrawl_timestamp='+meta.get('timestamp',''))
+          print('commoncrawl_bytes='+str(len(http_payload)))
+          PY
+            grep -Eio '<title>[^<]*</title>' /tmp/recovery/commoncrawl.html | head -1 || true
+            grep -Eio 'FIELD INTELLIGENCE FOR THE SKILLED TRADES|The knowledge[^<]{0,180}|Torch didn.t start in a boardroom|Built for the field' /tmp/recovery/commoncrawl.html | head -10 || true
+            echo 'Common Crawl asset candidates:'
+            grep -Eo '(src|href)="[^"]+"' /tmp/recovery/commoncrawl.html | sed -E 's/^[^=]+="//;s/"$//' | head -80 || true
           fi
