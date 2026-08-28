@@ -5,11 +5,12 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Cloudflare production defaults require authenticated Clerk users", async () => {
-  const [baseText, generator, dockerfile, workflow] = await Promise.all([
+  const [baseText, generator, dockerfile, workflow, verifyWorkflow] = await Promise.all([
     read("cloudflare/wrangler.base.json"),
     read("cloudflare/generate-deploy-config.mjs"),
     read("Dockerfile.cloudflare"),
     read(".github/workflows/cloudflare-production-deploy.yml"),
+    read(".github/workflows/cloudflare-cutover-verify.yml"),
   ]);
   const base = JSON.parse(baseText);
 
@@ -26,8 +27,14 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
   assert.doesNotMatch(generator, /PILOT_AUTH_BYPASS !== "false"/);
   assert.match(dockerfile, /ARG VITE_PILOT_AUTH_BYPASS=false/);
+  assert.match(dockerfile, /ARG VITE_PUBLIC_DEMO_URL=/);
+  assert.match(dockerfile, /ENV VITE_PUBLIC_DEMO_URL=\$VITE_PUBLIC_DEMO_URL/);
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
+  assert.match(workflow, /vars\.VITE_PUBLIC_DEMO_URL/);
+  assert.match(workflow, /--build-arg VITE_PUBLIC_DEMO_URL=/);
+  assert.match(verifyWorkflow, /--build-arg VITE_PUBLIC_DEMO_URL=/);
+  assert.match(verifyWorkflow, /grep -R -F "\$VITE_PUBLIC_DEMO_URL"/);
   assert.match(workflow, /--secrets-file/);
   assert.match(workflow, /cloudflare-secrets\.json/);
   assert.match(workflow, /X-Jack-Diagnostic:ci-smoke/);
