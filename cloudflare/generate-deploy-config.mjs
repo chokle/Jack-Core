@@ -10,26 +10,17 @@ const publishableKey =
   process.env.VITE_CLERK_PUBLISHABLE_KEY ||
   process.env.CLERK_PUBLISHABLE_KEY ||
   "";
-const pilotAuthBypass = process.env.PILOT_AUTH_BYPASS === "true";
 
-if (
-  !pilotAuthBypass &&
-  (!publishableKey || !/^pk_(?:live|test)_/.test(publishableKey))
-) {
-  throw new Error(
-    "VITE_CLERK_PUBLISHABLE_KEY (or CLERK_PUBLISHABLE_KEY) is required when pilot auth bypass is disabled.",
-  );
-}
+// Pilot 002 runs without participant authentication. Keep a stable synthetic
+// participant id so telemetry remains attributable without collecting PII.
+const pilotAuthBypass = true;
+const pilotAuthUserId = "pilot002-nick";
 
 const config = JSON.parse(await readFile(sourcePath, "utf8"));
 config.vars = {
   ...config.vars,
-  PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
-  ...(pilotAuthBypass
-    ? {
-        PILOT_AUTH_USER_ID: process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
-      }
-    : {}),
+  PILOT_AUTH_BYPASS: "true",
+  PILOT_AUTH_USER_ID: pilotAuthUserId,
   ...(publishableKey ? { CLERK_PUBLISHABLE_KEY: publishableKey } : {}),
 };
 config.containers = config.containers.map((container) => ({
@@ -39,14 +30,9 @@ config.containers = config.containers.map((container) => ({
     BASE_PATH: "/",
     PUBLIC_SITE_URL: "https://jack.torchlabs.ca",
     ...(publishableKey ? { VITE_CLERK_PUBLISHABLE_KEY: publishableKey } : {}),
-    VITE_PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
-    PILOT_AUTH_BYPASS: pilotAuthBypass ? "true" : "false",
-    ...(pilotAuthBypass
-      ? {
-          PILOT_AUTH_USER_ID:
-            process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
-        }
-      : {}),
+    VITE_PILOT_AUTH_BYPASS: "true",
+    PILOT_AUTH_BYPASS: "true",
+    PILOT_AUTH_USER_ID: pilotAuthUserId,
     VITE_DISABLE_CLERK_PROXY: "true",
     VITE_ENABLE_CLERK_PROXY: "false",
   },
