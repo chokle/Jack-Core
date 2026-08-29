@@ -17,17 +17,13 @@ ARG VITE_PILOT_AUTH_BYPASS=false
 ARG VITE_DISABLE_CLERK_PROXY=true
 ARG VITE_ENABLE_CLERK_PROXY=false
 
-RUN if [ "$VITE_PILOT_AUTH_BYPASS" != "true" ]; then \
-      case "$VITE_CLERK_PUBLISHABLE_KEY" in \
-        pk_live_*|pk_test_*) ;; \
-        *) echo "A valid VITE_CLERK_PUBLISHABLE_KEY is required when auth bypass is disabled." >&2; exit 1 ;; \
-      esac; \
-    fi
-
+# Pilot 002 intentionally bypasses participant sign-in. The build argument is
+# retained for compatibility with the deploy workflow, but the production Jack
+# bundle is built in bypass mode until Pilot 002 is closed.
 ENV BASE_PATH=$BASE_PATH
 ENV PUBLIC_SITE_URL=$PUBLIC_SITE_URL
 ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
-ENV VITE_PILOT_AUTH_BYPASS=$VITE_PILOT_AUTH_BYPASS
+ENV VITE_PILOT_AUTH_BYPASS=true
 ENV VITE_DISABLE_CLERK_PROXY=$VITE_DISABLE_CLERK_PROXY
 ENV VITE_ENABLE_CLERK_PROXY=$VITE_ENABLE_CLERK_PROXY
 
