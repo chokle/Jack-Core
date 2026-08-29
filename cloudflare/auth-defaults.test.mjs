@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Cloudflare production explicitly uses the Pilot 002 synthetic participant", async () => {
+test("Cloudflare production defaults require authenticated Clerk users", async () => {
   const [baseText, generator, dockerfile, workflow] = await Promise.all([
     read("cloudflare/wrangler.base.json"),
     read("cloudflare/generate-deploy-config.mjs"),
@@ -13,8 +13,6 @@ test("Cloudflare production explicitly uses the Pilot 002 synthetic participant"
   ]);
   const base = JSON.parse(baseText);
 
-  // The checked-in base remains fail-closed. Pilot 002 bypass is an explicit
-  // production overlay, making the rollback to normal auth a small diff.
   assert.equal(base.vars.PILOT_AUTH_BYPASS, "false");
   assert.equal(base.vars.PILOT_AUTH_USER_ID, undefined);
   assert.deepEqual(base.secrets.required, [
@@ -25,12 +23,9 @@ test("Cloudflare production explicitly uses the Pilot 002 synthetic participant"
     "ADMIN_EMAILS",
   ]);
 
-  assert.match(generator, /const pilotAuthBypass = true/);
-  assert.match(generator, /const pilotAuthUserId = "pilot002-nick"/);
-  assert.match(generator, /PILOT_AUTH_BYPASS: "true"/);
-  assert.match(generator, /PILOT_AUTH_USER_ID: pilotAuthUserId/);
+  assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
+  assert.doesNotMatch(generator, /PILOT_AUTH_BYPASS !== "false"/);
   assert.match(dockerfile, /ARG VITE_PILOT_AUTH_BYPASS=false/);
-  assert.match(dockerfile, /ENV VITE_PILOT_AUTH_BYPASS=true/);
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
   assert.match(workflow, /--secrets-file/);
