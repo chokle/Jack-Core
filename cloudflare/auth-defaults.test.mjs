@@ -17,6 +17,43 @@ function integerMatch(text, pattern, label) {
   return Number.parseInt(match[1], 10);
 }
 
+function workflowSteps(workflow) {
+  const marker = "\n    steps:\n";
+  const stepsStart = workflow.indexOf(marker);
+  assert.ok(stepsStart >= 0, "production workflow steps must exist");
+  const stepsText = workflow.slice(stepsStart + marker.length);
+  const starts = [
+    ...stepsText.matchAll(/^      -(?:[ \t]+(?=\S)|[ \t]*$)/gm),
+  ].map(({ index }) => index);
+  return starts.map((start, position) =>
+    stepsText.slice(start, starts[position + 1] ?? stepsText.length),
+  );
+}
+
+function stepIdentity(step) {
+  const name = step.match(/^(?:      - |        )name:\s*(.+)$/m)?.[1];
+  if (name) return name;
+  const action = step.match(/^(?:      - |        )uses:\s*(.+)$/m)?.[1];
+  if (action) return `uses: ${action}`;
+  const command = step.match(/^\s+(?:- )?run:\s*([^|>\n].*)$/m)?.[1];
+  if (command) return `run: ${command}`;
+  return step.split(/\r?\n/, 1)[0].trim();
+}
+
+function stepTimeoutMinutes(step) {
+  const matches = [
+    ...step.matchAll(/^(?:      - |        )timeout-minutes:\s*(\d+)\s*$/gm),
+  ];
+  assert.equal(
+    matches.length,
+    1,
+    `${stepIdentity(step)} must declare exactly one integer timeout-minutes cap`,
+  );
+  const minutes = Number.parseInt(matches[0][1], 10);
+  assert.ok(minutes > 0, `${stepIdentity(step)} timeout must be positive`);
+  return minutes;
+}
+
 function workflowWranglerCommands(workflow) {
   return [
     ...workflow.matchAll(
@@ -54,7 +91,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /X-Jack-Diagnostic:ci-smoke/);
   assert.match(
     workflow,
-    /- name: Generate Cloudflare deploy config\n\s+env:\n\s+VITE_CLERK_PUBLISHABLE_KEY: \$\{\{ secrets\.VITE_CLERK_PUBLISHABLE_KEY \}\}/,
+    /- name: Generate Cloudflare deploy config\n\s+timeout-minutes: \d+\n\s+env:\n\s+VITE_CLERK_PUBLISHABLE_KEY: \$\{\{ secrets\.VITE_CLERK_PUBLISHABLE_KEY \}\}/,
   );
   assert.equal(
     workflow.match(/secrets\.VITE_CLERK_PUBLISHABLE_KEY/g)?.length,
@@ -178,31 +215,69 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
     workflow,
     "Capture failed startup diagnostics",
   );
+  const steps = workflowSteps(workflow);
+  const rolloutIndex = steps.findIndex(
+    (step) =>
+      stepIdentity(step) === "Wait for exact workers.dev rollout acceptance",
+  );
+  assert.ok(rolloutIndex > 0, "rollout acceptance must follow pre-gate steps");
+  const preGateSteps = steps.slice(0, rolloutIndex);
+  const postGateSteps = steps.slice(rolloutIndex + 1);
+  const preGateIdentities = preGateSteps.map(stepIdentity);
+  assert.deepEqual(preGateIdentities.slice(-3), [
+    "Deploy Worker + Container to workers.dev",
+    "Resolve deployed workers.dev target",
+    "Resolve deployed container digest",
+  ]);
+  const preGateTimeouts = preGateSteps.map(stepTimeoutMinutes);
+  assert.equal(
+    preGateTimeouts.length,
+    preGateSteps.length,
+    "every pre-gate step must contribute one enforceable timeout",
+  );
+  const preGateMinutes = preGateTimeouts.reduce(
+    (total, minutes) => total + minutes,
+    0,
+  );
+  assert.deepEqual(postGateSteps.map(stepIdentity), [
+    "Smoke-test workers.dev deployment",
+    "Capture failed startup diagnostics",
+    "Record deployment evidence",
+  ]);
+  const postGateTimeouts = postGateSteps.map(stepTimeoutMinutes);
+  assert.equal(
+    postGateTimeouts.length,
+    postGateSteps.length,
+    "every post-gate step must contribute one enforceable timeout",
+  );
+  const postGateMinutes = postGateTimeouts.reduce(
+    (total, minutes) => total + minutes,
+    0,
+  );
 
   const jobMinutes = integerMatch(
     jobHeader,
     /timeout-minutes:\s*(\d+)/,
     "production job timeout",
   );
-  const setupBuildMinutes = integerMatch(
-    workflow,
-    /CLOUDFLARE_SETUP_BUILD_BUDGET_MINUTES:\s*"(\d+)"/,
-    "setup/build budget",
-  );
-  const deployMinutes = integerMatch(
+  const deployCommandMinutes = integerMatch(
     deployStep,
     /timeout --kill-after=\d+s (\d+)m npx --yes wrangler@4\.127\.1 deploy/,
-    "bounded deploy budget",
+    "bounded deploy command",
   );
-  const rolloutMinutes = integerMatch(
-    rolloutStep,
-    /timeout-minutes:\s*(\d+)/,
-    "rollout acceptance budget",
+  const deployKillAfterSeconds = integerMatch(
+    deployStep,
+    /timeout --kill-after=(\d+)s \d+m npx --yes wrangler@4\.127\.1 deploy/,
+    "deploy kill-after bound",
   );
-  const postGateMinutes = integerMatch(
-    workflow,
-    /CLOUDFLARE_POST_GATE_BUDGET_MINUTES:\s*"(\d+)"/,
-    "post-gate diagnostics budget",
+  const rolloutMinutes = stepTimeoutMinutes(rolloutStep);
+  assert.equal(rolloutMinutes, 35, "rollout gate must retain its 35m cap");
+  const smokeMinutes = stepTimeoutMinutes(smokeStep);
+  const diagnosticsMinutes = stepTimeoutMinutes(diagnosticsStep);
+  assert.equal(
+    diagnosticsMinutes,
+    5,
+    "failed startup diagnostics must retain its 5m cap",
   );
   const headroomMinutes = integerMatch(
     workflow,
@@ -210,11 +285,7 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
     "job headroom",
   );
   const requiredJobMinutes =
-    setupBuildMinutes +
-    deployMinutes +
-    rolloutMinutes +
-    postGateMinutes +
-    headroomMinutes;
+    preGateMinutes + rolloutMinutes + postGateMinutes + headroomMinutes;
   const diagnosticWranglerBounds = [
     ...diagnosticsStep.matchAll(
       /timeout --kill-after=(\d+)s (\d+)s npx --yes wrangler@4\.127\.1/g,
@@ -267,7 +338,7 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
     smokeProbeBounds.length,
     "every post-gate smoke curl command must have an explicit max-time bound",
   );
-  const postGateWorstCaseSeconds =
+  const diagnosticWorstCaseSeconds =
     diagnosticWranglerBounds.reduce(
       (total, match) => total + Number(match[1]) + Number(match[2]),
       0,
@@ -276,15 +347,69 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
       (total, match) => total + Number(match[1]),
       0,
     ) +
-    diagnosticSleeps.reduce((total, match) => total + Number(match[1]), 0) +
-    smokeProbeBounds.reduce((total, match) => total + Number(match[1]), 0);
+    diagnosticSleeps.reduce((total, match) => total + Number(match[1]), 0);
+  const smokeWorstCaseSeconds = smokeProbeBounds.reduce(
+    (total, match) => total + Number(match[1]),
+    0,
+  );
 
   assert.ok(
-    jobMinutes >= requiredJobMinutes,
-    `job timeout ${jobMinutes}m must cover setup/build ${setupBuildMinutes}m + deploy ${deployMinutes}m + rollout ${rolloutMinutes}m + post-gate diagnostics ${postGateMinutes}m + headroom ${headroomMinutes}m`,
+    stepTimeoutMinutes(deployStep) * 60 >=
+      deployCommandMinutes * 60 + deployKillAfterSeconds,
+    "deploy step timeout must cover the command timeout and kill-after window",
+  );
+  assert.equal(
+    jobMinutes,
+    requiredJobMinutes,
+    `job timeout ${jobMinutes}m must equal enforceable pre-gate steps ${preGateMinutes}m + rollout ${rolloutMinutes}m + post-gate steps ${postGateMinutes}m + headroom ${headroomMinutes}m`,
   );
   assert.ok(
-    postGateMinutes * 60 >= postGateWorstCaseSeconds,
-    `post-gate budget ${postGateMinutes}m must cover the workflow's ${postGateWorstCaseSeconds}s bounded smoke-plus-diagnostics path`,
+    diagnosticsMinutes * 60 >= diagnosticWorstCaseSeconds,
+    `diagnostics step ${diagnosticsMinutes}m must cover its ${diagnosticWorstCaseSeconds}s bounded command path`,
+  );
+  assert.ok(
+    smokeMinutes * 60 >= smokeWorstCaseSeconds,
+    `smoke step ${smokeMinutes}m must cover its ${smokeWorstCaseSeconds}s bounded probe path`,
+  );
+
+  const unboundedMutation = workflow.replace(
+    "      - name: Wait for exact workers.dev rollout acceptance",
+    [
+      "      - id: unbounded_pre_gate",
+      "        name: Newly added unbounded pre-gate work",
+      "        run: node -e 'setInterval(() => {}, 1000)'",
+      "",
+      "      - name: Wait for exact workers.dev rollout acceptance",
+    ].join("\n"),
+  );
+  const mutatedSteps = workflowSteps(unboundedMutation);
+  const mutatedRolloutIndex = mutatedSteps.findIndex(
+    (step) =>
+      stepIdentity(step) === "Wait for exact workers.dev rollout acceptance",
+  );
+  assert.throws(
+    () => mutatedSteps.slice(0, mutatedRolloutIndex).map(stepTimeoutMinutes),
+    /Newly added unbounded pre-gate work must declare exactly one integer timeout-minutes cap/,
+  );
+
+  const bareDashMutation = workflow.replace(
+    "      - name: Wait for exact workers.dev rollout acceptance",
+    [
+      "      -",
+      "        id: bare_dash_unbounded_pre_gate",
+      "        name: Bare-dash unbounded pre-gate work",
+      "        run: node -e 'setInterval(() => {}, 1000)'",
+      "",
+      "      - name: Wait for exact workers.dev rollout acceptance",
+    ].join("\n"),
+  );
+  const bareDashSteps = workflowSteps(bareDashMutation);
+  const bareDashRolloutIndex = bareDashSteps.findIndex(
+    (step) =>
+      stepIdentity(step) === "Wait for exact workers.dev rollout acceptance",
+  );
+  assert.throws(
+    () => bareDashSteps.slice(0, bareDashRolloutIndex).map(stepTimeoutMinutes),
+    /Bare-dash unbounded pre-gate work must declare exactly one integer timeout-minutes cap/,
   );
 });

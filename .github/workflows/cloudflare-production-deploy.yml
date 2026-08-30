@@ -19,33 +19,36 @@ env:
   PILOT_AUTH_BYPASS: "false"
   WRANGLER_OUTPUT_FILE_PATH: .wrangler-output.json
   WRANGLER_LOG_SANITIZE: "true"
-  # The static job timeout is regression-checked against these phase budgets,
-  # the bounded deploy, and the rollout-gate step timeout.
-  CLOUDFLARE_SETUP_BUILD_BUDGET_MINUTES: "25"
-  CLOUDFLARE_POST_GATE_BUDGET_MINUTES: "5"
+  # The static job timeout is regression-checked against every step's hard
+  # timeout plus this runner/step-transition headroom.
   CLOUDFLARE_JOB_HEADROOM_MINUTES: "10"
 
 jobs:
   verify-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 140
     steps:
       - uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
+        timeout-minutes: 2
         with:
           version: 11.7.0
 
       - uses: actions/setup-node@v6
+        timeout-minutes: 3
         with:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - timeout-minutes: 5
+        run: pnpm install --frozen-lockfile
 
       - name: Fail closed on production credentials
+        timeout-minutes: 1
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -85,22 +88,26 @@ jobs:
           NODE
 
       - name: Resolve Cloudflare account context
+        timeout-minutes: 2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CONFIGURED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node cloudflare/resolve-account-context.mjs
 
       - name: Verify Cloudflare authentication
+        timeout-minutes: 3
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: timeout --kill-after=5s 2m npx --yes wrangler@4.127.1 whoami
 
       - name: Generate Cloudflare deploy config
+        timeout-minutes: 1
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: node cloudflare/generate-deploy-config.mjs
 
       - name: Validate Cloudflare helper syntax
+        timeout-minutes: 1
         run: |
           node --check cloudflare/worker.mjs
           node --check cloudflare/resolve-account-context.mjs
@@ -108,35 +115,45 @@ jobs:
           node --check cloudflare/run-rollout-acceptance.mjs
 
       - name: Cloudflare configuration regression tests
+        timeout-minutes: 3
         run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.test.mjs
 
       - name: Format check
+        timeout-minutes: 3
         run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
 
       - name: Wrangler dry run
+        timeout-minutes: 6
         run: timeout --kill-after=5s 5m npx --yes wrangler@4.127.1 deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
 
       - name: Build production container image
+        timeout-minutes: 10
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
 
       - name: API full tests
+        timeout-minutes: 5
         run: pnpm --filter @workspace/api-server test
 
       - name: Jack full tests
+        timeout-minutes: 5
         run: pnpm --filter @workspace/jack-core test
 
       - name: Workspace typecheck
+        timeout-minutes: 5
         run: pnpm typecheck
 
       - name: Workspace build
+        timeout-minutes: 8
         run: pnpm build
 
       - name: Diff check
+        timeout-minutes: 1
         run: git diff --check HEAD^
 
       - name: Prepare Worker secret handoff
+        timeout-minutes: 1
         shell: bash
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -166,12 +183,14 @@ jobs:
           NODE
 
       - name: Deploy Worker + Container to workers.dev
+        timeout-minutes: 16
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: timeout --kill-after=10s 15m npx --yes wrangler@4.127.1 deploy --config cloudflare/wrangler.generated.json --secrets-file "$RUNNER_TEMP/cloudflare-secrets.json"
 
       - name: Resolve deployed workers.dev target
         id: deployment
+        timeout-minutes: 1
         shell: bash
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"
@@ -199,6 +218,7 @@ jobs:
 
       - name: Resolve deployed container digest
         id: container
+        timeout-minutes: 2
         shell: bash
         run: |
           container_tag="${{ steps.deployment.outputs.container_tag }}"
@@ -241,6 +261,7 @@ jobs:
         run: node cloudflare/run-rollout-acceptance.mjs
 
       - name: Smoke-test workers.dev deployment
+        timeout-minutes: 2
         shell: bash
         run: |
           target="${{ steps.deployment.outputs.target }}"
@@ -254,6 +275,7 @@ jobs:
 
       - name: Capture failed startup diagnostics
         if: failure()
+        timeout-minutes: 5
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -305,6 +327,7 @@ jobs:
           fi
 
       - name: Record deployment evidence
+        timeout-minutes: 1
         shell: bash
         run: |
           {
