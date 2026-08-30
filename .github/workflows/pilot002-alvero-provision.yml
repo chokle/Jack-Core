@@ -1,0 +1,143 @@
+name: Pilot 002 Alvero Provision
+
+on:
+  push:
+    branches:
+      - ops/pilot002-alvero-provision
+    paths:
+      - ".github/workflows/pilot002-alvero-provision.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PILOT_ID: dedc1222-4677-4393-aa3c-84a4f33efd39
+      ORG_ID: 40817dd6-d2b8-4087-a6f2-f416500ab4e6
+      PARTICIPANT_LABEL: Alvero
+      PILOT_EMAIL: pilot002.alvero@torchlabs.ca
+      EXTERNAL_ID: pilot002-alvero
+    steps:
+      - name: Fail closed on credentials
+        shell: bash
+        run: |
+          test -n "$CLERK_SECRET_KEY"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+
+      - name: Create or recover Clerk account, enroll, and stage one-time handoff
+        shell: bash
+        run: |
+          node <<'NODE'
+          const required = ["CLERK_SECRET_KEY","SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","PILOT_ID","ORG_ID","PARTICIPANT_LABEL","PILOT_EMAIL","EXTERNAL_ID"];
+          for (const name of required) if (!process.env[name]) throw new Error(`Missing ${name}`);
+
+          const clerkHeaders = {
+            Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}`,
+            "Content-Type": "application/json",
+          };
+          const supabaseHeaders = {
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "return=representation",
+          };
+
+          async function json(res) {
+            const text = await res.text();
+            let body = {};
+            try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+            return body;
+          }
+
+          let user = null;
+          const createRes = await fetch("https://api.clerk.com/v1/users", {
+            method: "POST",
+            headers: clerkHeaders,
+            body: JSON.stringify({
+              email_address: [process.env.PILOT_EMAIL],
+              first_name: process.env.PARTICIPANT_LABEL,
+              external_id: process.env.EXTERNAL_ID,
+              skip_password_requirement: true,
+            }),
+          });
+          if (createRes.ok) {
+            user = await json(createRes);
+          } else {
+            const listRes = await fetch(`https://api.clerk.com/v1/users?email_address=${encodeURIComponent(process.env.PILOT_EMAIL)}&limit=10`, { headers: clerkHeaders });
+            const listBody = await json(listRes);
+            const rows = Array.isArray(listBody) ? listBody : (listBody.data ?? []);
+            user = rows.find((row) => row.external_id === process.env.EXTERNAL_ID || (row.email_addresses ?? []).some((entry) => entry.email_address === process.env.PILOT_EMAIL));
+            if (!user) {
+              const createBody = await json(createRes);
+              throw new Error(`Clerk create failed and existing account was not found: ${createRes.status} ${JSON.stringify(createBody)}`);
+            }
+          }
+          if (!user?.id) throw new Error("Clerk user id missing");
+
+          const membershipFilter = `${process.env.SUPABASE_URL}/rest/v1/pilot_memberships?pilot_id=eq.${process.env.PILOT_ID}&user_id=eq.${encodeURIComponent(user.id)}&select=id`;
+          const membershipRes = await fetch(membershipFilter, { headers: supabaseHeaders });
+          if (!membershipRes.ok) throw new Error(`Membership lookup failed: ${membershipRes.status}`);
+          const memberships = await json(membershipRes);
+          if (Array.isArray(memberships) && memberships.length) {
+            const patchRes = await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_memberships?pilot_id=eq.${process.env.PILOT_ID}&user_id=eq.${encodeURIComponent(user.id)}`, {
+              method: "PATCH",
+              headers: supabaseHeaders,
+              body: JSON.stringify({ role: "tester", active: true, valid_until: null, updated_at: new Date().toISOString() }),
+            });
+            if (!patchRes.ok) throw new Error(`Membership update failed: ${patchRes.status}`);
+          } else {
+            const insertRes = await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_memberships`, {
+              method: "POST",
+              headers: supabaseHeaders,
+              body: JSON.stringify({
+                organization_id: process.env.ORG_ID,
+                pilot_id: process.env.PILOT_ID,
+                user_id: user.id,
+                role: "tester",
+                active: true,
+                valid_from: new Date().toISOString(),
+                valid_until: null,
+              }),
+            });
+            if (!insertRes.ok) throw new Error(`Membership insert failed: ${insertRes.status}`);
+          }
+
+          const tokenRes = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
+            method: "POST",
+            headers: clerkHeaders,
+            body: JSON.stringify({ user_id: user.id, expires_in_seconds: 3600 }),
+          });
+          const token = await json(tokenRes);
+          if (!tokenRes.ok || !token?.url) throw new Error(`Sign-in token creation failed: ${tokenRes.status}`);
+
+          const handoffUrl = new URL(token.url);
+          handoffUrl.searchParams.set("redirect_url", "https://jack.torchlabs.ca/app");
+          const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+          await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_access_handoffs?pilot_id=eq.${process.env.PILOT_ID}&participant_label=eq.${encodeURIComponent(process.env.PARTICIPANT_LABEL)}`, {
+            method: "DELETE",
+            headers: supabaseHeaders,
+          });
+          const handoffRes = await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_access_handoffs`, {
+            method: "POST",
+            headers: supabaseHeaders,
+            body: JSON.stringify({
+              pilot_id: process.env.PILOT_ID,
+              user_id: user.id,
+              participant_label: process.env.PARTICIPANT_LABEL,
+              access_url: handoffUrl.toString(),
+              expires_at: expiresAt,
+            }),
+          });
+          if (!handoffRes.ok) throw new Error(`Handoff storage failed: ${handoffRes.status}`);
+
+          console.log(`Provisioned Pilot 002 participant ${process.env.PARTICIPANT_LABEL} as ${user.id}.`);
+          NODE
