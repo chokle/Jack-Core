@@ -27,7 +27,7 @@ The GitHub production deploy lane requires these repository Actions secrets:
 For a local manual run, Cloudflare account values can still be supplied explicitly:
 
 ```bash
-CLOUDFLARE_API_TOKEN='...' CLOUDFLARE_ACCOUNT_ID='...' npx wrangler whoami
+CLOUDFLARE_API_TOKEN='...' CLOUDFLARE_ACCOUNT_ID='...' npx wrangler@4.127.1 whoami
 ```
 
 Never commit credential material.
@@ -51,11 +51,13 @@ The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLE
 7. hand runtime secrets to Wrangler without exposing them job-wide;
 8. deploy Worker + Container to the temporary `workers.dev` target;
 9. resolve the deployed target/version from Wrangler structured output;
-10. wait for the exact pushed Container digest and named serving-instance version through 120 primary attempts plus, if needed, 12 terminal reconciliation attempts under the same 35-minute hard timeout;
-11. prove that serving-instance version both before and after smoke-testing the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
-12. record deployment evidence in the workflow summary.
+10. run 120 primary attempts, admitting terminal reconciliation only from an exact active/ready application digest plus warmup `200` and exactly one stopped `jack-production` instance whose non-empty ID/version matches the application;
+11. pin the admitted application ID/digest/version and instance ID/version, require a fresh transition to `running` by 33:00 on a monotonic clock, then finish the complete acceptance transaction by the internal 34:30 deadline (inside the 35-minute step timeout);
+12. re-prove the pinned application and serving instance before and after checking public shell `200`, `/api/healthz` `200` with `status=ok`, and anonymous `/api/me` exact `401` with the sign-in-required body; every Wrangler subprocess, HTTP probe, and poll sleep is bounded, and any identity/digest/version drift fails closed;
+13. record deployment evidence in the workflow summary.
 
 Production DNS remains unchanged during this lane so Railway stays available as rollback.
+The production and verification workflows pin Wrangler `4.127.1`; do not replace that pin with `latest` during the pilot.
 
 ## Production cutover
 

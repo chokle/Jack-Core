@@ -19,11 +19,16 @@ env:
   PILOT_AUTH_BYPASS: "false"
   WRANGLER_OUTPUT_FILE_PATH: .wrangler-output.json
   WRANGLER_LOG_SANITIZE: "true"
+  # The static job timeout is regression-checked against these phase budgets,
+  # the bounded deploy, and the rollout-gate step timeout.
+  CLOUDFLARE_SETUP_BUILD_BUDGET_MINUTES: "25"
+  CLOUDFLARE_POST_GATE_BUDGET_MINUTES: "5"
+  CLOUDFLARE_JOB_HEADROOM_MINUTES: "10"
 
 jobs:
   verify-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
         with:
@@ -88,7 +93,7 @@ jobs:
       - name: Verify Cloudflare authentication
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx --yes wrangler@latest whoami
+        run: timeout --kill-after=5s 2m npx --yes wrangler@4.127.1 whoami
 
       - name: Generate Cloudflare deploy config
         env:
@@ -99,15 +104,17 @@ jobs:
         run: |
           node --check cloudflare/worker.mjs
           node --check cloudflare/resolve-account-context.mjs
+          node --check cloudflare/rollout-acceptance.mjs
+          node --check cloudflare/run-rollout-acceptance.mjs
 
       - name: Cloudflare configuration regression tests
-        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs
+        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.test.mjs
 
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
 
       - name: Wrangler dry run
-        run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
+        run: timeout --kill-after=5s 5m npx --yes wrangler@4.127.1 deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
 
       - name: Build production container image
         env:
@@ -161,7 +168,7 @@ jobs:
       - name: Deploy Worker + Container to workers.dev
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx --yes wrangler@latest deploy --config cloudflare/wrangler.generated.json --secrets-file "$RUNNER_TEMP/cloudflare-secrets.json"
+        run: timeout --kill-after=10s 15m npx --yes wrangler@4.127.1 deploy --config cloudflare/wrangler.generated.json --secrets-file "$RUNNER_TEMP/cloudflare-secrets.json"
 
       - name: Resolve deployed workers.dev target
         id: deployment
@@ -226,171 +233,12 @@ jobs:
 
       - name: Wait for exact workers.dev rollout acceptance
         timeout-minutes: 35
-        shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          set -u
-          target="${{ steps.deployment.outputs.target }}"
-          release="${{ steps.deployment.outputs.version_id }}"
-          expected_digest="${{ steps.container.outputs.expected_digest }}"
-          ready=false
-          primary_attempts=120
-          terminal_grace_attempts=12
-          total_attempts=$((primary_attempts + terminal_grace_attempts))
-
-          # Cloudflare may give a replaced instance up to 15 minutes to drain.
-          # Keep the established primary polling floor, then reconcile for a
-          # narrowly bounded grace period in case the control plane crosses over
-          # immediately after that floor. The 35-minute step timeout remains the
-          # outer bound for both phases and their API calls.
-          for attempt in $(seq 1 "$total_attempts"); do
-            rollout_phase="primary"
-            if (( attempt > primary_attempts )); then
-              rollout_phase="terminal-grace"
-            fi
-
-            applications="$(npx --yes wrangler@latest containers list --json || true)"
-            mapfile -t application_fields < <(node -e '
-              try {
-                const payload = JSON.parse(process.argv[1]);
-                const rows = Array.isArray(payload) ? payload : payload.result ?? payload.applications ?? [];
-                const application = rows.find((row) => row.name === "jack-core-production");
-                console.log(application?.id ?? application?.application_id ?? "");
-                console.log(application?.state ?? "missing");
-                console.log(application?.image ?? "");
-                console.log(application?.version ?? "");
-              } catch {
-                console.log("");
-                console.log("unavailable");
-                console.log("");
-                console.log("");
-              }
-            ' "$applications")
-            application_id="${application_fields[0]:-}"
-            application_state="${application_fields[1]:-unavailable}"
-            application_image="${application_fields[2]:-}"
-            application_version="${application_fields[3]:-}"
-            reported_digest="${application_image##*@}"
-
-            image_match=false
-            if [[ "$reported_digest" == "$expected_digest" ]]; then
-              image_match=true
-            fi
-
-            warmup_status="not-checked"
-            root_status="not-checked"
-            health_status="not-checked"
-            auth_status="not-checked"
-            health_ok=false
-            auth_ok=false
-            instance_state="not-checked"
-            instance_version=""
-            instance_version_match=false
-            postprobe_instance_state="not-checked"
-            postprobe_instance_version=""
-            postprobe_instance_version_match=false
-
-            if [[ "$image_match" == "true" && "$application_state" =~ ^(active|ready)$ ]]; then
-              warmup_status="$(curl --silent --show-error --output /tmp/jack-warmup.html --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 30 "$target/?release=$release&attempt=$attempt&phase=warmup" || true)"
-            fi
-
-            if [[ "$warmup_status" == "200" && -n "$application_id" ]]; then
-              instances="$(npx --yes wrangler@latest containers instances "$application_id" --json || true)"
-              mapfile -t instance_fields < <(node -e '
-                try {
-                  const payload = JSON.parse(process.argv[1]);
-                  const rows = Array.isArray(payload) ? payload : payload.instances ?? [];
-                  const instance = rows.find((row) => row.name === "jack-production");
-                  console.log(instance?.state ?? "missing");
-                  console.log(instance?.version ?? "");
-                } catch {
-                  console.log("unavailable");
-                  console.log("");
-                }
-              ' "$instances")
-              instance_state="${instance_fields[0]:-unavailable}"
-              instance_version="${instance_fields[1]:-}"
-              if [[ "$instance_state" == "running" && -n "$application_version" && "$instance_version" == "$application_version" ]]; then
-                instance_version_match=true
-              fi
-            fi
-
-            if [[ "$instance_version_match" == "true" ]]; then
-              root_status="$(curl --silent --show-error --output /tmp/jack-readiness.html --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/?release=$release&attempt=$attempt&phase=acceptance" || true)"
-              if [[ "$root_status" == "200" ]]; then
-                health_status="$(curl --silent --show-error --output /tmp/jack-healthz.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/api/healthz?release=$release&attempt=$attempt" || true)"
-                if [[ "$health_status" == "200" ]] && node -e '
-                  const fs = require("node:fs");
-                  try {
-                    const body = JSON.parse(fs.readFileSync("/tmp/jack-healthz.json", "utf8"));
-                    process.exit(body.status === "ok" ? 0 : 1);
-                  } catch {
-                    process.exit(1);
-                  }
-                '; then
-                  health_ok=true
-                  auth_status="$(curl --silent --show-error --output /tmp/jack-unauthorized.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/api/me?release=$release&attempt=$attempt" || true)"
-                  if [[ "$auth_status" == "401" ]] && node -e '
-                    const fs = require("node:fs");
-                    try {
-                      const body = JSON.parse(fs.readFileSync("/tmp/jack-unauthorized.json", "utf8"));
-                      process.exit(String(body.error || "").includes("sign in required") ? 0 : 1);
-                    } catch {
-                      process.exit(1);
-                    }
-                  '; then
-                    auth_ok=true
-                  fi
-                fi
-              fi
-            fi
-
-            if [[ "$auth_ok" == "true" && -n "$application_id" ]]; then
-              postprobe_instances="$(npx --yes wrangler@latest containers instances "$application_id" --json || true)"
-              mapfile -t postprobe_instance_fields < <(node -e '
-                try {
-                  const payload = JSON.parse(process.argv[1]);
-                  const rows = Array.isArray(payload) ? payload : payload.instances ?? [];
-                  const instance = rows.find((row) => row.name === "jack-production");
-                  console.log(instance?.state ?? "missing");
-                  console.log(instance?.version ?? "");
-                } catch {
-                  console.log("unavailable");
-                  console.log("");
-                }
-              ' "$postprobe_instances")
-              postprobe_instance_state="${postprobe_instance_fields[0]:-unavailable}"
-              postprobe_instance_version="${postprobe_instance_fields[1]:-}"
-              if [[ "$postprobe_instance_state" == "running" && -n "$application_version" && "$postprobe_instance_version" == "$application_version" ]]; then
-                postprobe_instance_version_match=true
-              fi
-            fi
-
-            echo "workers.dev rollout attempt ${attempt}/${total_attempts}: phase=${rollout_phase}, app_state=${application_state}, image_match=${image_match}, warmup=${warmup_status:-000}, preprobe_instance_state=${instance_state}, preprobe_instance_version_match=${instance_version_match}, postprobe_instance_state=${postprobe_instance_state}, postprobe_instance_version_match=${postprobe_instance_version_match}, root=${root_status:-000}, health=${health_status:-000}, anonymous_api_me=${auth_status:-000}"
-
-            if [[ "$image_match" == "true" && "$instance_version_match" == "true" && "$postprobe_instance_version_match" == "true" && "$root_status" == "200" && "$health_ok" == "true" && "$auth_ok" == "true" ]]; then
-              ready=true
-              break
-            fi
-
-            if (( attempt % 3 == 0 )) && [[ -n "$application_id" ]]; then
-              npx --yes wrangler@latest containers instances "$application_id" --json || true
-            fi
-
-            if (( attempt == primary_attempts )); then
-              echo "::notice::Primary rollout window exhausted; entering ${terminal_grace_attempts}-attempt terminal reconciliation grace."
-            fi
-
-            if (( attempt < total_attempts )); then
-              sleep 10
-            fi
-          done
-
-          if [[ "$ready" != "true" ]]; then
-            echo "::error::workers.dev did not activate ${expected_digest} on the serving container instance with a healthy shell and fail-closed anonymous auth within ${primary_attempts} primary attempts plus the ${terminal_grace_attempts}-attempt terminal reconciliation grace."
-            exit 1
-          fi
+          CLOUDFLARE_ROLLOUT_TARGET: ${{ steps.deployment.outputs.target }}
+          CLOUDFLARE_ROLLOUT_RELEASE: ${{ steps.deployment.outputs.version_id }}
+          CLOUDFLARE_EXPECTED_DIGEST: ${{ steps.container.outputs.expected_digest }}
+        run: node cloudflare/run-rollout-acceptance.mjs
 
       - name: Smoke-test workers.dev deployment
         shell: bash
@@ -411,7 +259,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           log_path="$RUNNER_TEMP/cloudflare-tail.jsonl"
-          timeout 45s npx --yes wrangler@latest tail jack-core-production \
+          timeout --kill-after=5s 45s npx --yes wrangler@4.127.1 tail jack-core-production \
             --format json \
             --header "X-Jack-Diagnostic:ci-smoke" > "$log_path" 2>&1 &
           tail_pid=$!
@@ -442,7 +290,7 @@ jobs:
           console.log(JSON.stringify(rows, null, 2));
           NODE
 
-          applications="$(npx --yes wrangler@latest containers list --json)"
+          applications="$(timeout --kill-after=5s 45s npx --yes wrangler@4.127.1 containers list --json)"
           printf '%s\n' "$applications"
           application_id="$(node -e '
             const payload = JSON.parse(process.argv[1]);
@@ -451,7 +299,7 @@ jobs:
             process.stdout.write(application?.id ?? application?.application_id ?? "");
           ' "$applications")"
           if [[ -n "$application_id" ]]; then
-            npx --yes wrangler@latest containers instances "$application_id" --json
+            timeout --kill-after=5s 45s npx --yes wrangler@4.127.1 containers instances "$application_id" --json
           else
             echo "Cloudflare did not return the jack-core-production container application."
           fi

@@ -4,6 +4,27 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
+function stepBody(workflow, name) {
+  const start = workflow.indexOf(`- name: ${name}`);
+  assert.ok(start >= 0, `${name} step must exist`);
+  const next = workflow.indexOf("\n      - name:", start + 1);
+  return workflow.slice(start, next < 0 ? workflow.length : next);
+}
+
+function integerMatch(text, pattern, label) {
+  const match = text.match(pattern);
+  assert.ok(match, `${label} must be declared`);
+  return Number.parseInt(match[1], 10);
+}
+
+function workflowWranglerCommands(workflow) {
+  return [
+    ...workflow.matchAll(
+      /(?<command>(?:npx\s+--yes\s+)?wrangler(?:@[^\s"'\\]+)?)(?=\s)/g,
+    ),
+  ].map(({ groups }) => groups.command);
+}
+
 test("Cloudflare production defaults require authenticated Clerk users", async () => {
   const [baseText, generator, dockerfile, workflow] = await Promise.all([
     read("cloudflare/wrangler.base.json"),
@@ -71,9 +92,12 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
 });
 
 test("Cloudflare rollout acceptance cannot pass against the previous container", async () => {
-  const workflow = await read(
-    ".github/workflows/cloudflare-production-deploy.yml",
-  );
+  const [workflow, verificationWorkflow, gate, runner] = await Promise.all([
+    read(".github/workflows/cloudflare-production-deploy.yml"),
+    read(".github/workflows/cloudflare-cutover-verify.yml"),
+    read("cloudflare/rollout-acceptance.mjs"),
+    read("cloudflare/run-rollout-acceptance.mjs"),
+  ]);
   const waitStart = workflow.indexOf(
     "- name: Wait for exact workers.dev rollout acceptance",
   );
@@ -90,88 +114,177 @@ test("Cloudflare rollout acceptance cannot pass against the previous container",
   assert.match(workflow, /\/jack-core-production@sha256:\[0-9a-f\]\{64\}\$/);
   assert.match(workflow, /expected_digest=\$expected_digest/);
   assert.match(rolloutGate, /timeout-minutes: 35/);
-  assert.match(rolloutGate, /primary_attempts=120/);
-  assert.match(rolloutGate, /terminal_grace_attempts=12/);
   assert.match(
     rolloutGate,
-    /total_attempts=\$\(\(primary_attempts \+ terminal_grace_attempts\)\)/,
-  );
-  assert.match(rolloutGate, /for attempt in \$\(seq 1 "\$total_attempts"\)/);
-  assert.match(rolloutGate, /attempt > primary_attempts/);
-  assert.match(rolloutGate, /rollout_phase="terminal-grace"/);
-  assert.match(rolloutGate, /phase=\$\{rollout_phase\}/);
-  assert.match(rolloutGate, /attempt == primary_attempts/);
-  assert.match(rolloutGate, /attempt < total_attempts/);
-  assert.match(
-    rolloutGate,
-    /entering \$\{terminal_grace_attempts\}-attempt terminal reconciliation grace/,
+    /CLOUDFLARE_ROLLOUT_TARGET: \$\{\{ steps\.deployment\.outputs\.target \}\}/,
   );
   assert.match(
     rolloutGate,
-    /if \[\[ "\$ready" != "true" \]\]; then[\s\S]*terminal reconciliation grace\."\n\s+exit 1/,
-  );
-  assert.match(rolloutGate, /containers list --json/);
-  assert.match(rolloutGate, /reported_digest="\$\{application_image##\*@\}"/);
-  assert.match(rolloutGate, /reported_digest" == "\$expected_digest/);
-  assert.match(rolloutGate, /application_state" =~ \^\(active\|ready\)\$/);
-  assert.match(rolloutGate, /\/api\/healthz\?release=/);
-  assert.match(rolloutGate, /\/api\/me\?release=/);
-  assert.match(rolloutGate, /auth_status" == "401"/);
-  assert.match(rolloutGate, /includes\("sign in required"\)/);
-  assert.match(rolloutGate, /row\.name === "jack-production"/);
-  assert.match(rolloutGate, /instance_state" == "running"/);
-  assert.match(rolloutGate, /instance_version" == "\$application_version"/);
-  assert.match(rolloutGate, /postprobe_instance_state" == "running"/);
-  assert.match(
-    rolloutGate,
-    /postprobe_instance_version" == "\$application_version"/,
+    /CLOUDFLARE_ROLLOUT_RELEASE: \$\{\{ steps\.deployment\.outputs\.version_id \}\}/,
   );
   assert.match(
     rolloutGate,
-    /image_match" == "true" && "\$instance_version_match" == "true" && "\$postprobe_instance_version_match" == "true" && "\$root_status" == "200" && "\$health_ok" == "true" && "\$auth_ok" == "true"/,
+    /CLOUDFLARE_EXPECTED_DIGEST: \$\{\{ steps\.container\.outputs\.expected_digest \}\}/,
   );
-  assert.match(rolloutGate, /containers instances "\$application_id" --json/);
-  assert.doesNotMatch(
+  assert.match(
     rolloutGate,
-    /if \[\[ "\$http_code" =~ \^2 \]\]; then\s+ready=true/,
+    /run: node cloudflare\/run-rollout-acceptance\.mjs/,
   );
-  assert.equal(
-    rolloutGate.match(/\bready=true\b/g)?.length,
-    1,
-    "only the complete exact-version acceptance predicate may mark the gate ready",
+  assert.match(gate, /primaryAttempts: 120/);
+  assert.match(gate, /transitionDeadlineMs: 33 \* 60_000/);
+  assert.match(gate, /acceptanceDeadlineMs: 34\.5 \* 60_000/);
+  assert.match(gate, /matches\.length === 1/);
+  assert.match(gate, /instance\.id === admission\.instanceId/);
+  assert.match(gate, /application\.digest === admission\.digest/);
+  assert.match(gate, /postprobeApplication/);
+  assert.match(gate, /postprobeInstance/);
+  assert.match(gate, /anonymousMe\.status === 401/);
+  assert.match(gate, /includes\("sign in required"\)/);
+  assert.match(runner, /WRANGLER_VERSION = "4\.127\.1"/);
+  assert.match(runner, /"--search",\s+"jack-production"/);
+  assert.match(runner, /"--per-page",\s+"100"/);
+  const pinnedCommand = "npx --yes wrangler@4.127.1";
+  assert.deepEqual(workflowWranglerCommands(workflow), [
+    pinnedCommand,
+    pinnedCommand,
+    pinnedCommand,
+    pinnedCommand,
+    pinnedCommand,
+    pinnedCommand,
+  ]);
+  assert.deepEqual(workflowWranglerCommands(verificationWorkflow), [
+    pinnedCommand,
+  ]);
+});
+
+test("Cloudflare production job budget cannot preempt rollout diagnostics", async () => {
+  const workflow = await read(
+    ".github/workflows/cloudflare-production-deploy.yml",
+  );
+  const jobHeader = workflow.slice(
+    workflow.indexOf("  verify-and-deploy:"),
+    workflow.indexOf("    steps:"),
+  );
+  const deployStep = stepBody(
+    workflow,
+    "Deploy Worker + Container to workers.dev",
+  );
+  const rolloutStep = stepBody(
+    workflow,
+    "Wait for exact workers.dev rollout acceptance",
+  );
+  const smokeStep = stepBody(workflow, "Smoke-test workers.dev deployment");
+  const diagnosticsStep = stepBody(
+    workflow,
+    "Capture failed startup diagnostics",
   );
 
-  const imageGate = rolloutGate.indexOf(
-    'reported_digest="${application_image##*@}"',
+  const jobMinutes = integerMatch(
+    jobHeader,
+    /timeout-minutes:\s*(\d+)/,
+    "production job timeout",
   );
-  const firstProbe = rolloutGate.indexOf("curl --silent");
-  const acceptanceProbe = rolloutGate.indexOf("phase=acceptance");
-  const authProof = rolloutGate.indexOf('auth_status" == "401"');
-  const instanceProof = rolloutGate.indexOf(
-    'instance_version" == "$application_version"',
+  const setupBuildMinutes = integerMatch(
+    workflow,
+    /CLOUDFLARE_SETUP_BUILD_BUDGET_MINUTES:\s*"(\d+)"/,
+    "setup/build budget",
   );
-  const postprobeInstanceProof = rolloutGate.indexOf(
-    'postprobe_instance_version" == "$application_version"',
+  const deployMinutes = integerMatch(
+    deployStep,
+    /timeout --kill-after=\d+s (\d+)m npx --yes wrangler@4\.127\.1 deploy/,
+    "bounded deploy budget",
   );
-  const acceptance = rolloutGate.lastIndexOf("ready=true");
+  const rolloutMinutes = integerMatch(
+    rolloutStep,
+    /timeout-minutes:\s*(\d+)/,
+    "rollout acceptance budget",
+  );
+  const postGateMinutes = integerMatch(
+    workflow,
+    /CLOUDFLARE_POST_GATE_BUDGET_MINUTES:\s*"(\d+)"/,
+    "post-gate diagnostics budget",
+  );
+  const headroomMinutes = integerMatch(
+    workflow,
+    /CLOUDFLARE_JOB_HEADROOM_MINUTES:\s*"(\d+)"/,
+    "job headroom",
+  );
+  const requiredJobMinutes =
+    setupBuildMinutes +
+    deployMinutes +
+    rolloutMinutes +
+    postGateMinutes +
+    headroomMinutes;
+  const diagnosticWranglerBounds = [
+    ...diagnosticsStep.matchAll(
+      /timeout --kill-after=(\d+)s (\d+)s npx --yes wrangler@4\.127\.1/g,
+    ),
+  ];
+  const diagnosticProbeBounds = [
+    ...diagnosticsStep.matchAll(/--max-time (\d+)/g),
+  ];
+  const diagnosticCurlCommands = [...diagnosticsStep.matchAll(/\bcurl(?=\s)/g)];
+  const diagnosticSleeps = [
+    ...diagnosticsStep.matchAll(/^\s*sleep (\d+)\s*$/gm),
+  ];
+  const diagnosticSleepCommands = [
+    ...diagnosticsStep.matchAll(/\bsleep(?=\s)/g),
+  ];
+  const smokeProbeBounds = [...smokeStep.matchAll(/--max-time (\d+)/g)];
+  const smokeCurlCommands = [...smokeStep.matchAll(/\bcurl(?=\s)/g)];
+  assert.equal(
+    diagnosticWranglerBounds.length,
+    3,
+    "all three diagnostic Wrangler commands must remain explicitly bounded",
+  );
+  assert.equal(
+    diagnosticProbeBounds.length,
+    1,
+    "the diagnostic HTTP probe must remain explicitly bounded",
+  );
+  assert.equal(
+    diagnosticCurlCommands.length,
+    diagnosticProbeBounds.length,
+    "every diagnostic curl command must have an explicit max-time bound",
+  );
+  assert.equal(
+    diagnosticSleeps.length,
+    1,
+    "the diagnostic startup delay must remain explicit",
+  );
+  assert.equal(
+    diagnosticSleepCommands.length,
+    diagnosticSleeps.length,
+    "every diagnostic sleep must have an explicit numeric bound",
+  );
+  assert.equal(
+    smokeProbeBounds.length,
+    3,
+    "all three post-gate smoke probes must remain explicitly bounded",
+  );
+  assert.equal(
+    smokeCurlCommands.length,
+    smokeProbeBounds.length,
+    "every post-gate smoke curl command must have an explicit max-time bound",
+  );
+  const postGateWorstCaseSeconds =
+    diagnosticWranglerBounds.reduce(
+      (total, match) => total + Number(match[1]) + Number(match[2]),
+      0,
+    ) +
+    diagnosticProbeBounds.reduce(
+      (total, match) => total + Number(match[1]),
+      0,
+    ) +
+    diagnosticSleeps.reduce((total, match) => total + Number(match[1]), 0) +
+    smokeProbeBounds.reduce((total, match) => total + Number(match[1]), 0);
+
   assert.ok(
-    imageGate >= 0 && imageGate < firstProbe,
-    "verify the image before probing",
+    jobMinutes >= requiredJobMinutes,
+    `job timeout ${jobMinutes}m must cover setup/build ${setupBuildMinutes}m + deploy ${deployMinutes}m + rollout ${rolloutMinutes}m + post-gate diagnostics ${postGateMinutes}m + headroom ${headroomMinutes}m`,
   );
   assert.ok(
-    authProof >= 0 && authProof < acceptance,
-    "prove fail-closed auth before accepting",
-  );
-  assert.ok(
-    instanceProof >= 0 && instanceProof < acceptance,
-    "prove the serving instance version before accepting",
-  );
-  assert.ok(
-    instanceProof >= 0 && instanceProof < acceptanceProbe,
-    "prove the serving instance version before acceptance probes",
-  );
-  assert.ok(
-    postprobeInstanceProof > authProof && postprobeInstanceProof < acceptance,
-    "re-prove the serving instance version after acceptance probes",
+    postGateMinutes * 60 >= postGateWorstCaseSeconds,
+    `post-gate budget ${postGateMinutes}m must cover the workflow's ${postGateWorstCaseSeconds}s bounded smoke-plus-diagnostics path`,
   );
 });

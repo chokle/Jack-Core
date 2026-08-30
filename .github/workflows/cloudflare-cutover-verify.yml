@@ -51,12 +51,14 @@ jobs:
         run: |
           node --check cloudflare/worker.mjs
           node --check cloudflare/resolve-account-context.mjs
+          node --check cloudflare/rollout-acceptance.mjs
+          node --check cloudflare/run-rollout-acceptance.mjs
       - name: Cloudflare configuration regression tests
-        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/container-lifecycle.test.mjs cloudflare/resolve-account-context.test.mjs
+        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/container-lifecycle.test.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.test.mjs
       - name: Format check
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/container-lifecycle.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md package.json .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml .github/workflows/live-security-header-verify.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/container-lifecycle.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md package.json .github/workflows/cloudflare-cutover-verify.yml .github/workflows/cloudflare-production-deploy.yml .github/workflows/live-security-header-verify.yml
       - name: Cloudflare Worker dry run
-        run: npx --yes wrangler@latest deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
+        run: timeout --kill-after=5s 5m npx --yes wrangler@4.127.1 deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
         run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:verify .
       - name: Production container CSP smoke test
