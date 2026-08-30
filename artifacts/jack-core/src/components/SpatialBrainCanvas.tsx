@@ -210,6 +210,8 @@ const DEFAULT_PITCH = -0.3;
  */
 const FULL_MAX_HOPS = 8;
 const ORBIT_SPEED = 0.006;
+const IDLE_ORBIT_DELAY_MS = 30_000;
+const IDLE_ORBIT_STEP = 0.0008;
 const BIRTH_MS = 1600;
 
 /** Minimum screen-space hit radius. Touch targets stay at least 44px wide. */
@@ -799,9 +801,14 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       let pressHitId: string | null = null;
       let pressPointerType = "mouse";
       let pinchDist = 0;
+      let lastInteractionAt = performance.now();
+      const markInteraction = () => {
+        lastInteractionAt = performance.now();
+      };
 
       const onPointerDown = (e: PointerEvent) => {
         if (locked) return;
+        markInteraction();
         // A manual grab cancels any in-flight camera swing.
         camTargetRef.current = null;
         const p = localXY(e);
@@ -839,6 +846,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         }
 
         if (dragging && !locked) {
+          markInteraction();
           const dx = p.x - last.x;
           const dy = p.y - last.y;
           moved = Math.max(
@@ -867,6 +875,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       };
 
       const onPointerUp = (e: PointerEvent) => {
+        markInteraction();
         const wasDragging = dragging;
         pointers.delete(e.pointerId);
         if (pointers.size < 2) pinchDist = 0;
@@ -912,6 +921,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
 
       const onWheel = (e: WheelEvent) => {
         if (locked) return;
+        markInteraction();
         e.preventDefault();
         applyZoom(e.deltaY < 0 ? 1.1 : 1 / 1.1);
       };
@@ -1153,6 +1163,18 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const dt = Math.min(2, Math.max(0, (t - lastT) / 16.67));
         lastT = t;
         if (!document.hidden) {
+          const cam = camRef.current;
+          const idleOrbitActive =
+            !lockedRef.current &&
+            !reducedRef.current &&
+            pointers.size === 0 &&
+            !dragging &&
+            camTargetRef.current === null &&
+            t - lastInteractionAt >= IDLE_ORBIT_DELAY_MS;
+          if (idleOrbitActive) {
+            cam.yaw += IDLE_ORBIT_STEP * dt;
+          }
+
           // Ease an in-flight camera swing (focusNode / ensureVisible) toward its
           // target before stepping/drawing. Yaw takes the shortest angular path.
           const camTarget = camTargetRef.current;
