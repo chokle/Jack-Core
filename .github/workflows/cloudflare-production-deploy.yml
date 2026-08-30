@@ -235,10 +235,21 @@ jobs:
           release="${{ steps.deployment.outputs.version_id }}"
           expected_digest="${{ steps.container.outputs.expected_digest }}"
           ready=false
+          primary_attempts=120
+          terminal_grace_attempts=12
+          total_attempts=$((primary_attempts + terminal_grace_attempts))
 
           # Cloudflare may give a replaced instance up to 15 minutes to drain.
-          # Keep at least a 20-minute polling floor, with job headroom for API calls.
-          for attempt in $(seq 1 120); do
+          # Keep the established primary polling floor, then reconcile for a
+          # narrowly bounded grace period in case the control plane crosses over
+          # immediately after that floor. The 35-minute step timeout remains the
+          # outer bound for both phases and their API calls.
+          for attempt in $(seq 1 "$total_attempts"); do
+            rollout_phase="primary"
+            if (( attempt > primary_attempts )); then
+              rollout_phase="terminal-grace"
+            fi
+
             applications="$(npx --yes wrangler@latest containers list --json || true)"
             mapfile -t application_fields < <(node -e '
               try {
@@ -356,7 +367,7 @@ jobs:
               fi
             fi
 
-            echo "workers.dev rollout attempt ${attempt}/120: app_state=${application_state}, image_match=${image_match}, warmup=${warmup_status:-000}, preprobe_instance_state=${instance_state}, preprobe_instance_version_match=${instance_version_match}, postprobe_instance_state=${postprobe_instance_state}, postprobe_instance_version_match=${postprobe_instance_version_match}, root=${root_status:-000}, health=${health_status:-000}, anonymous_api_me=${auth_status:-000}"
+            echo "workers.dev rollout attempt ${attempt}/${total_attempts}: phase=${rollout_phase}, app_state=${application_state}, image_match=${image_match}, warmup=${warmup_status:-000}, preprobe_instance_state=${instance_state}, preprobe_instance_version_match=${instance_version_match}, postprobe_instance_state=${postprobe_instance_state}, postprobe_instance_version_match=${postprobe_instance_version_match}, root=${root_status:-000}, health=${health_status:-000}, anonymous_api_me=${auth_status:-000}"
 
             if [[ "$image_match" == "true" && "$instance_version_match" == "true" && "$postprobe_instance_version_match" == "true" && "$root_status" == "200" && "$health_ok" == "true" && "$auth_ok" == "true" ]]; then
               ready=true
@@ -367,13 +378,17 @@ jobs:
               npx --yes wrangler@latest containers instances "$application_id" --json || true
             fi
 
-            if (( attempt < 120 )); then
+            if (( attempt == primary_attempts )); then
+              echo "::notice::Primary rollout window exhausted; entering ${terminal_grace_attempts}-attempt terminal reconciliation grace."
+            fi
+
+            if (( attempt < total_attempts )); then
               sleep 10
             fi
           done
 
           if [[ "$ready" != "true" ]]; then
-            echo "::error::workers.dev did not activate ${expected_digest} on the serving container instance with a healthy shell and fail-closed anonymous auth within the bounded rollout window."
+            echo "::error::workers.dev did not activate ${expected_digest} on the serving container instance with a healthy shell and fail-closed anonymous auth within ${primary_attempts} primary attempts plus the ${terminal_grace_attempts}-attempt terminal reconciliation grace."
             exit 1
           fi
 

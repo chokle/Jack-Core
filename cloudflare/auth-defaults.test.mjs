@@ -90,7 +90,26 @@ test("Cloudflare rollout acceptance cannot pass against the previous container",
   assert.match(workflow, /\/jack-core-production@sha256:\[0-9a-f\]\{64\}\$/);
   assert.match(workflow, /expected_digest=\$expected_digest/);
   assert.match(rolloutGate, /timeout-minutes: 35/);
-  assert.match(rolloutGate, /for attempt in \$\(seq 1 120\)/);
+  assert.match(rolloutGate, /primary_attempts=120/);
+  assert.match(rolloutGate, /terminal_grace_attempts=12/);
+  assert.match(
+    rolloutGate,
+    /total_attempts=\$\(\(primary_attempts \+ terminal_grace_attempts\)\)/,
+  );
+  assert.match(rolloutGate, /for attempt in \$\(seq 1 "\$total_attempts"\)/);
+  assert.match(rolloutGate, /attempt > primary_attempts/);
+  assert.match(rolloutGate, /rollout_phase="terminal-grace"/);
+  assert.match(rolloutGate, /phase=\$\{rollout_phase\}/);
+  assert.match(rolloutGate, /attempt == primary_attempts/);
+  assert.match(rolloutGate, /attempt < total_attempts/);
+  assert.match(
+    rolloutGate,
+    /entering \$\{terminal_grace_attempts\}-attempt terminal reconciliation grace/,
+  );
+  assert.match(
+    rolloutGate,
+    /if \[\[ "\$ready" != "true" \]\]; then[\s\S]*terminal reconciliation grace\."\n\s+exit 1/,
+  );
   assert.match(rolloutGate, /containers list --json/);
   assert.match(rolloutGate, /reported_digest="\$\{application_image##\*@\}"/);
   assert.match(rolloutGate, /reported_digest" == "\$expected_digest/);
@@ -115,6 +134,11 @@ test("Cloudflare rollout acceptance cannot pass against the previous container",
   assert.doesNotMatch(
     rolloutGate,
     /if \[\[ "\$http_code" =~ \^2 \]\]; then\s+ready=true/,
+  );
+  assert.equal(
+    rolloutGate.match(/\bready=true\b/g)?.length,
+    1,
+    "only the complete exact-version acceptance predicate may mark the gate ready",
   );
 
   const imageGate = rolloutGate.indexOf(
