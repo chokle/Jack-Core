@@ -1,0 +1,44 @@
+name: Pilot 002 Nick Handoff
+
+on:
+  push:
+    branches:
+      - ops/pilot002-alvero-provision
+    paths:
+      - ".github/workflows/pilot002-nick-handoff.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PILOT_ID: dedc1222-4677-4393-aa3c-84a4f33efd39
+      USER_ID: user_3HBuMJKYJvdCD2Xn8OjlUs6Hji1
+      PARTICIPANT_LABEL: Nick
+    steps:
+      - name: Stage short-lived one-time sign-in handoff
+        shell: bash
+        run: |
+          node <<'NODE'
+          const required = ["CLERK_SECRET_KEY","SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","PILOT_ID","USER_ID","PARTICIPANT_LABEL"];
+          for (const name of required) if (!process.env[name]) throw new Error(`Missing ${name}`);
+          const clerkHeaders = { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}`, "Content-Type": "application/json" };
+          const supabaseHeaders = { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json", Prefer: "return=representation" };
+          const tokenRes = await fetch("https://api.clerk.com/v1/sign_in_tokens", { method: "POST", headers: clerkHeaders, body: JSON.stringify({ user_id: process.env.USER_ID, expires_in_seconds: 3600 }) });
+          const token = await tokenRes.json();
+          if (!tokenRes.ok || !token?.url) throw new Error(`Sign-in token creation failed: ${tokenRes.status}`);
+          const handoffUrl = new URL(token.url);
+          handoffUrl.searchParams.set("redirect_url", "https://jack.torchlabs.ca/app");
+          const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+          await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_access_handoffs?pilot_id=eq.${process.env.PILOT_ID}&participant_label=eq.${encodeURIComponent(process.env.PARTICIPANT_LABEL)}`, { method: "DELETE", headers: supabaseHeaders });
+          const handoffRes = await fetch(`${process.env.SUPABASE_URL}/rest/v1/pilot_access_handoffs`, { method: "POST", headers: supabaseHeaders, body: JSON.stringify({ pilot_id: process.env.PILOT_ID, user_id: process.env.USER_ID, participant_label: process.env.PARTICIPANT_LABEL, access_url: handoffUrl.toString(), expires_at: expiresAt }) });
+          if (!handoffRes.ok) throw new Error(`Handoff storage failed: ${handoffRes.status}`);
+          console.log(`Staged Pilot 002 handoff for ${process.env.PARTICIPANT_LABEL}.`);
+          NODE
