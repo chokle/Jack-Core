@@ -40,11 +40,11 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     3,
     "Clerk publishable key must be bound to preflight, config generation, and container build",
   );
-  assert.match(workflow, /- name: Wait for workers\.dev container readiness/);
-  assert.match(workflow, /timeout-minutes: 8/);
-  assert.match(workflow, /for attempt in \$\(seq 1 42\)/);
-  assert.match(workflow, /containers list --json/);
-  assert.match(workflow, /containers instances "\$application_id" --json/);
+  assert.match(workflow, /- name: Resolve deployed container digest/);
+  assert.match(
+    workflow,
+    /- name: Wait for exact workers\.dev rollout acceptance/,
+  );
 
   const jobHeader = workflow.slice(
     workflow.indexOf("jobs:"),
@@ -68,4 +68,86 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
       `${secretName} should be bound only to preflight and secret handoff`,
     );
   }
+});
+
+test("Cloudflare rollout acceptance cannot pass against the previous container", async () => {
+  const workflow = await read(
+    ".github/workflows/cloudflare-production-deploy.yml",
+  );
+  const waitStart = workflow.indexOf(
+    "- name: Wait for exact workers.dev rollout acceptance",
+  );
+  const smokeStart = workflow.indexOf(
+    "- name: Smoke-test workers.dev deployment",
+  );
+  assert.ok(waitStart > 0, "exact rollout gate must exist");
+  assert.ok(smokeStart > waitStart, "smoke test must follow the rollout gate");
+
+  const rolloutGate = workflow.slice(waitStart, smokeStart);
+  assert.match(workflow, /container_tag=jack-core-production:/);
+  assert.match(workflow, /registry\.cloudflare\.com\//);
+  assert.match(workflow, /docker image inspect "\$registry_tag"/);
+  assert.match(workflow, /\/jack-core-production@sha256:\[0-9a-f\]\{64\}\$/);
+  assert.match(workflow, /expected_digest=\$expected_digest/);
+  assert.match(rolloutGate, /timeout-minutes: 35/);
+  assert.match(rolloutGate, /for attempt in \$\(seq 1 120\)/);
+  assert.match(rolloutGate, /containers list --json/);
+  assert.match(rolloutGate, /reported_digest="\$\{application_image##\*@\}"/);
+  assert.match(rolloutGate, /reported_digest" == "\$expected_digest/);
+  assert.match(rolloutGate, /application_state" =~ \^\(active\|ready\)\$/);
+  assert.match(rolloutGate, /\/api\/healthz\?release=/);
+  assert.match(rolloutGate, /\/api\/me\?release=/);
+  assert.match(rolloutGate, /auth_status" == "401"/);
+  assert.match(rolloutGate, /includes\("sign in required"\)/);
+  assert.match(rolloutGate, /row\.name === "jack-production"/);
+  assert.match(rolloutGate, /instance_state" == "running"/);
+  assert.match(rolloutGate, /instance_version" == "\$application_version"/);
+  assert.match(rolloutGate, /postprobe_instance_state" == "running"/);
+  assert.match(
+    rolloutGate,
+    /postprobe_instance_version" == "\$application_version"/,
+  );
+  assert.match(
+    rolloutGate,
+    /image_match" == "true" && "\$instance_version_match" == "true" && "\$postprobe_instance_version_match" == "true" && "\$root_status" == "200" && "\$health_ok" == "true" && "\$auth_ok" == "true"/,
+  );
+  assert.match(rolloutGate, /containers instances "\$application_id" --json/);
+  assert.doesNotMatch(
+    rolloutGate,
+    /if \[\[ "\$http_code" =~ \^2 \]\]; then\s+ready=true/,
+  );
+
+  const imageGate = rolloutGate.indexOf(
+    'reported_digest="${application_image##*@}"',
+  );
+  const firstProbe = rolloutGate.indexOf("curl --silent");
+  const acceptanceProbe = rolloutGate.indexOf("phase=acceptance");
+  const authProof = rolloutGate.indexOf('auth_status" == "401"');
+  const instanceProof = rolloutGate.indexOf(
+    'instance_version" == "$application_version"',
+  );
+  const postprobeInstanceProof = rolloutGate.indexOf(
+    'postprobe_instance_version" == "$application_version"',
+  );
+  const acceptance = rolloutGate.lastIndexOf("ready=true");
+  assert.ok(
+    imageGate >= 0 && imageGate < firstProbe,
+    "verify the image before probing",
+  );
+  assert.ok(
+    authProof >= 0 && authProof < acceptance,
+    "prove fail-closed auth before accepting",
+  );
+  assert.ok(
+    instanceProof >= 0 && instanceProof < acceptance,
+    "prove the serving instance version before accepting",
+  );
+  assert.ok(
+    instanceProof >= 0 && instanceProof < acceptanceProbe,
+    "prove the serving instance version before acceptance probes",
+  );
+  assert.ok(
+    postprobeInstanceProof > authProof && postprobeInstanceProof < acceptance,
+    "re-prove the serving instance version after acceptance probes",
+  );
 });
