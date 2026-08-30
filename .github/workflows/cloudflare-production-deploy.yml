@@ -180,53 +180,200 @@ jobs:
             console.error("Wrangler deploy output did not contain a deployment target.");
             process.exit(1);
           }
+          if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(deploy.version_id || "")) {
+            console.error("Wrangler deploy output did not contain a valid Worker version ID.");
+            process.exit(1);
+          }
           const target = deploy.targets.find((value) => value.includes("workers.dev")) || deploy.targets[0];
           console.log(`target=${target}`);
-          console.log(`version_id=${deploy.version_id || "unknown"}`);
+          console.log(`version_id=${deploy.version_id}`);
+          console.log(`container_tag=jack-core-production:${deploy.version_id.split("-")[0]}`);
           NODE
 
-      - name: Wait for workers.dev container readiness
-        timeout-minutes: 8
+      - name: Resolve deployed container digest
+        id: container
+        shell: bash
+        run: |
+          container_tag="${{ steps.deployment.outputs.container_tag }}"
+          image_version="${container_tag##*:}"
+          registry_tag="$(docker image ls --format '{{.Repository}}:{{.Tag}}' | node -e '
+            const fs = require("node:fs");
+            const suffix = `/jack-core-production:${process.argv[1]}`;
+            const tags = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean);
+            const tag = tags.find((value) => value.startsWith("registry.cloudflare.com/") && value.endsWith(suffix));
+            process.stdout.write(tag ?? "");
+          ' "$image_version")"
+
+          if [[ -z "$registry_tag" ]]; then
+            echo "::error::Wrangler did not leave the pushed registry tag for ${container_tag}."
+            exit 1
+          fi
+
+          repo_digests="$(docker image inspect "$registry_tag" --format '{{json .RepoDigests}}')"
+          expected_digest="$(node -e '
+            const refs = JSON.parse(process.argv[1]) ?? [];
+            const ref = refs.find((value) => /\/jack-core-production@sha256:[0-9a-f]{64}$/i.test(value));
+            process.stdout.write(ref?.split("@").at(-1) ?? "");
+          ' "$repo_digests")"
+
+          if [[ ! "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unable to resolve the pushed Cloudflare container digest for ${registry_tag}."
+            exit 1
+          fi
+
+          echo "expected_digest=$expected_digest" >> "$GITHUB_OUTPUT"
+          echo "Cloudflare rollout must activate container digest ${expected_digest}."
+
+      - name: Wait for exact workers.dev rollout acceptance
+        timeout-minutes: 35
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -u
           target="${{ steps.deployment.outputs.target }}"
+          release="${{ steps.deployment.outputs.version_id }}"
+          expected_digest="${{ steps.container.outputs.expected_digest }}"
           ready=false
 
-          for attempt in $(seq 1 42); do
-            http_code="$(curl --silent --show-error --output /tmp/jack-readiness.html --write-out '%{http_code}' --max-time 10 "$target/" || true)"
-            echo "workers.dev readiness attempt ${attempt}/42: HTTP ${http_code:-000}"
+          # Cloudflare may give a replaced instance up to 15 minutes to drain.
+          # Keep at least a 20-minute polling floor, with job headroom for API calls.
+          for attempt in $(seq 1 120); do
+            applications="$(npx --yes wrangler@latest containers list --json || true)"
+            mapfile -t application_fields < <(node -e '
+              try {
+                const payload = JSON.parse(process.argv[1]);
+                const rows = Array.isArray(payload) ? payload : payload.result ?? payload.applications ?? [];
+                const application = rows.find((row) => row.name === "jack-core-production");
+                console.log(application?.id ?? application?.application_id ?? "");
+                console.log(application?.state ?? "missing");
+                console.log(application?.image ?? "");
+                console.log(application?.version ?? "");
+              } catch {
+                console.log("");
+                console.log("unavailable");
+                console.log("");
+                console.log("");
+              }
+            ' "$applications")
+            application_id="${application_fields[0]:-}"
+            application_state="${application_fields[1]:-unavailable}"
+            application_image="${application_fields[2]:-}"
+            application_version="${application_fields[3]:-}"
+            reported_digest="${application_image##*@}"
 
-            if [[ "$http_code" =~ ^2 ]]; then
+            image_match=false
+            if [[ "$reported_digest" == "$expected_digest" ]]; then
+              image_match=true
+            fi
+
+            warmup_status="not-checked"
+            root_status="not-checked"
+            health_status="not-checked"
+            auth_status="not-checked"
+            health_ok=false
+            auth_ok=false
+            instance_state="not-checked"
+            instance_version=""
+            instance_version_match=false
+            postprobe_instance_state="not-checked"
+            postprobe_instance_version=""
+            postprobe_instance_version_match=false
+
+            if [[ "$image_match" == "true" && "$application_state" =~ ^(active|ready)$ ]]; then
+              warmup_status="$(curl --silent --show-error --output /tmp/jack-warmup.html --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 30 "$target/?release=$release&attempt=$attempt&phase=warmup" || true)"
+            fi
+
+            if [[ "$warmup_status" == "200" && -n "$application_id" ]]; then
+              instances="$(npx --yes wrangler@latest containers instances "$application_id" --json || true)"
+              mapfile -t instance_fields < <(node -e '
+                try {
+                  const payload = JSON.parse(process.argv[1]);
+                  const rows = Array.isArray(payload) ? payload : payload.instances ?? [];
+                  const instance = rows.find((row) => row.name === "jack-production");
+                  console.log(instance?.state ?? "missing");
+                  console.log(instance?.version ?? "");
+                } catch {
+                  console.log("unavailable");
+                  console.log("");
+                }
+              ' "$instances")
+              instance_state="${instance_fields[0]:-unavailable}"
+              instance_version="${instance_fields[1]:-}"
+              if [[ "$instance_state" == "running" && -n "$application_version" && "$instance_version" == "$application_version" ]]; then
+                instance_version_match=true
+              fi
+            fi
+
+            if [[ "$instance_version_match" == "true" ]]; then
+              root_status="$(curl --silent --show-error --output /tmp/jack-readiness.html --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/?release=$release&attempt=$attempt&phase=acceptance" || true)"
+              if [[ "$root_status" == "200" ]]; then
+                health_status="$(curl --silent --show-error --output /tmp/jack-healthz.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/api/healthz?release=$release&attempt=$attempt" || true)"
+                if [[ "$health_status" == "200" ]] && node -e '
+                  const fs = require("node:fs");
+                  try {
+                    const body = JSON.parse(fs.readFileSync("/tmp/jack-healthz.json", "utf8"));
+                    process.exit(body.status === "ok" ? 0 : 1);
+                  } catch {
+                    process.exit(1);
+                  }
+                '; then
+                  health_ok=true
+                  auth_status="$(curl --silent --show-error --output /tmp/jack-unauthorized.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 15 "$target/api/me?release=$release&attempt=$attempt" || true)"
+                  if [[ "$auth_status" == "401" ]] && node -e '
+                    const fs = require("node:fs");
+                    try {
+                      const body = JSON.parse(fs.readFileSync("/tmp/jack-unauthorized.json", "utf8"));
+                      process.exit(String(body.error || "").includes("sign in required") ? 0 : 1);
+                    } catch {
+                      process.exit(1);
+                    }
+                  '; then
+                    auth_ok=true
+                  fi
+                fi
+              fi
+            fi
+
+            if [[ "$auth_ok" == "true" && -n "$application_id" ]]; then
+              postprobe_instances="$(npx --yes wrangler@latest containers instances "$application_id" --json || true)"
+              mapfile -t postprobe_instance_fields < <(node -e '
+                try {
+                  const payload = JSON.parse(process.argv[1]);
+                  const rows = Array.isArray(payload) ? payload : payload.instances ?? [];
+                  const instance = rows.find((row) => row.name === "jack-production");
+                  console.log(instance?.state ?? "missing");
+                  console.log(instance?.version ?? "");
+                } catch {
+                  console.log("unavailable");
+                  console.log("");
+                }
+              ' "$postprobe_instances")
+              postprobe_instance_state="${postprobe_instance_fields[0]:-unavailable}"
+              postprobe_instance_version="${postprobe_instance_fields[1]:-}"
+              if [[ "$postprobe_instance_state" == "running" && -n "$application_version" && "$postprobe_instance_version" == "$application_version" ]]; then
+                postprobe_instance_version_match=true
+              fi
+            fi
+
+            echo "workers.dev rollout attempt ${attempt}/120: app_state=${application_state}, image_match=${image_match}, warmup=${warmup_status:-000}, preprobe_instance_state=${instance_state}, preprobe_instance_version_match=${instance_version_match}, postprobe_instance_state=${postprobe_instance_state}, postprobe_instance_version_match=${postprobe_instance_version_match}, root=${root_status:-000}, health=${health_status:-000}, anonymous_api_me=${auth_status:-000}"
+
+            if [[ "$image_match" == "true" && "$instance_version_match" == "true" && "$postprobe_instance_version_match" == "true" && "$root_status" == "200" && "$health_ok" == "true" && "$auth_ok" == "true" ]]; then
               ready=true
               break
             fi
 
-            if (( attempt % 3 == 0 )); then
-              applications="$(npx --yes wrangler@latest containers list --json || true)"
-              printf '%s\n' "$applications"
-              application_id="$(node -e '
-                try {
-                  const payload = JSON.parse(process.argv[1]);
-                  const rows = Array.isArray(payload) ? payload : payload.result ?? payload.applications ?? [];
-                  const application = rows.find((row) => row.name === "jack-core-production");
-                  process.stdout.write(application?.id ?? application?.application_id ?? "");
-                } catch {
-                  process.stdout.write("");
-                }
-              ' "$applications")"
-              if [[ -n "$application_id" ]]; then
-                npx --yes wrangler@latest containers instances "$application_id" --json || true
-              fi
+            if (( attempt % 3 == 0 )) && [[ -n "$application_id" ]]; then
+              npx --yes wrangler@latest containers instances "$application_id" --json || true
             fi
 
-            sleep 10
+            if (( attempt < 120 )); then
+              sleep 10
+            fi
           done
 
           if [[ "$ready" != "true" ]]; then
-            echo "::error::workers.dev did not become ready within the bounded seven-minute provisioning window."
+            echo "::error::workers.dev did not activate ${expected_digest} on the serving container instance with a healthy shell and fail-closed anonymous auth within the bounded rollout window."
             exit 1
           fi
 
@@ -234,10 +381,11 @@ jobs:
         shell: bash
         run: |
           target="${{ steps.deployment.outputs.target }}"
-          curl --fail --silent --show-error --max-time 30 "$target/" > /dev/null
-          curl --fail --silent --show-error --max-time 30 "$target/api/healthz" | tee /tmp/healthz.json
+          release="${{ steps.deployment.outputs.version_id }}"
+          curl --fail --silent --show-error --header 'Cache-Control: no-cache' --max-time 30 "$target/?release=$release" > /dev/null
+          curl --fail --silent --show-error --header 'Cache-Control: no-cache' --max-time 30 "$target/api/healthz?release=$release" | tee /tmp/healthz.json
           node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/healthz.json","utf8")); if(body.status!=="ok") process.exit(1)'
-          auth_status="$(curl --silent --show-error --output /tmp/unauthorized.json --write-out '%{http_code}' --max-time 30 "$target/api/me")"
+          auth_status="$(curl --silent --show-error --output /tmp/unauthorized.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 30 "$target/api/me?release=$release")"
           test "$auth_status" = "401"
           node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/unauthorized.json","utf8")); if(!String(body.error||"").includes("sign in required")) process.exit(1)'
 
@@ -300,6 +448,9 @@ jobs:
             echo "## Cloudflare workers.dev acceptance"
             echo "- target: ${{ steps.deployment.outputs.target }}"
             echo "- version: ${{ steps.deployment.outputs.version_id }}"
+            echo "- container digest: ${{ steps.container.outputs.expected_digest }}"
+            echo "- exact container rollout: PASS"
+            echo "- serving instance version: PASS"
             echo "- public shell: PASS"
             echo "- /api/healthz: PASS"
             echo "- anonymous /api/me rejected: PASS (401)"
