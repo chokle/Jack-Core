@@ -51,8 +51,8 @@ The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLE
 7. hand runtime secrets to Wrangler without exposing them job-wide;
 8. deploy Worker + Container to the temporary `workers.dev` target;
 9. resolve the deployed target/version from Wrangler structured output;
-10. wait for the supported Container lifecycle to report the app port ready;
-11. smoke-test the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
+10. wait for the exact pushed Container digest and named serving-instance version through 120 primary attempts plus, if needed, 12 terminal reconciliation attempts under the same 35-minute hard timeout;
+11. prove that serving-instance version both before and after smoke-testing the public shell, `/api/healthz`, and anonymous `/api/me` rejection;
 12. record deployment evidence in the workflow summary.
 
 Production DNS remains unchanged during this lane so Railway stays available as rollback.
