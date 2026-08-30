@@ -158,6 +158,125 @@ test("an immediate exact same-version running instance passes only after the ful
   assert.equal(result.snapshot.postprobeInstance.state, "running");
 });
 
+test("an initially running candidate retries a transient preprobe control-plane read", async () => {
+  const clock = createFakeClock();
+  const logs = [];
+  const { adapter, calls } = createAdapter({
+    clock,
+    applications: ({ call }) => {
+      if (call === 2) throw new Error("temporary preprobe read failure");
+      return [application()];
+    },
+  });
+  const result = await runScenario({
+    adapter,
+    clock,
+    logger: (line) => logs.push(line),
+    config: { terminalPollIntervalMs: 1 },
+  });
+
+  assert.equal(result.ready, true);
+  assert.equal(result.code, "accepted");
+  assert.deepEqual(result.admission, {
+    admittedAtMs: 0,
+    applicationId: "app-1",
+    digest: DIGEST,
+    applicationVersion: "14",
+    instanceId: "instance-1",
+    instanceVersion: "14",
+  });
+  assert.equal(calls.applications, 4);
+  assert.equal(calls.instances, 3);
+  assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 1);
+  assert.match(logs.join("\n"), /full transaction will restart/);
+});
+
+test("an initially running candidate restarts the full transaction after a transient postprobe read", async () => {
+  const clock = createFakeClock();
+  const logs = [];
+  const { adapter, calls } = createAdapter({
+    clock,
+    instances: ({ call }) => {
+      if (call === 3) throw new Error("temporary postprobe read failure");
+      return [instance()];
+    },
+  });
+  const result = await runScenario({
+    adapter,
+    clock,
+    logger: (line) => logs.push(line),
+    config: { terminalPollIntervalMs: 1 },
+  });
+
+  assert.equal(result.ready, true);
+  assert.equal(result.code, "accepted");
+  assert.notEqual(result.admission, null);
+  assert.equal(calls.applications, 5);
+  assert.equal(calls.instances, 5);
+  assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 2);
+  assert.match(logs.join("\n"), /full transaction will restart/);
+});
+
+test("an initially running admission never retries drift or public probe failure", async (t) => {
+  await t.test("drift after a transient read", async () => {
+    const clock = createFakeClock();
+    const { adapter, calls } = createAdapter({
+      clock,
+      applications: ({ call }) => {
+        if (call === 2) throw new Error("temporary preprobe read failure");
+        return [
+          application(
+            call === 3
+              ? {
+                  image: `registry.cloudflare.com/account/jack-core-production@${OTHER_DIGEST}`,
+                }
+              : undefined,
+          ),
+        ];
+      },
+    });
+    const result = await runScenario({
+      adapter,
+      clock,
+      logger: () => {},
+      config: { terminalPollIntervalMs: 1 },
+    });
+
+    assert.equal(result.ready, false);
+    assert.equal(result.code, "application-drift");
+    assert.notEqual(result.admission, null);
+    assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 0);
+  });
+
+  await t.test("public probe failure after a transient read", async () => {
+    const clock = createFakeClock();
+    const { adapter, calls } = createAdapter({
+      clock,
+      applications: ({ call }) => {
+        if (call === 2) throw new Error("temporary preprobe read failure");
+        return [application()];
+      },
+      probes: {
+        root: () => {
+          throw new Error("public network failure");
+        },
+      },
+    });
+    const result = await runScenario({
+      adapter,
+      clock,
+      logger: () => {},
+      config: { terminalPollIntervalMs: 1 },
+    });
+
+    assert.equal(result.ready, false);
+    assert.equal(result.code, "root-probe-failed");
+    assert.notEqual(result.admission, null);
+    assert.equal(calls.applications, 3);
+    assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 1);
+  });
+});
+
 test("a stopped instance transitioning at 32:30 passes before both internal deadlines", async () => {
   const clock = createFakeClock();
   const { adapter } = createAdapter({
@@ -696,7 +815,7 @@ test("digest or version drift after stopped admission fails instead of re-admitt
   assert.equal(result.code, "application-drift");
 });
 
-test("a bounded Wrangler timeout is not confused with the absolute phase deadline", async () => {
+test("an initially running bounded Wrangler timeout retries before the absolute acceptance deadline", async () => {
   const clock = createFakeClock();
   const { adapter, calls } = createAdapter({
     clock,
@@ -713,12 +832,13 @@ test("a bounded Wrangler timeout is not confused with the absolute phase deadlin
       transitionDeadlineMs: 1_000,
       acceptanceDeadlineMs: 1_500,
       wranglerCommandTimeoutMs: 50,
+      terminalPollIntervalMs: 1,
     },
   });
-  assert.equal(result.ready, false);
-  assert.equal(result.code, "acceptance-read-failed");
-  assert.equal(result.elapsedMs, 51);
-  assert.equal(calls.probes.filter(({ kind }) => kind !== "warmup").length, 0);
+  assert.equal(result.ready, true);
+  assert.equal(result.code, "accepted");
+  assert.equal(result.elapsedMs, 52);
+  assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 1);
 });
 
 test("the production subprocess adapter kills a command that exceeds its timeout", async () => {

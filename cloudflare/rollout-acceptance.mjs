@@ -152,6 +152,17 @@ function pinnedInstanceMatches(instance, admission, state) {
   );
 }
 
+function admissionFrom(application, instance, admittedAtMs) {
+  return {
+    admittedAtMs,
+    applicationId: application.id,
+    digest: application.digest,
+    applicationVersion: application.version,
+    instanceId: instance.id,
+    instanceVersion: instance.version,
+  };
+}
+
 export async function runRolloutAcceptance({
   target,
   release,
@@ -369,14 +380,9 @@ export async function runRolloutAcceptance({
       );
     }
 
-    const transactionAdmission = admission ?? {
-      admittedAtMs: elapsed(),
-      applicationId: candidate.application.id,
-      digest: candidate.application.digest,
-      applicationVersion: candidate.application.version,
-      instanceId: candidate.instance.id,
-      instanceVersion: candidate.instance.version,
-    };
+    const transactionAdmission =
+      admission ??
+      admissionFrom(candidate.application, candidate.instance, elapsed());
 
     const preprobeApplication = await readApplication(acceptanceDeadline);
     snapshot.application = preprobeApplication;
@@ -593,11 +599,17 @@ export async function runRolloutAcceptance({
           }
 
           if (instance.identityVersionMatch && instance.state === "running") {
+            if (!admission) {
+              admission = admissionFrom(application, instance, elapsed());
+              logger(
+                `workers.dev rollout running admission: elapsed=${formatElapsed(elapsed())} application=${application.id}@${application.version} instance=${instance.id}@${instance.version}`,
+              );
+            }
             logSnapshot(`primary ${attempt}/${options.primaryAttempts}`);
             return await completeAcceptanceWithRetries(
               { application, instance },
               clock.now(),
-              Boolean(admission),
+              true,
             );
           }
 
@@ -606,14 +618,7 @@ export async function runRolloutAcceptance({
             instance.identityVersionMatch &&
             instance.state === "stopped"
           ) {
-            admission = {
-              admittedAtMs: elapsed(),
-              applicationId: application.id,
-              digest: application.digest,
-              applicationVersion: application.version,
-              instanceId: instance.id,
-              instanceVersion: instance.version,
-            };
+            admission = admissionFrom(application, instance, elapsed());
             logger(
               `workers.dev rollout terminal admission: elapsed=${formatElapsed(elapsed())} application=${application.id}@${application.version} instance=${instance.id}@${instance.version}`,
             );
