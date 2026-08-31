@@ -71,7 +71,7 @@ begin
     return false;
   end if;
 
-  v_actor_user_id := pg_catalog.nullif(
+  v_actor_user_id := nullif(
     pg_catalog.btrim(v_video.uploader_user_id),
     ''
   );
@@ -111,7 +111,7 @@ begin
   end if;
 
   v_now := pg_catalog.clock_timestamp();
-  v_trade := pg_catalog.nullif(pg_catalog.btrim(v_video.trade), '');
+  v_trade := nullif(pg_catalog.btrim(v_video.trade), '');
   v_parent_node_id := case
     when v_trade is null then '__jack__'
     else 'topic:' || v_trade
@@ -202,11 +202,11 @@ begin
         'uploaderUserId', v_actor_user_id,
         'uploaderEmail', case
           when v_actor_user_id is null then null
-          else pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_email), '')
+          else nullif(pg_catalog.btrim(v_video.uploader_email), '')
         end,
         'uploaderName', case
           when v_actor_user_id is null then null
-          else pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_name), '')
+          else nullif(pg_catalog.btrim(v_video.uploader_name), '')
         end,
         'createdAt', v_video.created_at,
         'updatedAt', coalesce(v_video.updated_at, v_video.created_at)
@@ -235,8 +235,8 @@ begin
       v_contributor_node_id,
       'contributor',
       coalesce(
-        pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_name), ''),
-        pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_email), ''),
+        nullif(pg_catalog.btrim(v_video.uploader_name), ''),
+        nullif(pg_catalog.btrim(v_video.uploader_email), ''),
         'Contributor'
       ),
       v_trade,
@@ -244,8 +244,8 @@ begin
       pg_catalog.jsonb_strip_nulls(
         pg_catalog.jsonb_build_object(
           'userId', v_actor_user_id,
-          'email', pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_email), ''),
-          'name', pg_catalog.nullif(pg_catalog.btrim(v_video.uploader_name), ''),
+          'email', nullif(pg_catalog.btrim(v_video.uploader_email), ''),
+          'name', nullif(pg_catalog.btrim(v_video.uploader_name), ''),
           'trade', v_trade
         )
       ),
