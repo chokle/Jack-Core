@@ -265,6 +265,8 @@ set search_path = ''
 as $$
 declare
   v_row jsonb;
+  v_old jsonb;
+  v_requires_current boolean;
   v_actor_user_id text;
   v_organization_id uuid;
   v_pilot_id uuid;
@@ -350,7 +352,36 @@ begin
     end if;
 
   elsif tg_table_name = 'test_feedback' then
-    if v_row ->> 'pilot_id' is not null
+    v_requires_current := tg_op = 'INSERT';
+    if tg_op = 'UPDATE' then
+      v_old := pg_catalog.to_jsonb(old);
+      v_requires_current :=
+        v_old ->> 'tester_user_id' is distinct from v_row ->> 'tester_user_id'
+        or v_old ->> 'organization_id' is distinct from v_row ->> 'organization_id'
+        or v_old ->> 'pilot_id' is distinct from v_row ->> 'pilot_id'
+        or v_old ->> 'test_session_id' is distinct from v_row ->> 'test_session_id'
+        or (
+          v_old ->> 'deletion_due_at' is not null
+          and v_row ->> 'deletion_due_at' is null
+        )
+        or v_old -> 'features_used' is distinct from v_row -> 'features_used'
+        or v_old ->> 'tester_email' is distinct from v_row ->> 'tester_email'
+        or v_old ->> 'tester_name' is distinct from v_row ->> 'tester_name'
+        or v_old ->> 'tester_profile_id' is distinct from v_row ->> 'tester_profile_id'
+        or v_old ->> 'tester_trade' is distinct from v_row ->> 'tester_trade'
+        or v_old ->> 'session_id' is distinct from v_row ->> 'session_id'
+        or v_old ->> 'device_category' is distinct from v_row ->> 'device_category'
+        or v_old ->> 'trigger' is distinct from v_row ->> 'trigger'
+        or v_old ->> 'goal' is distinct from v_row ->> 'goal'
+        or v_old ->> 'useful' is distinct from v_row ->> 'useful'
+        or v_old ->> 'shortfall' is distinct from v_row ->> 'shortfall'
+        or v_old ->> 'adoption_need' is distinct from v_row ->> 'adoption_need'
+        or v_old ->> 'additional' is distinct from v_row ->> 'additional'
+        or v_old ->> 'app_version' is distinct from v_row ->> 'app_version';
+    end if;
+
+    if v_requires_current
+      and v_row ->> 'pilot_id' is not null
       and v_row ->> 'deletion_due_at' is null
     then
       if v_row ->> 'test_session_id' is not null then
