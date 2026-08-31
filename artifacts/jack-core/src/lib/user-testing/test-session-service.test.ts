@@ -268,14 +268,21 @@ describe("test session service", () => {
       }))
       .mockResolvedValueOnce(new Response("{}", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("storage unavailable");
-    });
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key === "jack.userTesting.eventQueue.v1") {
+          throw new Error("storage unavailable");
+        }
+        return originalSetItem.call(this, key, value);
+      });
 
     await flushTestEvents();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).eventId).toBe("e-1");
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).eventId).toBe("e-2");
+    setItemSpy.mockRestore();
   });
 
   it.each([408, 429, 503] as const)(
