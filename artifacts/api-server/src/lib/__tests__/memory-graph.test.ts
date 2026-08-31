@@ -474,6 +474,120 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
   });
 });
 
+describe("syncVideoGraph — durable account-deletion fencing", () => {
+  it("propagates an RPC failure without falling back to direct identity writes", async () => {
+    fake.tables["videos"].push({
+      id: "vid-rpc-fail",
+      title: "Must not leak",
+      trade: TRADE,
+      status: "uploaded",
+      description: null,
+      competency_codes: [],
+      uploader_user_id: "user-rpc-fail",
+      uploader_email: "blocked@example.test",
+      uploader_name: "Blocked Contributor",
+      created_at: "2026-08-31T00:00:00.000Z",
+      updated_at: null,
+    });
+    fake.failNext(
+      "rpc:apply_fenced_video_graph_identity",
+      "insert",
+      { message: "fenced graph RPC unavailable" },
+    );
+
+    await expect(syncVideoGraph("vid-rpc-fail")).rejects.toMatchObject({
+      message: "fenced graph RPC unavailable",
+    });
+    expect(nodeById("video:vid-rpc-fail")).toBeUndefined();
+    expect(nodeById("contributor:user-rpc-fail")).toBeUndefined();
+  });
+
+  it("cannot recreate cleaned identity after whole-account deletion begins", async () => {
+    const userId = "user-stale-video";
+    const videoId = "vid-stale-account-delete";
+    fake.tables["videos"].push({
+      id: videoId,
+      title: "Stale owned upload",
+      trade: TRADE,
+      status: "uploaded",
+      description: null,
+      competency_codes: ["W-2"],
+      uploader_user_id: userId,
+      uploader_email: "stale@example.test",
+      uploader_name: "Stale Contributor",
+      created_at: "2026-08-31T00:00:00.000Z",
+      updated_at: null,
+    });
+    await syncVideoGraph(videoId);
+    expect(nodeById(`video:${videoId}`)).toBeDefined();
+    expect(nodeById(`contributor:${userId}`)).toBeDefined();
+
+    const begun = await fake.rpc("begin_telemetry_account_deletion", {
+      p_actor_user_id: userId,
+    });
+    expect(begun.error).toBeNull();
+    await removeVideoGraph(videoId);
+    await removeContributorGraph(userId);
+
+    await expect(syncVideoGraph(videoId)).rejects.toMatchObject({
+      message: "video graph source is fenced by account deletion",
+    });
+    expect(nodeById(`video:${videoId}`)).toBeUndefined();
+    expect(nodeById(`contributor:${userId}`)).toBeUndefined();
+  });
+
+  it("does not mint un-fenceable email or name metadata without an actor id", async () => {
+    fake.tables["videos"].push({
+      id: "vid-legacy-ownerless",
+      title: "Legacy upload",
+      trade: TRADE,
+      status: "uploaded",
+      description: null,
+      competency_codes: [],
+      uploader_user_id: null,
+      uploader_email: "legacy@example.test",
+      uploader_name: "Legacy Person",
+      created_at: "2026-08-31T00:00:00.000Z",
+      updated_at: null,
+    });
+
+    await syncVideoGraph("vid-legacy-ownerless");
+
+    const meta = nodeById("video:vid-legacy-ownerless")!["meta"] as Record<string, unknown>;
+    expect(meta).not.toHaveProperty("uploaderUserId");
+    expect(meta).not.toHaveProperty("uploaderEmail");
+    expect(meta).not.toHaveProperty("uploaderName");
+    expect(nodes().filter((node) => node["kind"] === "contributor")).toHaveLength(0);
+  });
+
+  it("prunes the old contributor identity when authoritative ownership changes", async () => {
+    const video = {
+      id: "vid-owner-change",
+      title: "Transferred upload",
+      trade: TRADE,
+      status: "uploaded",
+      description: null,
+      competency_codes: [],
+      uploader_user_id: "user-old-owner",
+      uploader_email: "old@example.test",
+      uploader_name: "Old Owner",
+      created_at: "2026-08-31T00:00:00.000Z",
+      updated_at: null,
+    };
+    fake.tables["videos"].push(video);
+    await syncVideoGraph(video.id);
+    expect(nodeById("contributor:user-old-owner")).toBeDefined();
+
+    video.uploader_user_id = "user-new-owner";
+    video.uploader_email = "new@example.test";
+    video.uploader_name = "New Owner";
+    await syncVideoGraph(video.id);
+
+    expect(nodeById("contributor:user-old-owner")).toBeUndefined();
+    expect(nodeById("contributor:user-new-owner")).toBeDefined();
+  });
+});
+
 describe("removeContributorGraph — account privacy", () => {
   it("removes the uploader identity node and every incident edge", async () => {
     const userId = "user-delete-contributor";
