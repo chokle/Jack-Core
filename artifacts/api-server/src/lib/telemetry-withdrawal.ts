@@ -234,7 +234,9 @@ async function applyTelemetryWithdrawalCleanup(
       })
       .eq("actor_user_id", actorUserId)
       .eq("pilot_id", pilotId)
-      .lte("occurred_at", withdrawnAt);
+      // received_at is server-controlled. Client occurred_at may be skewed up
+      // to the accepted future window and must not escape withdrawal cleanup.
+      .lte("received_at", withdrawnAt);
     if (eventUpdate.error) throw eventUpdate.error;
 
     const failureDelete = await db
