@@ -119,6 +119,14 @@ router.delete("/account", async (req, res) => {
       .delete()
       .eq("actor_user_id", userId);
     if (sessionDeleteError) throw sessionDeleteError;
+    // Cleanup obligations contain the same actor identity and must be removed
+    // before their consent manifest. Otherwise a pending job becomes both
+    // unverifiable and permanently attributable after account deletion.
+    const { error: withdrawalJobDeleteError } = await supabase
+      .from("telemetry_withdrawal_jobs")
+      .delete()
+      .eq("actor_user_id", userId);
+    if (withdrawalJobDeleteError) throw withdrawalJobDeleteError;
     const { error: consentDeleteError } = await supabase
       .from("telemetry_consents")
       .delete()
