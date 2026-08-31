@@ -506,6 +506,7 @@ describe("user-testing gate transition", () => {
     await waitFor(() => {
       expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
     });
+    expect(userConsented()).toBe("false");
     await screen.findByTestId("user-testing-cancel");
 
     await startFlowFromOpenOverlay({ expectRecording: true });
@@ -571,6 +572,10 @@ describe("user-testing gate transition", () => {
     });
     expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
     expect(userConsented()).toBe("false");
+
+    openFromAnyEntry();
+    await screen.findByTestId("user-testing-cancel");
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(2);
   });
 
   it("start with explicit active session records user testing acceptance", async () => {
