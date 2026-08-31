@@ -585,10 +585,18 @@ describe("user-testing gate transition", () => {
 
     await renderAuthenticatedApp("/app");
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(80_000);
+      await vi.advanceTimersByTimeAsync(0);
     });
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
 
-    expect(mockedStartTestSession).toHaveBeenCalledTimes(7);
+    const retryDelays = [500, 1_500, 3_000, 10_000, 30_000, 30_000];
+    for (const [index, delay] of retryDelays.entries()) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay);
+      });
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(index + 2);
+    }
+
     expect(mockedStartTestSession.mock.calls[6]?.[1]?.requestKey).toBe(identity.userId);
     vi.useRealTimers();
   });
