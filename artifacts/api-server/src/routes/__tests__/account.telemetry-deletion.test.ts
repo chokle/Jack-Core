@@ -20,13 +20,19 @@ const recordingRows = vi.hoisted(
 const removeRecordingObjects = vi.hoisted(() =>
   vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({ error: null })),
 );
+const removeVideoGraph = vi.hoisted(() => vi.fn(async () => {}));
+const removeContributorGraph = vi.hoisted(() => vi.fn(async () => {}));
+const withdrawMentor = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("@clerk/express", () => ({
   getAuth: () => ({ userId: "user-1" }),
   clerkClient: { users: { deleteUser } },
 }));
-vi.mock("../../lib/jobs.js", () => ({ removeGraphSafe: vi.fn() }));
-vi.mock("../../lib/memory-graph.js", () => ({ withdrawMentor: vi.fn() }));
+vi.mock("../../lib/memory-graph.js", () => ({
+  removeVideoGraph,
+  removeContributorGraph,
+  withdrawMentor,
+}));
 vi.mock("../../lib/video-storage.js", () => ({ removeVideoAssets: vi.fn(async () => {}) }));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
@@ -120,6 +126,12 @@ beforeEach(() => {
   deleteUser.mockClear();
   removeRecordingObjects.mockReset();
   removeRecordingObjects.mockResolvedValue({ error: null });
+  removeVideoGraph.mockReset();
+  removeVideoGraph.mockResolvedValue(undefined);
+  removeContributorGraph.mockReset();
+  removeContributorGraph.mockResolvedValue(undefined);
+  withdrawMentor.mockReset();
+  withdrawMentor.mockResolvedValue(undefined);
 });
 
 describe("account deletion telemetry coverage", () => {
@@ -134,9 +146,13 @@ describe("account deletion telemetry coverage", () => {
     expect(new Set(deletedTables)).toEqual(
       new Set([
         "videos",
+        "interview_sessions",
+        "parked_thoughts",
         "chat_messages",
         "test_recordings",
         "test_feedback",
+        "end_of_shift_closeouts",
+        "pilot_access_handoffs",
         "activity_ingest_failures",
         "test_events",
         "admin_access_audit",
@@ -170,6 +186,43 @@ describe("account deletion telemetry coverage", () => {
         value: "user-1",
       },
     ]);
+    expect(
+      updates.filter(({ table }) => table === "pilot_memberships"),
+    ).toEqual([
+      {
+        table: "pilot_memberships",
+        values: { created_by_user_id: null },
+        column: "created_by_user_id",
+        value: "user-1",
+      },
+    ]);
+    expect(
+      updates.filter(({ table }) => table === "platform_roles"),
+    ).toEqual([
+      {
+        table: "platform_roles",
+        values: { created_by_user_id: null },
+        column: "created_by_user_id",
+        value: "user-1",
+      },
+    ]);
+    expect(removeContributorGraph).toHaveBeenCalledWith("user-1");
+    expect(deleteUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("keeps the identity when strict contributor graph cleanup fails", async () => {
+    removeContributorGraph.mockRejectedValueOnce(new Error("graph unavailable"));
+
+    const failed = await request(app()).delete("/api/account");
+
+    expect(failed.status).toBe(500);
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+    ]);
+
+    const retried = await request(app()).delete("/api/account");
+    expect(retried.status).toBe(204);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 
