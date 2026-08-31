@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
 
 const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
+const recordingServiceCancelSpy = vi.fn();
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/user-testing/test-session-service", () => ({
@@ -30,7 +31,9 @@ vi.mock("@/lib/user-testing/recording-service", () => ({
     stop() {
       return Promise.resolve();
     }
-    cancel() {}
+    cancel() {
+      recordingServiceCancelSpy();
+    }
     pause() {}
     resume() {}
   },
@@ -59,6 +62,7 @@ describe("TestingOverlay consent boundary", () => {
     state.currentSession = null;
     recordingServiceCtorSpy.mockClear();
     recordingServiceStartSpy.mockClear();
+    recordingServiceCancelSpy.mockClear();
     window.history.replaceState({}, "", "/app");
     sessionStorage.clear();
   });
@@ -87,6 +91,41 @@ describe("TestingOverlay consent boundary", () => {
 
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+  });
+
+  it("cancels recording work when the active identity changes", async () => {
+    state.cachedSession = {
+      id: "11111111-1111-4111-8111-111111111111",
+      organizationId: "org",
+      pilotId: "pilot",
+      appSessionId: "app",
+      status: "active",
+      telemetryStatus: "granted",
+      screenConsentState: "granted",
+      microphoneConsentState: "granted",
+      onboardingStatus: "not_started",
+      onboardingStep: 0,
+      recordingStatus: "not_started",
+      feedbackStatus: "not_started",
+      questionCount: 0,
+      startedAt: "2026-07-31T00:00:00Z",
+      lastActivityAt: "2026-07-31T00:00:00Z",
+      expiresAt: "2026-07-31T12:00:00Z",
+    };
+
+    const ref = createRef<TestingOverlayHandle>();
+    const rendered = render(
+      <TestingOverlay ref={ref} identityKey="user-a" />,
+    );
+    act(() => ref.current?.open());
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(
+      <TestingOverlay ref={ref} identityKey="user-b" />,
+    );
+
+    expect(recordingServiceCancelSpy).toHaveBeenCalledTimes(1);
   });
 
   it("requires an active session to construct recording service", async () => {
