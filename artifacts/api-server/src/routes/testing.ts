@@ -102,6 +102,13 @@ function withdrawalDeletionDueAt(): string {
   ).toISOString();
 }
 
+function pendingRecordingCleanupDueAt(): string {
+  // A recording starts life as cleanup-due. This gives any uploaded object a
+  // durable database cleanup link even if the process or storage call fails
+  // before the row can be finalized.
+  return new Date(Date.now() + 60 * 60 * 1000).toISOString();
+}
+
 async function recordingConsentsRemainCurrent(input: {
   userId: string;
   pilotId: string;
@@ -156,6 +163,31 @@ async function compensateRecordingConsentRace(input: {
   }
   if (marked.error) throw marked.error;
   if (removed.error) throw removed.error;
+}
+
+async function discardPendingRecording(input: {
+  recordingId: string;
+  userId: string;
+  storagePath: string;
+  removeStorage: boolean;
+}): Promise<unknown | null> {
+  if (input.removeStorage) {
+    const removed = await supabase.storage
+      .from("jack-test-recordings")
+      .remove([input.storagePath]);
+    if (removed.error) {
+      // Do not delete the metadata row: it was inserted cleanup-due and is the
+      // only durable link an operator/cleanup worker has to a partial object.
+      return removed.error;
+    }
+  }
+
+  const deleted = await supabase
+    .from("test_recordings")
+    .delete()
+    .eq("id", input.recordingId)
+    .eq("tester_user_id", input.userId);
+  return deleted.error ?? null;
 }
 
 function isFileSizeLimitError(err: unknown): boolean {
@@ -770,27 +802,12 @@ router.post(
       const filename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
       const recordingId = crypto.randomUUID();
       const storagePath = `recordings/${recordingId}/${filename}`;
+      const pendingDeletionDueAt = pendingRecordingCleanupDueAt();
 
-      const { error: uploadErr } = await supabase.storage
-        .from("jack-test-recordings")
-        .upload(storagePath, fs.createReadStream(tempPath), {
-          contentType: req.file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadErr) {
-        if (isFileSizeLimitError(uploadErr)) {
-          return res.status(413).json({
-            error:
-              "This recording exceeds the storage plan's file size limit. Please try a shorter session.",
-          });
-        }
-        throw uploadErr;
-      }
-
-      // Only the private storage_path is stored — never a public URL — since a
-      // screen recording can contain arbitrary on-screen content.
-      const { data: row, error: insertErr } = await supabase
+      // Insert the private path before storage upload and keep the row
+      // cleanup-due until every consent fence passes. A failed/partial upload
+      // can therefore never leave an object without a durable cleanup link.
+      const { data: pendingRow, error: insertErr } = await supabase
         .from("test_recordings")
         .insert({
           id: recordingId,
@@ -809,27 +826,116 @@ router.post(
           user_agent: null,
           screen_resolution: null,
           app_version: stringField(req.body, "appVersion") ?? null,
+          deletion_due_at: pendingDeletionDueAt,
         })
         .select("id, created_at")
         .single();
 
-      if (insertErr) {
-        // Roll back the uploaded object if we can't record its metadata.
-        await supabase.storage.from("jack-test-recordings").remove([storagePath]);
-        throw insertErr;
+      if (insertErr || !pendingRow) {
+        throw insertErr ?? new Error("Recording metadata insert returned no row.");
       }
 
-      const consentsStillCurrent = await recordingConsentsRemainCurrent({
+      const consentInput = {
         userId: identity.userId,
         pilotId,
         telemetryConsentId: telemetryConsent.id,
         screenConsentId: screenConsent.id,
         microphoneIncluded,
         microphoneConsentId: microphoneConsent?.id ?? null,
-      });
-      if (!consentsStillCurrent) {
+      };
+      if (!(await recordingConsentsRemainCurrent(consentInput))) {
+        const cleanupErr = await discardPendingRecording({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+          removeStorage: false,
+        });
+        if (cleanupErr) {
+          req.log.error(
+            { err: cleanupErr, recordingId },
+            "failed to roll back pre-upload recording metadata; cleanup remains scheduled",
+          );
+        }
+        return res.status(412).json({
+          error: "Recording consent changed before upload. The recording was not retained.",
+        });
+      }
+
+      let uploadErr: unknown = null;
+      try {
+        const uploadResult = await supabase.storage
+          .from("jack-test-recordings")
+          .upload(storagePath, fs.createReadStream(tempPath), {
+            contentType: req.file.mimetype,
+            upsert: false,
+          });
+        uploadErr = uploadResult.error;
+      } catch (err) {
+        uploadErr = err;
+      }
+
+      if (uploadErr) {
+        const cleanupErr = await discardPendingRecording({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+          removeStorage: true,
+        });
+        if (cleanupErr) {
+          req.log.error(
+            { err: cleanupErr, recordingId, storagePath },
+            "failed to remove a partial recording; cleanup remains scheduled",
+          );
+        }
+        if (isFileSizeLimitError(uploadErr)) {
+          return res.status(413).json({
+            error:
+              "This recording exceeds the storage plan's file size limit. Please try a shorter session.",
+          });
+        }
+        throw uploadErr;
+      }
+
+      if (!(await recordingConsentsRemainCurrent(consentInput))) {
         await compensateRecordingConsentRace({
-          recordingId: String(row.id),
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        return res.status(412).json({
+          error: "Recording consent changed during upload. The recording was not retained.",
+        });
+      }
+
+      const { data: row, error: finalizeErr } = await supabase
+        .from("test_recordings")
+        .update({ deletion_due_at: null })
+        .eq("id", recordingId)
+        .eq("tester_user_id", identity.userId)
+        .eq("deletion_due_at", pendingDeletionDueAt)
+        .select("id, created_at")
+        .maybeSingle();
+      if (finalizeErr || !row) {
+        const consentsStillCurrent = await recordingConsentsRemainCurrent(consentInput);
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        if (!consentsStillCurrent) {
+          return res.status(412).json({
+            error: "Recording consent changed during upload. The recording was not retained.",
+          });
+        }
+        if (finalizeErr) throw finalizeErr;
+        return res.status(409).json({
+          error: "Recording could not be finalized and was not retained.",
+        });
+      }
+
+      if (!(await recordingConsentsRemainCurrent(consentInput))) {
+        await compensateRecordingConsentRace({
+          recordingId,
           userId: identity.userId,
           storagePath,
         });
