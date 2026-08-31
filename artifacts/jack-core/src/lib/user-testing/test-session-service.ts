@@ -353,12 +353,33 @@ export function flushTestEvents(): Promise<TestSession | null> {
     generation === flushGeneration && !controller.signal.aborted;
   const request = (async () => {
     let latest = getCachedTestSession();
+    let queue = readQueue();
+    const processedEventIds = new Set<string>();
 
+    const mergeNewEvents = () => {
+      const queuedIds = new Set(queue.map((event) => event.eventId));
+      for (const event of readQueue()) {
+        if (
+          !processedEventIds.has(event.eventId) &&
+          !queuedIds.has(event.eventId)
+        ) {
+          queue.push(event);
+          queuedIds.add(event.eventId);
+        }
+      }
+    };
+    const advanceQueue = (eventId: string) => {
+      processedEventIds.add(eventId);
+      queue = queue.filter((event) => event.eventId !== eventId);
+      mergeNewEvents();
+      writeQueue(queue);
+    };
     const isRetryable = (status: number): boolean =>
       status >= 500 || status === 408 || status === 429;
 
     while (isCurrent()) {
-      const next = readQueue()[0];
+      mergeNewEvents();
+      const next = queue[0];
       if (!next) return latest;
 
       try {
@@ -393,9 +414,8 @@ export function flushTestEvents(): Promise<TestSession | null> {
             return latest;
           }
 
-          const currentQueue = readQueue();
           if (!isCurrent()) return null;
-          writeQueue(currentQueue.filter((event) => event.eventId !== next.eventId));
+          advanceQueue(next.eventId);
           continue;
         }
 
@@ -404,9 +424,8 @@ export function flushTestEvents(): Promise<TestSession | null> {
 
         latest = body.session;
         cacheTestSession(latest);
-        const currentQueue = readQueue();
         if (!isCurrent()) return null;
-        writeQueue(currentQueue.filter((event) => event.eventId !== next.eventId));
+        advanceQueue(next.eventId);
       } catch {
         if (!isCurrent()) return null;
         return latest;
