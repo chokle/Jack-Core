@@ -413,6 +413,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     }
 
     const normalizedFeatures = [...new Set(features as string[])];
+    const canonicalAppVersion = appVersion ?? null;
     const { data: row, error } = await supabase
       .from("test_feedback")
       .insert({
@@ -434,7 +435,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         shortfall,
         adoption_need: adoptionNeed,
         additional,
-        app_version: appVersion,
+        app_version: canonicalAppVersion,
         status: "new",
         notification_status: "pending",
       })
@@ -474,7 +475,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
           existing.shortfall === shortfall &&
           existing.adoption_need === adoptionNeed &&
           existing.additional === additional &&
-          existing.app_version === appVersion;
+          existing.app_version === canonicalAppVersion;
         if (!retryMatches) {
           return res.status(409).json({
             error: "Feedback id does not match this submission context.",
