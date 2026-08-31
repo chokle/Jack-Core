@@ -267,31 +267,46 @@ export class FakeSupabase {
     operation: "insert" | "update",
     previous?: Row,
   ): { message: string } | null {
+    const accountActorColumns: Record<string, string[]> = {
+      telemetry_consents: ["actor_user_id"],
+      telemetry_withdrawal_jobs: ["actor_user_id"],
+      test_sessions: ["actor_user_id"],
+      test_events: ["actor_user_id"],
+      test_recordings: ["tester_user_id"],
+      test_feedback: ["tester_user_id"],
+      activity_ingest_failures: ["actor_user_id"],
+      videos: ["uploader_user_id"],
+      chat_messages: ["user_id"],
+      mentor_profiles: ["contributor_user_id"],
+      interview_sessions: ["contributor_user_id"],
+      parked_thoughts: ["actor_user_id"],
+      end_of_shift_closeouts: ["actor_user_id"],
+      pilot_access_handoffs: ["user_id"],
+      pilot_memberships: ["user_id", "created_by_user_id"],
+      platform_roles: ["user_id", "created_by_user_id"],
+      activity_report_runs: ["requested_by_user_id"],
+      admin_access_audit: ["actor_user_id", "target_user_id"],
+    };
+    const fencedActor = (accountActorColumns[table] ?? [])
+      .map((column) => String(row[column] ?? ""))
+      .find(
+        (candidate) =>
+          candidate.length > 0 && this.isTelemetryActorFenced(candidate),
+      );
+    if (fencedActor) {
+      return { message: "account deletion is already in progress" };
+    }
+
     const actorColumn =
       table === "test_recordings" || table === "test_feedback"
         ? "tester_user_id"
         : "actor_user_id";
     const actorUserId = String(row[actorColumn] ?? "");
-    if (
-      actorUserId &&
-      [
-        "telemetry_consents",
-        "telemetry_withdrawal_jobs",
-        "test_sessions",
-        "test_events",
-        "test_recordings",
-        "test_feedback",
-        "activity_ingest_failures",
-      ].includes(table) &&
-      this.isTelemetryActorFenced(actorUserId)
-    ) {
-      return { message: "account deletion is already in progress" };
-    }
-
     const organizationId = row["organization_id"];
     const pilotId = row["pilot_id"];
     if (table === "test_sessions") {
       if (
+        row["status"] === "active" &&
         row["telemetry_status"] === "granted" &&
         !this.telemetryConsentIsCurrent(
           actorUserId,
@@ -302,6 +317,7 @@ export class FakeSupabase {
         )
       ) return { message: "telemetry consent is not current for session write" };
       if (
+        row["status"] === "active" &&
         row["screen_consent_state"] === "granted" &&
         !this.telemetryConsentIsCurrent(
           actorUserId,
@@ -312,6 +328,7 @@ export class FakeSupabase {
         )
       ) return { message: "screen consent is not current for session write" };
       if (
+        row["status"] === "active" &&
         row["microphone_consent_state"] === "granted" &&
         !this.telemetryConsentIsCurrent(
           actorUserId,
@@ -583,6 +600,34 @@ export class FakeSupabase {
           last_attempt_at: now,
         });
       }
+      const sourceFences = (this.tables["account_deletion_source_fences"] ??= []);
+      const sourceTables: Array<[string, string, string]> = [
+        ["video", "videos", "uploader_user_id"],
+        ["mentor_profile", "mentor_profiles", "contributor_user_id"],
+        ["interview_session", "interview_sessions", "contributor_user_id"],
+      ];
+      for (const [sourceType, table, actorColumn] of sourceTables) {
+        for (const row of this.tables[table] ?? []) {
+          if (row[actorColumn] !== actorUserId) continue;
+          const sourceId = String(row["id"] ?? "");
+          if (
+            sourceId &&
+            !sourceFences.some(
+              (candidate) =>
+                candidate["source_type"] === sourceType &&
+                candidate["source_id"] === sourceId,
+            )
+          ) {
+            sourceFences.push({
+              source_type: sourceType,
+              source_id: sourceId,
+              actor_hash: actorHash,
+              created_at: now,
+            });
+          }
+        }
+      }
+
       this.tables["telemetry_withdrawal_jobs"] = (
         this.tables["telemetry_withdrawal_jobs"] ?? []
       ).filter((row) => row["actor_user_id"] !== actorUserId);
@@ -1009,6 +1054,18 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
           }
         }
       }
+    }
+
+    for (const incoming of this.upsertRows) {
+      const existing = this.rows.find((row) => row["id"] === incoming["id"]);
+      const merged = existing ? { ...existing, ...incoming } : incoming;
+      const guardError = this.db.telemetryWriteError(
+        this.table,
+        merged,
+        existing ? "update" : "insert",
+        existing,
+      );
+      if (guardError) return { data: null, error: guardError };
     }
 
     // Model referential integrity: a child row's FK column (e.g. an edge
