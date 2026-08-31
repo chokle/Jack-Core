@@ -695,13 +695,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
     setFeedbackIdentity(me.userId ?? null);
 
-    const contextUserId =
-      me.isAdmin === false && me.userId ? me.userId : null;
+    const contextUserId = me.userId || null;
     activeTelemetryUserIdRef.current = contextUserId;
-    setTelemetryIdentity(contextUserId);
+    // Admin promotion must clear every collection/session queue while still
+    // loading identity-owned historical privacy controls.
+    setTelemetryIdentity(me.isAdmin === false ? contextUserId : null);
     if (!contextUserId) return;
 
-    const stopRetry = initializeTelemetryRetry();
+    const stopRetry =
+      me.isAdmin === false ? initializeTelemetryRetry() : () => {};
     const abortController = new AbortController();
     let cancelled = false;
 
@@ -761,6 +763,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
     if (!context.enrolled || !context.scope) {
       setTelemetryConsentOpen(false);
+      // A former tester is no longer eligible for the participation prompt,
+      // but remains entitled to Account & privacy. Do not persist a recording
+      // decision; simply remove the active-pilot gate for this session.
+      setTestingGate({ accepted: false, restricted: false });
       return;
     }
 
