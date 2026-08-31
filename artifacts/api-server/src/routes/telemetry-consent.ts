@@ -12,8 +12,7 @@ import {
   WITHDRAWAL_DELETION_DAYS,
 } from "../lib/activity-telemetry.js";
 import {
-  activateTelemetryWithdrawalJob,
-  enqueueTelemetryWithdrawalJob,
+  appendTelemetryWithdrawal,
   reconcileTelemetryWithdrawalJob,
   type TelemetryWithdrawalScope,
 } from "../lib/telemetry-withdrawal.js";
@@ -409,67 +408,44 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     );
     if (!scope) return res.status(404).json({ error: "Pilot consent history not found." });
 
-    const now = new Date().toISOString();
     const retainedUntil = new Date(
-      new Date(now).setUTCMonth(new Date(now).getUTCMonth() + 24),
+      new Date().setUTCMonth(new Date().getUTCMonth() + 24),
     ).toISOString();
     const deletionDueAt = isoAfterDays(WITHDRAWAL_DELETION_DAYS);
     const withdrawalJobId = randomUUID();
-    const rows = [...scopes].map((consentScope) => ({
-      id: randomUUID(),
-      actor_user_id: identity.userId,
-      organization_id: scope.organizationId,
-      pilot_id: scope.pilotId,
-      scope: consentScope,
-      state: "withdrawn",
-      privacy_notice_version: PRIVACY_NOTICE_VERSION,
-      consent_version: CONSENT_VERSION,
-      source: "account_privacy",
-      occurred_at: now,
-      retained_until: retainedUntil,
-      created_at: now,
-    }));
+    const withdrawalScopes = [...scopes];
+    const consentIds = withdrawalScopes.map(() => randomUUID());
 
-    // Persist the cleanup obligation first. If the process dies after the
-    // append-only consent rows commit, the reconciler still has the exact
-    // consent IDs and scope manifest needed to finish cleanup safely.
-    await enqueueTelemetryWithdrawalJob({
-      id: withdrawalJobId,
-      actorUserId: identity.userId,
-      organizationId: scope.organizationId,
-      pilotId: scope.pilotId,
-      scopes: rows.map((row) => row.scope),
-      consentIds: rows.map((row) => row.id),
-      withdrawnAt: now,
-      consentRetainedUntil: retainedUntil,
-      deletionDueAt,
-    });
-
-    const inserted = await db.from("telemetry_consents").insert(rows);
-    const appendReportedError = inserted.error;
-    if (appendReportedError) {
-      // A transport error can be ambiguous after the database commits. Never
-      // discard the only cleanup obligation here; the exact manifest verifier
-      // will either prove the rows landed or age out a truly absent append.
-      req.log.error(
-        { err: appendReportedError, withdrawalJobId },
-        "Telemetry withdrawal append result is ambiguous",
-      );
-    }
-
+    // The database function takes the same per-actor lock as whole-account
+    // deletion and atomically appends the authoritative withdrawal rows with
+    // their durable cleanup obligation. There is no job-without-consent state.
+    let appendReportedError: unknown = null;
     try {
-      await activateTelemetryWithdrawalJob(withdrawalJobId);
-    } catch (activationError) {
-      // The awaiting-consent job is intentionally still runnable: its exact
-      // consent manifest lets the worker prove the append committed.
+      await appendTelemetryWithdrawal({
+        id: withdrawalJobId,
+        actorUserId: identity.userId,
+        organizationId: scope.organizationId,
+        pilotId: scope.pilotId,
+        scopes: withdrawalScopes,
+        consentIds,
+        consentRetainedUntil: retainedUntil,
+        deletionDueAt,
+        privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+        consentVersion: CONSENT_VERSION,
+      });
+    } catch (error) {
+      // A transport failure can still be ambiguous after commit. Reconcile the
+      // exact job/manifest once; absence is an actionable failure, never a 202
+      // that would leave collection authorized.
+      appendReportedError = error;
       req.log.error(
-        { err: activationError, withdrawalJobId },
-        "Telemetry withdrawal cleanup activation will be reconciled asynchronously",
+        { err: error, withdrawalJobId },
+        "Atomic telemetry withdrawal append result is ambiguous",
       );
     }
 
     let cleanupPending = true;
-    let manifestCommitted = !appendReportedError;
+    let manifestCommitted = appendReportedError === null;
     try {
       const reconciliation = await reconcileTelemetryWithdrawalJob(withdrawalJobId);
       cleanupPending = reconciliation.status !== "completed";
@@ -488,16 +464,21 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       );
     }
 
-    const withdrawalPending = !manifestCommitted;
-    return res.status(cleanupPending || withdrawalPending ? 202 : 200).json({
-      withdrawn: manifestCommitted ? [...scopes] : [],
-      requestedWithdrawal: [...scopes],
+    if (!manifestCommitted) {
+      return res.status(503).json({
+        error:
+          "Telemetry withdrawal could not be confirmed. Collection remains stopped; retry the withdrawal.",
+        withdrawalJobId,
+      });
+    }
+
+    return res.status(cleanupPending ? 202 : 200).json({
+      withdrawn: withdrawalScopes,
+      requestedWithdrawal: withdrawalScopes,
       deletionDueAt:
-        manifestCommitted && (scopes.has("telemetry") || scopes.has("screen"))
-          ? deletionDueAt
-          : null,
+        scopes.has("telemetry") || scopes.has("screen") ? deletionDueAt : null,
       cleanupPending,
-      withdrawalPending,
+      withdrawalPending: false,
       withdrawalJobId,
     });
   } catch (error) {
