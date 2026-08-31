@@ -30,6 +30,7 @@ vi.mock("@/lib/user-testing/recording-service", () => ({
     stop() {
       return Promise.resolve();
     }
+    cancel() {}
     pause() {}
     resume() {}
   },
@@ -68,7 +69,7 @@ describe("TestingOverlay consent boundary", () => {
 
   it("opens even without a cached session", () => {
     const ref = createRef<TestingOverlayHandle>();
-    render(<TestingOverlay ref={ref} />);
+    render(<TestingOverlay ref={ref} identityKey="test-user" />);
 
     act(() => ref.current?.open());
 
@@ -78,7 +79,7 @@ describe("TestingOverlay consent boundary", () => {
 
   it("does not construct recording service without any active session", async () => {
     const ref = createRef<TestingOverlayHandle>();
-    render(<TestingOverlay ref={ref} />);
+    render(<TestingOverlay ref={ref} identityKey="test-user" />);
 
     act(() => ref.current?.open());
     const start = screen.getByTestId("testing-overlay-start");
@@ -109,7 +110,7 @@ describe("TestingOverlay consent boundary", () => {
     };
 
     const ref = createRef<TestingOverlayHandle>();
-    render(<TestingOverlay ref={ref} />);
+    render(<TestingOverlay ref={ref} identityKey="test-user" />);
 
     act(() => ref.current?.open());
     fireEvent.click(screen.getByTestId("testing-overlay-start"));
