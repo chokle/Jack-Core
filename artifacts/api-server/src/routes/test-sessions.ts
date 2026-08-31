@@ -128,6 +128,16 @@ async function activeSession(userId: string, pilotId: string) {
     .maybeSingle();
 }
 
+function sessionUsesExactTelemetryConsent(
+  row: Record<string, any>,
+  consent: ConsentSnapshot,
+): boolean {
+  return (
+    row.telemetry_status === "granted" &&
+    String(row.telemetry_consent_id) === consent.id
+  );
+}
+
 function deletionDueAfterWithdrawal(): string {
   return new Date(
     Date.now() + WITHDRAWAL_DELETION_DAYS * 24 * 60 * 60 * 1000,
@@ -404,130 +414,192 @@ router.post("/testing/sessions/start", async (req, res) => {
     };
     const existing = await activeSession(identity.userId, membership.scope.pilotId);
     if (existing.error) throw existing.error;
-    if (
+    const existingUsesCurrentConsent =
       existing.data &&
-      !(await expireSessionIfNeeded(existing.data, identity.userId, req, startConsents))
-    ) {
-      const resumedAt = new Date().toISOString();
-      const updated = await db
-        .from("test_sessions")
-        .update({
-          app_session_id: requestedAppSessionId,
-          device_category: validatedStart.value.deviceCategory,
-          telemetry_consent_id: telemetryConsent.id,
-          screen_consent_id: currentConsentGranted(screenConsent) ? screenConsent.id : null,
-          microphone_consent_id: currentConsentGranted(microphoneConsent)
-            ? microphoneConsent.id
-            : null,
-          screen_consent_state: currentConsentGranted(screenConsent) ? "granted" : "declined",
-          microphone_consent_state: currentConsentGranted(microphoneConsent)
-            ? "granted"
-            : "declined",
-          resumed_at: resumedAt,
-          last_activity_at: resumedAt,
-          updated_at: resumedAt,
-        })
-        .eq("id", existing.data.id)
-        .eq("actor_user_id", identity.userId)
-        .eq("organization_id", membership.scope.organizationId)
-        .eq("pilot_id", membership.scope.pilotId)
-        .eq("status", "active")
-        .eq("telemetry_status", "granted")
-        .eq("telemetry_consent_id", telemetryConsent.id)
-        .select("*")
-        .maybeSingle();
-      if (updated.error) throw updated.error;
-      const consentsCurrentAfterResume = await consentSnapshotsStillCurrent(
-        identity.userId,
-        membership.scope.pilotId,
-        startConsents,
-      );
-      if (!updated.data) {
+      sessionUsesExactTelemetryConsent(existing.data, telemetryConsent);
+    const existingExpired =
+      existing.data &&
+      existingUsesCurrentConsent &&
+      (await expireSessionIfNeeded(existing.data, identity.userId, req, startConsents));
+    if (existing.data && !existingExpired) {
+      if (!existingUsesCurrentConsent) {
+        const retiredAt = new Date().toISOString();
+        const retired = await db
+          .from("test_sessions")
+          .update({
+            status: "expired",
+            expires_at: retiredAt,
+            last_activity_at: retiredAt,
+            updated_at: retiredAt,
+          })
+          .eq("id", existing.data.id)
+          .eq("actor_user_id", identity.userId)
+          .eq("organization_id", membership.scope.organizationId)
+          .eq("pilot_id", membership.scope.pilotId)
+          .eq("status", "active")
+          .eq("telemetry_status", existing.data.telemetry_status)
+          .eq("telemetry_consent_id", existing.data.telemetry_consent_id)
+          .select("id")
+          .maybeSingle();
+        if (retired.error) throw retired.error;
+        const consentsCurrentAfterRetirement = await consentSnapshotsStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          startConsents,
+        );
+        if (!retired.data) {
+          const raced = await activeSession(identity.userId, membership.scope.pilotId);
+          if (raced.error) throw raced.error;
+          if (
+            raced.data &&
+            consentsCurrentAfterRetirement &&
+            sessionUsesExactTelemetryConsent(raced.data, telemetryConsent)
+          ) {
+            return res.json({ session: publicSession(raced.data), resumed: true });
+          }
+          return res.status(409).json({
+            error: "The pilot session changed while stale consent was being retired.",
+          });
+        }
+        if (!consentsCurrentAfterRetirement) {
+          const currentTelemetry = await latestConsent(
+            identity.userId,
+            membership.scope.pilotId,
+            "telemetry",
+          );
+          if (!currentConsentGranted(currentTelemetry)) {
+            await compensateTelemetryConsentRace(
+              identity.userId,
+              membership.scope.pilotId,
+              String(existing.data.id),
+            );
+          }
+          return res.status(409).json({
+            error: "Telemetry consent changed while the pilot session was starting.",
+          });
+        }
+      } else {
+        const resumedAt = new Date().toISOString();
+        const updated = await db
+          .from("test_sessions")
+          .update({
+            app_session_id: requestedAppSessionId,
+            device_category: validatedStart.value.deviceCategory,
+            telemetry_consent_id: telemetryConsent.id,
+            screen_consent_id: currentConsentGranted(screenConsent) ? screenConsent.id : null,
+            microphone_consent_id: currentConsentGranted(microphoneConsent)
+              ? microphoneConsent.id
+              : null,
+            screen_consent_state: currentConsentGranted(screenConsent) ? "granted" : "declined",
+            microphone_consent_state: currentConsentGranted(microphoneConsent)
+              ? "granted"
+              : "declined",
+            resumed_at: resumedAt,
+            last_activity_at: resumedAt,
+            updated_at: resumedAt,
+          })
+          .eq("id", existing.data.id)
+          .eq("actor_user_id", identity.userId)
+          .eq("organization_id", membership.scope.organizationId)
+          .eq("pilot_id", membership.scope.pilotId)
+          .eq("status", "active")
+          .eq("telemetry_status", "granted")
+          .eq("telemetry_consent_id", telemetryConsent.id)
+          .select("*")
+          .maybeSingle();
+        if (updated.error) throw updated.error;
+        const consentsCurrentAfterResume = await consentSnapshotsStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          startConsents,
+        );
+        if (!updated.data) {
+          if (!consentsCurrentAfterResume) {
+            await compensateTelemetryConsentRace(
+              identity.userId,
+              membership.scope.pilotId,
+              String(existing.data.id),
+            );
+            return res.status(409).json({
+              error: "Telemetry consent changed while the pilot session was starting.",
+            });
+          }
+          return res.status(409).json({
+            error: "The pilot session changed while it was being resumed.",
+          });
+        }
         if (!consentsCurrentAfterResume) {
           await compensateTelemetryConsentRace(
             identity.userId,
             membership.scope.pilotId,
-            String(existing.data.id),
+            String(updated.data.id),
           );
           return res.status(409).json({
             error: "Telemetry consent changed while the pilot session was starting.",
           });
         }
-        return res.status(409).json({
-          error: "The pilot session changed while it was being resumed.",
+        const event = await insertCanonicalEvent({
+          req,
+          actorUserId: identity.userId,
+          session: updated.data,
+          consent: telemetryConsent,
+          clientEvent: false,
+          event: {
+            eventId: randomUUID(),
+            eventType: "test_resumed",
+            appSessionId: requestedAppSessionId,
+            occurredAt: resumedAt,
+            metadata: {},
+            result: "success",
+            dedupeKey: `test_resumed:${requestedAppSessionId}`,
+            appVersion: validatedStart.value.appVersion ?? null,
+            deployVersion: validatedStart.value.deployVersion ?? null,
+            deviceCategory: validatedStart.value.deviceCategory,
+          },
         });
-      }
-      if (!consentsCurrentAfterResume) {
-        await compensateTelemetryConsentRace(
+        if (event.error) throw new Error(event.error);
+        const resumedSession = await db
+          .from("test_sessions")
+          .select("id")
+          .eq("id", updated.data.id)
+          .eq("actor_user_id", identity.userId)
+          .eq("organization_id", membership.scope.organizationId)
+          .eq("pilot_id", membership.scope.pilotId)
+          .eq("status", "active")
+          .eq("telemetry_status", "granted")
+          .eq("telemetry_consent_id", telemetryConsent.id)
+          .maybeSingle();
+        if (resumedSession.error) throw resumedSession.error;
+        const consentsCurrentAfterEvent = await consentSnapshotsStillCurrent(
           identity.userId,
           membership.scope.pilotId,
-          String(updated.data.id),
+          startConsents,
         );
-        return res.status(409).json({
-          error: "Telemetry consent changed while the pilot session was starting.",
-        });
-      }
-      const event = await insertCanonicalEvent({
-        req,
-        actorUserId: identity.userId,
-        session: updated.data,
-        consent: telemetryConsent,
-        clientEvent: false,
-        event: {
-          eventId: randomUUID(),
-          eventType: "test_resumed",
-          appSessionId: requestedAppSessionId,
-          occurredAt: resumedAt,
-          metadata: {},
-          result: "success",
-          dedupeKey: `test_resumed:${requestedAppSessionId}`,
-          appVersion: validatedStart.value.appVersion ?? null,
-          deployVersion: validatedStart.value.deployVersion ?? null,
-          deviceCategory: validatedStart.value.deviceCategory,
-        },
-      });
-      if (event.error) throw new Error(event.error);
-      const resumedSession = await db
-        .from("test_sessions")
-        .select("id")
-        .eq("id", updated.data.id)
-        .eq("actor_user_id", identity.userId)
-        .eq("organization_id", membership.scope.organizationId)
-        .eq("pilot_id", membership.scope.pilotId)
-        .eq("status", "active")
-        .eq("telemetry_status", "granted")
-        .eq("telemetry_consent_id", telemetryConsent.id)
-        .maybeSingle();
-      if (resumedSession.error) throw resumedSession.error;
-      const consentsCurrentAfterEvent = await consentSnapshotsStillCurrent(
-        identity.userId,
-        membership.scope.pilotId,
-        startConsents,
-      );
-      if (!consentsCurrentAfterEvent) {
-        await compensateTelemetryConsentRace(
-          identity.userId,
-          membership.scope.pilotId,
-          String(updated.data.id),
-        );
-        return res.status(409).json({
-          error: "Telemetry consent changed while the pilot session was starting.",
-        });
-      }
-      if (!resumedSession.data) {
-        if (!event.duplicate && event.row?.["event_id"]) {
-          await redactRejectedSessionEvent({
-            eventId: String(event.row["event_id"]),
-            userId: identity.userId,
-            pilotId: membership.scope.pilotId,
-            sessionId: String(updated.data.id),
+        if (!consentsCurrentAfterEvent) {
+          await compensateTelemetryConsentRace(
+            identity.userId,
+            membership.scope.pilotId,
+            String(updated.data.id),
+          );
+          return res.status(409).json({
+            error: "Telemetry consent changed while the pilot session was starting.",
           });
         }
-        return res.status(409).json({
-          error: "The pilot session changed while it was being resumed.",
-        });
+        if (!resumedSession.data) {
+          if (!event.duplicate && event.row?.["event_id"]) {
+            await redactRejectedSessionEvent({
+              eventId: String(event.row["event_id"]),
+              userId: identity.userId,
+              pilotId: membership.scope.pilotId,
+              sessionId: String(updated.data.id),
+            });
+          }
+          return res.status(409).json({
+            error: "The pilot session changed while it was being resumed.",
+          });
+        }
+        return res.json({ session: publicSession(updated.data), resumed: true });
       }
-      return res.json({ session: publicSession(updated.data), resumed: true });
     }
 
     const now = new Date().toISOString();
@@ -572,18 +644,27 @@ router.post("/testing/sessions/start", async (req, res) => {
         const raced = await activeSession(identity.userId, membership.scope.pilotId);
         if (raced.error) throw raced.error;
         if (raced.data) {
+          const racedConsentsCurrent = await consentSnapshotsStillCurrent(
+            identity.userId,
+            membership.scope.pilotId,
+            startConsents,
+          );
           if (
-            !(await consentSnapshotsStillCurrent(
-              identity.userId,
-              membership.scope.pilotId,
-              startConsents,
-            ))
+            !racedConsentsCurrent ||
+            !sessionUsesExactTelemetryConsent(raced.data, telemetryConsent)
           ) {
-            await compensateTelemetryConsentRace(
+            const currentTelemetry = await latestConsent(
               identity.userId,
               membership.scope.pilotId,
-              String(raced.data.id),
+              "telemetry",
             );
+            if (!currentConsentGranted(currentTelemetry)) {
+              await compensateTelemetryConsentRace(
+                identity.userId,
+                membership.scope.pilotId,
+                String(raced.data.id),
+              );
+            }
             return res.status(409).json({
               error: "Telemetry consent changed while the pilot session was starting.",
             });
