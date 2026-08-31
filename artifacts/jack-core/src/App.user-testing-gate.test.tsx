@@ -287,6 +287,7 @@ vi.mock("@/lib/user-testing/recording-service", () => {
       return Promise.resolve(null);
     }
 
+    cancel() {}
     pause() {}
     resume() {}
   }
