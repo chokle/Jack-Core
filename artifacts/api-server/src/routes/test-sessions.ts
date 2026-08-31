@@ -200,7 +200,8 @@ async function expireSessionIfNeeded(
 ): Promise<boolean> {
   const expiresAt = Date.parse(String(row.expires_at ?? ""));
   if (!Number.isFinite(expiresAt) || expiresAt > Date.now()) return false;
-  const consent = await latestConsent(userId, String(row.pilot_id), "telemetry");
+  const pilotId = String(row.pilot_id);
+  const consent = await latestConsent(userId, pilotId, "telemetry");
   const now = new Date().toISOString();
   const updated = await db
     .from("test_sessions")
@@ -209,7 +210,11 @@ async function expireSessionIfNeeded(
     .eq("actor_user_id", userId);
   if (updated.error) throw updated.error;
   if (currentConsentGranted(consent)) {
-    await insertCanonicalEvent({
+    if (!(await telemetryConsentStillCurrent(userId, pilotId, consent.id))) {
+      await compensateTelemetryConsentRace(userId, pilotId, String(row.id));
+      return true;
+    }
+    const event = await insertCanonicalEvent({
       req,
       actorUserId: userId,
       session: row,
@@ -226,6 +231,10 @@ async function expireSessionIfNeeded(
         deviceCategory: "desktop",
       },
     });
+    if (event.error) throw new Error(event.error);
+    if (!(await telemetryConsentStillCurrent(userId, pilotId, consent.id))) {
+      await compensateTelemetryConsentRace(userId, pilotId, String(row.id));
+    }
   }
   return true;
 }
