@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../supabase.js", async () => {
   const mocks = await import("./mocks.js");
@@ -10,6 +10,7 @@ vi.mock("../logger.js", () => ({
 
 import {
   deliverFeedbackNotification,
+  queueFeedbackNotification,
   type FeedbackEmailSender,
 } from "../feedback-notifications.js";
 import { fake, resetMocks } from "./mocks.js";
@@ -32,9 +33,14 @@ function seedFeedback() {
       notification_status: "pending",
       notification_attempts: 0,
       notification_next_attempt_at: null,
+      deletion_due_at: null,
     },
   ];
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   resetMocks();
@@ -129,5 +135,57 @@ describe("feedback notification delivery", () => {
 
     expect(sender).toHaveBeenCalledOnce();
     expect(fake.tables["test_feedback"][0]?.["notification_attempts"]).toBe(1);
+  });
+
+  it("does not deliver feedback in a terminal failed state", async () => {
+    fake.tables["test_feedback"][0]!["notification_status"] = "failed";
+    const sender = vi.fn<FeedbackEmailSender>(async () => ({ messageId: "must-not-send" }));
+
+    expect(await deliverFeedbackNotification(FEEDBACK_ID, sender)).toBe("failed");
+
+    expect(sender).not.toHaveBeenCalled();
+    expect(fake.tables["test_feedback"][0]?.["notification_attempts"]).toBe(0);
+  });
+
+  it("fails closed when feedback is marked for deletion", async () => {
+    fake.tables["test_feedback"][0]!["deletion_due_at"] =
+      "2026-07-30T00:00:00.000Z";
+    const sender = vi.fn<FeedbackEmailSender>(async () => ({ messageId: "must-not-send" }));
+
+    expect(await deliverFeedbackNotification(FEEDBACK_ID, sender)).toBe("failed");
+
+    expect(sender).not.toHaveBeenCalled();
+    expect(fake.tables["test_feedback"][0]).toMatchObject({
+      notification_status: "pending",
+      notification_attempts: 0,
+      deletion_due_at: "2026-07-30T00:00:00.000Z",
+    });
+  });
+
+  it("re-checks withdrawal state before queued setImmediate delivery", async () => {
+    process.env["RESEND_API_KEY"] = "test-key";
+    process.env["FEEDBACK_FROM_EMAIL"] = "Jack Feedback <feedback@example.test>";
+    const providerFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "must-not-send" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", providerFetch);
+    vi.useFakeTimers();
+
+    queueFeedbackNotification(FEEDBACK_ID);
+    Object.assign(fake.tables["test_feedback"][0]!, {
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+      deletion_due_at: "2026-07-30T00:00:00.000Z",
+    });
+    await vi.runAllTimersAsync();
+
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(fake.tables["test_feedback"][0]).toMatchObject({
+      notification_status: "failed",
+      notification_attempts: 0,
+      notification_last_error: "telemetry_consent_withdrawn",
+      deletion_due_at: "2026-07-30T00:00:00.000Z",
+    });
   });
 });
