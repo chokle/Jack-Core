@@ -116,6 +116,26 @@ function publicSession(row: Record<string, any>) {
   };
 }
 
+function publicSessionWithCurrentRecordingConsents(
+  row: Record<string, any>,
+  consents: ConsentSnapshots,
+) {
+  const screenGranted =
+    row.screen_consent_state === "granted" &&
+    currentConsentGranted(consents.screen) &&
+    String(row.screen_consent_id) === consents.screen.id;
+  const microphoneGranted =
+    screenGranted &&
+    row.microphone_consent_state === "granted" &&
+    currentConsentGranted(consents.microphone) &&
+    String(row.microphone_consent_id) === consents.microphone.id;
+  return {
+    ...publicSession(row),
+    screenConsentState: screenGranted ? "granted" : "declined",
+    microphoneConsentState: microphoneGranted ? "granted" : "declined",
+  };
+}
+
 async function activeSession(userId: string, pilotId: string) {
   return db
     .from("test_sessions")
@@ -756,10 +776,60 @@ router.get("/testing/sessions/current", async (req, res) => {
     if (!membership.scope) return res.json({ session: null });
     const result = await activeSession(identity.userId, membership.scope.pilotId);
     if (result.error) throw result.error;
-    if (result.data && (await expireSessionIfNeeded(result.data, identity.userId, req))) {
+    if (!result.data) return res.json({ session: null });
+
+    const initialConsents = await loadConsentSnapshots(
+      identity.userId,
+      membership.scope.pilotId,
+    );
+    const initialTelemetry = initialConsents.telemetry;
+    if (
+      !currentConsentGranted(initialTelemetry) ||
+      !sessionUsesExactTelemetryConsent(result.data, initialTelemetry)
+    ) {
+      if (initialTelemetry && initialTelemetry.state !== "granted") {
+        await compensateTelemetryConsentRace(
+          identity.userId,
+          membership.scope.pilotId,
+          String(result.data.id),
+        );
+      }
       return res.json({ session: null });
     }
-    return res.json({ session: result.data ? publicSession(result.data) : null });
+    if (
+      await expireSessionIfNeeded(
+        result.data,
+        identity.userId,
+        req,
+        initialConsents,
+      )
+    ) {
+      return res.json({ session: null });
+    }
+
+    // Re-read before exposing capture permissions. A consent mutation between
+    // the active-session read and this response must fail closed.
+    const finalConsents = await loadConsentSnapshots(
+      identity.userId,
+      membership.scope.pilotId,
+    );
+    const finalTelemetry = finalConsents.telemetry;
+    if (
+      !currentConsentGranted(finalTelemetry) ||
+      !sessionUsesExactTelemetryConsent(result.data, finalTelemetry)
+    ) {
+      if (finalTelemetry && finalTelemetry.state !== "granted") {
+        await compensateTelemetryConsentRace(
+          identity.userId,
+          membership.scope.pilotId,
+          String(result.data.id),
+        );
+      }
+      return res.json({ session: null });
+    }
+    return res.json({
+      session: publicSessionWithCurrentRecordingConsents(result.data, finalConsents),
+    });
   } catch (error) {
     req.log.error({ err: error }, "Could not load current pilot session");
     return res.status(503).json({ error: "Pilot session could not be loaded" });
