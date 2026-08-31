@@ -12,6 +12,7 @@ import {
   validateCanonicalEventInput,
   WITHDRAWAL_DELETION_DAYS,
   type CanonicalEventInput,
+  type ConsentSnapshot,
 } from "../lib/activity-telemetry.js";
 
 const router = Router();
@@ -133,6 +134,51 @@ function deletionDueAfterWithdrawal(): string {
   ).toISOString();
 }
 
+interface ConsentSnapshots {
+  telemetry: ConsentSnapshot | null;
+  screen: ConsentSnapshot | null;
+  microphone: ConsentSnapshot | null;
+}
+
+async function loadConsentSnapshots(
+  userId: string,
+  pilotId: string,
+): Promise<ConsentSnapshots> {
+  const [telemetry, screen, microphone] = await Promise.all([
+    latestConsent(userId, pilotId, "telemetry"),
+    latestConsent(userId, pilotId, "screen"),
+    latestConsent(userId, pilotId, "microphone"),
+  ]);
+  return { telemetry, screen, microphone };
+}
+
+function sameConsentSnapshot(
+  current: ConsentSnapshot | null,
+  expected: ConsentSnapshot | null,
+): boolean {
+  if (!current || !expected) return current === expected;
+  return (
+    current.id === expected.id &&
+    current.state === expected.state &&
+    current.privacyNoticeVersion === expected.privacyNoticeVersion &&
+    current.consentVersion === expected.consentVersion
+  );
+}
+
+async function consentSnapshotsStillCurrent(
+  userId: string,
+  pilotId: string,
+  expected: ConsentSnapshots,
+): Promise<boolean> {
+  const current = await loadConsentSnapshots(userId, pilotId);
+  return Boolean(
+    currentConsentGranted(current.telemetry) &&
+      sameConsentSnapshot(current.telemetry, expected.telemetry) &&
+      sameConsentSnapshot(current.screen, expected.screen) &&
+      sameConsentSnapshot(current.microphone, expected.microphone),
+  );
+}
+
 async function telemetryConsentStillCurrent(
   userId: string,
   pilotId: string,
@@ -197,11 +243,14 @@ async function expireSessionIfNeeded(
   row: Record<string, any>,
   userId: string,
   req: Request,
+  expectedConsents?: ConsentSnapshots,
 ): Promise<boolean> {
   const expiresAt = Date.parse(String(row.expires_at ?? ""));
   if (!Number.isFinite(expiresAt) || expiresAt > Date.now()) return false;
   const pilotId = String(row.pilot_id);
-  const consent = await latestConsent(userId, pilotId, "telemetry");
+  const consentSnapshots =
+    expectedConsents ?? (await loadConsentSnapshots(userId, pilotId));
+  const consent = consentSnapshots.telemetry;
   const now = new Date().toISOString();
   const updated = await db
     .from("test_sessions")
@@ -210,7 +259,7 @@ async function expireSessionIfNeeded(
     .eq("actor_user_id", userId);
   if (updated.error) throw updated.error;
   if (currentConsentGranted(consent)) {
-    if (!(await telemetryConsentStillCurrent(userId, pilotId, consent.id))) {
+    if (!(await consentSnapshotsStillCurrent(userId, pilotId, consentSnapshots))) {
       await compensateTelemetryConsentRace(userId, pilotId, String(row.id));
       return true;
     }
@@ -232,7 +281,7 @@ async function expireSessionIfNeeded(
       },
     });
     if (event.error) throw new Error(event.error);
-    if (!(await telemetryConsentStillCurrent(userId, pilotId, consent.id))) {
+    if (!(await consentSnapshotsStillCurrent(userId, pilotId, consentSnapshots))) {
       await compensateTelemetryConsentRace(userId, pilotId, String(row.id));
     }
   }
@@ -313,9 +362,17 @@ router.post("/testing/sessions/start", async (req, res) => {
       membership.scope.pilotId,
       "microphone",
     );
+    const startConsents: ConsentSnapshots = {
+      telemetry: telemetryConsent,
+      screen: screenConsent,
+      microphone: microphoneConsent,
+    };
     const existing = await activeSession(identity.userId, membership.scope.pilotId);
     if (existing.error) throw existing.error;
-    if (existing.data && !(await expireSessionIfNeeded(existing.data, identity.userId, req))) {
+    if (
+      existing.data &&
+      !(await expireSessionIfNeeded(existing.data, identity.userId, req, startConsents))
+    ) {
       const resumedAt = new Date().toISOString();
       const updated = await db
         .from("test_sessions")
@@ -341,10 +398,10 @@ router.post("/testing/sessions/start", async (req, res) => {
         .single();
       if (updated.error) throw updated.error;
       if (
-        !(await telemetryConsentStillCurrent(
+        !(await consentSnapshotsStillCurrent(
           identity.userId,
           membership.scope.pilotId,
-          telemetryConsent.id,
+          startConsents,
         ))
       ) {
         await compensateTelemetryConsentRace(
@@ -356,7 +413,7 @@ router.post("/testing/sessions/start", async (req, res) => {
           error: "Telemetry consent changed while the pilot session was starting.",
         });
       }
-      await insertCanonicalEvent({
+      const event = await insertCanonicalEvent({
         req,
         actorUserId: identity.userId,
         session: updated.data,
@@ -375,11 +432,12 @@ router.post("/testing/sessions/start", async (req, res) => {
           deviceCategory: validatedStart.value.deviceCategory,
         },
       });
+      if (event.error) throw new Error(event.error);
       if (
-        !(await telemetryConsentStillCurrent(
+        !(await consentSnapshotsStillCurrent(
           identity.userId,
           membership.scope.pilotId,
-          telemetryConsent.id,
+          startConsents,
         ))
       ) {
         await compensateTelemetryConsentRace(
@@ -437,10 +495,10 @@ router.post("/testing/sessions/start", async (req, res) => {
         if (raced.error) throw raced.error;
         if (raced.data) {
           if (
-            !(await telemetryConsentStillCurrent(
+            !(await consentSnapshotsStillCurrent(
               identity.userId,
               membership.scope.pilotId,
-              telemetryConsent.id,
+              startConsents,
             ))
           ) {
             await compensateTelemetryConsentRace(
@@ -458,10 +516,10 @@ router.post("/testing/sessions/start", async (req, res) => {
       throw inserted.error;
     }
     if (
-      !(await telemetryConsentStillCurrent(
+      !(await consentSnapshotsStillCurrent(
         identity.userId,
         membership.scope.pilotId,
-        telemetryConsent.id,
+        startConsents,
       ))
     ) {
       await compensateTelemetryConsentRace(
@@ -494,10 +552,10 @@ router.post("/testing/sessions/start", async (req, res) => {
     });
     if (event.error) throw new Error(event.error);
     if (
-      !(await telemetryConsentStillCurrent(
+      !(await consentSnapshotsStillCurrent(
         identity.userId,
         membership.scope.pilotId,
-        telemetryConsent.id,
+        startConsents,
       ))
     ) {
       await compensateTelemetryConsentRace(
@@ -591,7 +649,7 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
     if (!("error" in prevalidated)) {
       const existingEvent = await db
         .from("test_events")
-        .select("event_id")
+        .select("*")
         .eq("event_id", prevalidated.value.eventId)
         .eq("test_session_id", req.params.id)
         .eq("actor_user_id", identity.userId)
@@ -605,10 +663,40 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           .eq("actor_user_id", identity.userId)
           .maybeSingle();
         if (existingSession.error) throw existingSession.error;
-        if (!existingSession.data) return res.status(404).json({ error: "Pilot session not found" });
+        if (!existingSession.data) {
+          return res.status(404).json({ error: "Pilot session not found" });
+        }
+        const pilotId = String(existingSession.data.pilot_id);
+        const consent = await latestConsent(identity.userId, pilotId, "telemetry");
+        if (
+          existingSession.data.telemetry_status !== "granted" ||
+          !currentConsentGranted(consent) ||
+          consent.id !== String(existingSession.data.telemetry_consent_id)
+        ) {
+          await compensateTelemetryConsentRace(
+            identity.userId,
+            pilotId,
+            String(existingSession.data.id),
+          );
+          return res.status(409).json({ error: "Telemetry consent is not active." });
+        }
+        const duplicate = await insertCanonicalEvent({
+          req,
+          actorUserId: identity.userId,
+          session: existingSession.data,
+          consent,
+          event,
+          clientEvent: true,
+        });
+        if (duplicate.error) {
+          return res.status(400).json({
+            error: "Activity event was rejected.",
+            code: duplicate.error,
+          });
+        }
         const duplicateProjection = eventProjectionFromRow(
           existingSession.data,
-          existingEvent.data,
+          duplicate.row ?? existingEvent.data,
           new Date().toISOString(),
           true,
         );
@@ -617,9 +705,22 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           .update(duplicateProjection)
           .eq("id", req.params.id)
           .eq("actor_user_id", identity.userId)
+          .eq("telemetry_status", "granted")
+          .neq("status", "withdrawn")
           .select("*")
-          .single();
+          .maybeSingle();
         if (projected.error) throw projected.error;
+        if (
+          !projected.data ||
+          !(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))
+        ) {
+          await compensateTelemetryConsentRace(
+            identity.userId,
+            pilotId,
+            String(existingSession.data.id),
+          );
+          return res.status(409).json({ error: "Telemetry consent is not active." });
+        }
         return res.json({
           accepted: true,
           duplicate: true,
@@ -645,8 +746,12 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       });
       return res.status(404).json({ error: "Active pilot session not found" });
     }
-    const consent = await latestConsent(identity.userId, String(session.data.pilot_id), "telemetry");
-    if (!currentConsentGranted(consent)) {
+    const pilotId = String(session.data.pilot_id);
+    const consent = await latestConsent(identity.userId, pilotId, "telemetry");
+    if (
+      !currentConsentGranted(consent) ||
+      consent.id !== String(session.data.telemetry_consent_id)
+    ) {
       await recordIngestFailure({
         actorUserId: identity.userId,
         organizationId: session.data.organization_id,
@@ -676,6 +781,14 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       });
       return res.status(400).json({ error: "Activity event was rejected.", code: inserted.error });
     }
+    if (!(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))) {
+      await compensateTelemetryConsentRace(
+        identity.userId,
+        pilotId,
+        String(session.data.id),
+      );
+      return res.status(409).json({ error: "Telemetry consent is not active." });
+    }
 
     const now = new Date().toISOString();
     const updates = eventProjectionFromRow(
@@ -693,9 +806,22 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       .update(updates)
       .eq("id", req.params.id)
       .eq("actor_user_id", identity.userId)
+      .eq("status", "active")
+      .eq("telemetry_status", "granted")
       .select("*")
-      .single();
+      .maybeSingle();
     if (updated.error) throw updated.error;
+    if (
+      !updated.data ||
+      !(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))
+    ) {
+      await compensateTelemetryConsentRace(
+        identity.userId,
+        pilotId,
+        String(session.data.id),
+      );
+      return res.status(409).json({ error: "Telemetry consent is not active." });
+    }
     return res.status(inserted.duplicate ? 200 : 201).json({
       accepted: true,
       duplicate: inserted.duplicate,
@@ -735,7 +861,7 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
   }
   const session = await db
     .from("test_sessions")
-    .select("id,organization_id,pilot_id")
+    .select("id,organization_id,pilot_id,telemetry_consent_id")
     .eq("id", req.params.id)
     .eq("actor_user_id", identity.userId)
     .eq("status", "active")
@@ -743,8 +869,12 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
     .maybeSingle();
   if (session.error) throw session.error;
   if (!session.data) return res.status(404).json({ error: "Pilot session not found." });
-  const consent = await latestConsent(identity.userId, String(session.data.pilot_id), "telemetry");
-  if (!currentConsentGranted(consent)) {
+  const pilotId = String(session.data.pilot_id);
+  const consent = await latestConsent(identity.userId, pilotId, "telemetry");
+  if (
+    !currentConsentGranted(consent) ||
+    consent.id !== String(session.data.telemetry_consent_id)
+  ) {
     return res.status(409).json({ error: "Telemetry consent is not active." });
   }
   await recordIngestFailure({
@@ -756,6 +886,14 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
     outcome: "dropped",
     eventCount: req.body.eventCount,
   });
+  if (!(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))) {
+    await compensateTelemetryConsentRace(
+      identity.userId,
+      pilotId,
+      String(session.data.id),
+    );
+    return res.status(409).json({ error: "Telemetry consent is not active." });
+  }
   return res.status(202).json({ accepted: true });
 });
 
