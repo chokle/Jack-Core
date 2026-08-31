@@ -13,6 +13,7 @@ import { denyRestrictedIdentity } from "../lib/identity.js";
 import { userTestingLimiter } from "../lib/rate-limit.js";
 import { queueFeedbackNotification } from "../lib/feedback-notifications.js";
 import {
+  activeTesterScopeMatches,
   activityDb,
   auditReportAccess,
   authorizeReportScope,
@@ -111,13 +112,15 @@ function pendingRecordingCleanupDueAt(): string {
 
 async function recordingConsentsRemainCurrent(input: {
   userId: string;
+  organizationId: string;
   pilotId: string;
   telemetryConsentId: string;
   screenConsentId: string;
   microphoneIncluded: boolean;
   microphoneConsentId: string | null;
 }): Promise<boolean> {
-  const [telemetry, screen, microphone] = await Promise.all([
+  const [testerScopeCurrent, telemetry, screen, microphone] = await Promise.all([
+    activeTesterScopeMatches(input.userId, input.organizationId, input.pilotId),
     latestConsent(input.userId, input.pilotId, "telemetry"),
     latestConsent(input.userId, input.pilotId, "screen"),
     input.microphoneIncluded
@@ -125,7 +128,8 @@ async function recordingConsentsRemainCurrent(input: {
       : Promise.resolve(null),
   ]);
   return Boolean(
-    currentConsentGranted(telemetry) &&
+    testerScopeCurrent &&
+      currentConsentGranted(telemetry) &&
       telemetry.id === input.telemetryConsentId &&
       currentConsentGranted(screen) &&
       screen.id === input.screenConsentId &&
@@ -312,6 +316,9 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         "User-testing feedback is temporarily unavailable.",
       )
     ) return;
+    if (identity.isAdmin) {
+      return res.status(403).json({ error: "User-testing feedback is unavailable for admins." });
+    }
     if (!identity.email) {
       return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
@@ -785,6 +792,9 @@ router.post(
           "Screen recording is temporarily unavailable.",
         )
       ) return;
+      if (identity.isAdmin) {
+        return res.status(403).json({ error: "Screen recording is unavailable for admins." });
+      }
       const pilotSession = await db
         .from("test_sessions")
         .select("*")
@@ -802,6 +812,14 @@ router.post(
       }
       const microphoneIncluded = stringField(req.body, "microphoneIncluded") === "true";
       const pilotId = String(pilotSession.data.pilot_id);
+      const organizationId = String(pilotSession.data.organization_id);
+      if (
+        !(await activeTesterScopeMatches(identity.userId, organizationId, pilotId))
+      ) {
+        return res.status(403).json({
+          error: "An active tester membership for this pilot is required.",
+        });
+      }
       const [telemetryConsent, screenConsent, microphoneConsent] = await Promise.all([
         latestConsent(identity.userId, pilotId, "telemetry"),
         latestConsent(identity.userId, pilotId, "screen"),
@@ -867,6 +885,7 @@ router.post(
 
       const consentInput = {
         userId: identity.userId,
+        organizationId,
         pilotId,
         telemetryConsentId: telemetryConsent.id,
         screenConsentId: screenConsent.id,
