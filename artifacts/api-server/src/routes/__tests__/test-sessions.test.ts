@@ -620,7 +620,7 @@ describe("canonical user-test sessions", () => {
 
       expect(response.status).toBe(409);
       expect(response.body.error).toContain("Telemetry consent changed");
-      expect(fake.tables.test_sessions).toHaveLength(2);
+      expect(fake.tables.test_sessions).toHaveLength(1);
       expect(fake.tables.test_sessions.every((session) => session.status === "withdrawn")).toBe(
         true,
       );
