@@ -30,13 +30,16 @@ function withdrawalDeletionDueAt(): string {
   ).toISOString();
 }
 
-async function exactTelemetryConsentStillCurrent(
+type TelemetryConsentFence = "exact" | "granted-refresh" | "revoked";
+
+async function telemetryConsentFenceState(
   userId: string,
   pilotId: string,
   consentId: string,
-): Promise<boolean> {
+): Promise<TelemetryConsentFence> {
   const current = await latestConsent(userId, pilotId, "telemetry");
-  return currentConsentGranted(current) && current.id === consentId;
+  if (!currentConsentGranted(current)) return "revoked";
+  return current.id === consentId ? "exact" : "granted-refresh";
 }
 
 async function redactRejectedHeartbeat(input: {
@@ -193,24 +196,46 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     const pilotId = String(session.data.pilot_id);
     const organizationId = String(session.data.organization_id);
     const testSessionId = String(session.data.id);
-    const exactConsentCurrent = () =>
-      exactTelemetryConsentStillCurrent(
-        identity.userId,
-        pilotId,
-        consent.id,
-      );
     const compensateWithdrawal = () =>
       compensateTelemetryWriteAfterWithdrawal(
         identity.userId,
         pilotId,
         testSessionId,
       );
+    const enforceConsentFence = async (): Promise<
+      Exclude<TelemetryConsentFence, "exact"> | null
+    > => {
+      const state = await telemetryConsentFenceState(
+        identity.userId,
+        pilotId,
+        consent.id,
+      );
+      if (state === "exact") return null;
+      if (state === "revoked") {
+        await compensateWithdrawal();
+      } else {
+        await redactRejectedHeartbeat({
+          eventId,
+          userId: identity.userId,
+          pilotId,
+          sessionId: testSessionId,
+        });
+      }
+      return state;
+    };
+    const consentFenceResponse = (
+      state: Exclude<TelemetryConsentFence, "exact">,
+    ) =>
+      res.status(state === "revoked" ? 412 : 409).json({
+        error:
+          state === "revoked"
+            ? "Telemetry consent is not currently granted."
+            : "Telemetry consent changed while the activity heartbeat was being recorded.",
+      });
 
-    if (!(await exactConsentCurrent())) {
-      await compensateWithdrawal();
-      return res
-        .status(412)
-        .json({ error: "Telemetry consent is not currently granted." });
+    const postInsertConsentFence = await enforceConsentFence();
+    if (postInsertConsentFence) {
+      return consentFenceResponse(postInsertConsentFence);
     }
 
     const sessionFence =
@@ -243,11 +268,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     if (sessionFence.error) throw sessionFence.error;
 
     if (!sessionFence.data) {
-      if (!(await exactConsentCurrent())) {
-        await compensateWithdrawal();
-        return res
-          .status(412)
-          .json({ error: "Telemetry consent is not currently granted." });
+      const missingSessionConsentFence = await enforceConsentFence();
+      if (missingSessionConsentFence) {
+        return consentFenceResponse(missingSessionConsentFence);
       }
       await redactRejectedHeartbeat({
         eventId,
@@ -260,11 +283,9 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
         .json({ error: "No active pilot session was found." });
     }
 
-    if (!(await exactConsentCurrent())) {
-      await compensateWithdrawal();
-      return res
-        .status(412)
-        .json({ error: "Telemetry consent is not currently granted." });
+    const finalConsentFence = await enforceConsentFence();
+    if (finalConsentFence) {
+      return consentFenceResponse(finalConsentFence);
     }
 
     return res.status(201).json({ accepted: true, eventId });
