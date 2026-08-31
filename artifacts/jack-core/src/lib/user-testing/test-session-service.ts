@@ -89,9 +89,16 @@ const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
 const TELEMETRY_IDENTITY_KEY = "jack.userTesting.identity.v1";
 const MAX_QUEUE_SIZE = 100;
+interface FlushRequestState {
+  generation: number;
+  controller: AbortController;
+  promise: Promise<TestSession | null>;
+}
+
 const startRequests = new Map<string, Promise<TestSession>>();
 let startGeneration = 0;
-let flushRequest: Promise<TestSession | null> | null = null;
+let flushGeneration = 0;
+let flushRequest: FlushRequestState | null = null;
 let initialized = false;
 
 function uuid(): string {
@@ -141,7 +148,10 @@ export function cacheTestSession(session: TestSession | null): void {
 
 export function invalidateTestSessionStarts(): void {
   startGeneration += 1;
+  flushGeneration += 1;
   startRequests.clear();
+  flushRequest?.controller.abort();
+  flushRequest = null;
   cacheTestSession(null);
 }
 
@@ -302,14 +312,20 @@ export function startTestSession(
   return tracked;
 }
 
-export async function loadCurrentTestSession(pilotId?: string): Promise<TestSession | null> {
+export async function loadCurrentTestSession(
+  pilotId?: string,
+  options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
+): Promise<TestSession | null> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/sessions/current${query}`, {
     credentials: "include",
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   if (!response.ok) return null;
   const body = (await response.json()) as { session: TestSession | null };
-  cacheTestSession(body.session);
+  if (options.shouldCache?.() ?? true) {
+    cacheTestSession(body.session);
+  }
   return body.session;
 }
 
@@ -327,21 +343,24 @@ async function reportDropped(sessionId: string, count: number): Promise<void> {
 }
 
 export function flushTestEvents(): Promise<TestSession | null> {
-  if (flushRequest) return flushRequest;
-  flushRequest = (async () => {
-    let latest = getCachedTestSession();
-    let queue = readQueue();
+  const generation = flushGeneration;
+  if (flushRequest?.generation === generation) {
+    return flushRequest.promise;
+  }
 
-    const persistQueue = (updated: QueuedEvent[]): void => {
-      queue = updated;
-      writeQueue(updated);
-    };
+  const controller = new AbortController();
+  const isCurrent = () =>
+    generation === flushGeneration && !controller.signal.aborted;
+  const request = (async () => {
+    let latest = getCachedTestSession();
 
     const isRetryable = (status: number): boolean =>
       status >= 500 || status === 408 || status === 429;
 
-    while (queue.length > 0) {
-      const next = queue[0];
+    while (isCurrent()) {
+      const next = readQueue()[0];
+      if (!next) return latest;
+
       try {
         const response = await fetch(
           `/api/testing/sessions/${encodeURIComponent(next.sessionId)}/events`,
@@ -349,6 +368,7 @@ export function flushTestEvents(): Promise<TestSession | null> {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify({
               eventId: next.eventId,
               eventType: next.eventType,
@@ -366,33 +386,48 @@ export function flushTestEvents(): Promise<TestSession | null> {
             }),
           },
         );
+        if (!isCurrent()) return null;
 
         if (!response.ok) {
           if (isRetryable(response.status)) {
-            persistQueue(queue);
             return latest;
           }
 
-          persistQueue(queue.slice(1));
+          const currentQueue = readQueue();
+          if (!isCurrent()) return null;
+          writeQueue(currentQueue.filter((event) => event.eventId !== next.eventId));
           continue;
         }
 
         const body = (await response.json()) as { session: TestSession };
+        if (!isCurrent()) return null;
+
         latest = body.session;
         cacheTestSession(latest);
-        persistQueue(queue.slice(1));
+        const currentQueue = readQueue();
+        if (!isCurrent()) return null;
+        writeQueue(currentQueue.filter((event) => event.eventId !== next.eventId));
       } catch {
-        persistQueue(queue);
+        if (!isCurrent()) return null;
         return latest;
       }
     }
 
-    persistQueue([]);
-    return latest;
-  })().finally(() => {
-    flushRequest = null;
+    return null;
+  })();
+
+  const entry: FlushRequestState = {
+    generation,
+    controller,
+    promise: Promise.resolve(null),
+  };
+  entry.promise = request.finally(() => {
+    if (flushRequest === entry) {
+      flushRequest = null;
+    }
   });
-  return flushRequest;
+  flushRequest = entry;
+  return entry.promise;
 }
 
 export async function trackTestEvent(
