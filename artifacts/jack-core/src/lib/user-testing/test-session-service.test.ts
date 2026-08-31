@@ -4,7 +4,9 @@ import {
   cacheTestSession,
   flushTestEvents,
   getCachedTestSession,
+  invalidateTestSessionStarts,
   loadCurrentTestSession,
+  setTelemetryIdentity,
   startTestSession,
   trackTestEvent,
   withdrawTelemetry,
@@ -66,6 +68,7 @@ describe("test session service", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    invalidateTestSessionStarts();
     vi.unstubAllGlobals();
   });
 
@@ -103,6 +106,100 @@ describe("test session service", () => {
     expect(await first).toEqual(session);
     expect(await second).toEqual(session);
     expect(getCachedTestSession()).toEqual(session);
+  });
+
+  it("isolates concurrent starts by active Clerk identity", async () => {
+    const sessionA = { ...session, id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const sessionB = { ...session, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+    let resolveA!: (response: Response) => void;
+    let resolveB!: (response: Response) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveA = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveB = resolve;
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const startA = startTestSession(session.pilotId, {
+      requestKey: "user-a",
+      shouldCache: () => false,
+    });
+    const startB = startTestSession(session.pilotId, {
+      requestKey: "user-b",
+      shouldCache: () => true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    resolveA(new Response(JSON.stringify({ session: sessionA }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    }));
+    expect(await startA).toEqual(sessionA);
+    expect(getCachedTestSession()).toBeNull();
+
+    resolveB(new Response(JSON.stringify({ session: sessionB }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    }));
+    expect(await startB).toEqual(sessionB);
+    expect(getCachedTestSession()).toEqual(sessionB);
+  });
+
+  it("does not restore a late start response after telemetry withdrawal", async () => {
+    let resolveStart!: (response: Response) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveStart = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ withdrawn: ["telemetry"], deletionDueAt: null }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pendingStart = startTestSession(session.pilotId, {
+      requestKey: "user-a",
+    });
+    await withdrawTelemetry(session.pilotId);
+    resolveStart(new Response(JSON.stringify({ session }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    }));
+
+    expect(await pendingStart).toEqual(session);
+    expect(getCachedTestSession()).toBeNull();
+  });
+
+  it("clears another identity's cached session and queued telemetry", () => {
+    setTelemetryIdentity("user-a");
+    cacheTestSession(session);
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("queued-a")]),
+    );
+
+    setTelemetryIdentity("user-b");
+
+    expect(getCachedTestSession()).toBeNull();
+    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
   });
 
   it("restores the current session and sends only event metadata", async () => {
