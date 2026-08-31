@@ -525,6 +525,7 @@ describe("POST /api/testing/recordings consent races", () => {
       const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
         stream.resume();
         await once(stream, "end");
+        withdrawalCompleted = true;
         return { data: null, error: null };
       });
       const removeRecording = vi.fn(async (_paths: string[]) => ({
@@ -606,7 +607,6 @@ describe("POST /api/testing/recordings consent races", () => {
                 single: async () => {
                   recordingInsert = payload;
                   recordingId = String(payload["id"]);
-                  withdrawalCompleted = true;
                   return {
                     data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
                     error: null,
@@ -639,6 +639,7 @@ describe("POST /api/testing/recordings consent races", () => {
         tester_user_id: "user_1",
         test_session_id: validBody.sessionId,
         screen_consent_id: screenConsentId,
+        deletion_due_at: expect.any(String),
       });
       expect(recordingUpdate).toMatchObject({
         deletion_due_at: expect.any(String),
@@ -650,4 +651,343 @@ describe("POST /api/testing/recordings consent races", () => {
       ]);
     },
   );
+
+  it("rolls back cleanup-linked metadata without uploading after a pre-upload withdrawal", async () => {
+    const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
+    const screenConsentId = "77777777-7777-4777-8777-777777777777";
+    let withdrawalCompleted = false;
+    let recordingInsert: Record<string, unknown> | null = null;
+    const operations: string[] = [];
+    const uploadRecording = vi.fn();
+    const removeRecording = vi.fn();
+    storageFrom.mockReturnValue({
+      upload: uploadRecording,
+      remove: removeRecording,
+    });
+
+    const completedQuery = () => {
+      const query = {
+        eq: () => query,
+        then: (
+          onfulfilled?: (result: { data: null; error: null }) => unknown,
+          onrejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve({ data: null, error: null }).then(onfulfilled, onrejected),
+      };
+      return query;
+    };
+
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: validBody.sessionId,
+              organization_id: ORGANIZATION_ID,
+              pilot_id: PILOT_ID,
+              telemetry_consent_id: telemetryConsentId,
+              screen_consent_id: screenConsentId,
+              microphone_consent_id: null,
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "telemetry_consents") {
+        let requestedScope = "";
+        const query = {
+          select: () => query,
+          eq: (column: string, value: unknown) => {
+            if (column === "scope") requestedScope = String(value);
+            return query;
+          },
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+              state:
+                withdrawalCompleted && requestedScope === "screen" ? "withdrawn" : "granted",
+              privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+              consent_version: "jack-pilot-consent-2026-07-25",
+              occurred_at: withdrawalCompleted
+                ? "2026-07-26T00:00:00.000Z"
+                : "2026-07-25T00:00:00.000Z",
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "test_recordings") {
+        return {
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                operations.push("metadata");
+                recordingInsert = payload;
+                withdrawalCompleted = true;
+                return {
+                  data: {
+                    id: String(payload["id"]),
+                    created_at: "2026-07-26T00:00:00.000Z",
+                  },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          delete: () => {
+            operations.push("metadata-delete");
+            return completedQuery();
+          },
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const response = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("controlled pre-upload race"), {
+        filename: "pre-upload.webm",
+        contentType: "video/webm",
+      });
+
+    expect(response.status).toBe(412);
+    expect(response.body.error).toContain("before upload");
+    expect(recordingInsert).toMatchObject({
+      storage_path: expect.stringMatching(/^recordings\/[^/]+\/pre-upload\.webm$/),
+      deletion_due_at: expect.any(String),
+    });
+    expect(operations).toEqual(["metadata", "metadata-delete"]);
+    expect(uploadRecording).not.toHaveBeenCalled();
+    expect(removeRecording).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cleanup-due metadata link when failed upload cleanup also fails", async () => {
+    const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
+    const screenConsentId = "77777777-7777-4777-8777-777777777777";
+    let recordingInsert: Record<string, unknown> | null = null;
+    const operations: string[] = [];
+    const deleteRecording = vi.fn();
+    const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
+      operations.push("upload");
+      stream.resume();
+      await once(stream, "end");
+      return { data: null, error: { message: "storage upload failed" } };
+    });
+    const removeRecording = vi.fn(async (_paths: string[]) => {
+      operations.push("storage-remove");
+      return { data: null, error: { message: "storage cleanup failed" } };
+    });
+    storageFrom.mockReturnValue({
+      upload: uploadRecording,
+      remove: removeRecording,
+    });
+
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: validBody.sessionId,
+              organization_id: ORGANIZATION_ID,
+              pilot_id: PILOT_ID,
+              telemetry_consent_id: telemetryConsentId,
+              screen_consent_id: screenConsentId,
+              microphone_consent_id: null,
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "telemetry_consents") {
+        let requestedScope = "";
+        const query = {
+          select: () => query,
+          eq: (column: string, value: unknown) => {
+            if (column === "scope") requestedScope = String(value);
+            return query;
+          },
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+              state: "granted",
+              privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+              consent_version: "jack-pilot-consent-2026-07-25",
+              occurred_at: "2026-07-25T00:00:00.000Z",
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "test_recordings") {
+        return {
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                operations.push("metadata");
+                recordingInsert = payload;
+                return {
+                  data: {
+                    id: String(payload["id"]),
+                    created_at: "2026-07-26T00:00:00.000Z",
+                  },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          delete: deleteRecording,
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const response = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("controlled failed upload"), {
+        filename: "failed.webm",
+        contentType: "video/webm",
+      });
+
+    expect(response.status).toBe(500);
+    expect(operations).toEqual(["metadata", "upload", "storage-remove"]);
+    expect(recordingInsert).toMatchObject({
+      id: expect.any(String),
+      tester_user_id: "user_1",
+      storage_path: expect.stringMatching(/^recordings\/[^/]+\/failed\.webm$/),
+      deletion_due_at: expect.any(String),
+    });
+    expect(deleteRecording).not.toHaveBeenCalled();
+    expect(uploadRecording).toHaveBeenCalledOnce();
+    expect(removeRecording).toHaveBeenCalledOnce();
+  });
+
+  it("finalizes cleanup-linked metadata only after upload and stable consent fences", async () => {
+    const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
+    const screenConsentId = "77777777-7777-4777-8777-777777777777";
+    let recordingId = "";
+    let recordingInsert: Record<string, unknown> | null = null;
+    let finalizeUpdate: Record<string, unknown> | null = null;
+    const operations: string[] = [];
+    const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
+      operations.push("upload");
+      stream.resume();
+      await once(stream, "end");
+      return { data: null, error: null };
+    });
+    const removeRecording = vi.fn();
+    storageFrom.mockReturnValue({
+      upload: uploadRecording,
+      remove: removeRecording,
+    });
+
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: validBody.sessionId,
+              organization_id: ORGANIZATION_ID,
+              pilot_id: PILOT_ID,
+              telemetry_consent_id: telemetryConsentId,
+              screen_consent_id: screenConsentId,
+              microphone_consent_id: null,
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "telemetry_consents") {
+        let requestedScope = "";
+        const query = {
+          select: () => query,
+          eq: (column: string, value: unknown) => {
+            if (column === "scope") requestedScope = String(value);
+            return query;
+          },
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+              state: "granted",
+              privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+              consent_version: "jack-pilot-consent-2026-07-25",
+              occurred_at: "2026-07-25T00:00:00.000Z",
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "test_recordings") {
+        return {
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                operations.push("metadata");
+                recordingInsert = payload;
+                recordingId = String(payload["id"]);
+                return {
+                  data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => {
+            operations.push("finalize");
+            finalizeUpdate = payload;
+            const query = {
+              eq: () => query,
+              select: () => query,
+              maybeSingle: async () => ({
+                data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                error: null,
+              }),
+            };
+            return query;
+          },
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const response = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("controlled successful upload"), {
+        filename: "success.webm",
+        contentType: "video/webm",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({
+      id: recordingId,
+      createdAt: "2026-07-26T00:00:00.000Z",
+    });
+    expect(operations).toEqual(["metadata", "upload", "finalize"]);
+    expect(recordingInsert).toMatchObject({
+      storage_path: expect.stringMatching(/^recordings\/[^/]+\/success\.webm$/),
+      deletion_due_at: expect.any(String),
+    });
+    expect(finalizeUpdate).toEqual({ deletion_due_at: null });
+    expect(removeRecording).not.toHaveBeenCalled();
+  });
 });
