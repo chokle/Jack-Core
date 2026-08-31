@@ -208,13 +208,33 @@ function queueFeedbackAlert(req: Request, feedbackId: string): void {
   }
 }
 
-async function telemetryConsentMatches(
-  userId: string,
-  pilotId: string,
-  expectedConsentId: string,
-): Promise<boolean> {
-  const consent = await latestConsent(userId, pilotId, "telemetry");
-  return currentConsentGranted(consent) && consent.id === expectedConsentId;
+async function feedbackContextStillCurrent(input: {
+  userId: string;
+  organizationId: string;
+  pilotId: string;
+  sessionId: string;
+  telemetryConsentId: string;
+}): Promise<boolean> {
+  const [session, consent] = await Promise.all([
+    db
+      .from("test_sessions")
+      .select("id")
+      .eq("id", input.sessionId)
+      .eq("actor_user_id", input.userId)
+      .eq("organization_id", input.organizationId)
+      .eq("pilot_id", input.pilotId)
+      .eq("status", "active")
+      .eq("telemetry_status", "granted")
+      .eq("telemetry_consent_id", input.telemetryConsentId)
+      .maybeSingle(),
+    latestConsent(input.userId, input.pilotId, "telemetry"),
+  ]);
+  if (session.error) throw session.error;
+  return Boolean(
+    session.data &&
+      currentConsentGranted(consent) &&
+      consent.id === input.telemetryConsentId,
+  );
 }
 
 async function compensateFeedbackConsentRace(
@@ -400,11 +420,13 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
           return res.status(409).json({ error: "Feedback id is already in use." });
         }
         if (
-          !(await telemetryConsentMatches(
-            identity.userId,
-            membership.scope.pilotId,
-            telemetryConsent.id,
-          ))
+          !(await feedbackContextStillCurrent({
+            userId: identity.userId,
+            organizationId: membership.scope.organizationId,
+            pilotId: membership.scope.pilotId,
+            sessionId,
+            telemetryConsentId: telemetryConsent.id,
+          }))
         ) {
           await compensateFeedbackConsentRace(
             String(existing.id),
@@ -419,11 +441,13 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
       throw error;
     }
     if (
-      !(await telemetryConsentMatches(
-        identity.userId,
-        membership.scope.pilotId,
-        telemetryConsent.id,
-      ))
+      !(await feedbackContextStillCurrent({
+        userId: identity.userId,
+        organizationId: membership.scope.organizationId,
+        pilotId: membership.scope.pilotId,
+        sessionId,
+        telemetryConsentId: telemetryConsent.id,
+      }))
     ) {
       await compensateFeedbackConsentRace(
         String(row.id),
