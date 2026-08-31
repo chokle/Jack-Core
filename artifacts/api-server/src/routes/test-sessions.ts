@@ -847,8 +847,31 @@ router.get("/testing/sessions/current", async (req, res) => {
       }
       return res.json({ session: null });
     }
+    if (
+      !(await activeTesterScopeMatches(
+        identity.userId,
+        String(result.data.organization_id),
+        String(result.data.pilot_id),
+      ))
+    ) {
+      return res.json({ session: null });
+    }
+    const finalSession = await db
+      .from("test_sessions")
+      .select("*")
+      .eq("id", result.data.id)
+      .eq("actor_user_id", identity.userId)
+      .eq("organization_id", result.data.organization_id)
+      .eq("pilot_id", result.data.pilot_id)
+      .eq("status", "active")
+      .eq("telemetry_status", "granted")
+      .eq("telemetry_consent_id", finalTelemetry.id)
+      .maybeSingle();
+    if (finalSession.error) throw finalSession.error;
     return res.json({
-      session: publicSessionWithCurrentRecordingConsents(result.data, finalConsents),
+      session: finalSession.data
+        ? publicSessionWithCurrentRecordingConsents(finalSession.data, finalConsents)
+        : null,
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not load current pilot session");
