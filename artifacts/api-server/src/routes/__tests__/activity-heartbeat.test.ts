@@ -350,15 +350,15 @@ describe("pilot activity heartbeat", () => {
     expect(fake.tables.test_sessions[0]).toMatchObject({
       status: "active",
       telemetry_status: "granted",
-      deletion_due_at: undefined,
       last_activity_at: INITIAL_LAST_ACTIVITY,
     });
+    expect(fake.tables.test_sessions[0]).not.toHaveProperty("deletion_due_at");
     expect(fake.tables.activity_ingest_failures).toHaveLength(1);
     expect(fake.tables.test_recordings[0]?.deletion_due_at).toBeUndefined();
     expect(fake.tables.test_feedback[0]).toMatchObject({
       notification_status: "pending",
-      deletion_due_at: undefined,
     });
+    expect(fake.tables.test_feedback[0]).not.toHaveProperty("deletion_due_at");
   });
 
   it("compensates withdrawal detected after a successful session projection", async () => {
