@@ -129,12 +129,25 @@ describe("account deletion telemetry coverage", () => {
         "test_events",
         "admin_access_audit",
         "test_sessions",
+        "telemetry_withdrawal_jobs",
         "telemetry_consents",
         "pilot_memberships",
         "platform_roles",
       ]),
     );
-    expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
+    expect(
+      deletions.filter(({ table }) => table === "telemetry_withdrawal_jobs"),
+    ).toEqual([
+      {
+        table: "telemetry_withdrawal_jobs",
+        column: "actor_user_id",
+        value: "user-1",
+      },
+    ]);
+    expect(deletedTables.indexOf("telemetry_withdrawal_jobs")).toBeLessThan(
+      deletedTables.indexOf("telemetry_consents"),
+    );
+        expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
     expect(
       updates.filter(({ table }) => table === "activity_report_runs"),
     ).toEqual([
