@@ -89,6 +89,7 @@ beforeEach(() => {
     pilot_id: PILOT_ID,
     status: "active",
     telemetry_status: "granted",
+    telemetry_consent_id: CONSENT_ID,
     app_session_id: APP_SESSION_ID,
     question_count: 0,
     last_activity_at: "2026-07-25T00:00:00.000Z",
