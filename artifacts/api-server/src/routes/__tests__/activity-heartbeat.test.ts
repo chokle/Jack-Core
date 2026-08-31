@@ -27,7 +27,101 @@ const PILOT_ID = "22222222-2222-4222-8222-222222222222";
 const SESSION_ID = "33333333-3333-4333-8333-333333333333";
 const APP_SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const CONSENT_ID = "55555555-5555-4555-8555-555555555555";
+const RECORDING_ID = "66666666-6666-4666-8666-666666666666";
+const FEEDBACK_ID = "77777777-7777-4777-8777-777777777777";
+const FAILURE_ID = "88888888-8888-4888-8888-888888888888";
 const INITIAL_LAST_ACTIVITY = "2026-08-24T19:00:00.000Z";
+
+function withdrawConsentOnStateRead(readNumber: number): void {
+  const row = fake.tables.telemetry_consents[0]!;
+  let reads = 0;
+  let state = "granted";
+  Object.defineProperty(row, "state", {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      reads += 1;
+      if (reads >= readNumber) state = "withdrawn";
+      return state;
+    },
+    set: (value: unknown) => {
+      state = String(value);
+    },
+  });
+}
+
+function withdrawSessionOnStatusRead(readNumber: number): void {
+  const row = fake.tables.test_sessions[0]!;
+  let reads = 0;
+  let status = "active";
+  Object.defineProperty(row, "status", {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      reads += 1;
+      if (reads >= readNumber) status = "withdrawn";
+      return status;
+    },
+    set: (value: unknown) => {
+      status = String(value);
+    },
+  });
+}
+
+function seedWithdrawalDependents(): void {
+  fake.tables.activity_ingest_failures = [
+    {
+      id: FAILURE_ID,
+      actor_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+    },
+  ];
+  fake.tables.test_recordings = [
+    {
+      id: RECORDING_ID,
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+    },
+  ];
+  fake.tables.test_feedback = [
+    {
+      id: FEEDBACK_ID,
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+      notification_status: "pending",
+    },
+  ];
+}
+
+function expectWithdrawalCompensation(): void {
+  expect(fake.tables.test_sessions[0]).toMatchObject({
+    status: "withdrawn",
+    telemetry_status: "withdrawn",
+    recording_status: "withdrawn",
+    last_activity_at: INITIAL_LAST_ACTIVITY,
+    deletion_due_at: expect.any(String),
+  });
+  expect(fake.tables.test_events[0]).toMatchObject({
+    metadata: {},
+    correlation_id: null,
+    request_id: null,
+    redacted_at: expect.any(String),
+    deletion_due_at: expect.any(String),
+  });
+  expect(fake.tables.activity_ingest_failures).toHaveLength(0);
+  expect(fake.tables.test_recordings[0]).toMatchObject({
+    deletion_due_at: expect.any(String),
+  });
+  expect(fake.tables.test_feedback[0]).toMatchObject({
+    deletion_due_at: expect.any(String),
+    notification_status: "failed",
+    notification_last_error: "telemetry_consent_withdrawn",
+    notification_next_attempt_at: null,
+  });
+}
 
 function app(): Express {
   const value = express();
@@ -58,6 +152,8 @@ beforeEach(() => {
       pilot_id: PILOT_ID,
       app_session_id: APP_SESSION_ID,
       status: "active",
+      telemetry_status: "granted",
+      telemetry_consent_id: CONSENT_ID,
       started_at: INITIAL_LAST_ACTIVITY,
       last_activity_at: INITIAL_LAST_ACTIVITY,
     },
@@ -76,6 +172,9 @@ beforeEach(() => {
     },
   ];
   fake.tables.test_events = [];
+  fake.tables.activity_ingest_failures = [];
+  fake.tables.test_recordings = [];
+  fake.tables.test_feedback = [];
 });
 
 describe("pilot activity heartbeat", () => {
@@ -148,6 +247,50 @@ describe("pilot activity heartbeat", () => {
 
     expect(response.status).toBe(400);
     expect(fake.tables.test_events).toHaveLength(0);
+  });
+
+  it("compensates when consent is withdrawn after the heartbeat insert", async () => {
+    seedWithdrawalDependents();
+    // latestConsent reads once before the insert and again immediately after it.
+    // Flip the stored row on that second read to deterministically interleave
+    // withdrawal between the pre-write authorization and post-write fence.
+    withdrawConsentOnStateRead(2);
+
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        appSessionId: APP_SESSION_ID,
+        visibility: "foreground",
+        meaningfulActivity: true,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(412);
+    expect(fake.tables.test_events).toHaveLength(1);
+    expectWithdrawalCompensation();
+  });
+
+  it("guards the activity projection and compensates a withdrawal at session update", async () => {
+    seedWithdrawalDependents();
+    // The initial query reads status to filter and clone the session. The third
+    // read is the guarded UPDATE predicate, where withdrawal wins the race.
+    withdrawSessionOnStatusRead(3);
+    // Consent is current before and immediately after the insert, then reflects
+    // withdrawal when the failed guarded projection triggers its exact recheck.
+    withdrawConsentOnStateRead(3);
+
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        appSessionId: APP_SESSION_ID,
+        visibility: "foreground",
+        meaningfulActivity: true,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(412);
+    expect(fake.tables.test_events).toHaveLength(1);
+    expectWithdrawalCompensation();
   });
 
   it("fails closed when current telemetry consent is no longer granted", async () => {
