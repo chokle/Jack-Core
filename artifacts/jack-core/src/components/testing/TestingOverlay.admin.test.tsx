@@ -14,6 +14,7 @@ import { TestingOverlay, type TestingOverlayHandle } from "./TestingOverlay";
 const state = vi.hoisted(() => ({
   cachedSession: null as null | Record<string, unknown>,
   currentSession: null as null | Record<string, unknown>,
+  recordingStart: null as null | (() => Promise<void>),
   recordingOnStop: null as null | ((result: {
     blob: Blob;
     durationMs: number;
@@ -27,11 +28,15 @@ const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
 const recordingServiceCancelSpy = vi.fn();
 const uploadTestRecordingSpy = vi.fn();
+const loadCurrentTestSessionSpy = vi.fn(
+  async (_pilotId?: string, _options?: unknown) => state.currentSession,
+);
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/user-testing/test-session-service", () => ({
   getCachedTestSession: () => state.cachedSession,
-  loadCurrentTestSession: vi.fn(async () => state.currentSession),
+  loadCurrentTestSession: (...args: unknown[]) =>
+    loadCurrentTestSessionSpy(...args),
   trackTestEvent: vi.fn(),
 }));
 vi.mock("@/lib/user-testing/recording-service", () => ({
@@ -44,6 +49,7 @@ vi.mock("@/lib/user-testing/recording-service", () => ({
     }
     async start() {
       recordingServiceStartSpy();
+      await state.recordingStart?.();
     }
     stop() {
       return Promise.resolve();
@@ -79,11 +85,16 @@ describe("TestingOverlay consent boundary", () => {
   beforeEach(() => {
     state.cachedSession = null;
     state.currentSession = null;
+    state.recordingStart = null;
     state.recordingOnStop = null;
     recordingServiceCtorSpy.mockClear();
     recordingServiceStartSpy.mockClear();
     recordingServiceCancelSpy.mockClear();
     uploadTestRecordingSpy.mockReset();
+    loadCurrentTestSessionSpy.mockReset();
+    loadCurrentTestSessionSpy.mockImplementation(
+      async () => state.currentSession,
+    );
     window.history.replaceState({}, "", "/app");
     sessionStorage.clear();
   });
@@ -197,22 +208,13 @@ describe("TestingOverlay consent boundary", () => {
       lastActivityAt: "2026-07-31T00:00:00Z",
       expiresAt: "2026-07-31T12:00:00Z",
     };
+    let resolveUpload:
+      | ((outcome: { status: "uploaded"; id: string }) => void)
+      | undefined;
     uploadTestRecordingSpy.mockImplementation(
-      (
-        _blob: unknown,
-        _metadata: unknown,
-        options: { signal?: AbortSignal },
-      ) =>
+      () =>
         new Promise((resolve) => {
-          if (options.signal?.aborted) {
-            resolve({ status: "cancelled" });
-            return;
-          }
-          options.signal?.addEventListener(
-            "abort",
-            () => resolve({ status: "cancelled" }),
-            { once: true },
-          );
+          resolveUpload = resolve;
         }),
     );
     const onEvent = vi.fn();
@@ -256,9 +258,97 @@ describe("TestingOverlay consent boundary", () => {
     await waitFor(() => expect(uploadOptions.signal.aborted).toBe(true));
     expect(uploadOptions.shouldFallback()).toBe(false);
     await act(async () => {
+      resolveUpload?.({ status: "uploaded", id: "recording-user-a" });
       await Promise.resolve();
     });
     expect(onEvent).not.toHaveBeenCalledWith("stopped");
   });
+
+  it("aborts a pending session lookup and ignores the prior user's result", async () => {
+    let resolveSession:
+      | ((session: Record<string, unknown>) => void)
+      | undefined;
+    loadCurrentTestSessionSpy.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSession = resolve;
+        }),
+    );
+    const onEvent = vi.fn();
+    const ref = createRef<TestingOverlayHandle>();
+    const rendered = render(
+      <TestingOverlay ref={ref} identityKey="user-a" onEvent={onEvent} />,
+    );
+
+    act(() => ref.current?.open());
+    fireEvent.click(screen.getByTestId("testing-overlay-start"));
+    await waitFor(() =>
+      expect(loadCurrentTestSessionSpy).toHaveBeenCalledTimes(1),
+    );
+
+    const loadOptions = loadCurrentTestSessionSpy.mock.calls[0]?.[1] as {
+      signal: AbortSignal;
+      shouldCache: () => boolean;
+    };
+    expect(loadOptions.signal.aborted).toBe(false);
+    expect(loadOptions.shouldCache()).toBe(true);
+
+    rendered.rerender(
+      <TestingOverlay ref={ref} identityKey="user-b" onEvent={onEvent} />,
+    );
+
+    expect(loadOptions.signal.aborted).toBe(true);
+    expect(loadOptions.shouldCache()).toBe(false);
+    await act(async () => {
+      resolveSession?.({
+        id: "11111111-1111-4111-8111-111111111111",
+        status: "active",
+        microphoneConsentState: "granted",
+      });
+      await Promise.resolve();
+    });
+
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+    expect(onEvent).not.toHaveBeenCalledWith("started");
+  });
+
+  it("allows only one recorder start while permission work is pending", async () => {
+    state.cachedSession = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "active",
+      microphoneConsentState: "granted",
+    };
+    let resolveStart: (() => void) | undefined;
+    state.recordingStart = () =>
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      });
+    const onEvent = vi.fn();
+    const ref = createRef<TestingOverlayHandle>();
+    const rendered = render(
+      <TestingOverlay ref={ref} identityKey="user-a" onEvent={onEvent} />,
+    );
+
+    act(() => ref.current?.open());
+    const start = screen.getByTestId("testing-overlay-start");
+    fireEvent.click(start);
+    fireEvent.click(start);
+
+    expect(recordingServiceCtorSpy).toHaveBeenCalledTimes(1);
+    expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(
+      <TestingOverlay ref={ref} identityKey="user-b" onEvent={onEvent} />,
+    );
+    await act(async () => {
+      resolveStart?.();
+      await Promise.resolve();
+    });
+
+    expect(recordingServiceCancelSpy).toHaveBeenCalled();
+    expect(onEvent).not.toHaveBeenCalledWith("started");
+  });
+
 
 });
