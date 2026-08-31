@@ -236,10 +236,16 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
       .select("id,organization_id,pilot_id")
       .eq("id", sessionId)
       .eq("actor_user_id", identity.userId)
+      .eq("organization_id", membership.scope.organizationId)
       .eq("pilot_id", membership.scope.pilotId)
       .eq("status", "active")
       .maybeSingle();
     if (pilotSession.error) throw pilotSession.error;
+    if (!pilotSession.data) {
+      return res.status(403).json({
+        error: "An active owned pilot session is required to submit feedback.",
+      });
+    }
 
     const { data: row, error } = await supabase
       .from("test_feedback")
@@ -251,7 +257,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         tester_profile_id: profile?.id ?? null,
         tester_trade: profile?.trade ?? null,
         session_id: sessionId,
-        test_session_id: pilotSession.data?.id ?? null,
+        test_session_id: pilotSession.data.id,
         organization_id: membership.scope.organizationId,
         pilot_id: membership.scope.pilotId,
         features_used: [...new Set(features)],
