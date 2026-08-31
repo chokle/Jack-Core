@@ -51,5 +51,6 @@ export const openai = {} as unknown;
 /** Wipe all in-memory tables and embedding overrides between tests. */
 export function resetMocks(): void {
   for (const key of Object.keys(fake.tables)) fake.tables[key] = [];
+  fake.clearFailures();
   embedRegistry.clear();
 }
