@@ -106,7 +106,7 @@ function pendingRecordingCleanupDueAt(): string {
   // A recording starts life as cleanup-due. This gives any uploaded object a
   // durable database cleanup link even if the process or storage call fails
   // before the row can be finalized.
-  return new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 }
 
 async function recordingConsentsRemainCurrent(input: {
@@ -933,7 +933,20 @@ router.post(
         });
       }
 
-      if (!(await recordingConsentsRemainCurrent(consentInput))) {
+      let finalConsentsCurrent: boolean;
+      try {
+        finalConsentsCurrent = await recordingConsentsRemainCurrent(consentInput);
+      } catch (err) {
+        // The row is already active at this fence. An unreadable consent state
+        // is not permission to retain the uploaded private recording.
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        throw err;
+      }
+      if (!finalConsentsCurrent) {
         await compensateRecordingConsentRace({
           recordingId,
           userId: identity.userId,
