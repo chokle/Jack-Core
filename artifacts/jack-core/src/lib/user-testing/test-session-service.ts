@@ -218,12 +218,16 @@ async function readSessionResponse(response: Response): Promise<TestSession> {
   return body.session;
 }
 
-export function startTestSession(pilotId?: string): Promise<TestSession> {
+export function startTestSession(
+  pilotId?: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<TestSession> {
   if (startRequest) return startRequest;
   startRequest = fetch("/api/testing/sessions/start", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
+    ...(options.signal ? { signal: options.signal } : {}),
     body: JSON.stringify({
       ...(pilotId ? { pilotId } : {}),
       appSessionId: getAppSessionId(),
