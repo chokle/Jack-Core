@@ -70,8 +70,12 @@ async function currentContext(userId: string, requestedPilotId?: string | null) 
     requiresPilotSelection: false,
     scope: membership.scope,
     consents: { telemetry, screen, microphone },
-    session: session.data && currentConsentGranted(telemetry)
-      ? {
+    session:
+      session.data &&
+      session.data.telemetry_status === "granted" &&
+      currentConsentGranted(telemetry) &&
+      String(session.data.telemetry_consent_id) === telemetry.id
+        ? {
           id: session.data.id,
           organizationId: session.data.organization_id,
           pilotId: session.data.pilot_id,
