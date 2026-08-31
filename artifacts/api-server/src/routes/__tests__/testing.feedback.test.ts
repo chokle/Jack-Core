@@ -1248,9 +1248,9 @@ describe("POST /api/testing/recordings consent races", () => {
         return { data: null, error: null };
       });
       const removeRecording = vi.fn(async (_paths: string[]) => ({
-      data: null,
-      error: null,
-    }));
+        data: null,
+        error: null,
+      }));
       storageFrom.mockReturnValue({
         upload: uploadRecording,
         remove: removeRecording,
