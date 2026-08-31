@@ -127,6 +127,14 @@ describe("UserTestFeedback", () => {
       ref.current!.request("logout", userBContinue);
     });
     expect(screen.getByRole("dialog", { name: "Before you go — how did Jack do?" })).toBeTruthy();
+    expect(
+      (screen.getByLabelText(
+        "1. What did you try to accomplish with Jack today?",
+      ) as HTMLInputElement).value,
+    ).toBe("");
+    expect(localStorage.getItem("jack.userTesting.feedbackDraft.v1:user_b")).not.toContain(
+      "Find a safe procedure",
+    );
 
     await act(async () => {
       resolveSubmission(new Response(JSON.stringify({ id: "feedback-a" }), { status: 201 }));
