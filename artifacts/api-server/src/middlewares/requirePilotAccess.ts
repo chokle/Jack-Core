@@ -8,7 +8,8 @@ function usesRouteScopedAuthorization(req: Request): boolean {
   if (req.method === "DELETE" && path === "/account") return true;
   if (
     req.method === "GET" &&
-    (path === "/testing/telemetry/context" ||
+    (path === "/me" ||
+      path === "/testing/telemetry/context" ||
       path === "/testing/telemetry/export")
   ) {
     return true;
