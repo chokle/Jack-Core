@@ -87,6 +87,7 @@ interface QueuedEvent {
 const SESSION_CACHE_KEY = "jack.userTesting.activeSession.v2";
 const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
+const TELEMETRY_IDENTITY_KEY = "jack.userTesting.identity.v1";
 const MAX_QUEUE_SIZE = 100;
 const startRequests = new Map<string, Promise<TestSession>>();
 let startGeneration = 0;
@@ -158,6 +159,31 @@ function writeQueue(queue: QueuedEvent[]): void {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
   } catch {
     // A later server refresh remains authoritative when local storage is unavailable.
+  }
+}
+
+export function setTelemetryIdentity(userId: string | null): void {
+  const nextUserId = userId?.trim() || null;
+  let previousUserId: string | null = null;
+  try {
+    previousUserId = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+  } catch {
+    // Treat unavailable identity storage as a fresh scope.
+  }
+
+  if (previousUserId !== nextUserId) {
+    invalidateTestSessionStarts();
+    writeQueue([]);
+  }
+
+  try {
+    if (nextUserId) {
+      localStorage.setItem(TELEMETRY_IDENTITY_KEY, nextUserId);
+    } else {
+      localStorage.removeItem(TELEMETRY_IDENTITY_KEY);
+    }
+  } catch {
+    // The caller still keeps the active identity in memory.
   }
 }
 
