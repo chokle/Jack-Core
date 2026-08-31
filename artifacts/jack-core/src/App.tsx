@@ -350,6 +350,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
   const activeTelemetryUserIdRef = useRef<string | null>(null);
   const telemetryContextOwnerRef = useRef<string | null>(null);
+  const testingGateOwnerRef = useRef<string | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
@@ -372,6 +373,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
 
   useEffect(() => {
+    testingGateOwnerRef.current = me?.userId ?? null;
     testingAcceptanceInProgress.current = false;
     testStartPendingRef.current = false;
     testStartOwnerRef.current = null;
@@ -884,7 +886,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const inGraph = view === "graph" && !selectedVideoId;
   const activeNav: JackView = selectedVideoId ? "library" : view;
-  const canViewCloseout = me?.isAdmin === false && !!(telemetryContext?.scope?.pilotId);
+  const ownedTelemetryContext =
+    me?.userId && telemetryContextOwnerRef.current === me.userId
+      ? telemetryContext
+      : null;
+  const ownedTestingGate =
+    me?.userId && testingGateOwnerRef.current === me.userId
+      ? testingGate
+      : { accepted: false, restricted: true };
+  const canViewCloseout =
+    me?.isAdmin === false && !!ownedTelemetryContext?.scope?.pilotId;
 
   return (
     <>
@@ -946,14 +957,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <KnowledgeReview />
         ) : view === "reports" ? (
           <PilotActivityReports />
-        ) : view === "closeout" ? (
+        ) : view === "closeout" && canViewCloseout ? (
           <EndOfShiftCloseout
+            key={me?.userId ?? "signed-out"}
             participantId={me?.userId ?? "participant"}
             participantName={me?.name || me?.email}
-            organizationName={telemetryContext?.scope?.organizationName}
-            pilotName={telemetryContext?.scope?.pilotName}
-            organizationId={telemetryContext?.scope?.organizationId}
-            pilotId={telemetryContext?.scope?.pilotId}
+            organizationName={ownedTelemetryContext?.scope?.organizationName}
+            pilotName={ownedTelemetryContext?.scope?.pilotName}
+            organizationId={ownedTelemetryContext?.scope?.organizationId}
+            pilotId={ownedTelemetryContext?.scope?.pilotId}
           />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
@@ -961,13 +973,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       </JackShell>
 
       <TelemetryConsentModal
-        open={telemetryConsentOpen}
+        key={me?.userId ?? "signed-out"}
+        open={telemetryConsentOpen && !!ownedTelemetryContext?.scope}
         saving={testStartPending}
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
       <UserTestingGate
-        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
+        key={me?.userId ?? "signed-out"}
+        open={
+          me?.isAdmin === false &&
+          ownedTestingGate.restricted &&
+          !ownedTestingGate.accepted
+        }
         onStart={handleStartUserTest}
       />
 
@@ -992,10 +1010,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         onEvent={handleTestingEvent}
       />
       <UserTestFeedback
+        key={me?.userId ?? "signed-out"}
         ref={feedbackRef}
-        consented={testingGate.accepted}
+        consented={ownedTestingGate.accepted}
         userId={isSignedIn ? me?.userId : null}
-        pilotId={telemetryContext?.scope?.pilotId}
+        pilotId={ownedTelemetryContext?.scope?.pilotId}
       />
 
       <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
@@ -1006,7 +1025,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               You control your participation. Ask Jack conversations are stored as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {telemetryContext?.scope && (
+          {ownedTelemetryContext?.scope && (
             <div className="rounded-lg border border-border p-4">
               <p className="font-semibold">Pilot telemetry</p>
               <p className="mt-1 text-sm text-muted-foreground">
