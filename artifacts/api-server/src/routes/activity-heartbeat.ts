@@ -3,6 +3,7 @@ import { Router } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
+  activeTesterScopeMatches,
   activityDb as db,
   browserFamily,
   compensateTelemetryWriteAfterWithdrawal,
@@ -94,6 +95,7 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       Object.keys(body).some(
         (key) =>
           ![
+            "testSessionId",
             "appSessionId",
             "visibility",
             "meaningfulActivity",
@@ -104,6 +106,10 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       return res.status(400).json({ error: "Invalid activity heartbeat." });
     }
 
+    const requestedTestSessionId =
+      typeof body.testSessionId === "string" && UUID_RE.test(body.testSessionId)
+        ? body.testSessionId
+        : null;
     const appSessionId =
       typeof body.appSessionId === "string" && UUID_RE.test(body.appSessionId)
         ? body.appSessionId
@@ -118,6 +124,7 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       : "desktop";
 
     if (
+      !requestedTestSessionId ||
       !appSessionId ||
       !visibility ||
       typeof meaningfulActivity !== "boolean" ||
@@ -129,6 +136,7 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     const session = await db
       .from("test_sessions")
       .select("*")
+      .eq("id", requestedTestSessionId)
       .eq("actor_user_id", identity.userId)
       .eq("app_session_id", appSessionId)
       .eq("status", "active")
@@ -143,11 +151,22 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
         .json({ error: "No active pilot session was found." });
     }
 
-    const consent = await latestConsent(
-      identity.userId,
-      String(session.data.pilot_id),
-      "telemetry",
-    );
+    const pilotId = String(session.data.pilot_id);
+    const organizationId = String(session.data.organization_id);
+    const testSessionId = String(session.data.id);
+    if (
+      !(await activeTesterScopeMatches(
+        identity.userId,
+        organizationId,
+        pilotId,
+      ))
+    ) {
+      return res
+        .status(403)
+        .json({ error: "No active pilot membership was found." });
+    }
+
+    const consent = await latestConsent(identity.userId, pilotId, "telemetry");
     if (
       !currentConsentGranted(consent) ||
       consent.id !== String(session.data.telemetry_consent_id ?? "")
@@ -193,9 +212,6 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     });
     if (inserted.error) throw inserted.error;
 
-    const pilotId = String(session.data.pilot_id);
-    const organizationId = String(session.data.organization_id);
-    const testSessionId = String(session.data.id);
     const compensateWithdrawal = () =>
       compensateTelemetryWriteAfterWithdrawal(
         identity.userId,

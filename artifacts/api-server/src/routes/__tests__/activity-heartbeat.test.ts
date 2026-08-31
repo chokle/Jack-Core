@@ -24,6 +24,10 @@ import activityHeartbeatRouter from "../activity-heartbeat.js";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const PILOT_ID = "22222222-2222-4222-8222-222222222222";
+const SECOND_ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SECOND_PILOT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const SECOND_SESSION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const SECOND_CONSENT_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const SESSION_ID = "33333333-3333-4333-8333-333333333333";
 const APP_SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const CONSENT_ID = "55555555-5555-4555-8555-555555555555";
@@ -170,6 +174,25 @@ beforeEach(() => {
     isPresentation: false,
     classification: "resolved",
   });
+  fake.tables.pilot_memberships = [
+    {
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      user_id: "tester-1",
+      role: "tester",
+      active: true,
+      valid_from: "2000-01-01T00:00:00.000Z",
+      valid_until: null,
+    },
+  ];
+  fake.tables.pilots = [
+    {
+      id: PILOT_ID,
+      organization_id: ORGANIZATION_ID,
+      status: "active",
+      name: "Pilot One",
+    },
+  ];
   fake.tables.test_sessions = [
     {
       id: SESSION_ID,
@@ -209,6 +232,7 @@ describe("pilot activity heartbeat", () => {
       .post("/api/testing/activity-heartbeat")
       .set("User-Agent", "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: true,
@@ -241,6 +265,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "hidden",
         meaningfulActivity: false,
@@ -265,6 +290,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "hidden",
         meaningfulActivity: true,
@@ -285,6 +311,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: true,
@@ -311,6 +338,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: true,
@@ -335,6 +363,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: true,
@@ -370,6 +399,7 @@ describe("pilot activity heartbeat", () => {
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: true,
@@ -383,11 +413,112 @@ describe("pilot activity heartbeat", () => {
     );
   });
 
+  it("binds a shared browser app session to the exact pilot session", async () => {
+    const secondLastActivity = "2026-08-24T18:00:00.000Z";
+    fake.tables.pilot_memberships.push({
+      organization_id: SECOND_ORGANIZATION_ID,
+      pilot_id: SECOND_PILOT_ID,
+      user_id: "tester-1",
+      role: "tester",
+      active: true,
+      valid_from: "2000-01-01T00:00:00.000Z",
+      valid_until: null,
+    });
+    fake.tables.pilots.push({
+      id: SECOND_PILOT_ID,
+      organization_id: SECOND_ORGANIZATION_ID,
+      status: "active",
+      name: "Pilot Two",
+    });
+    fake.tables.test_sessions.push({
+      id: SECOND_SESSION_ID,
+      actor_user_id: "tester-1",
+      organization_id: SECOND_ORGANIZATION_ID,
+      pilot_id: SECOND_PILOT_ID,
+      app_session_id: APP_SESSION_ID,
+      status: "active",
+      telemetry_status: "granted",
+      telemetry_consent_id: SECOND_CONSENT_ID,
+      started_at: secondLastActivity,
+      last_activity_at: secondLastActivity,
+    });
+    fake.tables.telemetry_consents.push({
+      id: SECOND_CONSENT_ID,
+      actor_user_id: "tester-1",
+      organization_id: SECOND_ORGANIZATION_ID,
+      pilot_id: SECOND_PILOT_ID,
+      scope: "telemetry",
+      state: "granted",
+      privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+      consent_version: "jack-pilot-consent-2026-07-25",
+      occurred_at: secondLastActivity,
+    });
+
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        testSessionId: SECOND_SESSION_ID,
+        appSessionId: APP_SESSION_ID,
+        visibility: "foreground",
+        meaningfulActivity: true,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(201);
+    expect(fake.tables.test_events).toHaveLength(1);
+    expect(fake.tables.test_events[0]).toMatchObject({
+      actor_user_id: "tester-1",
+      organization_id: SECOND_ORGANIZATION_ID,
+      pilot_id: SECOND_PILOT_ID,
+      test_session_id: SECOND_SESSION_ID,
+      app_session_id: APP_SESSION_ID,
+      consent_id: SECOND_CONSENT_ID,
+    });
+    expect(
+      fake.tables.test_sessions.find((row) => row.id === SESSION_ID)
+        ?.last_activity_at,
+    ).toBe(INITIAL_LAST_ACTIVITY);
+    expect(
+      fake.tables.test_sessions.find((row) => row.id === SECOND_SESSION_ID)
+        ?.last_activity_at,
+    ).not.toBe(secondLastActivity);
+  });
+
+  it.each([
+    ["inactive", false, null],
+    ["expired", true, "2000-01-02T00:00:00.000Z"],
+  ])(
+    "rejects an %s tester membership",
+    async (_label, active, validUntil) => {
+      Object.assign(fake.tables.pilot_memberships[0]!, {
+        active,
+        valid_until: validUntil,
+      });
+
+      const response = await request(app())
+        .post("/api/testing/activity-heartbeat")
+        .send({
+          testSessionId: SESSION_ID,
+          appSessionId: APP_SESSION_ID,
+          visibility: "foreground",
+          meaningfulActivity: true,
+          deviceCategory: "desktop",
+        });
+
+      expect(response.status).toBe(403);
+      expect(fake.tables.test_events).toHaveLength(0);
+      expect(fake.tables.test_sessions[0]?.last_activity_at).toBe(
+        INITIAL_LAST_ACTIVITY,
+      );
+    },
+  );
+
   it("fails closed when current telemetry consent is no longer granted", async () => {
     fake.tables.telemetry_consents[0]!.state = "withdrawn";
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
       .send({
+        testSessionId: SESSION_ID,
         appSessionId: APP_SESSION_ID,
         visibility: "foreground",
         meaningfulActivity: false,
