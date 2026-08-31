@@ -751,6 +751,29 @@ async function exactTelemetryConsentStillCurrent(
   return currentConsentGranted(current) && current.id === consentId;
 }
 
+async function redactRejectedTelemetryEvent(input: {
+  eventId: string;
+  userId: string;
+  pilotId: string;
+  sessionId: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const redacted = await db
+    .from("test_events")
+    .update({
+      metadata: {},
+      correlation_id: null,
+      request_id: null,
+      redacted_at: now,
+      deletion_due_at: isoAfter(WITHDRAWAL_DELETION_DAYS),
+    })
+    .eq("event_id", input.eventId)
+    .eq("actor_user_id", input.userId)
+    .eq("pilot_id", input.pilotId)
+    .eq("test_session_id", input.sessionId);
+  if (redacted.error) throw redacted.error;
+}
+
 export async function recordServerAskJackEvent(input: {
   req: Request;
   actorIdentity: CallerIdentity | null;
@@ -849,6 +872,13 @@ export async function recordServerAskJackEvent(input: {
             pilotId,
             String(session.id),
           );
+        } else if (!result.duplicate && result.row?.["event_id"]) {
+          await redactRejectedTelemetryEvent({
+            eventId: String(result.row["event_id"]),
+            userId: actorUserId,
+            pilotId,
+            sessionId: String(session.id),
+          });
         }
         return;
       }
