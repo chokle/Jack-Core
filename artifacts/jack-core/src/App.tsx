@@ -508,6 +508,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       testingOverlayRef.current?.open();
       return;
     }
+    if (context.session) {
+      setFeedbackSessionId(context.session.id);
+      testingOverlayRef.current?.open();
+      return;
+    }
     if (
       context.consents.telemetry?.state === "granted" &&
       context.consents.telemetry.privacyNoticeVersion === context.privacyNoticeVersion &&
@@ -598,18 +603,41 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   useEffect(() => {
     if (me?.isAdmin !== false) return;
     const stopRetry = initializeTelemetryRetry();
-    void loadTelemetryContext().then((context) => {
+    void loadTelemetryContext().then(async (context) => {
       setTelemetryContext(context);
       const session = context.session;
       if (session) {
         setFeedbackSessionId(session.id);
+        if (session.onboardingStatus !== "completed") {
+          handleNavigate("graph");
+          window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
+          }, 0);
+        }
+        return;
       }
-      if (session && session.onboardingStatus !== "completed") {
-        handleNavigate("graph");
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
-        }, 0);
+
+      if (!context.enrolled || !context.scope) return;
+
+      const telemetryConsent = context.consents.telemetry;
+      if (
+        !telemetryConsent ||
+        telemetryConsent.privacyNoticeVersion !== context.privacyNoticeVersion ||
+        telemetryConsent.consentVersion !== context.consentVersion
+      ) {
+        setTelemetryConsentOpen(true);
+        return;
       }
+
+      if (telemetryConsent.state !== "granted") return;
+
+      const startedSession = await startTestSession(context.scope.pilotId);
+      setFeedbackSessionId(startedSession.id);
+      setTelemetryContext({ ...context, session: startedSession });
+      handleNavigate("graph");
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: startedSession }));
+      }, 0);
     }).catch(() => setTelemetryContext(null));
     return stopRetry;
   }, [me?.isAdmin]);

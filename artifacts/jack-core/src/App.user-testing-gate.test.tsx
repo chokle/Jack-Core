@@ -428,7 +428,9 @@ describe("user-testing gate transition", () => {
 
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     expect(userConsented()).toBe("false");
-    expect(mockedStartTestSession).not.toHaveBeenCalled();
+    // Current telemetry consent bootstraps exactly one scoped session on login
+    // without treating that as screen-recording participation acceptance.
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
     expect(uploadRecordingSpy).not.toHaveBeenCalled();
@@ -503,19 +505,22 @@ describe("user-testing gate transition", () => {
     });
   });
 
-  it("start requires an active session before recording can start", async () => {
+  it("auto-bootstrap creates the telemetry session before explicit recording start", async () => {
     recordingSupported.value = true;
     testSessionServiceState.currentSession = null;
 
     await renderAndOpenInitialModal();
-    await startFlowFromOpenOverlay();
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(userConsented()).toBe("false");
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+
+    await startFlowFromOpenOverlay({ expectRecording: true });
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(userConsented()).toBe("false");
+      expect(userConsented()).toBe("true");
     });
-    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
-    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+    expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
     expect(uploadRecordingSpy).not.toHaveBeenCalled();
   });
 
