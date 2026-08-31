@@ -100,18 +100,9 @@ router.delete("/account", async (req, res) => {
       .eq("contributor_user_id", userId);
     if (interviewSessionDeleteError) throw interviewSessionDeleteError;
 
-    const { data: chats, error: chatReadError } = await supabase
-      .from("chat_messages")
-      .select("session_id")
-      .eq("user_id", userId);
-    if (chatReadError) throw chatReadError;
-    const sessionIds = [...new Set((chats ?? []).map((row) => (row as Record<string, unknown>)["session_id"]).filter((id): id is string => typeof id === "string"))];
-    if (sessionIds.length > 0) {
-      const { error } = await supabase.from("parked_thoughts").delete().in("chat_session_id", sessionIds);
-      if (error) throw error;
-    }
-    // New parked rows carry a direct owner fence. Ambiguous legacy rows are not
-    // guessed from shared session ids and remain a separately authorized cleanup.
+    // Delete only rows with direct account attribution. Legacy rows with no
+    // actor remain for separately authorized review: chat session IDs are not
+    // account-unique and must never be used as a destructive ownership proxy.
     const { error: parkedOwnerDeleteError } = await supabase
       .from("parked_thoughts")
       .delete()
