@@ -151,6 +151,8 @@ describe("requirePilotAccess", () => {
   );
 
   it.each([
+    ["GET", "/api/me"],
+    ["GET", "/api/me/"],
     ["GET", "/api/testing/telemetry/context"],
     ["GET", "/api/testing/telemetry/context/"],
     ["GET", "/api/testing/telemetry/export"],
