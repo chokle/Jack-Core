@@ -295,127 +295,20 @@ export async function ensureBaseGraph(): Promise<void> {
  * through syncVideoGraph, which also prunes any topic left orphaned by a re-home.
  */
 async function writeVideoNode(videoId: string): Promise<void> {
-  const { data: video, error } = await supabase
-    .from("videos")
-    .select("id, title, trade, status, description, competency_codes, uploader_user_id, uploader_email, uploader_name, created_at, updated_at")
-    .eq("id", videoId)
-    .maybeSingle();
-  if (error) throw error;
+  const normalizedVideoId = videoId.trim();
+  if (!normalizedVideoId) throw new Error("Video id is required for graph sync.");
 
-  if (!video) {
-    await deleteVideoNode(videoId);
-    return;
-  }
-
-  const v = video as Record<string, unknown>;
-  const trade = (v["trade"] as string | null) ?? null;
-  const codes = Array.isArray(v["competency_codes"])
-    ? (v["competency_codes"] as unknown[]).filter((c): c is string => typeof c === "string")
-    : [];
-  const vNode = videoNodeId(videoId);
-  const uploaderUserId =
-    typeof v["uploader_user_id"] === "string" && (v["uploader_user_id"] as string).trim()
-      ? (v["uploader_user_id"] as string)
-      : null;
-  const uploaderEmail =
-    typeof v["uploader_email"] === "string" && (v["uploader_email"] as string).trim()
-      ? (v["uploader_email"] as string)
-      : null;
-  const uploaderName =
-    typeof v["uploader_name"] === "string" && (v["uploader_name"] as string).trim()
-      ? (v["uploader_name"] as string)
-      : uploaderEmail;
-  const cNode = uploaderUserId ? contributorNodeId(uploaderUserId) : null;
-
-  const nodes: NodeUpsert[] = [{ id: GRAPH_CORE_ID, kind: "core", label: "JACK" }];
-  const scaffoldEdges: EdgeUpsert[] = [];
-
-  if (trade) {
-    nodes.push({ id: topicNodeId(trade), kind: "topic", label: trade, trade });
-    scaffoldEdges.push({
-      id: edgeKey(GRAPH_CORE_ID, topicNodeId(trade)),
-      source_id: GRAPH_CORE_ID,
-      target_id: topicNodeId(trade),
-      kind: "topic",
-    });
-  }
-
-  nodes.push({
-    id: vNode,
-    kind: "video",
-    label: (v["title"] as string) ?? "Untitled",
-    trade,
-    ref_id: videoId,
-    meta: {
-      status: v["status"] ?? null,
-      trade: trade ?? undefined,
-      description: v["description"] ?? undefined,
-      competencyCodes: codes,
-      uploaderUserId: uploaderUserId ?? undefined,
-      uploaderEmail: uploaderEmail ?? undefined,
-      uploaderName: uploaderName ?? undefined,
-      createdAt: v["created_at"] ?? undefined,
-      updatedAt: v["updated_at"] ?? v["created_at"] ?? undefined,
-    },
+  // Personally attributable video/contributor nodes and every structural edge
+  // incident to the video are written by one service-role-only database RPC.
+  // The RPC re-reads the authoritative video row, serializes with whole-account
+  // deletion on the uploader advisory lock, checks the durable source/account
+  // fences, and reconciles atomically. Shared core/topic/competency scaffolding
+  // is also minted there, but is intentionally retained as de-identified graph
+  // structure when a contributor later deletes their account.
+  const { error } = await supabase.rpc("apply_fenced_video_graph_identity", {
+    p_video_id: normalizedVideoId,
   });
-  if (cNode) {
-    nodes.push({
-      id: cNode,
-      kind: "contributor",
-      label: uploaderName ?? "Contributor",
-      trade,
-      ref_id: uploaderUserId,
-      meta: {
-        userId: uploaderUserId,
-        email: uploaderEmail ?? undefined,
-        name: uploaderName ?? undefined,
-        trade: trade ?? undefined,
-      },
-    });
-  }
-
-  await upsertNodes(nodes);
-  await ensureCompetencyNodes(codes);
-
-  // Reconcile the structural edges incident to this video node, then re-add the
-  // authoritative set. Two scoped deletes avoid building a raw `.or()` filter
-  // string from the node id. Crucially, the source_id delete EXCLUDES kind
-  // 'knowledge': those video→knowledge provenance edges are owned by the
-  // distillation engine (syncVideoKnowledge) and must survive a plain re-sync
-  // (e.g. a metadata edit) that does not re-run distillation.
-  const del1 = await supabase
-    .from("knowledge_edges")
-    .delete()
-    .eq("source_id", vNode)
-    .neq("kind", "knowledge");
-  if (del1.error) throw del1.error;
-  const del2 = await supabase.from("knowledge_edges").delete().eq("target_id", vNode);
-  if (del2.error) throw del2.error;
-
-  const parent = trade ? topicNodeId(trade) : GRAPH_CORE_ID;
-  const edges: EdgeUpsert[] = [
-    ...scaffoldEdges,
-    ...(cNode ? [] : [{ id: edgeKey(parent, vNode), source_id: parent, target_id: vNode, kind: "video" }]),
-    ...(cNode
-      ? [
-          { id: edgeKey(parent, cNode), source_id: parent, target_id: cNode, kind: "contributor" },
-          {
-            id: edgeKey(cNode, vNode),
-            source_id: cNode,
-            target_id: vNode,
-            kind: "video",
-            meta: { role: "uploader", userId: uploaderUserId },
-          },
-        ]
-      : []),
-    ...codes.map((code) => ({
-      id: edgeKey(vNode, compNodeId(code)),
-      source_id: vNode,
-      target_id: compNodeId(code),
-      kind: "competency",
-    })),
-  ];
-  await upsertEdges(edges);
+  if (error) throw error;
 }
 
 /** Remove a video's node; its edges cascade via the foreign key. Internal. */
