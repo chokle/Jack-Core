@@ -76,18 +76,22 @@ function appendTelemetryWithdrawal(): void {
   appendConsentWithdrawal("telemetry");
 }
 
-function appendTelemetryGrant(id: string): void {
+function appendConsentGrant(scope: ConsentScope, id: string): void {
   fake.tables.telemetry_consents.push({
     id,
     actor_user_id: "tester-1",
     organization_id: ORGANIZATION_ID,
     pilot_id: PILOT_ID,
-    scope: "telemetry",
+    scope,
     state: "granted",
     privacy_notice_version: "jack-pilot-privacy-2026-07-25",
     consent_version: "jack-pilot-consent-2026-07-25",
     occurred_at: "2026-07-27T00:00:00.000Z",
   });
+}
+
+function appendTelemetryGrant(id: string): void {
+  appendConsentGrant("telemetry", id);
 }
 
 function withdrawConsentAfterNextInsert(
@@ -165,6 +169,22 @@ function completeSessionBeforeResumeUpdate() {
     const originalUpdate = query.update.bind(query);
     query.update = (values: Record<string, unknown>) => {
       if ("resumed_at" in values) {
+        fake.tables.test_sessions[0]!.status = "completed";
+      }
+      return originalUpdate(values);
+    };
+    return query;
+  });
+}
+
+function completeSessionBeforeExpiration() {
+  const originalFrom = fake.from.bind(fake);
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_sessions") return query;
+    const originalUpdate = query.update.bind(query);
+    query.update = (values: Record<string, unknown>) => {
+      if (values["status"] === "expired" && !("expires_at" in values)) {
         fake.tables.test_sessions[0]!.status = "completed";
       }
       return originalUpdate(values);
@@ -330,6 +350,158 @@ describe("canonical user-test sessions", () => {
     } finally {
       fromSpy.mockRestore();
     }
+  });
+
+  it("returns no current session for a stale telemetry grant without deleting old data", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    appendTelemetryGrant("78787878-7878-4787-8787-787878787878");
+
+    const response = await request(app)
+      .get("/api/testing/sessions/current")
+      .query({ pilotId: PILOT_ID });
+
+    expect(response.status).toBe(200);
+    expect(response.body.session).toBeNull();
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      id: started.body.session.id,
+      status: "active",
+      telemetry_status: "granted",
+      telemetry_consent_id: CONSENT_ID,
+    });
+    expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+    expect(fake.tables.test_events).toHaveLength(1);
+    expect(fake.tables.test_events[0]?.redacted_at).toBeUndefined();
+  });
+
+  it("sanitizes stale screen and microphone grants in the current session projection", async () => {
+    const screen = fake.tables.telemetry_consents.find(
+      (consent) => consent.scope === "screen",
+    );
+    const microphone = fake.tables.telemetry_consents.find(
+      (consent) => consent.scope === "microphone",
+    );
+    expect(screen).toBeDefined();
+    expect(microphone).toBeDefined();
+    screen!.state = "granted";
+    microphone!.state = "granted";
+    await request(app).post("/api/testing/sessions/start").send(startBody);
+    appendConsentGrant("screen", "89898989-8989-4989-8989-898989898989");
+    appendConsentGrant("microphone", "90909090-9090-4090-8090-909090909090");
+
+    const response = await request(app)
+      .get("/api/testing/sessions/current")
+      .query({ pilotId: PILOT_ID });
+
+    expect(response.status).toBe(200);
+    expect(response.body.session).toMatchObject({
+      telemetryStatus: "granted",
+      screenConsentState: "declined",
+      microphoneConsentState: "declined",
+    });
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      screen_consent_state: "granted",
+      microphone_consent_state: "granted",
+    });
+  });
+
+  it("compensates an active session observed after telemetry withdrawal", async () => {
+    await request(app).post("/api/testing/sessions/start").send(startBody);
+    appendTelemetryWithdrawal();
+
+    const response = await request(app)
+      .get("/api/testing/sessions/current")
+      .query({ pilotId: PILOT_ID });
+
+    expect(response.status).toBe(200);
+    expect(response.body.session).toBeNull();
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "withdrawn",
+      telemetry_status: "withdrawn",
+      deletion_due_at: expect.any(String),
+    });
+    expect(fake.tables.test_events[0]).toMatchObject({
+      metadata: {},
+      redacted_at: expect.any(String),
+      deletion_due_at: expect.any(String),
+    });
+  });
+
+  it("does not overwrite a concurrent completion while current-session expiration runs", async () => {
+    await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.test_sessions[0]!.expires_at = "2020-01-01T00:00:00.000Z";
+    const fromSpy = completeSessionBeforeExpiration();
+    try {
+      const response = await request(app)
+        .get("/api/testing/sessions/current")
+        .query({ pilotId: PILOT_ID });
+
+      expect(response.status).toBe(200);
+      expect(response.body.session).toBeNull();
+      expect(fake.tables.test_sessions[0]).toMatchObject({ status: "completed" });
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+      expect(fake.tables.test_events.map((event) => event.event_type)).toEqual([
+        "test_started",
+      ]);
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("starts fresh without a false expiry event after concurrent completion", async () => {
+    const first = await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.test_sessions[0]!.expires_at = "2020-01-01T00:00:00.000Z";
+    const fromSpy = completeSessionBeforeExpiration();
+    try {
+      const response = await request(app)
+        .post("/api/testing/sessions/start")
+        .send({
+          ...startBody,
+          appSessionId: "91919191-9191-4191-8191-919191919191",
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.session.id).not.toBe(first.body.session.id);
+      expect(fake.tables.test_sessions).toHaveLength(2);
+      expect(fake.tables.test_sessions[0]).toMatchObject({ status: "completed" });
+      expect(fake.tables.test_sessions[1]).toMatchObject({ status: "active" });
+      expect(fake.tables.test_events.map((event) => event.event_type)).toEqual([
+        "test_started",
+        "test_started",
+      ]);
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("rejects event and ingest writes after tester membership is deactivated", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.pilot_memberships[0]!.active = false;
+
+    const event = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({
+        eventId: "92929292-9292-4292-8292-929292929292",
+        eventType: "feature_viewed",
+        occurredAt: new Date().toISOString(),
+        appSessionId: APP_SESSION_ID,
+        metadata: { feature: "library" },
+        result: "success",
+        deviceCategory: "desktop",
+        schemaVersion: 1,
+      });
+    const failure = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/ingest-failures`)
+      .send({ reasonCode: "queue_overflow", eventCount: 1 });
+
+    expect(event.status).toBe(403);
+    expect(failure.status).toBe(403);
+    expect(fake.tables.test_events.map((row) => row.event_type)).toEqual([
+      "test_started",
+    ]);
+    expect(fake.tables.activity_ingest_failures).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]).toMatchObject({ status: "active" });
+    expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
   });
 
   it("does not resume a session completed after the active-session read", async () => {
