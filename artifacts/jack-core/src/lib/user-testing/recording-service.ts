@@ -107,24 +107,45 @@ export class RecordingService {
       throw new Error("Screen recording is not supported in this browser.");
     }
 
+    if (this.stopped) {
+      throw new Error("Recording was cancelled.");
+    }
+
     const displayStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: false,
     });
+    if (this.stopped) {
+      displayStream.getTracks().forEach((track) => track.stop());
+      throw new Error("Recording was cancelled.");
+    }
+    this.stream = displayStream;
 
     this.micRequested = includeMicrophone;
     if (includeMicrophone && typeof navigator.mediaDevices.getUserMedia === "function") {
       try {
         const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (this.stopped) {
+          micStream.getTracks().forEach((track) => track.stop());
+          this.releaseTracks();
+          throw new Error("Recording was cancelled.");
+        }
         for (const track of micStream.getAudioTracks()) {
           displayStream.addTrack(track);
         }
-      } catch {
+      } catch (error) {
+        if (this.stopped) {
+          this.releaseTracks();
+          throw error instanceof Error ? error : new Error("Recording was cancelled.");
+        }
         this.micDenied = true;
       }
     }
 
-    this.stream = displayStream;
+    if (this.stopped) {
+      this.releaseTracks();
+      throw new Error("Recording was cancelled.");
+    }
 
     // The browser's native "Stop sharing" control ends the video track
     // out-of-band — treat that exactly like our own Stop Test button so the
