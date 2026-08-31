@@ -10,6 +10,7 @@ vi.mock("../supabase.js", async () => {
 import { fake, resetMocks } from "./mocks.js";
 import {
   hasAnyReportScope,
+  latestConsent,
   CONSENT_VERSION,
   PRIVACY_NOTICE_VERSION,
   recordServerAskJackEvent,
@@ -183,6 +184,54 @@ beforeEach(() => {
   fake.tables.activity_ingest_failures = [];
   fake.tables.test_recordings = [];
   fake.tables.test_feedback = [];
+});
+
+describe("consent authority ordering", () => {
+  it("preserves occurred-at authority and uses sequence only as the exact tie-breaker", async () => {
+    fake.tables.telemetry_consents = [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-24T00:00:00.000Z",
+        consent_sequence: 99,
+      },
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "withdrawn",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-25T00:00:00.000Z",
+        consent_sequence: 11,
+      },
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-25T00:00:00.000Z",
+        consent_sequence: 10,
+      },
+    ];
+
+    await expect(latestConsent("tester-1", PILOT_ID, "telemetry")).resolves.toMatchObject({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      state: "withdrawn",
+    });
+  });
 });
 
 describe("server-authoritative Ask Jack telemetry", () => {
