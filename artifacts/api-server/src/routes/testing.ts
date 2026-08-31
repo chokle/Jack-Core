@@ -412,6 +412,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
       return res.status(409).json({ error: "Telemetry consent is not active." });
     }
 
+    const normalizedFeatures = [...new Set(features as string[])];
     const { data: row, error } = await supabase
       .from("test_feedback")
       .insert({
@@ -425,7 +426,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         test_session_id: pilotSession.data.id,
         organization_id: membership.scope.organizationId,
         pilot_id: membership.scope.pilotId,
-        features_used: [...new Set(features)],
+        features_used: normalizedFeatures,
         device_category: device,
         trigger,
         goal,
@@ -443,13 +444,41 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
       if ((error as { code?: string }).code === "23505") {
         const { data: existing, error: existingError } = await supabase
           .from("test_feedback")
-          .select("id, created_at")
+          .select(
+            "id,created_at,organization_id,pilot_id,session_id,test_session_id,features_used,device_category,trigger,goal,useful,shortfall,adoption_need,additional,app_version",
+          )
           .eq("id", feedbackId)
           .eq("tester_user_id", identity.userId)
           .maybeSingle();
         if (existingError) throw existingError;
         if (!existing) {
           return res.status(409).json({ error: "Feedback id is already in use." });
+        }
+        const existingFeatures = existing.features_used;
+        const featuresMatch =
+          Array.isArray(existingFeatures) &&
+          existingFeatures.length === normalizedFeatures.length &&
+          existingFeatures.every((feature) => typeof feature === "string") &&
+          JSON.stringify([...new Set(existingFeatures)].sort()) ===
+            JSON.stringify([...normalizedFeatures].sort());
+        const retryMatches =
+          String(existing.organization_id) === membership.scope.organizationId &&
+          String(existing.pilot_id) === membership.scope.pilotId &&
+          String(existing.session_id) === sessionId &&
+          String(existing.test_session_id) === String(pilotSession.data.id) &&
+          featuresMatch &&
+          existing.device_category === device &&
+          existing.trigger === trigger &&
+          existing.goal === goal &&
+          existing.useful === useful &&
+          existing.shortfall === shortfall &&
+          existing.adoption_need === adoptionNeed &&
+          existing.additional === additional &&
+          existing.app_version === appVersion;
+        if (!retryMatches) {
+          return res.status(409).json({
+            error: "Feedback id does not match this submission context.",
+          });
         }
         if (
           !(await feedbackContextStillCurrent({
@@ -916,12 +945,21 @@ router.post(
         .select("id, created_at")
         .maybeSingle();
       if (finalizeErr || !row) {
-        const consentsStillCurrent = await recordingConsentsRemainCurrent(consentInput);
+        let consentsStillCurrent = false;
+        let consentReadError: unknown = null;
+        try {
+          consentsStillCurrent = await recordingConsentsRemainCurrent(consentInput);
+        } catch (err) {
+          consentReadError = err;
+        }
+        // Removal is mandatory even when the diagnostic consent read failed:
+        // the metadata CAS did not prove this private object was activated.
         await compensateRecordingConsentRace({
           recordingId,
           userId: identity.userId,
           storagePath,
         });
+        if (consentReadError) throw consentReadError;
         if (!consentsStillCurrent) {
           return res.status(412).json({
             error: "Recording consent changed during upload. The recording was not retained.",
