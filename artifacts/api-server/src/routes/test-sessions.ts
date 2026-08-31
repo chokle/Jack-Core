@@ -3,6 +3,7 @@ import { Router, type Request } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
+  activeTesterScopeMatches,
   activityDb as db,
   currentConsentGranted,
   insertCanonicalEvent,
@@ -317,12 +318,22 @@ async function expireSessionIfNeeded(
     expectedConsents ?? (await loadConsentSnapshots(userId, pilotId));
   const consent = consentSnapshots.telemetry;
   const now = new Date().toISOString();
+  if (!currentConsentGranted(consent)) return true;
   const updated = await db
     .from("test_sessions")
     .update({ status: "expired", last_activity_at: now, updated_at: now })
     .eq("id", row.id)
-    .eq("actor_user_id", userId);
+    .eq("actor_user_id", userId)
+    .eq("organization_id", row.organization_id)
+    .eq("pilot_id", row.pilot_id)
+    .eq("status", "active")
+    .eq("telemetry_status", "granted")
+    .eq("telemetry_consent_id", consent.id)
+    .eq("expires_at", row.expires_at)
+    .select("id")
+    .maybeSingle();
   if (updated.error) throw updated.error;
+  if (!updated.data) return true;
   if (currentConsentGranted(consent)) {
     if (!(await consentSnapshotsStillCurrent(userId, pilotId, consentSnapshots))) {
       await compensateTelemetryConsentRace(userId, pilotId, String(row.id));
@@ -441,6 +452,15 @@ router.post("/testing/sessions/start", async (req, res) => {
       existing.data &&
       existingUsesCurrentConsent &&
       (await expireSessionIfNeeded(existing.data, identity.userId, req, startConsents));
+    if (existing.data && existingExpired) {
+      const remaining = await activeSession(identity.userId, membership.scope.pilotId);
+      if (remaining.error) throw remaining.error;
+      if (remaining.data) {
+        return res.status(409).json({
+          error: "The pilot session changed while expiration was being recorded.",
+        });
+      }
+    }
     if (existing.data && !existingExpired) {
       if (!existingUsesCurrentConsent) {
         const retiredAt = new Date().toISOString();
@@ -890,6 +910,15 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           return res.status(404).json({ error: "Pilot session not found" });
         }
         const pilotId = String(existingSession.data.pilot_id);
+        if (
+          !(await activeTesterScopeMatches(
+            identity.userId,
+            String(existingSession.data.organization_id),
+            pilotId,
+          ))
+        ) {
+          return res.status(403).json({ error: "Active tester membership is required." });
+        }
         const consent = await latestConsent(identity.userId, pilotId, "telemetry");
         if (
           existingSession.data.telemetry_status !== "granted" ||
@@ -971,6 +1000,15 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       return res.status(404).json({ error: "Active pilot session not found" });
     }
     const pilotId = String(session.data.pilot_id);
+    if (
+      !(await activeTesterScopeMatches(
+        identity.userId,
+        String(session.data.organization_id),
+        pilotId,
+      ))
+    ) {
+      return res.status(403).json({ error: "Active tester membership is required." });
+    }
     const consent = await latestConsent(identity.userId, pilotId, "telemetry");
     if (
       !currentConsentGranted(consent) ||
@@ -1109,6 +1147,15 @@ router.post("/testing/sessions/:id/ingest-failures", async (req, res) => {
   if (session.error) throw session.error;
   if (!session.data) return res.status(404).json({ error: "Pilot session not found." });
   const pilotId = String(session.data.pilot_id);
+  if (
+    !(await activeTesterScopeMatches(
+      identity.userId,
+      String(session.data.organization_id),
+      pilotId,
+    ))
+  ) {
+    return res.status(403).json({ error: "Active tester membership is required." });
+  }
   const consent = await latestConsent(identity.userId, pilotId, "telemetry");
   if (
     !currentConsentGranted(consent) ||
