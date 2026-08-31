@@ -748,8 +748,7 @@ describe("user-testing gate transition", () => {
     expect(localStorage.getItem(acceptedStorageKey(nextIdentity.userId))).toBeNull();
   });
 
-  it("keeps export and withdrawal controls for a former tester's historical pilot", async () => {
-    localStorage.setItem(acceptedStorageKey(identity.userId), "true");
+  it("keeps export and withdrawal controls for a former tester without prior gate storage", async () => {
     Object.assign(
       testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
       {
@@ -788,6 +787,11 @@ describe("user-testing gate transition", () => {
 
     await renderAuthenticatedApp("/app");
     await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    });
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
+    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
     fireEvent.click(screen.getByTestId("account-settings"));
 
     const controls = await screen.findByTestId("telemetry-privacy-controls");
@@ -810,6 +814,59 @@ describe("user-testing gate transition", () => {
       );
     });
     expect(mockedLoadTelemetryContext.mock.calls.at(-1)?.[0]).toBeUndefined();
+  });
+
+  it("keeps owned historical privacy controls after promotion without enabling collection", async () => {
+    setIdentity({ ...identityBase, isAdmin: true });
+    Object.assign(
+      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      {
+        enrolled: false,
+        requiresPilotSelection: false,
+        scope: null,
+        privacyScopes: [
+          {
+            organizationId: "org-history-admin",
+            pilotId: "pilot-history-admin",
+            organizationName: "Former Org",
+            pilotName: "Admin History",
+            consents: {
+              telemetry: {
+                state: "granted",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              screen: null,
+              microphone: null,
+            },
+          },
+        ],
+        consents: { telemetry: null, screen: null, microphone: null },
+        session: null,
+      },
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("account-settings"));
+    const controls = await screen.findByTestId("telemetry-privacy-controls");
+    expect(within(controls).getByText("Admin History")).toBeTruthy();
+    fireEvent.click(
+      within(screen.getByTestId("telemetry-privacy-scope-pilot-history-admin")).getByRole(
+        "button",
+        { name: "Withdraw telemetry" },
+      ),
+    );
+    await waitFor(() => {
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
+        "pilot-history-admin",
+        ["telemetry"],
+      );
+    });
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
   });
 
   it("start with explicit active session records user testing acceptance", async () => {
