@@ -4,7 +4,7 @@ import type { CallerIdentity } from "../admin-auth.js";
 
 vi.mock("../supabase.js", async () => {
   const mocks = await import("./mocks.js");
-  return { supabase: { from: mocks.fake.from.bind(mocks.fake) } };
+  return { supabase: { from: (table: string) => mocks.fake.from(table) } };
 });
 
 import { fake, resetMocks } from "./mocks.js";
@@ -20,6 +20,7 @@ const PILOT_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_PILOT_ID = "33333333-3333-4333-8333-333333333333";
 const SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const OTHER_SESSION_ID = "55555555-5555-4555-8555-555555555555";
+const CONSENT_ID = "88888888-8888-4888-8888-888888888888";
 
 function request(sessionId?: string): Request {
   return {
@@ -30,6 +31,45 @@ function request(sessionId?: string): Request {
     },
     log: { warn: vi.fn() },
   } as unknown as Request;
+}
+
+function withdrawTelemetryAfterNextEventInsert() {
+  const originalFrom = fake.from.bind(fake);
+  let withdrawn = false;
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_events") return query;
+    const originalInsert = query.insert.bind(query);
+    query.insert = (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      const builder = originalInsert(rows);
+      const originalThen = builder.then.bind(builder);
+      builder.then = (
+        onfulfilled?: (result: unknown) => unknown,
+        onrejected?: (reason: unknown) => unknown,
+      ) =>
+        originalThen(
+          (result: unknown) => {
+            if (!withdrawn) {
+              withdrawn = true;
+              fake.tables.telemetry_consents.push({
+                id: "99999999-9999-4999-8999-999999999999",
+                actor_user_id: "tester-1",
+                pilot_id: PILOT_ID,
+                scope: "telemetry",
+                state: "withdrawn",
+                privacy_notice_version: PRIVACY_NOTICE_VERSION,
+                consent_version: CONSENT_VERSION,
+                occurred_at: "2026-07-26T00:00:00.000Z",
+              });
+            }
+            return onfulfilled ? onfulfilled(result) : result;
+          },
+          onrejected,
+        );
+      return builder;
+    };
+    return query;
+  });
 }
 
 function identity(
@@ -56,6 +96,7 @@ beforeEach(() => {
       pilot_id: PILOT_ID,
       status: "active",
       telemetry_status: "granted",
+      telemetry_consent_id: CONSENT_ID,
       app_session_id: "66666666-6666-4666-8666-666666666666",
       device_category: "desktop",
       question_count: 0,
@@ -68,6 +109,7 @@ beforeEach(() => {
       pilot_id: OTHER_PILOT_ID,
       status: "active",
       telemetry_status: "granted",
+      telemetry_consent_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       app_session_id: "77777777-7777-4777-8777-777777777777",
       device_category: "desktop",
       question_count: 0,
@@ -76,7 +118,7 @@ beforeEach(() => {
   ];
   fake.tables.telemetry_consents = [
     {
-      id: "88888888-8888-4888-8888-888888888888",
+      id: CONSENT_ID,
       actor_user_id: "tester-1",
       pilot_id: PILOT_ID,
       scope: "telemetry",
@@ -87,6 +129,9 @@ beforeEach(() => {
     },
   ];
   fake.tables.test_events = [];
+  fake.tables.activity_ingest_failures = [];
+  fake.tables.test_recordings = [];
+  fake.tables.test_feedback = [];
 });
 
 describe("server-authoritative Ask Jack telemetry", () => {
@@ -122,6 +167,49 @@ describe("server-authoritative Ask Jack telemetry", () => {
     });
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("question");
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("answer");
+  });
+
+  it("redacts a server Ask Jack event inserted after withdrawal", async () => {
+    fake.tables.test_feedback = [{
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+      notification_status: "pending",
+    }];
+    const fromSpy = withdrawTelemetryAfterNextEventInsert();
+    try {
+      await recordServerAskJackEvent({
+        req: request(SESSION_ID),
+        actorIdentity: identity(),
+        eventType: "ask_jack_completed",
+        correlationId: "chat-message-race",
+        citationCount: 1,
+      });
+
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+        question_count: 0,
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_events).toHaveLength(1);
+      expect(fake.tables.test_events[0]).toMatchObject({
+        event_type: "ask_jack_completed",
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        deletion_due_at: expect.any(String),
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+      });
+    } finally {
+      fromSpy.mockRestore();
+    }
   });
 
   it.each([
