@@ -64,9 +64,10 @@ interface TelemetryPrivacyScope {
 async function historicalPrivacyScopes(userId: string): Promise<TelemetryPrivacyScope[]> {
   const history = await db
     .from("telemetry_consents")
-    .select("id,actor_user_id,organization_id,pilot_id,scope,state,privacy_notice_version,consent_version,occurred_at")
+    .select("id,actor_user_id,organization_id,pilot_id,scope,state,privacy_notice_version,consent_version,occurred_at,consent_sequence")
     .eq("actor_user_id", userId)
-    .order("occurred_at", { ascending: false });
+    .order("occurred_at", { ascending: false })
+    .order("consent_sequence", { ascending: false });
   if (history.error) throw history.error;
 
   const pilotIds = [...new Set(
@@ -238,6 +239,7 @@ async function withdrawalScope(
     .eq("actor_user_id", userId)
     .eq("pilot_id", pilotId)
     .order("occurred_at", { ascending: false })
+    .order("consent_sequence", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (historicalConsent.error) throw historicalConsent.error;
