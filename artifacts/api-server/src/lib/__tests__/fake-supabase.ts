@@ -137,6 +137,32 @@ function cosine(a: number[], b: number[]): number {
 }
 
 export class FakeSupabase {
+  private injectedFailures: Array<{
+    table: string;
+    op: string;
+    error: { message: string };
+  }> = [];
+
+  failNext(
+    table: string,
+    op: "select" | "upsert" | "delete" | "update" | "insert",
+    error: { message: string },
+  ): void {
+    this.injectedFailures.push({ table, op, error });
+  }
+
+  clearFailures(): void {
+    this.injectedFailures = [];
+  }
+
+  takeFailure(table: string, op: string): { message: string } | null {
+    const index = this.injectedFailures.findIndex(
+      (failure) => failure.table === table && failure.op === op,
+    );
+    if (index < 0) return null;
+    return this.injectedFailures.splice(index, 1)[0]!.error;
+  }
+
   tables: Record<string, Row[]> = {
     videos: [],
     competencies: [],
@@ -371,6 +397,8 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private run(): Result<unknown> {
+    const injectedFailure = this.db.takeFailure(this.table, this.op);
+    if (injectedFailure) return { data: null, error: injectedFailure };
     if (this.op === "upsert") return this.runUpsert();
     if (this.op === "insert") return this.runInsert();
     if (this.op === "update") return this.runUpdate();
