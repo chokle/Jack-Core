@@ -18,6 +18,7 @@ import {
   syncVideoKnowledge,
   syncMentorAnswerKnowledge,
   removeVideoGraph,
+  removeContributorGraph,
   removeMentorGraph,
   withdrawMentor,
   previewMentorWithdrawal,
@@ -470,6 +471,53 @@ describe("recomputeKnowledgeAggregates — corroboration math & hub weights", ()
     expect(hubEdge(id, compId("W-2"))!["weight"]).toBe(1);
     expect(hubEdge(id, topicId(TRADE))!["weight"]).toBe(1);
     expect((nodeById(id)!["meta"] as Record<string, unknown>)["sourceCount"]).toBe(1);
+  });
+});
+
+describe("removeContributorGraph — account privacy", () => {
+  it("removes the uploader identity node and every incident edge", async () => {
+    const userId = "user-delete-contributor";
+    fake.tables["videos"].push({
+      id: "vid-delete-contributor",
+      title: "Account-owned upload",
+      trade: TRADE,
+      status: "uploaded",
+      description: null,
+      competency_codes: [],
+      uploader_user_id: userId,
+      uploader_email: "delete@example.test",
+      uploader_name: "Delete Me",
+      created_at: "2026-08-31T00:00:00.000Z",
+      updated_at: null,
+    });
+    await syncVideoGraph("vid-delete-contributor");
+
+    const contributorId = `contributor:${userId}`;
+    expect(nodeById(contributorId)).toMatchObject({
+      kind: "contributor",
+      ref_id: userId,
+      meta: {
+        userId,
+        email: "delete@example.test",
+        name: "Delete Me",
+      },
+    });
+    expect(
+      edges().some(
+        (edge) =>
+          edge["source_id"] === contributorId || edge["target_id"] === contributorId,
+      ),
+    ).toBe(true);
+
+    await removeContributorGraph(userId);
+
+    expect(nodeById(contributorId)).toBeUndefined();
+    expect(
+      edges().some(
+        (edge) =>
+          edge["source_id"] === contributorId || edge["target_id"] === contributorId,
+      ),
+    ).toBe(false);
   });
 });
 
