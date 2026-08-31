@@ -100,6 +100,8 @@ let startGeneration = 0;
 let flushGeneration = 0;
 let flushRequest: FlushRequestState | null = null;
 let initialized = false;
+let memoryQueue: QueuedEvent[] = [];
+let memoryQueueIsAuthoritative = false;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -152,10 +154,14 @@ export function invalidateTestSessionStarts(): void {
   startRequests.clear();
   flushRequest?.controller.abort();
   flushRequest = null;
+  memoryQueue = [];
+  memoryQueueIsAuthoritative = false;
   cacheTestSession(null);
 }
 
 function readQueue(): QueuedEvent[] {
+  if (memoryQueueIsAuthoritative) return [...memoryQueue];
+
   try {
     const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
     return Array.isArray(value) ? (value as QueuedEvent[]) : [];
@@ -167,8 +173,14 @@ function readQueue(): QueuedEvent[] {
 function writeQueue(queue: QueuedEvent[]): void {
   try {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
+    memoryQueue = [];
+    memoryQueueIsAuthoritative = false;
   } catch {
-    // A later server refresh remains authoritative when local storage is unavailable.
+    // Keep the desired queue authoritative in memory. This both preserves newly
+    // tracked events and prevents stale persisted events from being resurrected
+    // after a successful submission or identity reset.
+    memoryQueue = [...queue];
+    memoryQueueIsAuthoritative = true;
   }
 }
 
