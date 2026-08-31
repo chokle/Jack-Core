@@ -285,6 +285,41 @@ describe("test session service", () => {
     setItemSpy.mockRestore();
   });
 
+  it("submits a newly tracked event exactly once when initial queue persistence fails", async () => {
+    cacheTestSession(session);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ session }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key === "jack.userTesting.eventQueue.v1") {
+          throw new Error("storage unavailable");
+        }
+        return originalSetItem.call(this, key, value);
+      });
+
+    await trackTestEvent("feature_viewed", { feature: "library" }, "feature:library");
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+
+    await flushTestEvents();
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(retryBody.eventId).toBe(firstBody.eventId);
+
+    await flushTestEvents();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    setItemSpy.mockRestore();
+  });
+
   it.each([408, 429, 503] as const)(
     "retains retryable status %s responses in queue without dropping subsequent events",
     async (status) => {
