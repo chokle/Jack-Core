@@ -11,6 +11,13 @@ import {
   resolveActiveTesterScope,
   WITHDRAWAL_DELETION_DAYS,
 } from "../lib/activity-telemetry.js";
+import {
+  activateTelemetryWithdrawalJob,
+  cancelTelemetryWithdrawalJob,
+  enqueueTelemetryWithdrawalJob,
+  reconcileTelemetryWithdrawalJob,
+  type TelemetryWithdrawalScope,
+} from "../lib/telemetry-withdrawal.js";
 
 const router = Router();
 const UUID_RE =
@@ -37,13 +44,113 @@ function exactKeys(value: unknown, allowed: ReadonlySet<string>): value is Recor
   );
 }
 
+interface PrivacyConsentSnapshot {
+  id: string;
+  state: "granted" | "declined" | "withdrawn";
+  privacyNoticeVersion: string;
+  consentVersion: string;
+}
+
+interface TelemetryPrivacyScope {
+  organizationId: string;
+  pilotId: string;
+  organizationName?: string;
+  pilotName?: string;
+  consents: {
+    telemetry: PrivacyConsentSnapshot | null;
+    screen: PrivacyConsentSnapshot | null;
+    microphone: PrivacyConsentSnapshot | null;
+  };
+}
+
+async function historicalPrivacyScopes(userId: string): Promise<TelemetryPrivacyScope[]> {
+  const history = await db
+    .from("telemetry_consents")
+    .select("id,actor_user_id,organization_id,pilot_id,scope,state,privacy_notice_version,consent_version,occurred_at")
+    .eq("actor_user_id", userId)
+    .order("occurred_at", { ascending: false });
+  if (history.error) throw history.error;
+
+  const pilotIds = [...new Set(
+    (history.data ?? [])
+      .map((row: Record<string, unknown>) => row["pilot_id"])
+      .filter((id: unknown): id is string => typeof id === "string"),
+  )];
+  const pilots = pilotIds.length > 0
+    ? await db.from("pilots").select("id,organization_id,name").in("id", pilotIds)
+    : { data: [], error: null };
+  if (pilots.error) throw pilots.error;
+  const pilotById = new Map<string, Record<string, unknown>>(
+    (pilots.data ?? []).map((row: Record<string, unknown>) => [String(row["id"]), row]),
+  );
+
+  const organizationIds = [...new Set(
+    (history.data ?? [])
+      .map((row: Record<string, unknown>) => row["organization_id"])
+      .filter((id: unknown): id is string => typeof id === "string"),
+  )];
+  const organizations = organizationIds.length > 0
+    ? await db.from("organizations").select("id,name").in("id", organizationIds)
+    : { data: [], error: null };
+  if (organizations.error) throw organizations.error;
+  const organizationById = new Map<string, Record<string, unknown>>(
+    (organizations.data ?? []).map(
+      (row: Record<string, unknown>) => [String(row["id"]), row],
+    ),
+  );
+
+  const scopes = new Map<string, TelemetryPrivacyScope>();
+  for (const row of history.data ?? []) {
+    const pilotId = String(row["pilot_id"] ?? "");
+    const organizationId = String(row["organization_id"] ?? "");
+    const consentScope = String(row["scope"]);
+    if (
+      !UUID_RE.test(pilotId) ||
+      !UUID_RE.test(organizationId) ||
+      !["telemetry", "screen", "microphone"].includes(consentScope)
+    ) {
+      continue;
+    }
+
+    let privacyScope = scopes.get(pilotId);
+    if (!privacyScope) {
+      const pilot = pilotById.get(pilotId);
+      const organization = organizationById.get(organizationId);
+      privacyScope = {
+        organizationId,
+        pilotId,
+        ...(organization?.["name"]
+          ? { organizationName: String(organization["name"]) }
+          : {}),
+        ...(pilot?.["name"] ? { pilotName: String(pilot["name"]) } : {}),
+        consents: { telemetry: null, screen: null, microphone: null },
+      };
+      scopes.set(pilotId, privacyScope);
+    }
+
+    const key = consentScope as TelemetryWithdrawalScope;
+    if (privacyScope.consents[key]) continue;
+    privacyScope.consents[key] = {
+      id: String(row["id"]),
+      state: row["state"] as PrivacyConsentSnapshot["state"],
+      privacyNoticeVersion: String(row["privacy_notice_version"] ?? ""),
+      consentVersion: String(row["consent_version"] ?? ""),
+    };
+  }
+  return [...scopes.values()];
+}
+
 async function currentContext(userId: string, requestedPilotId?: string | null) {
-  const membership = await resolveActiveTesterScope(userId, requestedPilotId);
+  const [membership, privacyScopes] = await Promise.all([
+    resolveActiveTesterScope(userId, requestedPilotId),
+    historicalPrivacyScopes(userId),
+  ]);
   if (!membership.scope) {
     return {
       enrolled: false,
       requiresPilotSelection: membership.reason === "ambiguous_pilot",
       scope: null,
+      privacyScopes,
       consents: { telemetry: null, screen: null, microphone: null },
       session: null,
       privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
@@ -55,6 +162,22 @@ async function currentContext(userId: string, requestedPilotId?: string | null) 
     latestConsent(userId, membership.scope.pilotId, "screen"),
     latestConsent(userId, membership.scope.pilotId, "microphone"),
   ]);
+  const activePrivacyScope = privacyScopes.find(
+    (scope) => scope.pilotId === membership.scope!.pilotId,
+  );
+  if (activePrivacyScope) {
+    activePrivacyScope.consents = { telemetry, screen, microphone };
+  } else {
+    privacyScopes.unshift({
+      organizationId: membership.scope.organizationId,
+      pilotId: membership.scope.pilotId,
+      ...(membership.scope.pilotName
+        ? { pilotName: membership.scope.pilotName }
+        : {}),
+      consents: { telemetry, screen, microphone },
+    });
+  }
+
   const session = await db
     .from("test_sessions")
     .select("*")
@@ -69,6 +192,7 @@ async function currentContext(userId: string, requestedPilotId?: string | null) 
     enrolled: true,
     requiresPilotSelection: false,
     scope: membership.scope,
+    privacyScopes,
     consents: { telemetry, screen, microphone },
     session:
       session.data &&
@@ -137,6 +261,7 @@ router.get("/testing/telemetry/context", async (req, res) => {
         enrolled: false,
         requiresPilotSelection: false,
         scope: null,
+        privacyScopes: [],
         consents: { telemetry: null, screen: null, microphone: null },
         session: null,
         privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
@@ -266,17 +391,22 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     ) {
       return res.status(400).json({ error: "Invalid withdrawal scopes." });
     }
-    const scopes = new Set<string>(requestedScopes.map(String));
+    const scopes = new Set<TelemetryWithdrawalScope>(
+      requestedScopes.map(String) as TelemetryWithdrawalScope[],
+    );
     if (scopes.has("telemetry")) {
       scopes.add("screen");
       scopes.add("microphone");
     }
     const scope = await withdrawalScope(identity.userId, pilotId);
     if (!scope) return res.status(404).json({ error: "Pilot consent history not found." });
+
     const now = new Date().toISOString();
     const retainedUntil = new Date(
       new Date(now).setUTCMonth(new Date(now).getUTCMonth() + 24),
     ).toISOString();
+    const deletionDueAt = isoAfterDays(WITHDRAWAL_DELETION_DAYS);
+    const withdrawalJobId = randomUUID();
     const rows = [...scopes].map((consentScope) => ({
       id: randomUUID(),
       actor_user_id: identity.userId,
@@ -291,114 +421,72 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       retained_until: retainedUntil,
       created_at: now,
     }));
-    const inserted = await db.from("telemetry_consents").insert(rows);
-    if (inserted.error) throw inserted.error;
-    // The approved retention window is 24 months after withdrawal (or pilot
-    // end), so extend the complete consent audit chain rather than retaining
-    // only the newly appended withdrawal rows.
-    const consentHistory = await db
-      .from("telemetry_consents")
-      .update({ retained_until: retainedUntil })
-      .eq("actor_user_id", identity.userId)
-      .eq("pilot_id", scope.pilotId)
-      .lt("retained_until", retainedUntil);
-    if (consentHistory.error) throw consentHistory.error;
 
-    const deletionDueAt = isoAfterDays(WITHDRAWAL_DELETION_DAYS);
-    if (scopes.has("telemetry")) {
-      const sessions = await db
-        .from("test_sessions")
-        .select("id")
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId);
-      if (sessions.error) throw sessions.error;
-      const sessionIds = (sessions.data ?? []).map((row: Record<string, unknown>) => row["id"]);
-      const sessionUpdate = await db
-        .from("test_sessions")
-        .update({
-          status: "withdrawn",
-          telemetry_status: "withdrawn",
-          screen_consent_state: "withdrawn",
-          microphone_consent_state: "withdrawn",
-          recording_status: "withdrawn",
-          deletion_due_at: deletionDueAt,
-          updated_at: now,
-        })
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId);
-      if (sessionUpdate.error) throw sessionUpdate.error;
-      const eventUpdate = await db
-        .from("test_events")
-        .update({
-          metadata: {},
-          correlation_id: null,
-          request_id: null,
-          redacted_at: now,
-          deletion_due_at: deletionDueAt,
-        })
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId);
-      if (eventUpdate.error) throw eventUpdate.error;
-      const failureDelete = await db
-        .from("activity_ingest_failures")
-        .delete()
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId);
-      if (failureDelete.error) throw failureDelete.error;
-      for (const sessionId of sessionIds) {
-        const recordings = await db
-          .from("test_recordings")
-          .update({ deletion_due_at: deletionDueAt })
-          .eq("tester_user_id", identity.userId)
-          .eq("test_session_id", sessionId);
-        if (recordings.error) throw recordings.error;
+    // Persist the cleanup obligation first. If the process dies after the
+    // append-only consent rows commit, the reconciler still has the exact
+    // consent IDs and scope manifest needed to finish cleanup safely.
+    await enqueueTelemetryWithdrawalJob({
+      id: withdrawalJobId,
+      actorUserId: identity.userId,
+      organizationId: scope.organizationId,
+      pilotId: scope.pilotId,
+      scopes: rows.map((row) => row.scope),
+      consentIds: rows.map((row) => row.id),
+      withdrawnAt: now,
+      consentRetainedUntil: retainedUntil,
+      deletionDueAt,
+    });
+
+    const inserted = await db.from("telemetry_consents").insert(rows);
+    if (inserted.error) {
+      try {
+        await cancelTelemetryWithdrawalJob(
+          withdrawalJobId,
+          "authoritative_withdrawal_append_failed",
+        );
+      } catch (cancelError) {
+        req.log.error(
+          { err: cancelError, withdrawalJobId },
+          "Could not cancel an uncommitted telemetry withdrawal obligation",
+        );
       }
-      const feedback = await db
-        .from("test_feedback")
-        .update({
-          deletion_due_at: deletionDueAt,
-          notification_status: "failed",
-          notification_last_error: "telemetry_consent_withdrawn",
-          notification_next_attempt_at: null,
-          updated_at: now,
-        })
-        .eq("tester_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId);
-      if (feedback.error) throw feedback.error;
-    } else {
-      const updates: Record<string, unknown> = { updated_at: now };
-      if (scopes.has("screen")) {
-        updates.screen_consent_state = "withdrawn";
-        updates.recording_status = "withdrawn";
-      }
-      if (scopes.has("microphone")) {
-        updates.microphone_consent_state = "withdrawn";
-        updates.recording_status = "withdrawn";
-      }
-      const sessionUpdate = await db
-        .from("test_sessions")
-        .update(updates)
-        .eq("actor_user_id", identity.userId)
-        .eq("pilot_id", scope.pilotId)
-        .eq("status", "active");
-      if (sessionUpdate.error) throw sessionUpdate.error;
-      if (scopes.has("screen") || scopes.has("microphone")) {
-        let recordingQuery = db
-          .from("test_recordings")
-          .update({ deletion_due_at: deletionDueAt })
-          .eq("tester_user_id", identity.userId)
-          .eq("pilot_id", scope.pilotId);
-        if (!scopes.has("screen")) {
-          recordingQuery = recordingQuery.not("microphone_consent_id", "is", null);
-        }
-        const recordings = await recordingQuery;
-        if (recordings.error) throw recordings.error;
-      }
+      throw inserted.error;
     }
-    return res.json({
+
+    try {
+      await activateTelemetryWithdrawalJob(withdrawalJobId);
+    } catch (activationError) {
+      // The awaiting-consent job is intentionally still runnable: its exact
+      // consent manifest lets the worker prove the append committed.
+      req.log.error(
+        { err: activationError, withdrawalJobId },
+        "Telemetry withdrawal cleanup activation will be reconciled asynchronously",
+      );
+    }
+
+    let cleanupPending = true;
+    try {
+      const reconciliation = await reconcileTelemetryWithdrawalJob(withdrawalJobId);
+      cleanupPending = reconciliation.status !== "completed";
+      if (reconciliation.error) {
+        req.log.error(
+          { err: reconciliation.error, withdrawalJobId },
+          "Telemetry withdrawal cleanup is pending retry",
+        );
+      }
+    } catch (reconcileError) {
+      req.log.error(
+        { err: reconcileError, withdrawalJobId },
+        "Telemetry withdrawal cleanup is pending durable reconciliation",
+      );
+    }
+
+    return res.status(cleanupPending ? 202 : 200).json({
       withdrawn: [...scopes],
       deletionDueAt:
         scopes.has("telemetry") || scopes.has("screen") ? deletionDueAt : null,
+      cleanupPending,
+      withdrawalJobId,
     });
   } catch (error) {
     req.log.error({ err: error }, "Could not withdraw telemetry consent");
