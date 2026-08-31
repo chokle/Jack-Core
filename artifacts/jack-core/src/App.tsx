@@ -569,11 +569,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       });
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
-      if (choices.telemetry === "granted") {
-        testStartPendingRef.current = false;
-        setTestStartPending(false);
-        await launchTestSession(context.scope?.pilotId);
-      } else {
+      if (choices.telemetry !== "granted") {
         persistUserTestingDeclined(me?.userId);
         clearUserTestingAccepted(me?.userId);
         setTestingGate({ accepted: false, restricted: false });
@@ -603,44 +599,99 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   useEffect(() => {
     if (me?.isAdmin !== false) return;
     const stopRetry = initializeTelemetryRetry();
-    void loadTelemetryContext().then(async (context) => {
-      setTelemetryContext(context);
-      const session = context.session;
-      if (session) {
-        setFeedbackSessionId(session.id);
-        if (session.onboardingStatus !== "completed") {
-          handleNavigate("graph");
-          window.setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
-          }, 0);
-        }
-        return;
-      }
+    let cancelled = false;
 
-      if (!context.enrolled || !context.scope) return;
+    void loadTelemetryContext()
+      .then((context) => {
+        if (!cancelled) setTelemetryContext(context);
+      })
+      .catch(() => {
+        if (!cancelled) setTelemetryContext(null);
+      });
 
-      const telemetryConsent = context.consents.telemetry;
-      if (
-        !telemetryConsent ||
-        telemetryConsent.privacyNoticeVersion !== context.privacyNoticeVersion ||
-        telemetryConsent.consentVersion !== context.consentVersion
-      ) {
-        setTelemetryConsentOpen(true);
-        return;
-      }
-
-      if (telemetryConsent.state !== "granted") return;
-
-      const startedSession = await startTestSession(context.scope.pilotId);
-      setFeedbackSessionId(startedSession.id);
-      setTelemetryContext({ ...context, session: startedSession });
-      handleNavigate("graph");
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: startedSession }));
-      }, 0);
-    }).catch(() => setTelemetryContext(null));
-    return stopRetry;
+    return () => {
+      cancelled = true;
+      stopRetry();
+    };
   }, [me?.isAdmin]);
+
+  useEffect(() => {
+    if (me?.isAdmin !== false || !telemetryContext) return;
+
+    const context = telemetryContext;
+    const session = context.session;
+    if (session) {
+      setFeedbackSessionId(session.id);
+      if (session.onboardingStatus !== "completed") {
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
+        }, 0);
+      }
+      return;
+    }
+
+    if (!context.enrolled || !context.scope) return;
+
+    const telemetryConsent = context.consents.telemetry;
+    if (
+      !telemetryConsent ||
+      telemetryConsent.privacyNoticeVersion !== context.privacyNoticeVersion ||
+      telemetryConsent.consentVersion !== context.consentVersion
+    ) {
+      setTelemetryConsentOpen(true);
+      return;
+    }
+
+    if (telemetryConsent.state !== "granted") return;
+
+    const pilotId = context.scope.pilotId;
+    const retryDelays = [1_000, 3_000, 10_000] as const;
+    let cancelled = false;
+    let starting = false;
+    let retryAttempt = 0;
+    let retryTimer: number | undefined;
+
+    const startScopedSession = async () => {
+      if (cancelled || starting) return;
+      starting = true;
+      try {
+        const startedSession = await startTestSession(pilotId);
+        if (cancelled) return;
+        setFeedbackSessionId(startedSession.id);
+        setTelemetryContext({ ...context, session: startedSession });
+      } catch {
+        if (cancelled) return;
+        const delay = retryDelays[retryAttempt];
+        retryAttempt += 1;
+        if (delay === undefined) return;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = undefined;
+          void startScopedSession();
+        }, delay);
+      } finally {
+        starting = false;
+      }
+    };
+
+    const retryOnReconnect = () => {
+      if (cancelled || starting) return;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      retryAttempt = 0;
+      void startScopedSession();
+    };
+
+    window.addEventListener("online", retryOnReconnect);
+    void startScopedSession();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      window.removeEventListener("online", retryOnReconnect);
+    };
+  }, [me?.isAdmin, telemetryContext]);
 
   useEffect(() => {
     const continueTest = () => testingOverlayRef.current?.open();
