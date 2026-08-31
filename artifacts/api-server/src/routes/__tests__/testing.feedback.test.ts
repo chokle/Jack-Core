@@ -511,6 +511,34 @@ describe("POST /api/testing/feedback", () => {
     },
   );
 
+  it("rejects a promoted admin before feedback or recording reads and writes", async () => {
+    resolveIdentity.mockResolvedValue({
+      userId: "user_1",
+      email: "admin@example.com",
+      name: "Promoted Admin",
+      isAdmin: true,
+      isPresentation: false,
+      classification: "resolved",
+    });
+    const uploadRecording = vi.fn();
+    storageFrom.mockReturnValue({ upload: uploadRecording, remove: vi.fn() });
+
+    const feedback = await request(app()).post("/api/testing/feedback").send(validBody);
+    const recording = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("old tester session recording"), {
+        filename: "admin.webm",
+        contentType: "video/webm",
+      });
+
+    expect(feedback.status).toBe(403);
+    expect(recording.status).toBe(403);
+    expect(from).not.toHaveBeenCalled();
+    expect(uploadRecording).not.toHaveBeenCalled();
+    expect(queueFeedbackNotification).not.toHaveBeenCalled();
+  });
+
   it("rejects public presentation visitors", async () => {
     resolveIdentity.mockResolvedValue(null);
     const response = await request(app()).post("/api/testing/feedback").send(validBody);
@@ -579,6 +607,79 @@ describe("POST /api/testing/feedback", () => {
 
 
 describe("POST /api/testing/recordings consent races", () => {
+  it.each([
+    { transition: "membership deactivation", sessionOrganizationId: ORGANIZATION_ID, active: false },
+    {
+      transition: "session organization mismatch",
+      sessionOrganizationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      active: true,
+    },
+  ])(
+    "rejects an old active recording session after $transition",
+    async ({ sessionOrganizationId, active }) => {
+      const uploadRecording = vi.fn();
+      storageFrom.mockReturnValue({ upload: uploadRecording, remove: vi.fn() });
+      from.mockImplementation((table: string) => {
+        if (table === "test_sessions") {
+          const query = {
+            select: () => query,
+            eq: () => query,
+            maybeSingle: async () => ({
+              data: {
+                id: validBody.sessionId,
+                organization_id: sessionOrganizationId,
+                pilot_id: PILOT_ID,
+                telemetry_consent_id: TELEMETRY_CONSENT_ID,
+                screen_consent_id: "77777777-7777-4777-8777-777777777777",
+                microphone_consent_id: null,
+              },
+              error: null,
+            }),
+          };
+          return query;
+        }
+        if (table === "pilot_memberships") {
+          const query = {
+            select: () => query,
+            eq: () => query,
+            limit: async () => ({
+              data: active
+                ? [{
+                    organization_id: ORGANIZATION_ID,
+                    pilot_id: PILOT_ID,
+                    user_id: "user_1",
+                    role: "tester",
+                    active: true,
+                    valid_from: "2026-01-01T00:00:00.000Z",
+                    valid_until: null,
+                  }]
+                : [],
+              error: null,
+            }),
+          };
+          return query;
+        }
+        if (table === "pilots") {
+          const scoped = scopeQuery(table);
+          if (scoped) return scoped;
+        }
+        throw new Error(`Unexpected table: ${table}`);
+      });
+
+      const response = await request(app())
+        .post("/api/testing/recordings")
+        .field("sessionId", validBody.sessionId)
+        .attach("file", Buffer.from("old membership recording"), {
+          filename: "membership.webm",
+          contentType: "video/webm",
+        });
+
+      expect(response.status).toBe(403);
+      expect(uploadRecording).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalledWith("test_recordings");
+    },
+  );
+
   it.each(["telemetry", "screen"] as const)(
     "removes and schedules a recording inserted after %s withdrawal",
     async (withdrawnScope) => {
@@ -616,6 +717,10 @@ describe("POST /api/testing/recordings consent races", () => {
       };
 
       from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
         if (table === "test_sessions") {
           const query = {
             select: () => query,
@@ -744,6 +849,10 @@ describe("POST /api/testing/recordings consent races", () => {
     };
 
     from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
       if (table === "test_sessions") {
         const query = {
           select: () => query,
@@ -856,6 +965,10 @@ describe("POST /api/testing/recordings consent races", () => {
     });
 
     from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
       if (table === "test_sessions") {
         const query = {
           select: () => query,
@@ -964,6 +1077,10 @@ describe("POST /api/testing/recordings consent races", () => {
     });
 
     from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
       if (table === "test_sessions") {
         const query = {
           select: () => query,
@@ -1119,6 +1236,10 @@ describe("POST /api/testing/recordings consent races", () => {
     };
 
     from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
       if (table === "test_sessions") {
         const query = {
           select: () => query,
@@ -1269,6 +1390,10 @@ describe("POST /api/testing/recordings consent races", () => {
       };
 
       from.mockImplementation((table: string) => {
+      if (table === "pilot_memberships" || table === "pilots") {
+        const scoped = scopeQuery(table);
+        if (scoped) return scoped;
+      }
         if (table === "test_sessions") {
           const query = {
             select: () => query,
