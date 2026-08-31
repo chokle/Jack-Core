@@ -56,12 +56,15 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     const identityRef = useRef<string | null>(identityKey);
     const operationGenerationRef = useRef(0);
     const pendingSessionControllerRef = useRef<AbortController | null>(null);
+    const pendingUploadControllerRef = useRef<AbortController | null>(null);
     const { toast } = useToast();
 
     const cancelCurrentOperation = useCallback((resetUi = true) => {
       operationGenerationRef.current += 1;
       pendingSessionControllerRef.current?.abort();
       pendingSessionControllerRef.current = null;
+      pendingUploadControllerRef.current?.abort();
+      pendingUploadControllerRef.current = null;
       serviceRef.current?.cancel();
       serviceRef.current = null;
       if (resetUi) {
@@ -116,15 +119,33 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
                 : result.stopReason,
           },
         );
-        const outcome = await uploadTestRecording(result.blob, {
-          sessionId,
-          timestamp: new Date().toISOString(),
-          durationMs: result.durationMs,
-          mimeType: result.mimeType,
-          microphoneIncluded: result.micIncluded,
-          appVersion: import.meta.env.VITE_APP_VERSION,
-        });
-        if (!isCurrent()) return;
+        const controller = new AbortController();
+        pendingUploadControllerRef.current?.abort();
+        pendingUploadControllerRef.current = controller;
+        let outcome: Awaited<ReturnType<typeof uploadTestRecording>>;
+        try {
+          outcome = await uploadTestRecording(
+            result.blob,
+            {
+              sessionId,
+              timestamp: new Date().toISOString(),
+              durationMs: result.durationMs,
+              mimeType: result.mimeType,
+              microphoneIncluded: result.micIncluded,
+              appVersion: import.meta.env.VITE_APP_VERSION,
+              identityKey: operationIdentity ?? undefined,
+            },
+            {
+              signal: controller.signal,
+              shouldFallback: isCurrent,
+            },
+          );
+        } finally {
+          if (pendingUploadControllerRef.current === controller) {
+            pendingUploadControllerRef.current = null;
+          }
+        }
+        if (!isCurrent() || outcome.status === "cancelled") return;
 
         if (outcome.status === "uploaded") {
           void trackTestEvent(
