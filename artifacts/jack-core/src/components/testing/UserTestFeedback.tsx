@@ -3,7 +3,9 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Loader2, MessageSquareText } from "lucide-react";
@@ -81,11 +83,26 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
     const [answers, setAnswers] = useState<FeedbackAnswers>(() =>
       userId ? readFeedbackDraft(userId) ?? EMPTY_ANSWERS() : EMPTY_ANSWERS(),
     );
+    const activeIdentityRef = useRef(userId);
+    const submitGenerationRef = useRef(0);
+    const submitControllerRef = useRef<AbortController | null>(null);
     const { toast } = useToast();
 
-    useEffect(() => {
-      if (!userId) return;
-      setAnswers(readFeedbackDraft(userId) ?? EMPTY_ANSWERS());
+    useLayoutEffect(() => {
+      activeIdentityRef.current = userId;
+      submitGenerationRef.current += 1;
+      submitControllerRef.current?.abort();
+      submitControllerRef.current = null;
+      setPending(null);
+      setSubmitting(false);
+      setAnswers(userId ? readFeedbackDraft(userId) ?? EMPTY_ANSWERS() : EMPTY_ANSWERS());
+
+      return () => {
+        activeIdentityRef.current = null;
+        submitGenerationRef.current += 1;
+        submitControllerRef.current?.abort();
+        submitControllerRef.current = null;
+      };
     }, [userId]);
 
     useEffect(() => {
@@ -158,9 +175,19 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
 
     const submit = async () => {
       if (!pending || !userId || !valid || submitting) return;
+
+      const operationIdentity = userId;
+      const operationGeneration = submitGenerationRef.current + 1;
+      submitGenerationRef.current = operationGeneration;
+      submitControllerRef.current?.abort();
+      const controller = new AbortController();
+      submitControllerRef.current = controller;
+      const isCurrent = () =>
+        submitGenerationRef.current === operationGeneration &&
+        activeIdentityRef.current === operationIdentity;
+
       setSubmitting(true);
       const activity = getFeedbackActivity(now());
-      const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs);
       try {
         const response = await fetch("/api/testing/feedback", {
@@ -187,11 +214,19 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
           }),
         });
         if (!response.ok) throw new Error(`Feedback submission failed (${response.status})`);
+        if (!isCurrent()) return;
+
         await trackTestEvent("feedback_submitted", {}, `feedback:${answers.feedbackId}`);
+        if (!isCurrent()) return;
+
         await trackTestEvent("test_completed", {}, `test_completed:${answers.feedbackId}`);
+        if (!isCurrent()) return;
+
         toast({ title: "Feedback submitted", description: "Thanks for helping improve Jack." });
         await continueLeaving(true);
       } catch {
+        if (!isCurrent()) return;
+
         toast({
           title: "Feedback saved on this device",
           description: "We couldn't send it right now. You can still leave Jack.",
@@ -199,6 +234,9 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
         await continueLeaving(false);
       } finally {
         window.clearTimeout(timeout);
+        if (submitControllerRef.current === controller) {
+          submitControllerRef.current = null;
+        }
       }
     };
 
