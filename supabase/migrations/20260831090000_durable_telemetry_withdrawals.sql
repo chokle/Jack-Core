@@ -16,6 +16,8 @@ revoke all on table public.telemetry_account_deletion_fences from public, anon, 
 grant all on table public.telemetry_account_deletion_fences to service_role;
 
 create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+grant usage on schema private to service_role;
 
 -- Source tombstones let derived writers reject a stale video/interview operation
 -- even after its parent row has been deleted. They contain UUID/source keys and a
@@ -66,10 +68,53 @@ create index if not exists parked_thoughts_actor_user_idx
   on public.parked_thoughts (actor_user_id)
   where actor_user_id is not null;
 
--- A database-assigned sequence makes "latest consent" total and independent of
--- caller clocks. The actor trigger below serializes inserts for the same actor.
+-- Make "latest consent" total without relying on heap/ALTER TABLE scan order.
+-- Re-running this predeploy migration deterministically ranks all historical
+-- rows by authoritative occurrence time, server creation time, then UUID.
+create sequence if not exists public.telemetry_consent_sequence_seq;
 alter table public.telemetry_consents
-  add column if not exists consent_sequence bigint generated always as identity;
+  add column if not exists consent_sequence bigint;
+alter table public.telemetry_consents
+  alter column consent_sequence drop identity if exists;
+alter table public.telemetry_consents
+  alter column consent_sequence drop default;
+
+with deterministic_history as (
+  select
+    consent.id,
+    pg_catalog.row_number() over (
+      order by consent.occurred_at, consent.created_at, consent.id
+    )::bigint as sequence_value
+  from public.telemetry_consents consent
+)
+update public.telemetry_consents consent
+set consent_sequence = history.sequence_value
+from deterministic_history history
+where consent.id = history.id;
+
+select pg_catalog.setval(
+  'public.telemetry_consent_sequence_seq'::regclass,
+  pg_catalog.greatest(
+    pg_catalog.coalesce(
+      (select pg_catalog.max(consent_sequence) from public.telemetry_consents),
+      0
+    ),
+    1
+  ),
+  exists (select 1 from public.telemetry_consents)
+);
+alter sequence public.telemetry_consent_sequence_seq
+  owned by public.telemetry_consents.consent_sequence;
+alter table public.telemetry_consents
+  alter column consent_sequence
+  set default pg_catalog.nextval('public.telemetry_consent_sequence_seq'::regclass);
+alter table public.telemetry_consents
+  alter column consent_sequence set not null;
+revoke all on sequence public.telemetry_consent_sequence_seq
+  from public, anon, authenticated;
+grant usage, select on sequence public.telemetry_consent_sequence_seq
+  to service_role;
+
 create index if not exists telemetry_consents_actor_latest_sequence_idx
   on public.telemetry_consents (
     actor_user_id,
