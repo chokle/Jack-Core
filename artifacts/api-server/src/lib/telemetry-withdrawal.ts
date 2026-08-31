@@ -11,6 +11,7 @@ const WITHDRAWAL_JOB_BATCH_SIZE = 100;
 const WITHDRAWAL_JOB_LEASE_MS = 5 * 60 * 1000;
 const WITHDRAWAL_JOB_SWEEP_INTERVAL_MS = 60 * 1000;
 const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
+const UNCOMMITTED_MANIFEST_GRACE_MS = 24 * 60 * 60 * 1000;
 const VALID_SCOPES = new Set(["telemetry", "screen", "microphone"]);
 
 export type TelemetryWithdrawalScope = "telemetry" | "screen" | "microphone";
@@ -29,7 +30,15 @@ export interface TelemetryWithdrawalJobInput {
 
 export interface TelemetryWithdrawalReconcileResult {
   status: "completed" | "pending" | "skipped";
+  manifestCommitted?: boolean;
   error?: string;
+}
+
+class UncommittedWithdrawalManifestError extends Error {
+  constructor() {
+    super("withdrawal_consents_not_yet_committed");
+    this.name = "UncommittedWithdrawalManifestError";
+  }
 }
 
 function isoAfterMs(milliseconds: number, from = Date.now()): string {
@@ -136,6 +145,9 @@ async function verifyCommittedWithdrawal(job: Record<string, unknown>): Promise<
     .in("id", consentIds);
   if (consents.error) throw consents.error;
 
+  if ((consents.data ?? []).length === 0) {
+    throw new UncommittedWithdrawalManifestError();
+  }
   const byId = new Map<string, Record<string, unknown>>(
     (consents.data ?? []).map((row: Record<string, unknown>) => [String(row["id"]), row]),
   );
@@ -149,7 +161,7 @@ async function verifyCommittedWithdrawal(job: Record<string, unknown>): Promise<
       consent["scope"] !== scopes[index] ||
       consent["state"] !== "withdrawn"
     ) {
-      throw new Error("withdrawal_consents_not_yet_committed");
+      throw new Error("withdrawal_consent_manifest_mismatch");
     }
   }
 }
@@ -377,6 +389,39 @@ async function completeJob(job: Record<string, unknown>): Promise<void> {
   if (completed.error) throw completed.error;
 }
 
+async function cancelStaleUncommittedJob(
+  job: Record<string, unknown>,
+): Promise<boolean> {
+  const withdrawnAt = Date.parse(String(job["withdrawn_at"] ?? ""));
+  if (
+    !Number.isFinite(withdrawnAt) ||
+    Date.now() - withdrawnAt < UNCOMMITTED_MANIFEST_GRACE_MS
+  ) {
+    return false;
+  }
+
+  const now = new Date().toISOString();
+  const cancelled = await db
+    .from(WITHDRAWAL_JOB_TABLE)
+    .update({
+      status: "cancelled",
+      completed_at: now,
+      retained_until: isoAfterMs(90 * 24 * 60 * 60 * 1000),
+      next_attempt_at: null,
+      lease_token: null,
+      lease_expires_at: null,
+      last_error: "authoritative_withdrawal_manifest_absent",
+      updated_at: now,
+    })
+    .eq("id", job["id"])
+    .eq("status", "processing")
+    .eq("lease_token", job["lease_token"])
+    .select("id")
+    .maybeSingle();
+  if (cancelled.error) throw cancelled.error;
+  return Boolean(cancelled.data);
+}
+
 async function retryJob(
   job: Record<string, unknown>,
   error: unknown,
@@ -409,7 +454,9 @@ export async function reconcileTelemetryWithdrawalJob(
     .maybeSingle();
   if (loaded.error) throw loaded.error;
   if (!loaded.data) return { status: "skipped" };
-  if (loaded.data.status === "completed") return { status: "completed" };
+  if (loaded.data.status === "completed") {
+    return { status: "completed", manifestCommitted: true };
+  }
   if (loaded.data.status === "cancelled") return { status: "skipped" };
 
   const claimed = await claimJob(loaded.data);
@@ -419,8 +466,20 @@ export async function reconcileTelemetryWithdrawalJob(
     await verifyCommittedWithdrawal(claimed);
     await applyTelemetryWithdrawalCleanup(claimed);
     await completeJob(claimed);
-    return { status: "completed" };
+    return { status: "completed", manifestCommitted: true };
   } catch (error) {
+    if (error instanceof UncommittedWithdrawalManifestError) {
+      try {
+        if (await cancelStaleUncommittedJob(claimed)) {
+          return { status: "skipped", manifestCommitted: false };
+        }
+      } catch (cancelError) {
+        logger.error(
+          { err: cancelError, withdrawalJobId: jobId },
+          "Could not cancel stale uncommitted withdrawal obligation",
+        );
+      }
+    }
     try {
       await retryJob(claimed, error);
     } catch (retryError) {
@@ -429,7 +488,11 @@ export async function reconcileTelemetryWithdrawalJob(
         "Could not release telemetry withdrawal cleanup lease",
       );
     }
-    return { status: "pending", error: safeError(error) };
+    return {
+      status: "pending",
+      manifestCommitted: !(error instanceof UncommittedWithdrawalManifestError),
+      error: safeError(error),
+    };
   }
 }
 
