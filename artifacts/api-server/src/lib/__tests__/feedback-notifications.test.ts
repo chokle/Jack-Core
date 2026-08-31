@@ -162,6 +162,28 @@ describe("feedback notification delivery", () => {
     });
   });
 
+  it("preserves withdrawal state when delivery finishes after withdrawal", async () => {
+    const sender = vi.fn<FeedbackEmailSender>(async () => {
+      Object.assign(fake.tables["test_feedback"][0]!, {
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+        notification_next_attempt_at: null,
+        deletion_due_at: "2026-07-30T00:00:00.000Z",
+      });
+      return { messageId: "email-in-flight" };
+    });
+
+    expect(await deliverFeedbackNotification(FEEDBACK_ID, sender)).toBe("failed");
+
+    expect(sender).toHaveBeenCalledOnce();
+    expect(fake.tables["test_feedback"][0]).toMatchObject({
+      notification_status: "failed",
+      notification_attempts: 0,
+      notification_last_error: "telemetry_consent_withdrawn",
+      deletion_due_at: "2026-07-30T00:00:00.000Z",
+    });
+  });
+
   it("re-checks withdrawal state before queued setImmediate delivery", async () => {
     process.env["RESEND_API_KEY"] = "test-key";
     process.env["FEEDBACK_FROM_EMAIL"] = "Jack Feedback <feedback@example.test>";
