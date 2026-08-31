@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import * as testSessionService from "@/lib/user-testing/test-session-service";
 
@@ -38,6 +38,7 @@ function acceptedStorageKey(userId: string) {
 const modalCloseAfterStart = { value: false };
 const recordingSupported = { value: false };
 const rejectStart = { value: false };
+const startFailuresRemaining = { value: 0 };
 const modalStartSpy = vi.fn();
 const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
@@ -317,6 +318,10 @@ vi.mock("@/lib/user-testing/test-session-service", async () => {
       return JSON.parse(JSON.stringify(testSessionServiceState.saveTelemetryResult));
     }),
     startTestSession: vi.fn(async () => {
+      if (startFailuresRemaining.value > 0) {
+        startFailuresRemaining.value -= 1;
+        throw new Error("temporary session start failure");
+      }
       const session = cloneStartedSession();
       actual.cacheTestSession(session);
       return session;
@@ -398,6 +403,10 @@ function storageWriteFailureForUserScope() {
 function resetServiceState() {
   testSessionServiceState.contextError = null;
   testSessionServiceState.currentSession = null;
+  testSessionServiceState.telemetryContext.session = null;
+  testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion = "privacy-v1";
+  testSessionServiceState.telemetryContext.consents.telemetry.consentVersion = "consent-v1";
+  startFailuresRemaining.value = 0;
   mockedLoadCurrentSession.mockClear();
   mockedLoadTelemetryContext.mockClear();
   mockedSaveTelemetryConsents.mockClear();
@@ -522,6 +531,46 @@ describe("user-testing gate transition", () => {
     });
     expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
     expect(uploadRecordingSpy).not.toHaveBeenCalled();
+  });
+
+  it("automatic telemetry consent stays separate from recording acceptance", async () => {
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-stale";
+
+    await renderAuthenticatedApp("/app");
+    const modal = await screen.findByTestId("telemetry-consent-modal");
+    fireEvent.click(within(modal).getAllByRole("checkbox")[0]);
+    fireEvent.click(within(modal).getByRole("button", { name: "Save choices" }));
+
+    await waitFor(() => expect(mockedSaveTelemetryConsents).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+
+    expect(userConsented()).toBe("false");
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+    expect(recordingServiceStartSpy).not.toHaveBeenCalled();
+  });
+
+  it("automatic telemetry bootstrap preserves a Torch interview handoff", async () => {
+    await renderAuthenticatedApp(
+      "/app?view=interview&source=torch-command-centre&starvingPointId=sp-1&title=Boiler+check&trade=Plumbing",
+    );
+
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("interview-page")).toBeTruthy();
+    expect(screen.queryByTestId("memory-graph-view")).toBeNull();
+  });
+
+  it("retries a transient automatic session-start failure without dropping context", async () => {
+    startFailuresRemaining.value = 1;
+
+    await renderAuthenticatedApp("/app");
+
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2), {
+      timeout: 3_000,
+    });
+    expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
+    expect(userConsented()).toBe("false");
   });
 
   it("start with explicit active session records user testing acceptance", async () => {
