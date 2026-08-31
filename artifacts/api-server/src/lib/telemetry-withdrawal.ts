@@ -136,6 +136,13 @@ async function verifyCommittedWithdrawal(job: Record<string, unknown>): Promise<
 
 type ConsentEpochs = Record<TelemetryWithdrawalScope, string[]>;
 
+interface RowEpochs {
+  known: boolean;
+  activityIngestFailures: string[];
+  testFeedback: string[];
+  testRecordings: string[];
+}
+
 function epochIdsFromJob(job: Record<string, unknown>): ConsentEpochs | null {
   const raw = job["epoch_consent_ids"];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -144,6 +151,25 @@ function epochIdsFromJob(job: Record<string, unknown>): ConsentEpochs | null {
     telemetry: stringArray(value["telemetry"]),
     screen: stringArray(value["screen"]),
     microphone: stringArray(value["microphone"]),
+  };
+}
+
+function rowEpochsFromJob(job: Record<string, unknown>): RowEpochs {
+  const raw = job["epoch_row_ids"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      known: false,
+      activityIngestFailures: [],
+      testFeedback: [],
+      testRecordings: [],
+    };
+  }
+  const value = raw as Record<string, unknown>;
+  return {
+    known: true,
+    activityIngestFailures: stringArray(value["activity_ingest_failures"]),
+    testFeedback: stringArray(value["test_feedback"]),
+    testRecordings: stringArray(value["test_recordings"]),
   };
 }
 
@@ -219,6 +245,7 @@ async function applyTelemetryWithdrawalCleanup(
   const consentRetainedUntil = String(job["consent_retained_until"]);
   const scopes = new Set(stringArray(job["scopes"]));
   const epochs = await loadConsentEpochs(job);
+  const rowEpochs = rowEpochsFromJob(job);
 
   const consentHistoryIds = [
     ...new Set([
@@ -286,16 +313,39 @@ async function applyTelemetryWithdrawalCleanup(
       if (eventUpdate.error) throw eventUpdate.error;
     }
 
-    if (sessionIds.length > 0) {
-      const failureDelete = await db
-        .from("activity_ingest_failures")
-        .delete()
-        .eq("actor_user_id", actorUserId)
-        .eq("pilot_id", pilotId)
-        .in("test_session_id", sessionIds);
-      if (failureDelete.error) throw failureDelete.error;
+    let failureDelete = db
+      .from("activity_ingest_failures")
+      .delete()
+      .eq("actor_user_id", actorUserId)
+      .eq("pilot_id", pilotId);
+    if (rowEpochs.known) {
+      if (rowEpochs.activityIngestFailures.length > 0) {
+        failureDelete = failureDelete.in("id", rowEpochs.activityIngestFailures);
+        const failures = await failureDelete;
+        if (failures.error) throw failures.error;
+      }
+    } else {
+      failureDelete = failureDelete.lte("created_at", withdrawnAt);
+      const failures = await failureDelete;
+      if (failures.error) throw failures.error;
     }
 
+    if (rowEpochs.known && rowEpochs.testRecordings.length > 0) {
+      const recordings = await db
+        .from("test_recordings")
+        .update({ deletion_due_at: deletionDueAt })
+        .eq("tester_user_id", actorUserId)
+        .in("id", rowEpochs.testRecordings);
+      if (recordings.error) throw recordings.error;
+    } else if (!rowEpochs.known) {
+      const recordings = await db
+        .from("test_recordings")
+        .update({ deletion_due_at: deletionDueAt })
+        .eq("tester_user_id", actorUserId)
+        .eq("pilot_id", pilotId)
+        .lte("created_at", withdrawnAt);
+      if (recordings.error) throw recordings.error;
+    }
     await updateRecordingsForSessions(actorUserId, sessionIds, deletionDueAt);
     await updateRecordingsForConsentIds(
       actorUserId,
@@ -312,19 +362,27 @@ async function applyTelemetryWithdrawalCleanup(
       deletionDueAt,
     );
 
-    if (sessionIds.length > 0) {
+    const feedbackValues = {
+      deletion_due_at: deletionDueAt,
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+      updated_at: withdrawnAt,
+    };
+    if (rowEpochs.known && rowEpochs.testFeedback.length > 0) {
       const feedback = await db
         .from("test_feedback")
-        .update({
-          deletion_due_at: deletionDueAt,
-          notification_status: "failed",
-          notification_last_error: "telemetry_consent_withdrawn",
-          notification_next_attempt_at: null,
-          updated_at: withdrawnAt,
-        })
+        .update(feedbackValues)
+        .eq("tester_user_id", actorUserId)
+        .in("id", rowEpochs.testFeedback);
+      if (feedback.error) throw feedback.error;
+    } else if (!rowEpochs.known) {
+      const feedback = await db
+        .from("test_feedback")
+        .update(feedbackValues)
         .eq("tester_user_id", actorUserId)
         .eq("pilot_id", pilotId)
-        .in("test_session_id", sessionIds);
+        .lte("created_at", withdrawnAt);
       if (feedback.error) throw feedback.error;
     }
     return;
@@ -352,6 +410,14 @@ async function applyTelemetryWithdrawalCleanup(
       epochs.screen,
       deletionDueAt,
     );
+    if (rowEpochs.known && rowEpochs.testRecordings.length > 0) {
+      const recordings = await db
+        .from("test_recordings")
+        .update({ deletion_due_at: deletionDueAt })
+        .eq("tester_user_id", actorUserId)
+        .in("id", rowEpochs.testRecordings);
+      if (recordings.error) throw recordings.error;
+    }
   }
 
   if (scopes.has("microphone") && epochs.microphone.length > 0) {
