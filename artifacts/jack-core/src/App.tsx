@@ -599,9 +599,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const handleTelemetryConsent = async (choices: TelemetryConsentChoices) => {
     const requestUserId = me?.userId;
+    const consentScope = telemetryContext?.scope;
     if (
       !requestUserId ||
-      !telemetryContext?.scope ||
+      !consentScope ||
       (testStartPendingRef.current && testStartOwnerRef.current === requestUserId)
     ) {
       return;
@@ -613,7 +614,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     setTestStartPending(true);
     try {
       const context = await saveTelemetryConsents({
-        pilotId: consentContext.scope.pilotId,
+        pilotId: consentScope.pilotId,
         ...choices,
         privacyNoticeVersion: consentContext.privacyNoticeVersion,
         consentVersion: consentContext.consentVersion,
