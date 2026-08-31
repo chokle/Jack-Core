@@ -62,7 +62,10 @@ import {
   withdrawTelemetry,
   type TelemetryContext,
 } from "./lib/user-testing/test-session-service";
-import { setFeedbackSessionId } from "./lib/user-testing/feedback-service";
+import {
+  setFeedbackIdentity,
+  setFeedbackSessionId,
+} from "./lib/user-testing/feedback-service";
 import { handoffInterviewResume } from "./lib/interview-resume";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
@@ -686,6 +689,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     setTelemetryContext(null);
     setTelemetryConsentOpen(false);
     if (!me) return;
+
+    setFeedbackIdentity(me.userId ?? null);
 
     const contextUserId =
       me.isAdmin === false && me.userId ? me.userId : null;
