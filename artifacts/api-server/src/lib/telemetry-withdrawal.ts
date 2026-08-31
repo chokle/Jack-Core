@@ -610,23 +610,6 @@ export async function reconcileTelemetryWithdrawalJob(
   }
 }
 
-async function purgeExpiredWithdrawalJobs(now: string): Promise<number> {
-  const expired = await db
-    .from(WITHDRAWAL_JOB_TABLE)
-    .select("id")
-    .in("status", ["completed", "cancelled"])
-    .lt("retained_until", now)
-    .limit(WITHDRAWAL_JOB_BATCH_SIZE);
-  if (expired.error) throw expired.error;
-  const ids = (expired.data ?? [])
-    .map((row: Record<string, unknown>) => row["id"])
-    .filter((id: unknown): id is string => typeof id === "string");
-  if (ids.length === 0) return 0;
-  const removed = await db.from(WITHDRAWAL_JOB_TABLE).delete().in("id", ids);
-  if (removed.error) throw removed.error;
-  return ids.length;
-}
-
 export async function runTelemetryWithdrawalSweep(): Promise<{
   attempted: number;
   completed: number;
@@ -634,7 +617,8 @@ export async function runTelemetryWithdrawalSweep(): Promise<{
   expired: number;
 }> {
   const now = new Date().toISOString();
-  const expiredCount = await purgeExpiredWithdrawalJobs(now);
+  // Physical retention deletion is intentionally owned by the separately
+  // authorized TELEMETRY_RETENTION_ENABLED worker.
   const [due, expired] = await Promise.all([
     db
       .from(WITHDRAWAL_JOB_TABLE)
@@ -664,7 +648,7 @@ export async function runTelemetryWithdrawalSweep(): Promise<{
     if (result.status === "completed") completed += 1;
     else pending += 1;
   }
-  return { attempted: jobs.size, completed, pending, expired: expiredCount };
+  return { attempted: jobs.size, completed, pending, expired: 0 };
 }
 
 export function startTelemetryWithdrawalWorker(): { stop: () => void } {
