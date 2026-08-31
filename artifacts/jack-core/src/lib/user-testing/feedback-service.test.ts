@@ -10,6 +10,7 @@ import {
   markFeedbackPrompted,
   readFeedbackDraft,
   saveFeedbackDraft,
+  setFeedbackIdentity,
 } from "./feedback-service";
 
 describe("user-test feedback eligibility", () => {
@@ -34,6 +35,21 @@ describe("user-test feedback eligibility", () => {
         activity,
       }),
     ).toBe(false);
+  });
+
+  it("starts fresh activity when the signed-in identity changes", () => {
+    setFeedbackIdentity("user_a");
+    const userAActivity = markFeedbackFeature("ask_jack", 1_000);
+
+    setFeedbackIdentity("user_b");
+    const userBActivity = getFeedbackActivity(2_000);
+
+    expect(userBActivity.sessionId).not.toBe(userAActivity.sessionId);
+    expect(userBActivity.arrivedAt).toBe(2_000);
+    expect(userBActivity.features).toEqual([]);
+
+    setFeedbackIdentity("user_b");
+    expect(getFeedbackActivity(3_000)).toEqual(userBActivity);
   });
 
   it("deduplicates prompts during the seven-day cooldown", () => {
