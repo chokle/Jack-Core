@@ -251,6 +251,29 @@ async function compensateTelemetryConsentRace(
   if (failed?.error) throw failed.error;
 }
 
+async function redactRejectedSessionEvent(input: {
+  eventId: string;
+  userId: string;
+  pilotId: string;
+  sessionId: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const redacted = await db
+    .from("test_events")
+    .update({
+      metadata: {},
+      correlation_id: null,
+      request_id: null,
+      redacted_at: now,
+      deletion_due_at: deletionDueAfterWithdrawal(),
+    })
+    .eq("event_id", input.eventId)
+    .eq("actor_user_id", input.userId)
+    .eq("pilot_id", input.pilotId)
+    .eq("test_session_id", input.sessionId);
+  if (redacted.error) throw redacted.error;
+}
+
 async function expireSessionIfNeeded(
   row: Record<string, any>,
   userId: string,
@@ -406,16 +429,35 @@ router.post("/testing/sessions/start", async (req, res) => {
         })
         .eq("id", existing.data.id)
         .eq("actor_user_id", identity.userId)
+        .eq("organization_id", membership.scope.organizationId)
+        .eq("pilot_id", membership.scope.pilotId)
+        .eq("status", "active")
+        .eq("telemetry_status", "granted")
+        .eq("telemetry_consent_id", telemetryConsent.id)
         .select("*")
-        .single();
+        .maybeSingle();
       if (updated.error) throw updated.error;
-      if (
-        !(await consentSnapshotsStillCurrent(
-          identity.userId,
-          membership.scope.pilotId,
-          startConsents,
-        ))
-      ) {
+      const consentsCurrentAfterResume = await consentSnapshotsStillCurrent(
+        identity.userId,
+        membership.scope.pilotId,
+        startConsents,
+      );
+      if (!updated.data) {
+        if (!consentsCurrentAfterResume) {
+          await compensateTelemetryConsentRace(
+            identity.userId,
+            membership.scope.pilotId,
+            String(existing.data.id),
+          );
+          return res.status(409).json({
+            error: "Telemetry consent changed while the pilot session was starting.",
+          });
+        }
+        return res.status(409).json({
+          error: "The pilot session changed while it was being resumed.",
+        });
+      }
+      if (!consentsCurrentAfterResume) {
         await compensateTelemetryConsentRace(
           identity.userId,
           membership.scope.pilotId,
@@ -445,13 +487,24 @@ router.post("/testing/sessions/start", async (req, res) => {
         },
       });
       if (event.error) throw new Error(event.error);
-      if (
-        !(await consentSnapshotsStillCurrent(
-          identity.userId,
-          membership.scope.pilotId,
-          startConsents,
-        ))
-      ) {
+      const resumedSession = await db
+        .from("test_sessions")
+        .select("id")
+        .eq("id", updated.data.id)
+        .eq("actor_user_id", identity.userId)
+        .eq("organization_id", membership.scope.organizationId)
+        .eq("pilot_id", membership.scope.pilotId)
+        .eq("status", "active")
+        .eq("telemetry_status", "granted")
+        .eq("telemetry_consent_id", telemetryConsent.id)
+        .maybeSingle();
+      if (resumedSession.error) throw resumedSession.error;
+      const consentsCurrentAfterEvent = await consentSnapshotsStillCurrent(
+        identity.userId,
+        membership.scope.pilotId,
+        startConsents,
+      );
+      if (!consentsCurrentAfterEvent) {
         await compensateTelemetryConsentRace(
           identity.userId,
           membership.scope.pilotId,
@@ -459,6 +512,19 @@ router.post("/testing/sessions/start", async (req, res) => {
         );
         return res.status(409).json({
           error: "Telemetry consent changed while the pilot session was starting.",
+        });
+      }
+      if (!resumedSession.data) {
+        if (!event.duplicate && event.row?.["event_id"]) {
+          await redactRejectedSessionEvent({
+            eventId: String(event.row["event_id"]),
+            userId: identity.userId,
+            pilotId: membership.scope.pilotId,
+            sessionId: String(updated.data.id),
+          });
+        }
+        return res.status(409).json({
+          error: "The pilot session changed while it was being resumed.",
         });
       }
       return res.json({ session: publicSession(updated.data), resumed: true });
@@ -716,16 +782,23 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
           .select("*")
           .maybeSingle();
         if (projected.error) throw projected.error;
-        if (
-          !projected.data ||
-          !(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))
-        ) {
+        const duplicateConsentCurrent = await telemetryConsentStillCurrent(
+          identity.userId,
+          pilotId,
+          consent.id,
+        );
+        if (!duplicateConsentCurrent) {
           await compensateTelemetryConsentRace(
             identity.userId,
             pilotId,
             String(existingSession.data.id),
           );
           return res.status(409).json({ error: "Telemetry consent is not active." });
+        }
+        if (!projected.data) {
+          return res.status(409).json({
+            error: "The pilot session changed before the event retry completed.",
+          });
         }
         return res.json({
           accepted: true,
@@ -811,16 +884,31 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       .select("*")
       .maybeSingle();
     if (updated.error) throw updated.error;
-    if (
-      !updated.data ||
-      !(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))
-    ) {
+    const projectionConsentCurrent = await telemetryConsentStillCurrent(
+      identity.userId,
+      pilotId,
+      consent.id,
+    );
+    if (!projectionConsentCurrent) {
       await compensateTelemetryConsentRace(
         identity.userId,
         pilotId,
         String(session.data.id),
       );
       return res.status(409).json({ error: "Telemetry consent is not active." });
+    }
+    if (!updated.data) {
+      if (!inserted.duplicate && inserted.row?.["event_id"]) {
+        await redactRejectedSessionEvent({
+          eventId: String(inserted.row["event_id"]),
+          userId: identity.userId,
+          pilotId,
+          sessionId: String(session.data.id),
+        });
+      }
+      return res.status(409).json({
+        error: "The pilot session changed before the event was projected.",
+      });
     }
     return res.status(inserted.duplicate ? 200 : 201).json({
       accepted: true,
