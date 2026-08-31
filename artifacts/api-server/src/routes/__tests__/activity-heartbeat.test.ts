@@ -55,7 +55,7 @@ function withdrawConsentOnStateRead(readNumber: number): void {
   });
 }
 
-function appendGrantedConsentAfterFirstRead(): void {
+function appendGrantedConsentOnStateRead(readNumber: number): void {
   const row = fake.tables.telemetry_consents[0]!;
   let reads = 0;
   Object.defineProperty(row, "state", {
@@ -63,7 +63,7 @@ function appendGrantedConsentAfterFirstRead(): void {
     enumerable: true,
     get: () => {
       reads += 1;
-      if (reads === 1) {
+      if (reads === readNumber) {
         fake.tables.telemetry_consents.push({
           id: REFRESHED_CONSENT_ID,
           actor_user_id: "tester-1",
@@ -303,10 +303,10 @@ describe("pilot activity heartbeat", () => {
 
   it("compensates when consent is withdrawn after the heartbeat insert", async () => {
     seedWithdrawalDependents();
-    // latestConsent reads once before the insert and again immediately after it.
-    // Flip the stored row on that second read to deterministically interleave
-    // withdrawal between the pre-write authorization and post-write fence.
-    withdrawConsentOnStateRead(2);
+    // Reads: application pre-check, database current-lineage trigger, then
+    // application post-write fence. Withdraw on the third read so the event has
+    // committed and the compensation path is exercised deterministically.
+    withdrawConsentOnStateRead(3);
 
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
@@ -355,10 +355,10 @@ describe("pilot activity heartbeat", () => {
 
   it("redacts only the rejected heartbeat after a still-granted consent refresh", async () => {
     seedWithdrawalDependents();
-    // Consent history is append-only in production. Append a newer granted row
-    // after the pre-write read so the post-write exact-id fence sees a refresh,
-    // not a withdrawal.
-    appendGrantedConsentAfterFirstRead();
+    // Consent history is append-only in production. The DB trigger consumes the
+    // second read; append a newer grant on the application post-write fence so
+    // the committed event is redacted without withdrawing unrelated history.
+    appendGrantedConsentOnStateRead(3);
 
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
@@ -392,9 +392,10 @@ describe("pilot activity heartbeat", () => {
 
   it("compensates withdrawal detected after a successful session projection", async () => {
     seedWithdrawalDependents();
-    // Reads: pre-write granted, post-insert granted, final post-projection
-    // withdrawn. This proves the final fence is required and effective.
-    withdrawConsentOnStateRead(3);
+    // Reads: application pre-check, event trigger, post-insert fence, active
+    // session projection trigger, then final application fence. Withdraw on the
+    // fifth read to prove compensation still runs after projection committed.
+    withdrawConsentOnStateRead(5);
 
     const response = await request(app())
       .post("/api/testing/activity-heartbeat")
