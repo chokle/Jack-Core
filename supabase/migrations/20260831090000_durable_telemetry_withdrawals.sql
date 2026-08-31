@@ -480,6 +480,10 @@ begin
         where session.id = (v_row ->> 'test_session_id')::uuid;
         if not found
           or v_session.actor_user_id <> v_row ->> 'tester_user_id'
+          or v_session.organization_id is distinct from
+            (v_row ->> 'organization_id')::uuid
+          or v_session.pilot_id is distinct from
+            (v_row ->> 'pilot_id')::uuid
           or not public.telemetry_consent_is_current(
             v_session.actor_user_id,
             v_session.organization_id,
@@ -504,14 +508,44 @@ begin
   elsif tg_table_name = 'activity_ingest_failures' then
     if v_row ->> 'actor_user_id' is not null
       and v_row ->> 'pilot_id' is not null
-      and not public.telemetry_grant_is_current(
+    then
+      if v_row ->> 'test_session_id' is not null then
+        select
+          session.actor_user_id,
+          session.organization_id,
+          session.pilot_id,
+          session.status,
+          session.telemetry_consent_id
+        into v_session
+        from public.test_sessions session
+        where session.id = (v_row ->> 'test_session_id')::uuid;
+
+        if not found
+          or v_session.actor_user_id <> v_row ->> 'actor_user_id'
+          or v_session.organization_id is distinct from
+            (v_row ->> 'organization_id')::uuid
+          or v_session.pilot_id is distinct from
+            (v_row ->> 'pilot_id')::uuid
+          or v_session.status <> 'active'
+          or not public.telemetry_consent_is_current(
+            v_session.actor_user_id,
+            v_session.organization_id,
+            v_session.pilot_id,
+            'telemetry',
+            v_session.telemetry_consent_id
+          )
+        then
+          raise exception 'telemetry consent is not current for ingest-failure write'
+            using errcode = '23514';
+        end if;
+      elsif not public.telemetry_grant_is_current(
         v_row ->> 'actor_user_id',
         (v_row ->> 'organization_id')::uuid,
         (v_row ->> 'pilot_id')::uuid
-      )
-    then
-      raise exception 'telemetry consent is not current for ingest-failure write'
-        using errcode = '23514';
+      ) then
+        raise exception 'telemetry consent is not current for ingest-failure write'
+          using errcode = '23514';
+      end if;
     end if;
   end if;
   return new;
