@@ -118,6 +118,27 @@ function identity(
 
 beforeEach(() => {
   resetMocks();
+  fake.tables.organizations = [{
+    id: ORGANIZATION_ID,
+    name: "Org",
+    status: "active",
+  }];
+  fake.tables.pilots = [{
+    id: PILOT_ID,
+    organization_id: ORGANIZATION_ID,
+    name: "Pilot",
+    status: "active",
+  }];
+  fake.tables.pilot_memberships = [{
+    id: "tester-membership",
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
+    user_id: "tester-1",
+    role: "tester",
+    active: true,
+    valid_from: "2026-01-01T00:00:00.000Z",
+    valid_until: null,
+  }];
   fake.tables.test_sessions = [
     {
       id: SESSION_ID,
@@ -292,6 +313,10 @@ describe("server-authoritative Ask Jack telemetry", () => {
       actorIdentity: identity({ classification: "unavailable" }),
       label: "unavailable identity",
     },
+    {
+      actorIdentity: identity({ isAdmin: true }),
+      label: "promoted admin identity",
+    },
   ])("skips Ask Jack telemetry writes for $label", async ({ actorIdentity }) => {
     const originalQuestionCount = fake.tables.test_sessions[0]?.question_count;
 
@@ -304,6 +329,26 @@ describe("server-authoritative Ask Jack telemetry", () => {
 
     expect(fake.tables.test_events).toHaveLength(0);
     expect(fake.tables.test_sessions[0]?.question_count).toBe(originalQuestionCount);
+  });
+
+  it("skips Ask Jack writes after tester membership deactivation without deleting history", async () => {
+    fake.tables.pilot_memberships[0]!.active = false;
+
+    await recordServerAskJackEvent({
+      req: request(SESSION_ID),
+      actorIdentity: identity(),
+      eventType: "ask_jack_completed",
+      correlationId: "chat-message-after-membership",
+      citationCount: 1,
+    });
+
+    expect(fake.tables.test_events).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "active",
+      telemetry_status: "granted",
+      question_count: 0,
+    });
+    expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
   });
 
   it("returns true when any membership in the valid scope window is report-authorized", async () => {
