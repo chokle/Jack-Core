@@ -3,6 +3,10 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const deletedTables = vi.hoisted(() => [] as string[]);
+const rpcCalls = vi.hoisted(
+  () => [] as Array<{ name: string; params: Record<string, unknown> }>,
+);
+const operationOrder = vi.hoisted(() => [] as string[]);
 const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
@@ -26,7 +30,13 @@ vi.mock("../../lib/memory-graph.js", () => ({ withdrawMentor: vi.fn() }));
 vi.mock("../../lib/video-storage.js", () => ({ removeVideoAssets: vi.fn(async () => {}) }));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
+    rpc: async (name: string, params: Record<string, unknown>) => {
+      rpcCalls.push({ name, params });
+      operationOrder.push(`rpc:${name}`);
+      return { data: null, error: null };
+    },
     from: (table: string) => {
+      operationOrder.push(`from:${table}`);
       let operation: "select" | "delete" = "select";
       let updateValues: Record<string, unknown> | null = null;
       let limit: number | undefined;
@@ -102,6 +112,8 @@ function app(): Express {
 
 beforeEach(() => {
   deletedTables.length = 0;
+  rpcCalls.length = 0;
+  operationOrder.length = 0;
   deletions.length = 0;
   updates.length = 0;
   recordingRows.length = 0;
@@ -129,25 +141,25 @@ describe("account deletion telemetry coverage", () => {
         "test_events",
         "admin_access_audit",
         "test_sessions",
-        "telemetry_withdrawal_jobs",
-        "telemetry_consents",
         "pilot_memberships",
         "platform_roles",
       ]),
     );
-    expect(
-      deletions.filter(({ table }) => table === "telemetry_withdrawal_jobs"),
-    ).toEqual([
+    expect(rpcCalls).toEqual([
       {
-        table: "telemetry_withdrawal_jobs",
-        column: "actor_user_id",
-        value: "user-1",
+        name: "begin_telemetry_account_deletion",
+        params: { p_actor_user_id: "user-1" },
+      },
+      {
+        name: "finish_telemetry_account_deletion",
+        params: { p_actor_user_id: "user-1" },
       },
     ]);
-    expect(deletedTables.indexOf("telemetry_withdrawal_jobs")).toBeLessThan(
-      deletedTables.indexOf("telemetry_consents"),
+    expect(operationOrder[0]).toBe("rpc:begin_telemetry_account_deletion");
+    expect(operationOrder.indexOf("rpc:finish_telemetry_account_deletion")).toBeGreaterThan(
+      operationOrder.indexOf("from:test_sessions"),
     );
-        expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
+    expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
     expect(
       updates.filter(({ table }) => table === "activity_report_runs"),
     ).toEqual([
@@ -192,10 +204,18 @@ describe("account deletion telemetry coverage", () => {
     expect(failed.status).toBe(500);
     expect(recordingRows).toHaveLength(1);
     expect(deleteUser).not.toHaveBeenCalled();
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+    ]);
 
     const retried = await request(app()).delete("/api/account");
     expect(retried.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+      "begin_telemetry_account_deletion",
+      "finish_telemetry_account_deletion",
+    ]);
   });
 });
