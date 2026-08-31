@@ -428,6 +428,25 @@ async function deleteVideoNode(videoId: string): Promise<void> {
 }
 
 /**
+ * Remove the direct account identity mirrored into Living Memory for video
+ * attribution. Video nodes are removed separately by account cleanup; deleting
+ * this deterministic contributor node also cascades every incident graph edge.
+ * The account-deletion DB fence rejects a stale in-flight graph upsert that tries
+ * to recreate the contributor after deletion begins.
+ */
+export async function removeContributorGraph(userId: string): Promise<void> {
+  const normalizedUserId = userId.trim();
+  if (!normalizedUserId) throw new Error("Contributor user id is required.");
+  const { error } = await supabase
+    .from("knowledge_nodes")
+    .delete()
+    .eq("id", contributorNodeId(normalizedUserId))
+    .eq("kind", "contributor")
+    .eq("ref_id", normalizedUserId);
+  if (error) throw error;
+}
+
+/**
  * Remove topic hubs no longer backed by source data. A topic is kept only if its
  * trade belongs to a seeded competency or is still referenced by at least one
  * video; everything else (a freeform trade whose last video was deleted or
