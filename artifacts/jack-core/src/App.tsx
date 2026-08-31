@@ -986,7 +986,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       />
 
       <TestingOverlay
+        key={me?.userId ?? "signed-out"}
         ref={testingOverlayRef}
+        identityKey={me?.userId ?? null}
         onEvent={handleTestingEvent}
       />
       <UserTestFeedback
