@@ -578,6 +578,59 @@ describe("user-testing gate transition", () => {
     expect(mockedStartTestSession).toHaveBeenCalledTimes(2);
   });
 
+  it("aborts and clears an automatic bootstrap when telemetry is withdrawn", async () => {
+    let bootstrapSignal: AbortSignal | undefined;
+    mockedStartTestSession.mockImplementationOnce(
+      (_pilotId, options) =>
+        new Promise((_, reject) => {
+          bootstrapSignal = options?.signal;
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(bootstrapSignal?.aborted).toBe(false);
+
+    setCachedActiveSession();
+    window.dispatchEvent(
+      new CustomEvent("jack:telemetry-withdrawn", {
+        detail: { withdrawn: ["telemetry"], deletionDueAt: null },
+      }),
+    );
+
+    await waitFor(() => expect(bootstrapSignal?.aborted).toBe(true));
+    expect(sessionStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes another user's consent prompt when the Clerk identity changes", async () => {
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-stale";
+
+    const rendered = await renderAuthenticatedApp("/app");
+    await screen.findByTestId("telemetry-consent-modal");
+
+    setIdentity({
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    });
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-v1";
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("telemetry-consent-modal")).toBeNull();
+    });
+  });
+
   it("start with explicit active session records user testing acceptance", async () => {
     recordingSupported.value = true;
     setCachedActiveSession({ microphoneConsentState: "granted" });
