@@ -469,6 +469,20 @@ describe("POST /api/testing/feedback", () => {
     expect(queueFeedbackNotification).toHaveBeenCalledOnce();
   });
 
+  it("treats an exact retry with omitted appVersion as the same null-version record", async () => {
+    const bodyWithoutAppVersion: Record<string, unknown> = { ...validBody };
+    delete bodyWithoutAppVersion["appVersion"];
+    installDuplicateFeedbackMock(existingFeedbackRecord({ app_version: null }));
+
+    const response = await request(app())
+      .post("/api/testing/feedback")
+      .send(bodyWithoutAppVersion);
+
+    expect(response.status).toBe(200);
+    expect(response.body.id).toBe(validBody.feedbackId);
+    expect(queueFeedbackNotification).toHaveBeenCalledOnce();
+  });
+
   it.each([
     {
       mismatch: "pilot",
