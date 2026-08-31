@@ -5,6 +5,7 @@ import request from "supertest";
 const resolveIdentity = vi.hoisted(() => vi.fn());
 const from = vi.hoisted(() => vi.fn());
 const queueFeedbackNotification = vi.hoisted(() => vi.fn());
+const testSessionEq = vi.fn();
 
 vi.mock("../../lib/admin-auth.js", () => ({
   resolveIdentity,
@@ -96,6 +97,7 @@ beforeEach(() => {
   resolveIdentity.mockReset();
   from.mockReset();
   queueFeedbackNotification.mockReset();
+  testSessionEq.mockReset();
   resolveIdentity.mockResolvedValue({
     userId: "user_1",
     email: "tester@example.com",
@@ -106,7 +108,7 @@ beforeEach(() => {
   });
   const testSessionQuery = {
     select: () => testSessionQuery,
-    eq: () => testSessionQuery,
+    eq: testSessionEq.mockImplementation(() => testSessionQuery),
     maybeSingle: async () => ({
       data: {
         id: validBody.sessionId,
@@ -155,6 +157,11 @@ describe("POST /api/testing/feedback", () => {
     expect(response.body.id).toBe(validBody.feedbackId);
     expect(from).toHaveBeenCalledWith("mentor_profiles");
     expect(from).toHaveBeenCalledWith("test_feedback");
+    expect(testSessionEq).toHaveBeenCalledWith("id", validBody.sessionId);
+    expect(testSessionEq).toHaveBeenCalledWith("actor_user_id", "user_1");
+    expect(testSessionEq).toHaveBeenCalledWith("organization_id", ORGANIZATION_ID);
+    expect(testSessionEq).toHaveBeenCalledWith("pilot_id", PILOT_ID);
+    expect(testSessionEq).toHaveBeenCalledWith("status", "active");
     expect(queueFeedbackNotification).toHaveBeenCalledWith(validBody.feedbackId);
   });
 
@@ -170,7 +177,7 @@ describe("POST /api/testing/feedback", () => {
     expect(from).toHaveBeenCalledWith("test_feedback");
   });
 
-  it("accepts pilot feedback without a telemetry session when membership is active", async () => {
+  it("rejects feedback without an active owned telemetry session", async () => {
     const defaultImplementation = from.getMockImplementation();
     from.mockImplementation((table: string) => {
       if (table === "test_sessions") {
@@ -186,8 +193,12 @@ describe("POST /api/testing/feedback", () => {
 
     const response = await request(app()).post("/api/testing/feedback").send(validBody);
 
-    expect(response.status).toBe(201);
-    expect(queueFeedbackNotification).toHaveBeenCalledWith(validBody.feedbackId);
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      error: "An active owned pilot session is required to submit feedback.",
+    });
+    expect(from).not.toHaveBeenCalledWith("test_feedback");
+    expect(queueFeedbackNotification).not.toHaveBeenCalled();
   });
 
   it("treats a retried feedback id as the same authoritative record", async () => {
