@@ -881,6 +881,8 @@ describe("POST /api/testing/recordings consent races", () => {
     let recordingId = "";
     let recordingInsert: Record<string, unknown> | null = null;
     let finalizeUpdate: Record<string, unknown> | null = null;
+    let consentReads = 0;
+    const finalizePredicates: Array<[string, unknown]> = [];
     const operations: string[] = [];
     const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
       operations.push("upload");
@@ -893,6 +895,290 @@ describe("POST /api/testing/recordings consent races", () => {
       upload: uploadRecording,
       remove: removeRecording,
     });
+
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: validBody.sessionId,
+              organization_id: ORGANIZATION_ID,
+              pilot_id: PILOT_ID,
+              telemetry_consent_id: telemetryConsentId,
+              screen_consent_id: screenConsentId,
+              microphone_consent_id: null,
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "telemetry_consents") {
+        let requestedScope = "";
+        const query = {
+          select: () => query,
+          eq: (column: string, value: unknown) => {
+            if (column === "scope") requestedScope = String(value);
+            return query;
+          },
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            consentReads += 1;
+            operations.push("consent");
+            return {
+              data: {
+                id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+                state: "granted",
+                privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+                consent_version: "jack-pilot-consent-2026-07-25",
+                occurred_at: "2026-07-25T00:00:00.000Z",
+              },
+              error: null,
+            };
+          },
+        };
+        return query;
+      }
+      if (table === "test_recordings") {
+        return {
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                operations.push("metadata");
+                recordingInsert = payload;
+                recordingId = String(payload["id"]);
+                return {
+                  data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => {
+            operations.push("finalize");
+            finalizeUpdate = payload;
+            const query = {
+              eq: (column: string, value: unknown) => {
+                finalizePredicates.push([column, value]);
+                return query;
+              },
+              select: () => query,
+              maybeSingle: async () => ({
+                data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                error: null,
+              }),
+            };
+            return query;
+          },
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const response = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("controlled successful upload"), {
+        filename: "success.webm",
+        contentType: "video/webm",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({
+      id: recordingId,
+      createdAt: "2026-07-26T00:00:00.000Z",
+    });
+    expect(consentReads).toBe(8);
+    expect(operations).toEqual([
+      "consent",
+      "consent",
+      "metadata",
+      "consent",
+      "consent",
+      "upload",
+      "consent",
+      "consent",
+      "finalize",
+      "consent",
+      "consent",
+    ]);
+    expect(recordingInsert).toMatchObject({
+      storage_path: expect.stringMatching(/^recordings\/[^/]+\/success\.webm$/),
+      deletion_due_at: expect.any(String),
+    });
+    expect(finalizeUpdate).toEqual({ deletion_due_at: null });
+    expect(finalizePredicates).toContainEqual([
+      "deletion_due_at",
+      (recordingInsert as Record<string, unknown>)["deletion_due_at"],
+    ]);
+    expect(removeRecording).not.toHaveBeenCalled();
+  });
+
+  it("reschedules and removes an activated recording when the final consent read fails", async () => {
+    const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
+    const screenConsentId = "77777777-7777-4777-8777-777777777777";
+    let recordingId = "";
+    let telemetryReads = 0;
+    let finalizeUpdate: Record<string, unknown> | null = null;
+    let scheduledUpdate: Record<string, unknown> | null = null;
+    const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
+      stream.resume();
+      await once(stream, "end");
+      return { data: null, error: null };
+    });
+    const removeRecording = vi.fn(async () => ({ data: null, error: null }));
+    storageFrom.mockReturnValue({
+      upload: uploadRecording,
+      remove: removeRecording,
+    });
+
+    const completedQuery = () => {
+      const query = {
+        eq: () => query,
+        then: (
+          onfulfilled?: (result: { data: null; error: null }) => unknown,
+          onrejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve({ data: null, error: null }).then(onfulfilled, onrejected),
+      };
+      return query;
+    };
+
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: validBody.sessionId,
+              organization_id: ORGANIZATION_ID,
+              pilot_id: PILOT_ID,
+              telemetry_consent_id: telemetryConsentId,
+              screen_consent_id: screenConsentId,
+              microphone_consent_id: null,
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "telemetry_consents") {
+        let requestedScope = "";
+        const query = {
+          select: () => query,
+          eq: (column: string, value: unknown) => {
+            if (column === "scope") requestedScope = String(value);
+            return query;
+          },
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => {
+            if (requestedScope === "telemetry") {
+              telemetryReads += 1;
+              if (telemetryReads === 4) {
+                throw new Error("final consent read unavailable");
+              }
+            }
+            return {
+              data: {
+                id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+                state: "granted",
+                privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+                consent_version: "jack-pilot-consent-2026-07-25",
+                occurred_at: "2026-07-25T00:00:00.000Z",
+              },
+              error: null,
+            };
+          },
+        };
+        return query;
+      }
+      if (table === "test_recordings") {
+        return {
+          insert: (payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                recordingId = String(payload["id"]);
+                return {
+                  data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => {
+            if (payload["deletion_due_at"] === null) {
+              finalizeUpdate = payload;
+              const query = {
+                eq: () => query,
+                select: () => query,
+                maybeSingle: async () => ({
+                  data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
+                  error: null,
+                }),
+              };
+              return query;
+            }
+            scheduledUpdate = payload;
+            return completedQuery();
+          },
+          delete: () => completedQuery(),
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const response = await request(app())
+      .post("/api/testing/recordings")
+      .field("sessionId", validBody.sessionId)
+      .attach("file", Buffer.from("controlled final-fence error"), {
+        filename: "final-error.webm",
+        contentType: "video/webm",
+      });
+
+    expect(response.status).toBe(500);
+    expect(telemetryReads).toBe(4);
+    expect(finalizeUpdate).toEqual({ deletion_due_at: null });
+    expect(scheduledUpdate).toMatchObject({ deletion_due_at: expect.any(String) });
+    expect(removeRecording).toHaveBeenCalledOnce();
+    expect(removeRecording.mock.calls[0]?.[0]).toEqual([
+      expect.stringMatching(/^recordings\/[^/]+\/final-error\.webm$/),
+    ]);
+  });
+
+  it("compensates a successful upload when the cleanup-deadline CAS loses", async () => {
+    const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
+    const screenConsentId = "77777777-7777-4777-8777-777777777777";
+    let recordingId = "";
+    let pendingDeletionDueAt: unknown;
+    let scheduledUpdate: Record<string, unknown> | null = null;
+    const finalizePredicates: Array<[string, unknown]> = [];
+    const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
+      stream.resume();
+      await once(stream, "end");
+      return { data: null, error: null };
+    });
+    const removeRecording = vi.fn(async () => ({ data: null, error: null }));
+    storageFrom.mockReturnValue({
+      upload: uploadRecording,
+      remove: removeRecording,
+    });
+
+    const completedQuery = () => {
+      const query = {
+        eq: () => query,
+        then: (
+          onfulfilled?: (result: { data: null; error: null }) => unknown,
+          onrejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve({ data: null, error: null }).then(onfulfilled, onrejected),
+      };
+      return query;
+    };
 
     from.mockImplementation((table: string) => {
       if (table === "test_sessions") {
@@ -941,9 +1227,8 @@ describe("POST /api/testing/recordings consent races", () => {
           insert: (payload: Record<string, unknown>) => ({
             select: () => ({
               single: async () => {
-                operations.push("metadata");
-                recordingInsert = payload;
                 recordingId = String(payload["id"]);
+                pendingDeletionDueAt = payload["deletion_due_at"];
                 return {
                   data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
                   error: null,
@@ -952,18 +1237,21 @@ describe("POST /api/testing/recordings consent races", () => {
             }),
           }),
           update: (payload: Record<string, unknown>) => {
-            operations.push("finalize");
-            finalizeUpdate = payload;
-            const query = {
-              eq: () => query,
-              select: () => query,
-              maybeSingle: async () => ({
-                data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
-                error: null,
-              }),
-            };
-            return query;
+            if (payload["deletion_due_at"] === null) {
+              const query = {
+                eq: (column: string, value: unknown) => {
+                  finalizePredicates.push([column, value]);
+                  return query;
+                },
+                select: () => query,
+                maybeSingle: async () => ({ data: null, error: null }),
+              };
+              return query;
+            }
+            scheduledUpdate = payload;
+            return completedQuery();
           },
+          delete: () => completedQuery(),
         };
       }
       throw new Error(`Unexpected table: ${table}`);
@@ -972,22 +1260,17 @@ describe("POST /api/testing/recordings consent races", () => {
     const response = await request(app())
       .post("/api/testing/recordings")
       .field("sessionId", validBody.sessionId)
-      .attach("file", Buffer.from("controlled successful upload"), {
-        filename: "success.webm",
+      .attach("file", Buffer.from("controlled finalize race"), {
+        filename: "cas-race.webm",
         contentType: "video/webm",
       });
 
-    expect(response.status).toBe(201);
-    expect(response.body).toEqual({
-      id: recordingId,
-      createdAt: "2026-07-26T00:00:00.000Z",
-    });
-    expect(operations).toEqual(["metadata", "upload", "finalize"]);
-    expect(recordingInsert).toMatchObject({
-      storage_path: expect.stringMatching(/^recordings\/[^/]+\/success\.webm$/),
-      deletion_due_at: expect.any(String),
-    });
-    expect(finalizeUpdate).toEqual({ deletion_due_at: null });
-    expect(removeRecording).not.toHaveBeenCalled();
+    expect(response.status).toBe(409);
+    expect(finalizePredicates).toContainEqual([
+      "deletion_due_at",
+      pendingDeletionDueAt,
+    ]);
+    expect(scheduledUpdate).toMatchObject({ deletion_due_at: expect.any(String) });
+    expect(removeRecording).toHaveBeenCalledOnce();
   });
 });
