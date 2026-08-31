@@ -543,11 +543,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
     if (
       activeTelemetryUserIdRef.current !== requestUserId ||
-      telemetryContextOwnerRef.current !== requestUserId ||
-      !context ||
-      !context.enrolled ||
-      !context.scope
+      telemetryContextOwnerRef.current !== requestUserId
     ) {
+      return;
+    }
+    if (!context || !context.enrolled || !context.scope) {
       testingOverlayRef.current?.open();
       return;
     }
