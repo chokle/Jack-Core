@@ -72,6 +72,36 @@ function withdrawTelemetryAfterNextEventInsert() {
   });
 }
 
+function completeSessionAfterNextEventInsert() {
+  const originalFrom = fake.from.bind(fake);
+  let completed = false;
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_events") return query;
+    const originalInsert = query.insert.bind(query);
+    query.insert = (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      const builder = originalInsert(rows);
+      const originalThen = builder.then.bind(builder);
+      builder.then = (
+        onfulfilled?: (result: unknown) => unknown,
+        onrejected?: (reason: unknown) => unknown,
+      ) =>
+        originalThen(
+          (result: unknown) => {
+            if (!completed) {
+              completed = true;
+              fake.tables.test_sessions[0]!.status = "completed";
+            }
+            return onfulfilled ? onfulfilled(result) : result;
+          },
+          onrejected,
+        );
+      return builder;
+    };
+    return query;
+  });
+}
+
 function identity(
   overrides: Partial<CallerIdentity> = {},
 ): CallerIdentity {
@@ -207,6 +237,47 @@ describe("server-authoritative Ask Jack telemetry", () => {
         notification_status: "failed",
         notification_last_error: "telemetry_consent_withdrawn",
       });
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("redacts only the Ask Jack event that loses a normal terminal transition", async () => {
+    fake.tables.test_feedback = [{
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+      notification_status: "pending",
+    }];
+    const fromSpy = completeSessionAfterNextEventInsert();
+    try {
+      await recordServerAskJackEvent({
+        req: request(SESSION_ID),
+        actorIdentity: identity(),
+        eventType: "ask_jack_completed",
+        correlationId: "chat-message-completed-race",
+        citationCount: 1,
+      });
+
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "completed",
+        telemetry_status: "granted",
+        question_count: 0,
+      });
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+      expect(fake.tables.test_events).toHaveLength(1);
+      expect(fake.tables.test_events[0]).toMatchObject({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        notification_status: "pending",
+      });
+      expect(fake.tables.test_feedback[0]?.deletion_due_at).toBeUndefined();
     } finally {
       fromSpy.mockRestore();
     }
