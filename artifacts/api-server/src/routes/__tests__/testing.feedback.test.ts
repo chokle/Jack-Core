@@ -946,6 +946,7 @@ describe("POST /api/testing/recordings consent races", () => {
     const screenConsentId = "77777777-7777-4777-8777-777777777777";
     let recordingId = "";
     let recordingInsert: Record<string, unknown> | null = null;
+    let pendingDeletionDueAt: unknown;
     let finalizeUpdate: Record<string, unknown> | null = null;
     let consentReads = 0;
     const finalizePredicates: Array<[string, unknown]> = [];
@@ -1015,6 +1016,7 @@ describe("POST /api/testing/recordings consent races", () => {
               single: async () => {
                 operations.push("metadata");
                 recordingInsert = payload;
+                pendingDeletionDueAt = payload["deletion_due_at"];
                 recordingId = String(payload["id"]);
                 return {
                   data: { id: recordingId, created_at: "2026-07-26T00:00:00.000Z" },
@@ -1078,7 +1080,7 @@ describe("POST /api/testing/recordings consent races", () => {
     expect(finalizeUpdate).toEqual({ deletion_due_at: null });
     expect(finalizePredicates).toContainEqual([
       "deletion_due_at",
-      (recordingInsert as Record<string, unknown>)["deletion_due_at"],
+      pendingDeletionDueAt,
     ]);
     expect(removeRecording).not.toHaveBeenCalled();
   });
@@ -1095,7 +1097,10 @@ describe("POST /api/testing/recordings consent races", () => {
       await once(stream, "end");
       return { data: null, error: null };
     });
-    const removeRecording = vi.fn(async () => ({ data: null, error: null }));
+    const removeRecording = vi.fn(async (_paths: string[]) => ({
+      data: null,
+      error: null,
+    }));
     storageFrom.mockReturnValue({
       upload: uploadRecording,
       remove: removeRecording,
@@ -1242,7 +1247,10 @@ describe("POST /api/testing/recordings consent races", () => {
         await once(stream, "end");
         return { data: null, error: null };
       });
-      const removeRecording = vi.fn(async () => ({ data: null, error: null }));
+      const removeRecording = vi.fn(async (_paths: string[]) => ({
+      data: null,
+      error: null,
+    }));
       storageFrom.mockReturnValue({
         upload: uploadRecording,
         remove: removeRecording,
