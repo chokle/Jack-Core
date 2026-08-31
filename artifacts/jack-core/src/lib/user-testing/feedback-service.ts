@@ -32,6 +32,7 @@ interface ActivityState {
 }
 
 const SESSION_KEY = "jack.userTesting.feedbackSession.v1";
+const IDENTITY_KEY = "jack.userTesting.feedbackIdentity.v1";
 const DRAFT_PREFIX = "jack.userTesting.feedbackDraft.v1:";
 const COOLDOWN_PREFIX = "jack.userTesting.feedbackCooldown.v1:";
 
@@ -50,6 +51,23 @@ function writeJson(storage: Storage, key: string, value: unknown): void {
   } catch {
     // Storage can be unavailable in private mode. Feedback remains usable
     // in-memory; only restoration/cooldown becomes best-effort.
+  }
+}
+
+export function setFeedbackIdentity(userId: string | null): void {
+  const nextIdentity = userId?.trim() || null;
+  try {
+    const previousIdentity = window.sessionStorage.getItem(IDENTITY_KEY);
+    if (previousIdentity !== nextIdentity) {
+      window.sessionStorage.removeItem(SESSION_KEY);
+    }
+    if (nextIdentity) {
+      window.sessionStorage.setItem(IDENTITY_KEY, nextIdentity);
+    } else {
+      window.sessionStorage.removeItem(IDENTITY_KEY);
+    }
+  } catch {
+    // Identity isolation is best-effort when session storage is unavailable.
   }
 }
 
