@@ -27,6 +27,7 @@ const PILOT_ID = "22222222-2222-4222-8222-222222222222";
 const SESSION_ID = "33333333-3333-4333-8333-333333333333";
 const APP_SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const CONSENT_ID = "55555555-5555-4555-8555-555555555555";
+const REFRESHED_CONSENT_ID = "99999999-9999-4999-8999-999999999999";
 const RECORDING_ID = "66666666-6666-4666-8666-666666666666";
 const FEEDBACK_ID = "77777777-7777-4777-8777-777777777777";
 const FAILURE_ID = "88888888-8888-4888-8888-888888888888";
@@ -46,6 +47,32 @@ function withdrawConsentOnStateRead(readNumber: number): void {
     },
     set: (value: unknown) => {
       state = String(value);
+    },
+  });
+}
+
+function appendGrantedConsentAfterFirstRead(): void {
+  const row = fake.tables.telemetry_consents[0]!;
+  let reads = 0;
+  Object.defineProperty(row, "state", {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      reads += 1;
+      if (reads === 1) {
+        fake.tables.telemetry_consents.push({
+          id: REFRESHED_CONSENT_ID,
+          actor_user_id: "tester-1",
+          organization_id: ORGANIZATION_ID,
+          pilot_id: PILOT_ID,
+          scope: "telemetry",
+          state: "granted",
+          privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+          consent_version: "jack-pilot-consent-2026-07-25",
+          occurred_at: "2026-08-24T19:01:00.000Z",
+        });
+      }
+      return "granted";
     },
   });
 }
@@ -101,7 +128,6 @@ function expectWithdrawalCompensation(): void {
     status: "withdrawn",
     telemetry_status: "withdrawn",
     recording_status: "withdrawn",
-    last_activity_at: INITIAL_LAST_ACTIVITY,
     deletion_due_at: expect.any(String),
   });
   expect(fake.tables.test_events[0]).toMatchObject({
@@ -268,6 +294,9 @@ describe("pilot activity heartbeat", () => {
     expect(response.status).toBe(412);
     expect(fake.tables.test_events).toHaveLength(1);
     expectWithdrawalCompensation();
+    expect(fake.tables.test_sessions[0]?.last_activity_at).toBe(
+      INITIAL_LAST_ACTIVITY,
+    );
   });
 
   it("guards the activity projection and compensates a withdrawal at session update", async () => {
@@ -291,6 +320,67 @@ describe("pilot activity heartbeat", () => {
     expect(response.status).toBe(412);
     expect(fake.tables.test_events).toHaveLength(1);
     expectWithdrawalCompensation();
+    expect(fake.tables.test_sessions[0]?.last_activity_at).toBe(
+      INITIAL_LAST_ACTIVITY,
+    );
+  });
+
+  it("redacts only the rejected heartbeat after a still-granted consent refresh", async () => {
+    seedWithdrawalDependents();
+    // Consent history is append-only in production. Append a newer granted row
+    // after the pre-write read so the post-write exact-id fence sees a refresh,
+    // not a withdrawal.
+    appendGrantedConsentAfterFirstRead();
+
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        appSessionId: APP_SESSION_ID,
+        visibility: "foreground",
+        meaningfulActivity: true,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(409);
+    expect(fake.tables.test_events[0]).toMatchObject({
+      metadata: {},
+      redacted_at: expect.any(String),
+      deletion_due_at: expect.any(String),
+    });
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "active",
+      telemetry_status: "granted",
+      deletion_due_at: undefined,
+      last_activity_at: INITIAL_LAST_ACTIVITY,
+    });
+    expect(fake.tables.activity_ingest_failures).toHaveLength(1);
+    expect(fake.tables.test_recordings[0]?.deletion_due_at).toBeUndefined();
+    expect(fake.tables.test_feedback[0]).toMatchObject({
+      notification_status: "pending",
+      deletion_due_at: undefined,
+    });
+  });
+
+  it("compensates withdrawal detected after a successful session projection", async () => {
+    seedWithdrawalDependents();
+    // Reads: pre-write granted, post-insert granted, final post-projection
+    // withdrawn. This proves the final fence is required and effective.
+    withdrawConsentOnStateRead(3);
+
+    const response = await request(app())
+      .post("/api/testing/activity-heartbeat")
+      .send({
+        appSessionId: APP_SESSION_ID,
+        visibility: "foreground",
+        meaningfulActivity: true,
+        deviceCategory: "desktop",
+      });
+
+    expect(response.status).toBe(412);
+    expectWithdrawalCompensation();
+    expect(fake.tables.test_sessions[0]?.last_activity_at).not.toBe(
+      INITIAL_LAST_ACTIVITY,
+    );
   });
 
   it("fails closed when current telemetry consent is no longer granted", async () => {
