@@ -457,6 +457,230 @@ export class FakeSupabase {
     const injectedFailure = this.takeFailure(rpcTable, "insert");
     if (injectedFailure) return { data: null, error: injectedFailure };
 
+    if (name === "apply_fenced_video_graph_identity") {
+      const videoId = String(params["p_video_id"] ?? "").trim();
+      if (!videoId) {
+        return { data: null, error: { message: "video id is required for graph sync" } };
+      }
+
+      const videoNodeId = `video:${videoId}`;
+      const nodes = (this.tables["knowledge_nodes"] ??= []);
+      const edges = (this.tables["knowledge_edges"] ??= []);
+      const video = (this.tables["videos"] ?? []).find((row) => row["id"] === videoId);
+      const oldContributorIds = new Set(
+        edges
+          .filter(
+            (edge) =>
+              edge["target_id"] === videoNodeId &&
+              edge["kind"] === "video" &&
+              String(edge["source_id"] ?? "").startsWith("contributor:"),
+          )
+          .map((edge) => String(edge["source_id"])),
+      );
+
+      const deleteNode = (id: string): void => {
+        this.tables["knowledge_nodes"] = (this.tables["knowledge_nodes"] ?? []).filter(
+          (row) => row["id"] !== id,
+        );
+        this.tables["knowledge_edges"] = (this.tables["knowledge_edges"] ?? []).filter(
+          (edge) => edge["source_id"] !== id && edge["target_id"] !== id,
+        );
+      };
+      const pruneOldContributors = (): void => {
+        for (const contributorId of oldContributorIds) {
+          const stillSourcesVideo = (this.tables["knowledge_edges"] ?? []).some(
+            (edge) =>
+              edge["source_id"] === contributorId && edge["kind"] === "video",
+          );
+          if (!stillSourcesVideo) deleteNode(contributorId);
+        }
+      };
+
+      // A delayed sync after an ordinary source deletion is cleanup-only.
+      if (!video) {
+        deleteNode(videoNodeId);
+        pruneOldContributors();
+        return { data: false, error: null };
+      }
+
+      const actorUserId = String(video["uploader_user_id"] ?? "").trim();
+      const sourceFenced = (this.tables["account_deletion_source_fences"] ?? []).some(
+        (row) =>
+          row["source_type"] === "video" &&
+          String(row["source_id"]) === videoId,
+      );
+      if (sourceFenced || (actorUserId && this.isTelemetryActorFenced(actorUserId))) {
+        return {
+          data: null,
+          error: { message: "video graph source is fenced by account deletion" },
+        };
+      }
+
+      const now = new Date().toISOString();
+      const trade = String(video["trade"] ?? "").trim() || null;
+      const rawCodes = Array.isArray(video["competency_codes"])
+        ? (video["competency_codes"] as unknown[])
+        : [];
+      const codes = [
+        ...new Set(
+          rawCodes
+            .filter((code): code is string => typeof code === "string")
+            .map((code) => code.trim())
+            .filter(Boolean),
+        ),
+      ];
+      const parentId = trade ? `topic:${trade}` : "__jack__";
+      const contributorId = actorUserId ? `contributor:${actorUserId}` : null;
+
+      const upsertNode = (row: Row, ignoreDuplicates = false): void => {
+        const rows = (this.tables["knowledge_nodes"] ??= []);
+        const existingIndex = rows.findIndex((candidate) => candidate["id"] === row["id"]);
+        if (existingIndex >= 0) {
+          if (!ignoreDuplicates) rows[existingIndex] = { ...rows[existingIndex]!, ...row };
+        } else {
+          rows.push({ ...row });
+        }
+      };
+      const upsertEdge = (row: Row): void => {
+        const rows = (this.tables["knowledge_edges"] ??= []);
+        const existingIndex = rows.findIndex((candidate) => candidate["id"] === row["id"]);
+        if (existingIndex >= 0) rows[existingIndex] = { ...rows[existingIndex]!, ...row };
+        else rows.push({ ...row });
+      };
+
+      upsertNode({ id: "__jack__", kind: "core", label: "JACK", updated_at: now });
+      if (trade) {
+        upsertNode({
+          id: `topic:${trade}`,
+          kind: "topic",
+          label: trade,
+          trade,
+          updated_at: now,
+        });
+      }
+      for (const code of codes) {
+        upsertNode(
+          {
+            id: `comp:${code}`,
+            kind: "competency",
+            label: code,
+            ref_id: code,
+            meta: { code },
+            updated_at: now,
+          },
+          true,
+        );
+      }
+
+      const uploaderEmail = actorUserId
+        ? String(video["uploader_email"] ?? "").trim() || null
+        : null;
+      const uploaderName = actorUserId
+        ? String(video["uploader_name"] ?? "").trim() || null
+        : null;
+      upsertNode({
+        id: videoNodeId,
+        kind: "video",
+        label: String(video["title"] ?? "Untitled"),
+        trade,
+        ref_id: videoId,
+        meta: {
+          status: video["status"] ?? null,
+          ...(trade ? { trade } : {}),
+          ...(video["description"] != null
+            ? { description: video["description"] }
+            : {}),
+          competencyCodes: codes,
+          ...(actorUserId ? { uploaderUserId: actorUserId } : {}),
+          ...(uploaderEmail ? { uploaderEmail } : {}),
+          ...(uploaderName ? { uploaderName } : {}),
+          ...(video["created_at"] != null ? { createdAt: video["created_at"] } : {}),
+          ...(video["updated_at"] != null || video["created_at"] != null
+            ? { updatedAt: video["updated_at"] ?? video["created_at"] }
+            : {}),
+        },
+        updated_at: now,
+      });
+      if (contributorId) {
+        upsertNode({
+          id: contributorId,
+          kind: "contributor",
+          label: uploaderName ?? uploaderEmail ?? "Contributor",
+          trade,
+          ref_id: actorUserId,
+          meta: {
+            userId: actorUserId,
+            ...(uploaderEmail ? { email: uploaderEmail } : {}),
+            ...(uploaderName ? { name: uploaderName } : {}),
+            ...(trade ? { trade } : {}),
+          },
+          updated_at: now,
+        });
+      }
+
+      this.tables["knowledge_edges"] = (this.tables["knowledge_edges"] ?? []).filter(
+        (edge) =>
+          !(
+            (edge["source_id"] === videoNodeId && edge["kind"] !== "knowledge") ||
+            edge["target_id"] === videoNodeId
+          ),
+      );
+
+      if (trade) {
+        upsertEdge({
+          id: `e:__jack__->topic:${trade}`,
+          source_id: "__jack__",
+          target_id: `topic:${trade}`,
+          kind: "topic",
+          weight: 1,
+          meta: {},
+        });
+      }
+      if (contributorId) {
+        upsertEdge({
+          id: `e:${parentId}->${contributorId}`,
+          source_id: parentId,
+          target_id: contributorId,
+          kind: "contributor",
+          weight: 1,
+          meta: {},
+        });
+        upsertEdge({
+          id: `e:${contributorId}->${videoNodeId}`,
+          source_id: contributorId,
+          target_id: videoNodeId,
+          kind: "video",
+          weight: 1,
+          meta: { role: "uploader", userId: actorUserId },
+        });
+      } else {
+        upsertEdge({
+          id: `e:${parentId}->${videoNodeId}`,
+          source_id: parentId,
+          target_id: videoNodeId,
+          kind: "video",
+          weight: 1,
+          meta: {},
+        });
+      }
+      for (const code of codes) {
+        upsertEdge({
+          id: `e:${videoNodeId}->comp:${code}`,
+          source_id: videoNodeId,
+          target_id: `comp:${code}`,
+          kind: "competency",
+          weight: 1,
+          meta: {},
+        });
+      }
+      pruneOldContributors();
+
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: true, error: afterFailure }
+        : { data: true, error: null };
+    }
+
     if (name === "append_telemetry_withdrawal") {
       const actorUserId = String(params["p_actor_user_id"] ?? "");
       const scopes = (params["p_scopes"] as string[] | undefined) ?? [];
