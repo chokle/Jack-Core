@@ -55,6 +55,15 @@ router.delete("/account", async (req, res) => {
     }
     if (!userId) return res.status(401).json({ error: "Sign in is required to delete an account." });
 
+    // Establish a permanent hashed write fence before any cleanup. This
+    // serializes account deletion with stale consent/activity requests while
+    // leaving Clerk intact until all data cleanup succeeds.
+    const { error: deletionFenceError } = await supabase.rpc(
+      "begin_telemetry_account_deletion",
+      { p_actor_user_id: userId },
+    );
+    if (deletionFenceError) throw deletionFenceError;
+
     const { data: videos, error: videoReadError } = await supabase
       .from("videos")
       .select("id, video_url, thumbnail_url")
@@ -119,19 +128,14 @@ router.delete("/account", async (req, res) => {
       .delete()
       .eq("actor_user_id", userId);
     if (sessionDeleteError) throw sessionDeleteError;
-    // Cleanup obligations contain the same actor identity and must be removed
-    // before their consent manifest. Otherwise a pending job becomes both
-    // unverifiable and permanently attributable after account deletion.
-    const { error: withdrawalJobDeleteError } = await supabase
-      .from("telemetry_withdrawal_jobs")
-      .delete()
-      .eq("actor_user_id", userId);
-    if (withdrawalJobDeleteError) throw withdrawalJobDeleteError;
-    const { error: consentDeleteError } = await supabase
-      .from("telemetry_consents")
-      .delete()
-      .eq("actor_user_id", userId);
-    if (consentDeleteError) throw consentDeleteError;
+    // Dependent rows are now gone, so finish the locked telemetry deletion in
+    // FK-safe order. It deletes jobs again to catch a withdraw-first ordering,
+    // then removes consent history while the permanent fence blocks recreation.
+    const { error: telemetryFinishError } = await supabase.rpc(
+      "finish_telemetry_account_deletion",
+      { p_actor_user_id: userId },
+    );
+    if (telemetryFinishError) throw telemetryFinishError;
     const { error: membershipDeleteError } = await supabase
       .from("pilot_memberships")
       .delete()
