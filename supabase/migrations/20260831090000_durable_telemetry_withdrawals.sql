@@ -20,7 +20,13 @@ grant all on table public.telemetry_account_deletion_fences to service_role;
 alter table public.telemetry_consents
   add column if not exists consent_sequence bigint generated always as identity;
 create index if not exists telemetry_consents_actor_latest_sequence_idx
-  on public.telemetry_consents (actor_user_id, pilot_id, scope, consent_sequence desc);
+  on public.telemetry_consents (
+    actor_user_id,
+    pilot_id,
+    scope,
+    occurred_at desc,
+    consent_sequence desc
+  );
 
 create table if not exists public.telemetry_withdrawal_jobs (
   id uuid primary key,
@@ -34,6 +40,11 @@ create table if not exists public.telemetry_withdrawal_jobs (
   -- old-epoch write is included while a later re-grant is never touched.
   epoch_consent_ids jsonb not null default '{}'::jsonb
     check (jsonb_typeof(epoch_consent_ids) = 'object'),
+  -- Exact pre-withdraw row IDs cover legacy/null-link records that cannot be
+  -- selected through a consent FK. Attributable-write triggers share the actor
+  -- lock, so this snapshot is a complete old-epoch boundary.
+  epoch_row_ids jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(epoch_row_ids) = 'object'),
   withdrawn_at timestamptz not null,
   consent_retained_until timestamptz not null,
   deletion_due_at timestamptz not null,
@@ -90,6 +101,8 @@ create index if not exists telemetry_withdrawal_jobs_retention_idx
 -- earlier draft before this migration was finalized.
 alter table public.telemetry_withdrawal_jobs
   add column if not exists epoch_consent_ids jsonb not null default '{}'::jsonb;
+alter table public.telemetry_withdrawal_jobs
+  add column if not exists epoch_row_ids jsonb not null default '{}'::jsonb;
 
 alter table public.telemetry_withdrawal_jobs enable row level security;
 revoke all on table public.telemetry_withdrawal_jobs from public, anon, authenticated;
@@ -181,6 +194,9 @@ create trigger activity_ingest_failures_account_deletion_fence
 before insert on public.activity_ingest_failures
 for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
+-- VOLATILE is deliberate: an attributable write may begin before withdrawal,
+-- block on the actor lock, then resume after withdrawal commits. The post-lock
+-- consent read must take a fresh READ COMMITTED snapshot.
 create or replace function public.telemetry_consent_is_current(
   p_actor_user_id text,
   p_organization_id uuid,
@@ -190,7 +206,7 @@ create or replace function public.telemetry_consent_is_current(
 )
 returns boolean
 language sql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -201,7 +217,7 @@ as $$
       and consent.organization_id = p_organization_id
       and consent.pilot_id = p_pilot_id
       and consent.scope = p_scope
-    order by consent.consent_sequence desc
+    order by consent.occurred_at desc, consent.consent_sequence desc
     limit 1
   ), false);
 $$;
@@ -220,7 +236,7 @@ create or replace function public.telemetry_grant_is_current(
 )
 returns boolean
 language sql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -231,7 +247,7 @@ as $$
       and consent.organization_id = p_organization_id
       and consent.pilot_id = p_pilot_id
       and consent.scope = 'telemetry'
-    order by consent.consent_sequence desc
+    order by consent.occurred_at desc, consent.consent_sequence desc
     limit 1
   ), false);
 $$;
@@ -440,6 +456,7 @@ as $$
 declare
   v_withdrawn_at timestamptz;
   v_epoch_consent_ids jsonb;
+  v_epoch_row_ids jsonb;
   v_actor_hash text;
 begin
   if p_actor_user_id is null or p_actor_user_id = ''
@@ -504,6 +521,47 @@ begin
     group by consent.scope
   ) snapshot;
 
+  select pg_catalog.jsonb_build_object(
+    'activity_ingest_failures',
+    coalesce((
+      select pg_catalog.jsonb_agg(failure.id order by failure.id)
+      from public.activity_ingest_failures failure
+      where failure.actor_user_id = p_actor_user_id
+        and failure.pilot_id = p_pilot_id
+    ), '[]'::jsonb),
+    'test_feedback',
+    coalesce((
+      select pg_catalog.jsonb_agg(feedback.id order by feedback.id)
+      from public.test_feedback feedback
+      where feedback.tester_user_id = p_actor_user_id
+        and (
+          feedback.pilot_id = p_pilot_id
+          or feedback.test_session_id in (
+            select session.id
+            from public.test_sessions session
+            where session.actor_user_id = p_actor_user_id
+              and session.pilot_id = p_pilot_id
+          )
+        )
+    ), '[]'::jsonb),
+    'test_recordings',
+    coalesce((
+      select pg_catalog.jsonb_agg(recording.id order by recording.id)
+      from public.test_recordings recording
+      where recording.tester_user_id = p_actor_user_id
+        and (
+          recording.pilot_id = p_pilot_id
+          or recording.test_session_id in (
+            select session.id
+            from public.test_sessions session
+            where session.actor_user_id = p_actor_user_id
+              and session.pilot_id = p_pilot_id
+          )
+        )
+    ), '[]'::jsonb)
+  )
+  into v_epoch_row_ids;
+
   insert into public.telemetry_withdrawal_jobs (
     id,
     actor_user_id,
@@ -512,6 +570,7 @@ begin
     scopes,
     consent_ids,
     epoch_consent_ids,
+    epoch_row_ids,
     withdrawn_at,
     consent_retained_until,
     deletion_due_at,
@@ -528,6 +587,7 @@ begin
     p_scopes,
     p_consent_ids,
     v_epoch_consent_ids,
+    v_epoch_row_ids,
     v_withdrawn_at,
     p_consent_retained_until,
     p_deletion_due_at,
