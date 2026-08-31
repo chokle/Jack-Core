@@ -15,6 +15,57 @@ alter table public.telemetry_account_deletion_fences enable row level security;
 revoke all on table public.telemetry_account_deletion_fences from public, anon, authenticated;
 grant all on table public.telemetry_account_deletion_fences to service_role;
 
+create schema if not exists private;
+
+-- Source tombstones let derived writers reject a stale video/interview operation
+-- even after its parent row has been deleted. They contain UUID/source keys and a
+-- one-way actor hash, never the raw account identifier.
+create table if not exists private.account_deletion_source_fences (
+  source_type text not null check (
+    source_type in ('video', 'mentor_profile', 'interview_session')
+  ),
+  source_id text not null,
+  actor_hash text not null check (actor_hash ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  primary key (source_type, source_id)
+);
+
+alter table private.account_deletion_source_fences enable row level security;
+revoke all on table private.account_deletion_source_fences
+  from public, anon, authenticated;
+grant all on table private.account_deletion_source_fences to service_role;
+
+-- New parking-lot writes carry direct ownership. Backfill only when ownership is
+-- deterministic; shared/orphan legacy chat sessions remain null for separately
+-- authorized review rather than guessing.
+alter table public.parked_thoughts
+  add column if not exists actor_user_id text;
+with unique_chat_owner as (
+  select
+    message.session_id,
+    min(message.user_id) as actor_user_id
+  from public.chat_messages message
+  where message.user_id is not null
+  group by message.session_id
+  having count(distinct message.user_id) = 1
+)
+update public.parked_thoughts thought
+set actor_user_id = owner.actor_user_id
+from unique_chat_owner owner
+where thought.actor_user_id is null
+  and thought.chat_session_id = owner.session_id;
+
+update public.parked_thoughts thought
+set actor_user_id = session.contributor_user_id
+from public.interview_sessions session
+where thought.actor_user_id is null
+  and thought.interview_session_id = session.id
+  and session.contributor_user_id is not null;
+
+create index if not exists parked_thoughts_actor_user_idx
+  on public.parked_thoughts (actor_user_id)
+  where actor_user_id is not null;
+
 -- A database-assigned sequence makes "latest consent" total and independent of
 -- caller clocks. The actor trigger below serializes inserts for the same actor.
 alter table public.telemetry_consents
@@ -156,43 +207,29 @@ revoke all on function public.enforce_telemetry_account_deletion_fence()
 grant execute on function public.enforce_telemetry_account_deletion_fence()
   to service_role;
 
-drop trigger if exists telemetry_consents_account_deletion_fence
-  on public.telemetry_consents;
-create trigger telemetry_consents_account_deletion_fence
-before insert on public.telemetry_consents
-for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
-drop trigger if exists telemetry_withdrawal_jobs_account_deletion_fence
-  on public.telemetry_withdrawal_jobs;
-create trigger telemetry_withdrawal_jobs_account_deletion_fence
-before insert on public.telemetry_withdrawal_jobs
-for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
-drop trigger if exists test_sessions_account_deletion_fence on public.test_sessions;
-create trigger test_sessions_account_deletion_fence
-before insert or update on public.test_sessions
-for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
-drop trigger if exists test_events_account_deletion_fence on public.test_events;
-create trigger test_events_account_deletion_fence
-before insert or update on public.test_events
-for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
-drop trigger if exists test_recordings_account_deletion_fence on public.test_recordings;
-create trigger test_recordings_account_deletion_fence
-before insert or update on public.test_recordings
-for each row execute function public.enforce_telemetry_account_deletion_fence('tester_user_id');
 
-drop trigger if exists test_feedback_account_deletion_fence on public.test_feedback;
-create trigger test_feedback_account_deletion_fence
-before insert or update on public.test_feedback
-for each row execute function public.enforce_telemetry_account_deletion_fence('tester_user_id');
 
-drop trigger if exists activity_ingest_failures_account_deletion_fence
-  on public.activity_ingest_failures;
-create trigger activity_ingest_failures_account_deletion_fence
-before insert on public.activity_ingest_failures
-for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
+
+-- Whole-account deletion uses the same permanent actor fence for every direct
+-- personally attributable writer. UPDATE coverage closes stale finalizers that
+-- authenticated before the fence but resume after their table sweep.
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 -- VOLATILE is deliberate: an attributable write may begin before withdrawal,
 -- block on the actor lock, then resume after withdrawal commits. The post-lock
@@ -278,7 +315,8 @@ begin
     v_actor_user_id := v_row ->> 'actor_user_id';
     v_organization_id := (v_row ->> 'organization_id')::uuid;
     v_pilot_id := (v_row ->> 'pilot_id')::uuid;
-    if v_row ->> 'telemetry_status' = 'granted'
+    if v_row ->> 'status' = 'active'
+      and v_row ->> 'telemetry_status' = 'granted'
       and not public.telemetry_consent_is_current(
         v_actor_user_id, v_organization_id, v_pilot_id, 'telemetry',
         (v_row ->> 'telemetry_consent_id')::uuid
@@ -287,7 +325,8 @@ begin
       raise exception 'telemetry consent is not current for session write'
         using errcode = '23514';
     end if;
-    if v_row ->> 'screen_consent_state' = 'granted'
+    if v_row ->> 'status' = 'active'
+      and v_row ->> 'screen_consent_state' = 'granted'
       and not public.telemetry_consent_is_current(
         v_actor_user_id, v_organization_id, v_pilot_id, 'screen',
         (v_row ->> 'screen_consent_id')::uuid
@@ -296,7 +335,8 @@ begin
       raise exception 'screen consent is not current for session write'
         using errcode = '23514';
     end if;
-    if v_row ->> 'microphone_consent_state' = 'granted'
+    if v_row ->> 'status' = 'active'
+      and v_row ->> 'microphone_consent_state' = 'granted'
       and not public.telemetry_consent_is_current(
         v_actor_user_id, v_organization_id, v_pilot_id, 'microphone',
         (v_row ->> 'microphone_consent_id')::uuid
@@ -438,31 +478,10 @@ revoke all on function public.enforce_current_telemetry_lineage()
 grant execute on function public.enforce_current_telemetry_lineage()
   to service_role;
 
-drop trigger if exists test_sessions_current_consent_lineage on public.test_sessions;
-create trigger test_sessions_current_consent_lineage
-before insert or update on public.test_sessions
-for each row execute function public.enforce_current_telemetry_lineage();
 
-drop trigger if exists test_events_current_consent_lineage on public.test_events;
-create trigger test_events_current_consent_lineage
-before insert or update on public.test_events
-for each row execute function public.enforce_current_telemetry_lineage();
 
-drop trigger if exists test_recordings_current_consent_lineage on public.test_recordings;
-create trigger test_recordings_current_consent_lineage
-before insert or update on public.test_recordings
-for each row execute function public.enforce_current_telemetry_lineage();
 
-drop trigger if exists test_feedback_current_consent_lineage on public.test_feedback;
-create trigger test_feedback_current_consent_lineage
-before insert or update on public.test_feedback
-for each row execute function public.enforce_current_telemetry_lineage();
 
-drop trigger if exists activity_ingest_failures_current_consent_lineage
-  on public.activity_ingest_failures;
-create trigger activity_ingest_failures_current_consent_lineage
-before insert on public.activity_ingest_failures
-for each row execute function public.enforce_current_telemetry_lineage();
 
 -- One transaction owns both the authoritative append and its cleanup obligation.
 -- The actor lock also serializes this operation with whole-account deletion and
@@ -706,6 +725,38 @@ begin
   )
   on conflict (actor_hash) do update
     set last_attempt_at = excluded.last_attempt_at;
+
+  -- Preserve source tombstones before parent rows are removed so derived graph
+  -- work that authenticated before deletion cannot recreate personal metadata.
+  insert into private.account_deletion_source_fences (
+    source_type,
+    source_id,
+    actor_hash
+  )
+  select 'video', video.id::text, v_actor_hash
+  from public.videos video
+  where video.uploader_user_id = p_actor_user_id
+  on conflict (source_type, source_id) do nothing;
+
+  insert into private.account_deletion_source_fences (
+    source_type,
+    source_id,
+    actor_hash
+  )
+  select 'mentor_profile', profile.id::text, v_actor_hash
+  from public.mentor_profiles profile
+  where profile.contributor_user_id = p_actor_user_id
+  on conflict (source_type, source_id) do nothing;
+
+  insert into private.account_deletion_source_fences (
+    source_type,
+    source_id,
+    actor_hash
+  )
+  select 'interview_session', session.id::text, v_actor_hash
+  from public.interview_sessions session
+  where session.contributor_user_id = p_actor_user_id
+  on conflict (source_type, source_id) do nothing;
 
   delete from public.telemetry_withdrawal_jobs
   where actor_user_id = p_actor_user_id;
