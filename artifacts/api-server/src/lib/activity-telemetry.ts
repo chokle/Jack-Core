@@ -226,11 +226,12 @@ export async function latestConsent(
 ): Promise<ConsentSnapshot | null> {
   const result = await db
     .from("telemetry_consents")
-    .select("id,state,privacy_notice_version,consent_version,occurred_at")
+    .select("id,state,privacy_notice_version,consent_version,occurred_at,consent_sequence")
     .eq("actor_user_id", userId)
     .eq("pilot_id", pilotId)
     .eq("scope", scope)
     .order("occurred_at", { ascending: false })
+    .order("consent_sequence", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (result.error) throw result.error;
