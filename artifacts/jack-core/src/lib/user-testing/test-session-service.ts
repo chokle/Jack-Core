@@ -88,7 +88,8 @@ const SESSION_CACHE_KEY = "jack.userTesting.activeSession.v2";
 const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
 const MAX_QUEUE_SIZE = 100;
-let startRequest: Promise<TestSession> | null = null;
+const startRequests = new Map<string, Promise<TestSession>>();
+let startGeneration = 0;
 let flushRequest: Promise<TestSession | null> | null = null;
 let initialized = false;
 
@@ -137,6 +138,12 @@ export function cacheTestSession(session: TestSession | null): void {
   }
 }
 
+export function invalidateTestSessionStarts(): void {
+  startGeneration += 1;
+  startRequests.clear();
+  cacheTestSession(null);
+}
+
 function readQueue(): QueuedEvent[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
@@ -160,13 +167,19 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function loadTelemetryContext(pilotId?: string): Promise<TelemetryContext> {
+export async function loadTelemetryContext(
+  pilotId?: string,
+  options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
+): Promise<TelemetryContext> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/telemetry/context${query}`, {
     credentials: "include",
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   const context = await readJson<TelemetryContext>(response);
-  cacheTestSession(context.session);
+  if (options.shouldCache?.() ?? true) {
+    cacheTestSession(context.session);
+  }
   return context;
 }
 
@@ -192,7 +205,7 @@ export async function withdrawTelemetry(
   scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
-    cacheTestSession(null);
+    invalidateTestSessionStarts();
     writeQueue([]);
   }
   window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
@@ -212,18 +225,32 @@ export function exportTelemetry(): void {
   window.location.assign("/api/testing/telemetry/export");
 }
 
-async function readSessionResponse(response: Response): Promise<TestSession> {
+async function readSessionResponse(
+  response: Response,
+  generation: number,
+  shouldCache?: () => boolean,
+): Promise<TestSession> {
   const body = await readJson<{ session: TestSession }>(response);
-  cacheTestSession(body.session);
+  if (generation === startGeneration && (shouldCache?.() ?? true)) {
+    cacheTestSession(body.session);
+  }
   return body.session;
 }
 
 export function startTestSession(
   pilotId?: string,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    requestKey?: string;
+    shouldCache?: () => boolean;
+  } = {},
 ): Promise<TestSession> {
-  if (startRequest) return startRequest;
-  startRequest = fetch("/api/testing/sessions/start", {
+  const requestKey = options.requestKey?.trim() || "default";
+  const existing = startRequests.get(requestKey);
+  if (existing) return existing;
+
+  const generation = startGeneration;
+  const request = fetch("/api/testing/sessions/start", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -235,12 +262,18 @@ export function startTestSession(
       deployVersion: import.meta.env.VITE_DEPLOY_VERSION || undefined,
       deviceCategory: deviceCategory(),
     }),
-  })
-    .then(readSessionResponse)
-    .finally(() => {
-      startRequest = null;
-    });
-  return startRequest;
+  }).then((response) =>
+    readSessionResponse(response, generation, options.shouldCache),
+  );
+
+  let tracked: Promise<TestSession>;
+  tracked = request.finally(() => {
+    if (startRequests.get(requestKey) === tracked) {
+      startRequests.delete(requestKey);
+    }
+  });
+  startRequests.set(requestKey, tracked);
+  return tracked;
 }
 
 export async function loadCurrentTestSession(pilotId?: string): Promise<TestSession | null> {
