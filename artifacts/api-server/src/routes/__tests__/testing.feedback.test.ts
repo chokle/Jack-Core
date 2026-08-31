@@ -306,6 +306,75 @@ describe("POST /api/testing/feedback", () => {
     expect(queueFeedbackNotification).not.toHaveBeenCalled();
   });
 
+  it("suppresses feedback when its active session changes during insert", async () => {
+    const defaultImplementation = from.getMockImplementation();
+    let sessionReads = 0;
+    let scheduledUpdate: Record<string, unknown> | null = null;
+    const completedQuery = () => {
+      const query = {
+        eq: () => query,
+        then: (
+          onfulfilled?: (result: { data: null; error: null }) => unknown,
+          onrejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve({ data: null, error: null }).then(onfulfilled, onrejected),
+      };
+      return query;
+    };
+    from.mockImplementation((table: string) => {
+      if (table === "test_sessions") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => ({
+            data:
+              sessionReads++ === 0
+                ? {
+                    id: validBody.sessionId,
+                    organization_id: ORGANIZATION_ID,
+                    pilot_id: PILOT_ID,
+                    telemetry_status: "granted",
+                    telemetry_consent_id: TELEMETRY_CONSENT_ID,
+                  }
+                : null,
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "test_feedback") {
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => ({
+                data: {
+                  id: validBody.feedbackId,
+                  created_at: "2026-07-26T00:00:00.000Z",
+                },
+                error: null,
+              }),
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => {
+            scheduledUpdate = payload;
+            return completedQuery();
+          },
+          delete: () => completedQuery(),
+        };
+      }
+      return defaultImplementation!(table);
+    });
+
+    const response = await request(app()).post("/api/testing/feedback").send(validBody);
+
+    expect(response.status).toBe(409);
+    expect(scheduledUpdate).toMatchObject({
+      deletion_due_at: expect.any(String),
+      notification_status: "failed",
+    });
+    expect(queueFeedbackNotification).not.toHaveBeenCalled();
+  });
+
   it("treats a retried feedback id as the same authoritative record", async () => {
     let feedbackCalls = 0;
     const testSessionQuery = {
