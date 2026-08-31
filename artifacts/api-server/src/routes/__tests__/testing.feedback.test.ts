@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import type { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type Express } from "express";
 import request from "supertest";
@@ -348,8 +350,15 @@ describe("POST /api/testing/recordings consent races", () => {
       let withdrawalCompleted = false;
       let recordingInsert: Record<string, unknown> | null = null;
       let recordingUpdate: Record<string, unknown> | null = null;
-      const uploadRecording = vi.fn(async () => ({ data: null, error: null }));
-      const removeRecording = vi.fn(async () => ({ data: null, error: null }));
+      const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
+        stream.resume();
+        await once(stream, "end");
+        return { data: null, error: null };
+      });
+      const removeRecording = vi.fn(async (_paths: string[]) => ({
+        data: null,
+        error: null,
+      }));
       storageFrom.mockReturnValue({
         upload: uploadRecording,
         remove: removeRecording,
