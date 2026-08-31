@@ -16,6 +16,24 @@ export type TestEventType =
 
 export type ConsentState = "granted" | "declined" | "withdrawn";
 
+export interface TelemetryConsentSnapshot {
+  state: ConsentState;
+  privacyNoticeVersion: string;
+  consentVersion: string;
+}
+
+export interface TelemetryPrivacyScope {
+  organizationId: string;
+  pilotId: string;
+  organizationName?: string;
+  pilotName?: string;
+  consents: {
+    telemetry: TelemetryConsentSnapshot | null;
+    screen: TelemetryConsentSnapshot | null;
+    microphone: TelemetryConsentSnapshot | null;
+  };
+}
+
 export interface TestSession {
   id: string;
   organizationId: string;
@@ -45,6 +63,8 @@ export interface TelemetryContext {
     organizationName?: string;
     pilotName?: string;
   } | null;
+  /** Identity-owned historical consent scopes, independent of active enrollment. */
+  privacyScopes: TelemetryPrivacyScope[];
   consents: {
     telemetry: {
       state: ConsentState;
