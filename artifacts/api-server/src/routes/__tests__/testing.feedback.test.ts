@@ -43,6 +43,87 @@ const validBody = {
   appVersion: "abc123",
 };
 
+function existingFeedbackRecord(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: validBody.feedbackId,
+    created_at: "2026-07-23T00:00:00Z",
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
+    session_id: validBody.sessionId,
+    test_session_id: validBody.sessionId,
+    features_used: validBody.featuresUsed,
+    device_category: validBody.deviceCategory,
+    trigger: validBody.trigger,
+    goal: validBody.goal,
+    useful: validBody.useful,
+    shortfall: validBody.shortfall,
+    adoption_need: validBody.adoptionNeed,
+    additional: validBody.additional,
+    app_version: validBody.appVersion,
+    ...overrides,
+  };
+}
+
+function installDuplicateFeedbackMock(existing: Record<string, unknown>): void {
+  let feedbackCalls = 0;
+  const testSessionQuery = {
+    select: () => testSessionQuery,
+    eq: () => testSessionQuery,
+    maybeSingle: async () => ({
+      data: {
+        id: validBody.sessionId,
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        telemetry_status: "granted",
+        telemetry_consent_id: TELEMETRY_CONSENT_ID,
+      },
+      error: null,
+    }),
+  };
+  from.mockImplementation((table: string) => {
+    const scoped = scopeQuery(table);
+    if (scoped) return scoped;
+    if (table === "mentor_profiles") {
+      return {
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: () => ({
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+        }),
+      };
+    }
+    if (table === "test_sessions") return testSessionQuery;
+    feedbackCalls += 1;
+    if (feedbackCalls === 1) {
+      return {
+        insert: () => ({
+          select: () => ({
+            single: async () => ({
+              data: null,
+              error: { code: "23505", message: "duplicate key" },
+            }),
+          }),
+        }),
+      };
+    }
+    return {
+      select: () => ({
+        eq: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: existing, error: null }),
+          }),
+        }),
+      }),
+    };
+  });
+}
+
 function scopeQuery(table: string): Record<string, unknown> | null {
   if (table === "pilot_memberships") {
     const query = {
@@ -375,75 +456,46 @@ describe("POST /api/testing/feedback", () => {
     expect(queueFeedbackNotification).not.toHaveBeenCalled();
   });
 
-  it("treats a retried feedback id as the same authoritative record", async () => {
-    let feedbackCalls = 0;
-    const testSessionQuery = {
-      select: () => testSessionQuery,
-      eq: () => testSessionQuery,
-      maybeSingle: async () => ({
-        data: {
-          id: validBody.sessionId,
-          organization_id: ORGANIZATION_ID,
-          pilot_id: PILOT_ID,
-          telemetry_status: "granted",
-          telemetry_consent_id: TELEMETRY_CONSENT_ID,
-        },
-        error: null,
-      }),
-    };
-    from.mockImplementation((table: string) => {
-      const scoped = scopeQuery(table);
-      if (scoped) return scoped;
-      if (table === "mentor_profiles") {
-        return {
-          select: () => ({
-            eq: () => ({
-              order: () => ({
-                limit: () => ({
-                  maybeSingle: async () => ({ data: null, error: null }),
-                }),
-              }),
-            }),
-          }),
-        };
-      }
-      if (table === "test_sessions") return testSessionQuery;
-      feedbackCalls += 1;
-      if (feedbackCalls === 1) {
-        return {
-          insert: () => ({
-            select: () => ({
-              single: async () => ({
-                data: null,
-                error: { code: "23505", message: "duplicate key" },
-              }),
-            }),
-          }),
-        };
-      }
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({
-                data: {
-                  id: validBody.feedbackId,
-                  created_at: "2026-07-23T00:00:00Z",
-                },
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      };
-    });
+  it("treats an exact feedback retry as the same authoritative record", async () => {
+    installDuplicateFeedbackMock(existingFeedbackRecord());
 
     const response = await request(app()).post("/api/testing/feedback").send(validBody);
 
     expect(response.status).toBe(200);
-    expect(response.body.id).toBe(validBody.feedbackId);
+    expect(response.body).toEqual({
+      id: validBody.feedbackId,
+      createdAt: "2026-07-23T00:00:00Z",
+    });
     expect(queueFeedbackNotification).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    {
+      mismatch: "pilot",
+      overrides: { pilot_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    },
+    {
+      mismatch: "test session",
+      overrides: { test_session_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+    },
+    {
+      mismatch: "canonical payload",
+      overrides: { goal: "A different submission" },
+    },
+  ])(
+    "rejects a duplicate feedback id with mismatched $mismatch context",
+    async ({ overrides }) => {
+      installDuplicateFeedbackMock(existingFeedbackRecord(overrides));
+
+      const response = await request(app()).post("/api/testing/feedback").send(validBody);
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual({
+        error: "Feedback id does not match this submission context.",
+      });
+      expect(queueFeedbackNotification).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects public presentation visitors", async () => {
     resolveIdentity.mockResolvedValue(null);
@@ -1150,11 +1202,25 @@ describe("POST /api/testing/recordings consent races", () => {
     ]);
   });
 
-  it("compensates a successful upload when the cleanup-deadline CAS loses", async () => {
+  it.each([
+    {
+      condition: "consent remains granted",
+      failDiagnosticConsentRead: false,
+      expectedStatus: 409,
+    },
+    {
+      condition: "the diagnostic consent read fails",
+      failDiagnosticConsentRead: true,
+      expectedStatus: 500,
+    },
+  ])(
+    "compensates a successful upload when the cleanup-deadline CAS loses and $condition",
+    async ({ failDiagnosticConsentRead, expectedStatus }) => {
     const telemetryConsentId = "66666666-6666-4666-8666-666666666666";
     const screenConsentId = "77777777-7777-4777-8777-777777777777";
-    let recordingId = "";
-    let pendingDeletionDueAt: unknown;
+      let recordingId = "";
+      let pendingDeletionDueAt: unknown;
+      let telemetryReads = 0;
     let scheduledUpdate: Record<string, unknown> | null = null;
     const finalizePredicates: Array<[string, unknown]> = [];
     const uploadRecording = vi.fn(async (_path: string, stream: Readable) => {
@@ -1209,16 +1275,24 @@ describe("POST /api/testing/recordings consent races", () => {
           },
           order: () => query,
           limit: () => query,
-          maybeSingle: async () => ({
-            data: {
-              id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
-              state: "granted",
-              privacy_notice_version: "jack-pilot-privacy-2026-07-25",
-              consent_version: "jack-pilot-consent-2026-07-25",
-              occurred_at: "2026-07-25T00:00:00.000Z",
-            },
-            error: null,
-          }),
+          maybeSingle: async () => {
+            if (requestedScope === "telemetry") {
+              telemetryReads += 1;
+              if (failDiagnosticConsentRead && telemetryReads === 4) {
+                throw new Error("diagnostic consent read unavailable");
+              }
+            }
+            return {
+              data: {
+                id: requestedScope === "telemetry" ? telemetryConsentId : screenConsentId,
+                state: "granted",
+                privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+                consent_version: "jack-pilot-consent-2026-07-25",
+                occurred_at: "2026-07-25T00:00:00.000Z",
+              },
+              error: null,
+            };
+          },
         };
         return query;
       }
@@ -1265,12 +1339,13 @@ describe("POST /api/testing/recordings consent races", () => {
         contentType: "video/webm",
       });
 
-    expect(response.status).toBe(409);
+      expect(response.status).toBe(expectedStatus);
     expect(finalizePredicates).toContainEqual([
       "deletion_due_at",
       pendingDeletionDueAt,
     ]);
-    expect(scheduledUpdate).toMatchObject({ deletion_due_at: expect.any(String) });
-    expect(removeRecording).toHaveBeenCalledOnce();
-  });
+      expect(scheduledUpdate).toMatchObject({ deletion_due_at: expect.any(String) });
+      expect(removeRecording).toHaveBeenCalledOnce();
+    },
+  );
 });
