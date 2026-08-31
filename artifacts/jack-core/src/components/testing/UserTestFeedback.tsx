@@ -83,6 +83,7 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
     const [answers, setAnswers] = useState<FeedbackAnswers>(() =>
       userId ? readFeedbackDraft(userId) ?? EMPTY_ANSWERS() : EMPTY_ANSWERS(),
     );
+    const [answersOwner, setAnswersOwner] = useState(userId);
     const activeIdentityRef = useRef(userId);
     const submitGenerationRef = useRef(0);
     const submitControllerRef = useRef<AbortController | null>(null);
@@ -95,6 +96,7 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
       submitControllerRef.current = null;
       setPending(null);
       setSubmitting(false);
+      setAnswersOwner(userId);
       setAnswers(userId ? readFeedbackDraft(userId) ?? EMPTY_ANSWERS() : EMPTY_ANSWERS());
 
       return () => {
@@ -106,9 +108,9 @@ export const UserTestFeedback = forwardRef<UserTestFeedbackHandle, UserTestFeedb
     }, [userId]);
 
     useEffect(() => {
-      if (!userId) return;
+      if (!userId || answersOwner !== userId) return;
       saveFeedbackDraft(userId, answers);
-    }, [answers, userId]);
+    }, [answers, answersOwner, userId]);
 
     const continueLeaving = useCallback(async (clearDraft: boolean) => {
       const action = pending?.onContinue;
