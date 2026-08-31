@@ -558,7 +558,21 @@ router.get("/testing/telemetry/export", async (req, res) => {
       notice:
         "Ask Jack conversation history is product data and is not duplicated in this optional telemetry export.",
       consents: consents.data ?? [],
-      withdrawalJobs: withdrawalJobs.data ?? [],
+      withdrawalJobs: (withdrawalJobs.data ?? []).map(
+        (row: Record<string, unknown>) => ({
+          id: row["id"],
+          organizationId: row["organization_id"],
+          pilotId: row["pilot_id"],
+          scopes: row["scopes"],
+          withdrawnAt: row["withdrawn_at"],
+          deletionDueAt: row["deletion_due_at"],
+          status: row["status"],
+          attempts: row["attempts"],
+          completedAt: row["completed_at"],
+          createdAt: row["created_at"],
+          updatedAt: row["updated_at"],
+        }),
+      ),
       sessions: sessions.data ?? [],
       events: events.data ?? [],
       ingestionFailures: failures.data ?? [],
