@@ -964,7 +964,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <PilotActivityReports />
         ) : view === "closeout" && canViewCloseout ? (
           <EndOfShiftCloseout
-            key={me?.userId ?? "signed-out"}
+            key={`closeout:${me?.userId ?? "signed-out"}`}
             participantId={me?.userId ?? "participant"}
             participantName={me?.name || me?.email}
             organizationName={ownedTelemetryContext?.scope?.organizationName}
@@ -978,14 +978,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       </JackShell>
 
       <TelemetryConsentModal
-        key={me?.userId ?? "signed-out"}
+        key={`telemetry-consent:${me?.userId ?? "signed-out"}`}
         open={telemetryConsentOpen && !!ownedTelemetryContext?.scope}
         saving={testStartPending}
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
       <UserTestingGate
-        key={me?.userId ?? "signed-out"}
+        key={`user-testing-gate:${me?.userId ?? "signed-out"}`}
         open={
           me?.isAdmin === false &&
           ownedTestingGate.restricted &&
@@ -1009,13 +1009,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       />
 
       <TestingOverlay
-        key={me?.userId ?? "signed-out"}
+        key={`testing-overlay:${me?.userId ?? "signed-out"}`}
         ref={testingOverlayRef}
         identityKey={me?.userId ?? null}
         onEvent={handleTestingEvent}
       />
       <UserTestFeedback
-        key={me?.userId ?? "signed-out"}
+        key={`user-feedback:${me?.userId ?? "signed-out"}`}
         ref={feedbackRef}
         consented={ownedTestingGate.accepted}
         userId={isSignedIn ? me?.userId : null}
