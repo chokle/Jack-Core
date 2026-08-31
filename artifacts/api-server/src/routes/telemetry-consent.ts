@@ -349,6 +349,18 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
           .eq("test_session_id", sessionId);
         if (recordings.error) throw recordings.error;
       }
+      const feedback = await db
+        .from("test_feedback")
+        .update({
+          deletion_due_at: deletionDueAt,
+          notification_status: "failed",
+          notification_last_error: "telemetry_consent_withdrawn",
+          notification_next_attempt_at: null,
+          updated_at: now,
+        })
+        .eq("tester_user_id", identity.userId)
+        .eq("pilot_id", scope.pilotId);
+      if (feedback.error) throw feedback.error;
     } else {
       const updates: Record<string, unknown> = { updated_at: now };
       if (scopes.has("screen")) {
