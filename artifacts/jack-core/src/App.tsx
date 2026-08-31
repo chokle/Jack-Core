@@ -54,7 +54,6 @@ import {
   cacheTestSession,
   exportTelemetry,
   initializeTelemetryRetry,
-  invalidateTestSessionStarts,
   loadTelemetryContext,
   saveTelemetryConsents,
   setTelemetryIdentity,
@@ -666,13 +665,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   useEffect(() => {
-    const contextUserId =
-      me?.isAdmin === false && me.userId ? me.userId : null;
-
-    telemetryContextUserIdRef.current = contextUserId;
-    setTelemetryIdentity(contextUserId);
+    telemetryContextUserIdRef.current = null;
     setTelemetryContext(null);
     setTelemetryConsentOpen(false);
+    if (!me) return;
+
+    const contextUserId =
+      me.isAdmin === false && me.userId ? me.userId : null;
+    telemetryContextUserIdRef.current = contextUserId;
+    setTelemetryIdentity(contextUserId);
     if (!contextUserId) return;
 
     const stopRetry = initializeTelemetryRetry();
@@ -712,8 +713,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   useEffect(() => {
     if (
       me?.isAdmin !== false ||
+      !me?.userId ||
       !telemetryContext ||
-      telemetryContextUserIdRef.current !== (me?.userId ?? null)
+      telemetryContextUserIdRef.current !== me.userId
     ) {
       return;
     }
