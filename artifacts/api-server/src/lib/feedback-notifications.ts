@@ -18,6 +18,7 @@ interface FeedbackRow {
   notification_status: NotificationState;
   notification_attempts: number;
   notification_next_attempt_at: string | null;
+  deletion_due_at: string | null;
 }
 
 interface DeliveryResult {
@@ -163,14 +164,23 @@ export async function deliverFeedbackNotification(
     const { data, error } = await supabase
       .from("test_feedback")
       .select(
-        "id,tester_name,tester_trade,useful,shortfall,additional,features_used,device_category,trigger,created_at,notification_status,notification_attempts,notification_next_attempt_at",
+        "id,tester_name,tester_trade,useful,shortfall,additional,features_used,device_category,trigger,created_at,notification_status,notification_attempts,notification_next_attempt_at,deletion_due_at",
       )
       .eq("id", feedbackId)
       .maybeSingle();
     if (error) throw error;
     if (!data) return "failed";
     const feedback = data as FeedbackRow;
-    if (feedback.notification_status === "sent") return "sent";
+    // Consent withdrawal marks feedback for deletion. Treat anything other than
+    // an explicit NULL as private/non-deliverable, and never revive terminal or
+    // otherwise unexpected notification states.
+    if (feedback.deletion_due_at !== null) return "failed";
+    if (
+      feedback.notification_status !== "pending" &&
+      feedback.notification_status !== "retrying"
+    ) {
+      return feedback.notification_status === "sent" ? "sent" : "failed";
+    }
 
     const now = new Date();
     if (
@@ -199,7 +209,9 @@ export async function deliverFeedbackNotification(
           notification_provider_message_id: result.messageId,
           updated_at: now.toISOString(),
         })
-        .eq("id", feedback.id);
+        .eq("id", feedback.id)
+        .in("notification_status", ["pending", "retrying"])
+        .is("deletion_due_at", null);
       if (updateError) throw updateError;
       logger.info(
         { feedbackId: feedback.id, notificationStatus: "sent", attempts },
@@ -223,7 +235,9 @@ export async function deliverFeedbackNotification(
           notification_next_attempt_at: nextAttempt,
           updated_at: now.toISOString(),
         })
-        .eq("id", feedback.id);
+        .eq("id", feedback.id)
+        .in("notification_status", ["pending", "retrying"])
+        .is("deletion_due_at", null);
       if (updateError) {
         logger.error(
           { err: updateError, feedbackId: feedback.id, notificationStatus: status },
@@ -263,6 +277,7 @@ export async function sweepFeedbackNotifications(): Promise<void> {
     .from("test_feedback")
     .select("id,notification_next_attempt_at")
     .in("notification_status", ["pending", "retrying"])
+    .is("deletion_due_at", null)
     .order("created_at", { ascending: true })
     .limit(25);
   if (error) {
