@@ -345,6 +345,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const testStartPendingRef = useRef(false);
   const [testStartPending, setTestStartPending] = useState(false);
   const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
+  const telemetryContextUserIdRef = useRef<string | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
@@ -474,8 +475,6 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     try {
       const session = await startTestSession(pilotId);
       setFeedbackSessionId(session.id);
-      setTestingGate({ accepted: true, restricted: false });
-      clearUserTestingDeclined(me?.userId);
       setTelemetryContext((current) =>
         current ? { ...current, session } : current,
       );
@@ -567,13 +566,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         privacyNoticeVersion: telemetryContext.privacyNoticeVersion,
         consentVersion: telemetryContext.consentVersion,
       });
+      telemetryContextUserIdRef.current = me?.userId ?? null;
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
       if (choices.telemetry !== "granted") {
         persistUserTestingDeclined(me?.userId);
         clearUserTestingAccepted(me?.userId);
         setTestingGate({ accepted: false, restricted: false });
-        handleNavigate("graph");
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
@@ -599,11 +598,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   useEffect(() => {
     if (me?.isAdmin !== false) return;
     const stopRetry = initializeTelemetryRetry();
+    const contextUserId = me?.userId ?? null;
     let cancelled = false;
 
+    telemetryContextUserIdRef.current = null;
+    setTelemetryContext(null);
     void loadTelemetryContext()
       .then((context) => {
-        if (!cancelled) setTelemetryContext(context);
+        if (cancelled) return;
+        telemetryContextUserIdRef.current = contextUserId;
+        setTelemetryContext(context);
       })
       .catch(() => {
         if (!cancelled) setTelemetryContext(null);
@@ -613,10 +617,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       cancelled = true;
       stopRetry();
     };
-  }, [me?.isAdmin]);
+  }, [me?.userId, me?.isAdmin]);
 
   useEffect(() => {
-    if (me?.isAdmin !== false || !telemetryContext) return;
+    if (
+      me?.isAdmin !== false ||
+      !telemetryContext ||
+      telemetryContextUserIdRef.current !== (me?.userId ?? null)
+    ) {
+      return;
+    }
 
     const context = telemetryContext;
     const session = context.session;
@@ -645,7 +655,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (telemetryConsent.state !== "granted") return;
 
     const pilotId = context.scope.pilotId;
-    const retryDelays = [1_000, 3_000, 10_000] as const;
+    const retryDelays = [500, 1_500, 3_000] as const;
     let cancelled = false;
     let starting = false;
     let retryAttempt = 0;
@@ -683,15 +693,24 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       void startScopedSession();
     };
 
+    const cancelBootstrap = () => {
+      cancelled = true;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+    };
+
     window.addEventListener("online", retryOnReconnect);
+    window.addEventListener("jack:telemetry-withdrawn", cancelBootstrap);
     void startScopedSession();
 
     return () => {
-      cancelled = true;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      cancelBootstrap();
       window.removeEventListener("online", retryOnReconnect);
+      window.removeEventListener("jack:telemetry-withdrawn", cancelBootstrap);
     };
-  }, [me?.isAdmin, telemetryContext]);
+  }, [me?.userId, me?.isAdmin, telemetryContext]);
 
   useEffect(() => {
     const continueTest = () => testingOverlayRef.current?.open();
