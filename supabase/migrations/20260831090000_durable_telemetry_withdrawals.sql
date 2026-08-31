@@ -15,6 +15,13 @@ alter table public.telemetry_account_deletion_fences enable row level security;
 revoke all on table public.telemetry_account_deletion_fences from public, anon, authenticated;
 grant all on table public.telemetry_account_deletion_fences to service_role;
 
+-- A database-assigned sequence makes "latest consent" total and independent of
+-- caller clocks. The actor trigger below serializes inserts for the same actor.
+alter table public.telemetry_consents
+  add column if not exists consent_sequence bigint generated always as identity;
+create index if not exists telemetry_consents_actor_latest_sequence_idx
+  on public.telemetry_consents (actor_user_id, pilot_id, scope, consent_sequence desc);
+
 create table if not exists public.telemetry_withdrawal_jobs (
   id uuid primary key,
   actor_user_id text not null,
@@ -79,6 +86,11 @@ create index if not exists telemetry_withdrawal_jobs_retention_idx
   on public.telemetry_withdrawal_jobs (retained_until)
   where retained_until is not null;
 
+-- Also upgrades a pre-release environment that created the table from an
+-- earlier draft before this migration was finalized.
+alter table public.telemetry_withdrawal_jobs
+  add column if not exists epoch_consent_ids jsonb not null default '{}'::jsonb;
+
 alter table public.telemetry_withdrawal_jobs enable row level security;
 revoke all on table public.telemetry_withdrawal_jobs from public, anon, authenticated;
 grant all on table public.telemetry_withdrawal_jobs to service_role;
@@ -90,13 +102,20 @@ security definer
 set search_path = ''
 as $$
 declare
+  v_actor_user_id text;
   v_actor_hash text;
+  v_now timestamptz;
 begin
+  v_actor_user_id := pg_catalog.to_jsonb(new) ->> coalesce(tg_argv[0], 'actor_user_id');
+  if v_actor_user_id is null or v_actor_user_id = '' then
+    return new;
+  end if;
+
   perform pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(new.actor_user_id, 20260831)
+    pg_catalog.hashtextextended(v_actor_user_id, 20260831)
   );
   v_actor_hash := pg_catalog.encode(
-    pg_catalog.sha256(pg_catalog.convert_to(new.actor_user_id, 'UTF8')),
+    pg_catalog.sha256(pg_catalog.convert_to(v_actor_user_id, 'UTF8')),
     'hex'
   );
   if exists (
@@ -106,6 +125,14 @@ begin
   ) then
     raise exception 'account deletion is already in progress'
       using errcode = 'P0001';
+  end if;
+
+  -- Consent order is server-owned. A request that waited behind withdrawal
+  -- cannot smuggle a stale pre-lock timestamp into a new consent epoch.
+  if tg_table_name = 'telemetry_consents' and tg_op = 'INSERT' then
+    v_now := pg_catalog.clock_timestamp();
+    new.occurred_at := v_now;
+    new.created_at := v_now;
   end if;
   return new;
 end;
@@ -120,13 +147,275 @@ drop trigger if exists telemetry_consents_account_deletion_fence
   on public.telemetry_consents;
 create trigger telemetry_consents_account_deletion_fence
 before insert on public.telemetry_consents
-for each row execute function public.enforce_telemetry_account_deletion_fence();
+for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
 
 drop trigger if exists telemetry_withdrawal_jobs_account_deletion_fence
   on public.telemetry_withdrawal_jobs;
 create trigger telemetry_withdrawal_jobs_account_deletion_fence
 before insert on public.telemetry_withdrawal_jobs
-for each row execute function public.enforce_telemetry_account_deletion_fence();
+for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
+
+drop trigger if exists test_sessions_account_deletion_fence on public.test_sessions;
+create trigger test_sessions_account_deletion_fence
+before insert or update on public.test_sessions
+for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
+
+drop trigger if exists test_events_account_deletion_fence on public.test_events;
+create trigger test_events_account_deletion_fence
+before insert or update on public.test_events
+for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
+
+drop trigger if exists test_recordings_account_deletion_fence on public.test_recordings;
+create trigger test_recordings_account_deletion_fence
+before insert or update on public.test_recordings
+for each row execute function public.enforce_telemetry_account_deletion_fence('tester_user_id');
+
+drop trigger if exists test_feedback_account_deletion_fence on public.test_feedback;
+create trigger test_feedback_account_deletion_fence
+before insert or update on public.test_feedback
+for each row execute function public.enforce_telemetry_account_deletion_fence('tester_user_id');
+
+drop trigger if exists activity_ingest_failures_account_deletion_fence
+  on public.activity_ingest_failures;
+create trigger activity_ingest_failures_account_deletion_fence
+before insert on public.activity_ingest_failures
+for each row execute function public.enforce_telemetry_account_deletion_fence('actor_user_id');
+
+create or replace function public.telemetry_consent_is_current(
+  p_actor_user_id text,
+  p_organization_id uuid,
+  p_pilot_id uuid,
+  p_scope text,
+  p_consent_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select consent.id = p_consent_id and consent.state = 'granted'
+    from public.telemetry_consents consent
+    where consent.actor_user_id = p_actor_user_id
+      and consent.organization_id = p_organization_id
+      and consent.pilot_id = p_pilot_id
+      and consent.scope = p_scope
+    order by consent.consent_sequence desc
+    limit 1
+  ), false);
+$$;
+
+revoke all on function public.telemetry_consent_is_current(
+  text, uuid, uuid, text, uuid
+) from public, anon, authenticated;
+grant execute on function public.telemetry_consent_is_current(
+  text, uuid, uuid, text, uuid
+) to service_role;
+
+create or replace function public.telemetry_grant_is_current(
+  p_actor_user_id text,
+  p_organization_id uuid,
+  p_pilot_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select consent.state = 'granted'
+    from public.telemetry_consents consent
+    where consent.actor_user_id = p_actor_user_id
+      and consent.organization_id = p_organization_id
+      and consent.pilot_id = p_pilot_id
+      and consent.scope = 'telemetry'
+    order by consent.consent_sequence desc
+    limit 1
+  ), false);
+$$;
+
+revoke all on function public.telemetry_grant_is_current(text, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.telemetry_grant_is_current(text, uuid, uuid)
+  to service_role;
+
+create or replace function public.enforce_current_telemetry_lineage()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_row jsonb;
+  v_actor_user_id text;
+  v_organization_id uuid;
+  v_pilot_id uuid;
+  v_session record;
+begin
+  v_row := pg_catalog.to_jsonb(new);
+
+  if tg_table_name = 'test_sessions' then
+    v_actor_user_id := v_row ->> 'actor_user_id';
+    v_organization_id := (v_row ->> 'organization_id')::uuid;
+    v_pilot_id := (v_row ->> 'pilot_id')::uuid;
+    if v_row ->> 'telemetry_status' = 'granted'
+      and not public.telemetry_consent_is_current(
+        v_actor_user_id, v_organization_id, v_pilot_id, 'telemetry',
+        (v_row ->> 'telemetry_consent_id')::uuid
+      )
+    then
+      raise exception 'telemetry consent is not current for session write'
+        using errcode = '23514';
+    end if;
+    if v_row ->> 'screen_consent_state' = 'granted'
+      and not public.telemetry_consent_is_current(
+        v_actor_user_id, v_organization_id, v_pilot_id, 'screen',
+        (v_row ->> 'screen_consent_id')::uuid
+      )
+    then
+      raise exception 'screen consent is not current for session write'
+        using errcode = '23514';
+    end if;
+    if v_row ->> 'microphone_consent_state' = 'granted'
+      and not public.telemetry_consent_is_current(
+        v_actor_user_id, v_organization_id, v_pilot_id, 'microphone',
+        (v_row ->> 'microphone_consent_id')::uuid
+      )
+    then
+      raise exception 'microphone consent is not current for session write'
+        using errcode = '23514';
+    end if;
+
+  elsif tg_table_name = 'test_events' then
+    if v_row ->> 'redacted_at' is null
+      and not public.telemetry_consent_is_current(
+        v_row ->> 'actor_user_id',
+        (v_row ->> 'organization_id')::uuid,
+        (v_row ->> 'pilot_id')::uuid,
+        'telemetry',
+        (v_row ->> 'consent_id')::uuid
+      )
+    then
+      raise exception 'telemetry consent is not current for event write'
+        using errcode = '23514';
+    end if;
+
+  elsif tg_table_name = 'test_recordings' then
+    -- Privacy cleanup may set deletion_due_at using old lineage. Any ordinary
+    -- insert/update (including clearing that marker during stale finalization)
+    -- must still carry exact current recording consent IDs.
+    if v_row ->> 'organization_id' is not null
+      and v_row ->> 'deletion_due_at' is null
+    then
+      if not public.telemetry_consent_is_current(
+        v_row ->> 'tester_user_id',
+        (v_row ->> 'organization_id')::uuid,
+        (v_row ->> 'pilot_id')::uuid,
+        'screen',
+        (v_row ->> 'screen_consent_id')::uuid
+      ) then
+        raise exception 'screen consent is not current for recording write'
+          using errcode = '23514';
+      end if;
+      if v_row ->> 'microphone_consent_id' is not null
+        and not public.telemetry_consent_is_current(
+          v_row ->> 'tester_user_id',
+          (v_row ->> 'organization_id')::uuid,
+          (v_row ->> 'pilot_id')::uuid,
+          'microphone',
+          (v_row ->> 'microphone_consent_id')::uuid
+        )
+      then
+        raise exception 'microphone consent is not current for recording write'
+          using errcode = '23514';
+      end if;
+    end if;
+
+  elsif tg_table_name = 'test_feedback' then
+    if v_row ->> 'pilot_id' is not null
+      and v_row ->> 'deletion_due_at' is null
+    then
+      if v_row ->> 'test_session_id' is not null then
+        select
+          session.actor_user_id,
+          session.organization_id,
+          session.pilot_id,
+          session.telemetry_consent_id
+        into v_session
+        from public.test_sessions session
+        where session.id = (v_row ->> 'test_session_id')::uuid;
+        if not found
+          or v_session.actor_user_id <> v_row ->> 'tester_user_id'
+          or not public.telemetry_consent_is_current(
+            v_session.actor_user_id,
+            v_session.organization_id,
+            v_session.pilot_id,
+            'telemetry',
+            v_session.telemetry_consent_id
+          )
+        then
+          raise exception 'telemetry consent is not current for feedback write'
+            using errcode = '23514';
+        end if;
+      elsif not public.telemetry_grant_is_current(
+        v_row ->> 'tester_user_id',
+        (v_row ->> 'organization_id')::uuid,
+        (v_row ->> 'pilot_id')::uuid
+      ) then
+        raise exception 'telemetry consent is not current for feedback write'
+          using errcode = '23514';
+      end if;
+    end if;
+
+  elsif tg_table_name = 'activity_ingest_failures' then
+    if v_row ->> 'actor_user_id' is not null
+      and v_row ->> 'pilot_id' is not null
+      and not public.telemetry_grant_is_current(
+        v_row ->> 'actor_user_id',
+        (v_row ->> 'organization_id')::uuid,
+        (v_row ->> 'pilot_id')::uuid
+      )
+    then
+      raise exception 'telemetry consent is not current for ingest-failure write'
+        using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_current_telemetry_lineage()
+  from public, anon, authenticated;
+grant execute on function public.enforce_current_telemetry_lineage()
+  to service_role;
+
+drop trigger if exists test_sessions_current_consent_lineage on public.test_sessions;
+create trigger test_sessions_current_consent_lineage
+before insert or update on public.test_sessions
+for each row execute function public.enforce_current_telemetry_lineage();
+
+drop trigger if exists test_events_current_consent_lineage on public.test_events;
+create trigger test_events_current_consent_lineage
+before insert or update on public.test_events
+for each row execute function public.enforce_current_telemetry_lineage();
+
+drop trigger if exists test_recordings_current_consent_lineage on public.test_recordings;
+create trigger test_recordings_current_consent_lineage
+before insert or update on public.test_recordings
+for each row execute function public.enforce_current_telemetry_lineage();
+
+drop trigger if exists test_feedback_current_consent_lineage on public.test_feedback;
+create trigger test_feedback_current_consent_lineage
+before insert or update on public.test_feedback
+for each row execute function public.enforce_current_telemetry_lineage();
+
+drop trigger if exists activity_ingest_failures_current_consent_lineage
+  on public.activity_ingest_failures;
+create trigger activity_ingest_failures_current_consent_lineage
+before insert on public.activity_ingest_failures
+for each row execute function public.enforce_current_telemetry_lineage();
 
 -- One transaction owns both the authoritative append and its cleanup obligation.
 -- The actor lock also serializes this operation with whole-account deletion and
@@ -335,6 +624,52 @@ $$;
 revoke all on function public.begin_telemetry_account_deletion(text)
   from public, anon, authenticated;
 grant execute on function public.begin_telemetry_account_deletion(text)
+  to service_role;
+
+-- Finish only after dependent event/session/recording rows are gone. The fence
+-- remains permanent, and re-locking plus a second job delete closes every race.
+create or replace function public.finish_telemetry_account_deletion(
+  p_actor_user_id text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_hash text;
+begin
+  if p_actor_user_id is null or p_actor_user_id = '' then
+    raise exception 'invalid account deletion actor'
+      using errcode = '22023';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_actor_user_id, 20260831)
+  );
+  v_actor_hash := pg_catalog.encode(
+    pg_catalog.sha256(pg_catalog.convert_to(p_actor_user_id, 'UTF8')),
+    'hex'
+  );
+  if not exists (
+    select 1
+    from public.telemetry_account_deletion_fences fence
+    where fence.actor_hash = v_actor_hash
+  ) then
+    raise exception 'account deletion fence was not established'
+      using errcode = 'P0001';
+  end if;
+
+  delete from public.telemetry_withdrawal_jobs
+  where actor_user_id = p_actor_user_id;
+  delete from public.telemetry_consents
+  where actor_user_id = p_actor_user_id;
+end;
+$$;
+
+revoke all on function public.finish_telemetry_account_deletion(text)
+  from public, anon, authenticated;
+grant execute on function public.finish_telemetry_account_deletion(text)
   to service_role;
 
 comment on table public.telemetry_withdrawal_jobs is
