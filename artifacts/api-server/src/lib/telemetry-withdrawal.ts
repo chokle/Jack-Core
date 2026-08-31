@@ -188,6 +188,34 @@ async function updateRecordingsForSessions(
   }
 }
 
+async function stillCurrentPartialWithdrawals(
+  job: Record<string, unknown>,
+): Promise<Set<TelemetryWithdrawalScope>> {
+  const scopes = stringArray(job["scopes"]) as TelemetryWithdrawalScope[];
+  const consentIds = stringArray(job["consent_ids"]);
+  const current = new Set<TelemetryWithdrawalScope>();
+  for (const [index, scope] of scopes.entries()) {
+    if (scope === "telemetry") continue;
+    const latest = await db
+      .from("telemetry_consents")
+      .select("id,state")
+      .eq("actor_user_id", job["actor_user_id"])
+      .eq("pilot_id", job["pilot_id"])
+      .eq("scope", scope)
+      .order("occurred_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latest.error) throw latest.error;
+    if (
+      latest.data?.id === consentIds[index] &&
+      latest.data?.state === "withdrawn"
+    ) {
+      current.add(scope);
+    }
+  }
+  return current;
+}
+
 async function applyTelemetryWithdrawalCleanup(
   job: Record<string, unknown>,
 ): Promise<void> {
@@ -290,23 +318,26 @@ async function applyTelemetryWithdrawalCleanup(
     return;
   }
 
+  const stillCurrent = await stillCurrentPartialWithdrawals(job);
   const updates: Record<string, unknown> = { updated_at: withdrawnAt };
-  if (scopes.has("screen")) {
+  if (stillCurrent.has("screen")) {
     updates["screen_consent_state"] = "withdrawn";
     updates["recording_status"] = "withdrawn";
   }
-  if (scopes.has("microphone")) {
+  if (stillCurrent.has("microphone")) {
     updates["microphone_consent_state"] = "withdrawn";
     updates["recording_status"] = "withdrawn";
   }
-  const sessionUpdate = await db
-    .from("test_sessions")
-    .update(updates)
-    .eq("actor_user_id", actorUserId)
-    .eq("pilot_id", pilotId)
-    .eq("status", "active")
-    .lte("started_at", withdrawnAt);
-  if (sessionUpdate.error) throw sessionUpdate.error;
+  if (Object.keys(updates).length > 1) {
+    const sessionUpdate = await db
+      .from("test_sessions")
+      .update(updates)
+      .eq("actor_user_id", actorUserId)
+      .eq("pilot_id", pilotId)
+      .eq("status", "active")
+      .lte("started_at", withdrawnAt);
+    if (sessionUpdate.error) throw sessionUpdate.error;
+  }
 
   if (scopes.has("screen") || scopes.has("microphone")) {
     const microphoneOnly = !scopes.has("screen");
