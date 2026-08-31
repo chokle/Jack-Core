@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -57,10 +58,12 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     const operationGenerationRef = useRef(0);
     const pendingSessionControllerRef = useRef<AbortController | null>(null);
     const pendingUploadControllerRef = useRef<AbortController | null>(null);
+    const pendingStartTokenRef = useRef<object | null>(null);
     const { toast } = useToast();
 
     const cancelCurrentOperation = useCallback((resetUi = true) => {
       operationGenerationRef.current += 1;
+      pendingStartTokenRef.current = null;
       pendingSessionControllerRef.current?.abort();
       pendingSessionControllerRef.current = null;
       pendingUploadControllerRef.current?.abort();
@@ -84,7 +87,7 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     }, [onEvent]);
     useImperativeHandle(ref, () => ({ open }), [open]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       identityRef.current = identityKey;
       cancelCurrentOperation();
       return () => cancelCurrentOperation(false);
@@ -176,97 +179,108 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     );
 
     const handleStart = useCallback(async () => {
-      const operationGeneration = operationGenerationRef.current;
-      const operationIdentity = identityRef.current;
-      const isCurrent = () =>
-        operationGenerationRef.current === operationGeneration &&
-        identityRef.current === operationIdentity;
+      if (pendingStartTokenRef.current) return;
+      const startToken = {};
+      pendingStartTokenRef.current = startToken;
 
-      if (!isScreenRecordingSupported()) {
-        toast({
-          title: "Screen recording isn't available",
-          description: "Jack remains fully available without a recording.",
-        });
-        onEvent?.("unavailable");
-        setPhase("idle");
-        return;
-      }
-
-      let currentSession = getCachedTestSession();
-      if (!currentSession) {
-        const controller = new AbortController();
-        pendingSessionControllerRef.current = controller;
-        try {
-          currentSession = await loadCurrentTestSession(undefined, {
-            signal: controller.signal,
-            shouldCache: isCurrent,
-          });
-        } catch {
-          currentSession = null;
-        } finally {
-          if (pendingSessionControllerRef.current === controller) {
-            pendingSessionControllerRef.current = null;
-          }
-        }
-      }
-
-      if (!isCurrent()) return;
-      if (!currentSession || currentSession.status !== "active") {
-        onEvent?.("unavailable");
-        setPhase("idle");
-        return;
-      }
-
-      const sessionId = currentSession.id;
-      const includeMicrophone = currentSession.microphoneConsentState === "granted";
-      const service = new RecordingService({
-        onStop: (result) => {
-          if (isCurrent()) {
-            void handleUpload(
-              result,
-              sessionId,
-              operationGeneration,
-              operationIdentity,
-            );
-          }
-        },
-        onError: () => {
-          if (isCurrent()) {
-            void trackTestEvent("reliability_error", {
-              error_code: "recording_unavailable",
-            });
-          }
-        },
-      });
-      serviceRef.current = service;
       try {
-        await service.start(includeMicrophone);
-      } catch {
-        if (serviceRef.current === service) {
-          serviceRef.current = null;
+        const operationGeneration = operationGenerationRef.current;
+        const operationIdentity = identityRef.current;
+        const isCurrent = () =>
+          operationGenerationRef.current === operationGeneration &&
+          identityRef.current === operationIdentity;
+
+        if (!isScreenRecordingSupported()) {
+          toast({
+            title: "Screen recording isn't available",
+            description: "Jack remains fully available without a recording.",
+          });
+          onEvent?.("unavailable");
+          setPhase("idle");
+          return;
         }
+
+        let currentSession = getCachedTestSession();
+        if (!currentSession) {
+          const controller = new AbortController();
+          pendingSessionControllerRef.current = controller;
+          try {
+            currentSession = await loadCurrentTestSession(undefined, {
+              signal: controller.signal,
+              shouldCache: isCurrent,
+            });
+          } catch {
+            currentSession = null;
+          } finally {
+            if (pendingSessionControllerRef.current === controller) {
+              pendingSessionControllerRef.current = null;
+            }
+          }
+        }
+
         if (!isCurrent()) return;
-        onEvent?.("cancelled");
-        setPhase("idle");
-        return;
-      }
-
-      if (!isCurrent()) {
-        service.cancel();
-        if (serviceRef.current === service) {
-          serviceRef.current = null;
+        if (!currentSession || currentSession.status !== "active") {
+          onEvent?.("unavailable");
+          setPhase("idle");
+          return;
         }
-        return;
-      }
 
-      void trackTestEvent("recording_started", {
-        microphone_included: service.micIncluded,
-      });
-      onEvent?.("started");
-      setMicIncluded(service.micIncluded);
-      setIsPaused(false);
-      setShowBanner(true);
-      setPhase("recording");
+        const sessionId = currentSession.id;
+        const includeMicrophone =
+          currentSession.microphoneConsentState === "granted";
+        const service = new RecordingService({
+          onStop: (result) => {
+            if (isCurrent() && serviceRef.current === service) {
+              void handleUpload(
+                result,
+                sessionId,
+                operationGeneration,
+                operationIdentity,
+              );
+            }
+          },
+          onError: () => {
+            if (isCurrent() && serviceRef.current === service) {
+              void trackTestEvent("reliability_error", {
+                error_code: "recording_unavailable",
+              });
+            }
+          },
+        });
+        serviceRef.current = service;
+        try {
+          await service.start(includeMicrophone);
+        } catch {
+          if (serviceRef.current === service) {
+            serviceRef.current = null;
+          }
+          if (!isCurrent()) return;
+          onEvent?.("cancelled");
+          setPhase("idle");
+          return;
+        }
+
+        if (!isCurrent() || serviceRef.current !== service) {
+          service.cancel();
+          if (serviceRef.current === service) {
+            serviceRef.current = null;
+          }
+          return;
+        }
+
+        void trackTestEvent("recording_started", {
+          microphone_included: service.micIncluded,
+        });
+        onEvent?.("started");
+        setMicIncluded(service.micIncluded);
+        setIsPaused(false);
+        setShowBanner(true);
+        setPhase("recording");
+      } finally {
+        if (pendingStartTokenRef.current === startToken) {
+          pendingStartTokenRef.current = null;
+        }
+      }
     }, [handleUpload, onEvent, toast]);
 
     const handleCancelConsent = useCallback(() => {
