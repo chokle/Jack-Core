@@ -58,6 +58,24 @@ describe("RecordingService microphone boundary", () => {
     service.cancel();
   });
 
+  it("discards a display stream when cancellation happens during permission", async () => {
+    const pendingStream = stream();
+    let resolveDisplay!: (value: MediaStream) => void;
+    getDisplayMedia.mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolveDisplay = resolve;
+      }),
+    );
+    const service = new RecordingService();
+
+    const start = service.start();
+    service.cancel();
+    resolveDisplay(pendingStream);
+
+    await expect(start).rejects.toThrow("cancelled");
+    expect(pendingStream.getTracks()[0]?.stop).toHaveBeenCalledTimes(1);
+  });
+
   it("requests microphone only after an explicit true option", async () => {
     const service = new RecordingService();
     await service.start(true);
