@@ -180,11 +180,12 @@ async function feedbackPrivacyIsCurrent(feedback: FeedbackRow): Promise<boolean>
 
   const consent = await supabase
     .from("telemetry_consents")
-    .select("id,state")
+    .select("id,state,occurred_at,consent_sequence")
     .eq("actor_user_id", feedback.tester_user_id)
     .eq("pilot_id", feedback.pilot_id)
     .eq("scope", "telemetry")
     .order("occurred_at", { ascending: false })
+    .order("consent_sequence", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (consent.error) throw consent.error;
