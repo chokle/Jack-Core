@@ -151,6 +151,60 @@ describe("requirePilotAccess", () => {
   );
 
   it.each([
+    ["GET", "/api/testing/telemetry/context"],
+    ["GET", "/api/testing/telemetry/context/"],
+    ["GET", "/api/testing/telemetry/export"],
+    ["GET", "/api/testing/telemetry/export/"],
+    ["POST", "/api/testing/telemetry/withdraw"],
+    ["POST", "/api/testing/telemetry/withdraw/"],
+  ])(
+    "keeps former tester privacy action %s %s reachable without active membership",
+    async (method, path) => {
+      getAuth.mockReturnValue({ userId: "user_former_pilot" });
+
+      const res =
+        method === "POST"
+          ? await request(app).post(path).send({})
+          : await request(app).get(path);
+
+      expect(res.status).toBe(200);
+      expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+      expect(resolveIdentity).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["POST", "/api/testing/telemetry/consents"],
+    ["POST", "/api/testing/sessions/start"],
+    ["GET", "/api/videos"],
+  ])(
+    "does not broaden former tester access through %s %s",
+    async (method, path) => {
+      getAuth.mockReturnValue({ userId: "user_former_pilot" });
+      resolveActiveTesterScope.mockResolvedValue({
+        scope: null,
+        reason: "not_enrolled",
+      });
+      resolveIdentity.mockResolvedValue({
+        userId: "user_former_pilot",
+        email: "former@example.test",
+        name: "Former Tester",
+        isAdmin: false,
+        isPresentation: false,
+        classification: "resolved",
+      });
+
+      const res =
+        method === "POST"
+          ? await request(app).post(path).send({})
+          : await request(app).get(path);
+
+      expect(res.status).toBe(403);
+      expect(resolveActiveTesterScope).toHaveBeenCalledWith("user_former_pilot");
+    },
+  );
+
+  it.each([
     "/api/testing/reports/scopes",
     "/api/testing/reports/summary",
     "/api/testing/progress",
