@@ -67,6 +67,45 @@ beforeEach(() => {
   ];
 });
 
+describe("parked thought account attribution", () => {
+  it("binds a signed-in chat bookmark to its account actor", async () => {
+    const response = await request(app)
+      .post("/api/parking-lot")
+      .set("x-test-user", OWNER)
+      .send({
+        source: "chat",
+        unfinishedThought: "Remember this private thread",
+        context: [],
+      });
+
+    expect(response.status).toBe(201);
+    expect(fake.tables["parked_thoughts"]).toHaveLength(2);
+    expect(fake.tables["parked_thoughts"][1]).toMatchObject({
+      source: "chat",
+      actor_user_id: OWNER,
+    });
+  });
+
+  it("rejects a stale signed-in chat write after account deletion is fenced", async () => {
+    const fence = await fake.rpc("begin_telemetry_account_deletion", {
+      p_actor_user_id: OWNER,
+    });
+    expect(fence.error).toBeNull();
+
+    const response = await request(app)
+      .post("/api/parking-lot")
+      .set("x-test-user", OWNER)
+      .send({
+        source: "chat",
+        unfinishedThought: "Must not survive deletion",
+        context: [],
+      });
+
+    expect(response.status).not.toBe(201);
+    expect(fake.tables["parked_thoughts"]).toHaveLength(1);
+  });
+});
+
 describe("parked interview ownership", () => {
   it("lists the interview bookmark for its Clerk owner with manage permission", async () => {
     const response = await request(app)
