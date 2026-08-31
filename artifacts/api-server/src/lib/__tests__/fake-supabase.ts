@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * In-memory fake of the tiny slice of the Supabase JS client that memory-graph.ts
  * and distillation.ts use. It supports the chainable query-builder surface the
@@ -200,10 +202,322 @@ export class FakeSupabase {
     return new QueryBuilder(this, table);
   }
 
+  private telemetryActorHash(actorUserId: string): string {
+    return createHash("sha256").update(actorUserId, "utf8").digest("hex");
+  }
+
+  isTelemetryActorFenced(actorUserId: string): boolean {
+    const actorHash = this.telemetryActorHash(actorUserId);
+    return (this.tables["telemetry_account_deletion_fences"] ?? []).some(
+      (row) => row["actor_hash"] === actorHash,
+    );
+  }
+
+  private latestTelemetryConsent(
+    actorUserId: string,
+    organizationId: unknown,
+    pilotId: unknown,
+    scope: string,
+  ): Row | null {
+    const rows = (this.tables["telemetry_consents"] ?? []).filter(
+      (row) =>
+        row["actor_user_id"] === actorUserId &&
+        row["organization_id"] === organizationId &&
+        row["pilot_id"] === pilotId &&
+        row["scope"] === scope,
+    );
+    return rows
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) => {
+        const leftSequence = Number(left.row["consent_sequence"] ?? left.index);
+        const rightSequence = Number(right.row["consent_sequence"] ?? right.index);
+        return rightSequence - leftSequence;
+      })[0]?.row ?? null;
+  }
+
+  private telemetryConsentIsCurrent(
+    actorUserId: string,
+    organizationId: unknown,
+    pilotId: unknown,
+    scope: string,
+    consentId: unknown,
+  ): boolean {
+    const latest = this.latestTelemetryConsent(
+      actorUserId,
+      organizationId,
+      pilotId,
+      scope,
+    );
+    return latest?.["id"] === consentId && latest["state"] === "granted";
+  }
+
+  telemetryWriteError(table: string, row: Row): { message: string } | null {
+    const actorColumn =
+      table === "test_recordings" || table === "test_feedback"
+        ? "tester_user_id"
+        : "actor_user_id";
+    const actorUserId = String(row[actorColumn] ?? "");
+    if (
+      actorUserId &&
+      [
+        "telemetry_consents",
+        "telemetry_withdrawal_jobs",
+        "test_sessions",
+        "test_events",
+        "test_recordings",
+        "test_feedback",
+        "activity_ingest_failures",
+      ].includes(table) &&
+      this.isTelemetryActorFenced(actorUserId)
+    ) {
+      return { message: "account deletion is already in progress" };
+    }
+
+    const organizationId = row["organization_id"];
+    const pilotId = row["pilot_id"];
+    if (table === "test_sessions") {
+      if (
+        row["telemetry_status"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+          row["telemetry_consent_id"],
+        )
+      ) return { message: "telemetry consent is not current for session write" };
+      if (
+        row["screen_consent_state"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "screen",
+          row["screen_consent_id"],
+        )
+      ) return { message: "screen consent is not current for session write" };
+      if (
+        row["microphone_consent_state"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "microphone",
+          row["microphone_consent_id"],
+        )
+      ) return { message: "microphone consent is not current for session write" };
+    } else if (
+      table === "test_events" &&
+      row["redacted_at"] == null &&
+      !this.telemetryConsentIsCurrent(
+        actorUserId,
+        organizationId,
+        pilotId,
+        "telemetry",
+        row["consent_id"],
+      )
+    ) {
+      return { message: "telemetry consent is not current for event write" };
+    } else if (
+      table === "test_recordings" &&
+      organizationId != null &&
+      row["deletion_due_at"] == null
+    ) {
+      if (
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "screen",
+          row["screen_consent_id"],
+        )
+      ) return { message: "screen consent is not current for recording write" };
+      if (
+        row["microphone_consent_id"] != null &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "microphone",
+          row["microphone_consent_id"],
+        )
+      ) return { message: "microphone consent is not current for recording write" };
+    } else if (
+      table === "test_feedback" &&
+      pilotId != null &&
+      row["deletion_due_at"] == null
+    ) {
+      const session = (this.tables["test_sessions"] ?? []).find(
+        (candidate) => candidate["id"] === row["test_session_id"],
+      );
+      if (session) {
+        if (
+          session["actor_user_id"] !== actorUserId ||
+          !this.telemetryConsentIsCurrent(
+            actorUserId,
+            session["organization_id"],
+            session["pilot_id"],
+            "telemetry",
+            session["telemetry_consent_id"],
+          )
+        ) return { message: "telemetry consent is not current for feedback write" };
+      } else {
+        const latest = this.latestTelemetryConsent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+        );
+        if (latest?.["state"] !== "granted") {
+          return { message: "telemetry consent is not current for feedback write" };
+        }
+      }
+    } else if (
+      table === "activity_ingest_failures" &&
+      actorUserId &&
+      pilotId != null
+    ) {
+      const latest = this.latestTelemetryConsent(
+        actorUserId,
+        organizationId,
+        pilotId,
+        "telemetry",
+      );
+      if (latest?.["state"] !== "granted") {
+        return { message: "telemetry consent is not current for ingest-failure write" };
+      }
+    }
+    return null;
+  }
+
   async rpc(
     name: string,
     params: Record<string, unknown>,
   ): Promise<Result<unknown>> {
+    const rpcTable = `rpc:${name}`;
+    const injectedFailure = this.takeFailure(rpcTable, "insert");
+    if (injectedFailure) return { data: null, error: injectedFailure };
+
+    if (name === "append_telemetry_withdrawal") {
+      const actorUserId = String(params["p_actor_user_id"] ?? "");
+      const scopes = (params["p_scopes"] as string[] | undefined) ?? [];
+      const consentIds = (params["p_consent_ids"] as string[] | undefined) ?? [];
+      const jobId = String(params["p_job_id"] ?? "");
+      if (
+        !actorUserId ||
+        !jobId ||
+        scopes.length === 0 ||
+        scopes.length !== consentIds.length ||
+        new Set(scopes).size !== scopes.length ||
+        scopes.some((scope) => !["telemetry", "screen", "microphone"].includes(scope)) ||
+        (scopes.includes("telemetry") &&
+          (!scopes.includes("screen") || !scopes.includes("microphone")))
+      ) {
+        return { data: null, error: { message: "invalid telemetry withdrawal manifest" } };
+      }
+      if (this.isTelemetryActorFenced(actorUserId)) {
+        return { data: null, error: { message: "account deletion is already in progress" } };
+      }
+      const jobs = (this.tables["telemetry_withdrawal_jobs"] ??= []);
+      const consents = (this.tables["telemetry_consents"] ??= []);
+      if (
+        jobs.some((row) => row["id"] === jobId) ||
+        consentIds.some((id) => consents.some((row) => row["id"] === id))
+      ) {
+        return { data: null, error: { message: "duplicate withdrawal manifest" } };
+      }
+
+      const organizationId = params["p_organization_id"];
+      const pilotId = params["p_pilot_id"];
+      const epochConsentIds: Record<string, string[]> = {};
+      for (const scope of scopes) {
+        epochConsentIds[scope] = consents
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["organization_id"] === organizationId &&
+              row["pilot_id"] === pilotId &&
+              row["scope"] === scope &&
+              row["state"] === "granted",
+          )
+          .map((row) => String(row["id"]));
+      }
+
+      const now = new Date().toISOString();
+      jobs.push({
+        id: jobId,
+        actor_user_id: actorUserId,
+        organization_id: organizationId,
+        pilot_id: pilotId,
+        scopes: [...scopes],
+        consent_ids: [...consentIds],
+        epoch_consent_ids: epochConsentIds,
+        withdrawn_at: now,
+        consent_retained_until: params["p_consent_retained_until"],
+        deletion_due_at: params["p_deletion_due_at"],
+        status: "pending",
+        attempts: 0,
+        next_attempt_at: now,
+        created_at: now,
+        updated_at: now,
+      });
+      for (const [index, scope] of scopes.entries()) {
+        consents.push({
+          id: consentIds[index],
+          consent_sequence: consents.length + 1,
+          actor_user_id: actorUserId,
+          organization_id: organizationId,
+          pilot_id: pilotId,
+          scope,
+          state: "withdrawn",
+          privacy_notice_version: params["p_privacy_notice_version"],
+          consent_version: params["p_consent_version"],
+          source: "account_privacy",
+          occurred_at: now,
+          retained_until: params["p_consent_retained_until"],
+          created_at: now,
+        });
+      }
+
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: now, error: afterFailure }
+        : { data: now, error: null };
+    }
+
+    if (
+      name === "begin_telemetry_account_deletion" ||
+      name === "finish_telemetry_account_deletion"
+    ) {
+      const actorUserId = String(params["p_actor_user_id"] ?? "");
+      if (!actorUserId) {
+        return { data: null, error: { message: "invalid account deletion actor" } };
+      }
+      const fences = (this.tables["telemetry_account_deletion_fences"] ??= []);
+      const actorHash = this.telemetryActorHash(actorUserId);
+      const now = new Date().toISOString();
+      const existing = fences.find((row) => row["actor_hash"] === actorHash);
+      if (existing) existing["last_attempt_at"] = now;
+      else {
+        fences.push({
+          actor_hash: actorHash,
+          first_started_at: now,
+          last_attempt_at: now,
+        });
+      }
+      this.tables["telemetry_withdrawal_jobs"] = (
+        this.tables["telemetry_withdrawal_jobs"] ?? []
+      ).filter((row) => row["actor_user_id"] !== actorUserId);
+      if (name === "finish_telemetry_account_deletion") {
+        this.tables["telemetry_consents"] = (
+          this.tables["telemetry_consents"] ?? []
+        ).filter((row) => row["actor_user_id"] !== actorUserId);
+      }
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: null, error: afterFailure }
+        : { data: null, error: null };
+    }
     if (name === "match_knowledge_nodes") {
       const query = (params["query_embedding"] as number[]) ?? [];
       const category = params["filter_category"] as string;
@@ -474,6 +788,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private runInsert(): Result<unknown> {
+    for (const row of this.upsertRows) {
+      const guardError = this.db.telemetryWriteError(this.table, row);
+      if (guardError) return { data: null, error: guardError };
+    }
+
     // Referential integrity applies to the insert path too — several FK-bearing
     // tables (transcript_segments, interview_*) are written via `.insert()`.
     const fkError = this.checkForeignKeys();
@@ -484,6 +803,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let n = 0;
     for (const incoming of this.upsertRows) {
       const row: Row = { created_at: now, ...incoming };
+      if (this.table === "telemetry_consents") {
+        row["occurred_at"] = now;
+        row["created_at"] = now;
+        row["consent_sequence"] =
+          (this.db.tables["telemetry_consents"] ?? []).length + n + 1;
+      }
       if (row["id"] === undefined)
         row["id"] = `fake-${this.table}-${this.rows.length + n}`;
       this.rows.push(row);
@@ -497,6 +822,14 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private runUpdate(): Result<unknown> {
+    const candidates = this.rows
+      .filter((row) => this.matches(row))
+      .map((row) => ({ ...row, ...this.updateValues }));
+    for (const row of candidates) {
+      const guardError = this.db.telemetryWriteError(this.table, row);
+      if (guardError) return { data: null, error: guardError };
+    }
+
     const updated: Row[] = [];
     for (const r of this.rows) {
       if (!this.matches(r)) continue;
