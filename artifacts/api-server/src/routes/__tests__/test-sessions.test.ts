@@ -113,6 +113,52 @@ function withdrawTelemetryAfterNextInsert(tableName: string) {
   return withdrawConsentAfterNextInsert(tableName, "telemetry");
 }
 
+function completeSessionAfterNextEventInsert() {
+  const originalFrom = fake.from.bind(fake);
+  let completed = false;
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_events") return query;
+    const originalInsert = query.insert.bind(query);
+    query.insert = (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      const builder = originalInsert(rows);
+      const originalThen = builder.then.bind(builder);
+      builder.then = (
+        onfulfilled?: (result: unknown) => unknown,
+        onrejected?: (reason: unknown) => unknown,
+      ) =>
+        originalThen(
+          (result: unknown) => {
+            if (!completed) {
+              completed = true;
+              fake.tables.test_sessions[0]!.status = "completed";
+            }
+            return onfulfilled ? onfulfilled(result) : result;
+          },
+          onrejected,
+        );
+      return builder;
+    };
+    return query;
+  });
+}
+
+function completeSessionBeforeResumeUpdate() {
+  const originalFrom = fake.from.bind(fake);
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_sessions") return query;
+    const originalUpdate = query.update.bind(query);
+    query.update = (values: Record<string, unknown>) => {
+      if ("resumed_at" in values) {
+        fake.tables.test_sessions[0]!.status = "completed";
+      }
+      return originalUpdate(values);
+    };
+    return query;
+  });
+}
+
 beforeEach(() => {
   resetMocks();
   Object.assign(identity, {
@@ -169,6 +215,29 @@ describe("canonical user-test sessions", () => {
       "test_started",
       "test_resumed",
     ]);
+  });
+
+  it("does not resume a session completed after the active-session read", async () => {
+    const first = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const fromSpy = completeSessionBeforeResumeUpdate();
+    try {
+      const response = await request(app).post("/api/testing/sessions/start").send(startBody);
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain("pilot session changed");
+      expect(fake.tables.test_sessions).toHaveLength(1);
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        id: first.body.session.id,
+        status: "completed",
+        telemetry_status: "granted",
+      });
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+      expect(fake.tables.test_events.map((event) => event.event_type)).toEqual([
+        "test_started",
+      ]);
+    } finally {
+      fromSpy.mockRestore();
+    }
   });
 
   it("withdraws a newly inserted session when consent changes before its start event", async () => {
@@ -340,6 +409,59 @@ describe("canonical user-test sessions", () => {
         notification_last_error: "telemetry_consent_withdrawn",
         notification_next_attempt_at: null,
       });
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("redacts only the losing event after a normal terminal transition", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.test_feedback = [{
+      id: "16161616-1616-4616-8616-161616161616",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: started.body.session.id,
+      notification_status: "pending",
+    }];
+    const fromSpy = completeSessionAfterNextEventInsert();
+    try {
+      const response = await request(app)
+        .post(`/api/testing/sessions/${started.body.session.id}/events`)
+        .send({
+          eventId: "17171717-1717-4717-8717-171717171717",
+          eventType: "feature_viewed",
+          occurredAt: new Date().toISOString(),
+          appSessionId: APP_SESSION_ID,
+          metadata: { feature: "library" },
+          result: "success",
+          deviceCategory: "desktop",
+          schemaVersion: 1,
+        });
+
+      expect(response.status).toBe(409);
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "completed",
+        telemetry_status: "granted",
+      });
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+      const losingEvent = fake.tables.test_events.find(
+        (event) => event.event_id === "17171717-1717-4717-8717-171717171717",
+      );
+      expect(losingEvent).toMatchObject({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(
+        fake.tables.test_events.find((event) => event.event_type === "test_started")
+          ?.redacted_at,
+      ).toBeUndefined();
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        notification_status: "pending",
+      });
+      expect(fake.tables.test_feedback[0]?.deletion_due_at).toBeUndefined();
     } finally {
       fromSpy.mockRestore();
     }
