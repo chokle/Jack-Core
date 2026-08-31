@@ -20,6 +20,7 @@ vi.mock("../../lib/admin-auth.js", () => ({
 }));
 
 import { fake, resetMocks } from "../../lib/__tests__/mocks.js";
+import { runTelemetryWithdrawalSweep } from "../../lib/telemetry-withdrawal.js";
 import telemetryConsentRouter from "../telemetry-consent.js";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -64,6 +65,7 @@ beforeEach(() => {
     valid_until: null,
   }];
   fake.tables.telemetry_consents = [];
+  fake.tables.telemetry_withdrawal_jobs = [];
   fake.tables.test_sessions = [];
   fake.tables.test_events = [];
   fake.tables.test_recordings = [];
@@ -340,6 +342,84 @@ describe("telemetry consent", () => {
     expect(fake.tables.activity_report_runs).toHaveLength(1);
   });
 
+  it("durably retries cleanup after authoritative withdrawal survives a partial database failure", async () => {
+    fake.tables.telemetry_consents = [{
+      id: "77777777-7777-4777-8777-777777777777",
+      actor_user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      scope: "telemetry",
+      state: "granted",
+      retained_until: "2027-01-01T00:00:00.000Z",
+      occurred_at: "2026-01-01T00:00:00.000Z",
+    }];
+    fake.tables.test_sessions = [{
+      id: SESSION_ID,
+      actor_user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      status: "active",
+      telemetry_status: "granted",
+    }];
+    fake.tables.test_events = [{
+      event_id: "44444444-4444-4444-8444-444444444444",
+      actor_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      metadata: { feature: "ask_jack" },
+      correlation_id: "request-before-withdrawal",
+    }];
+    fake.failNext("test_events", "update", {
+      message: "deterministic post-consent cleanup failure",
+    });
+
+    const response = await request(app())
+      .post("/api/testing/telemetry/withdraw")
+      .send({ pilotId: PILOT_ID, scopes: ["telemetry"] });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toMatchObject({
+      cleanupPending: true,
+      withdrawalJobId: expect.any(String),
+    });
+    expect(fake.tables.telemetry_consents.at(-1)).toMatchObject({
+      state: "withdrawn",
+      scope: "microphone",
+    });
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "withdrawn",
+      telemetry_status: "withdrawn",
+    });
+    expect(fake.tables.test_events[0]).toMatchObject({
+      metadata: { feature: "ask_jack" },
+      correlation_id: "request-before-withdrawal",
+    });
+    expect(fake.tables.telemetry_withdrawal_jobs[0]).toMatchObject({
+      status: "retrying",
+      last_error: "deterministic post-consent cleanup failure",
+    });
+
+    fake.tables.telemetry_withdrawal_jobs[0]!.next_attempt_at =
+      "2020-01-01T00:00:00.000Z";
+    const sweep = await runTelemetryWithdrawalSweep();
+
+    expect(sweep).toEqual({ attempted: 1, completed: 1, pending: 0 });
+    expect(fake.tables.telemetry_withdrawal_jobs[0]).toMatchObject({
+      status: "completed",
+      completed_at: expect.any(String),
+      last_error: null,
+    });
+    expect(fake.tables.test_events[0]).toMatchObject({
+      metadata: {},
+      correlation_id: null,
+      request_id: null,
+      redacted_at: expect.any(String),
+      deletion_due_at: expect.any(String),
+    });
+
+    const secondSweep = await runTelemetryWithdrawalSweep();
+    expect(secondSweep).toEqual({ attempted: 0, completed: 0, pending: 0 });
+  });
+
   it("allows withdrawal from retained consent history after membership is inactive", async () => {
     fake.tables.pilot_memberships[0]!.active = false;
     fake.tables.telemetry_consents = [{
@@ -352,6 +432,24 @@ describe("telemetry consent", () => {
       retained_until: "2027-01-01T00:00:00.000Z",
       occurred_at: "2026-01-01T00:00:00.000Z",
     }];
+
+    const context = await request(app()).get("/api/testing/telemetry/context");
+    expect(context.status).toBe(200);
+    expect(context.body).toMatchObject({
+      enrolled: false,
+      scope: null,
+      privacyScopes: [
+        {
+          organizationId: ORGANIZATION_ID,
+          pilotId: PILOT_ID,
+          organizationName: "Org",
+          pilotName: "Pilot",
+          consents: {
+            telemetry: { state: "granted" },
+          },
+        },
+      ],
+    });
 
     const response = await request(app())
       .post("/api/testing/telemetry/withdraw")
