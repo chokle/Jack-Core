@@ -197,7 +197,7 @@ export async function deliverFeedbackNotification(
         throw new DeliveryError("feedback_recipient_not_configured", false);
       }
       const result = await sender(feedback, recipients, feedbackRecordUrl(feedback.id));
-      const { error: updateError } = await supabase
+      const { data: updated, error: updateError } = await supabase
         .from("test_feedback")
         .update({
           notification_status: "sent",
@@ -211,8 +211,17 @@ export async function deliverFeedbackNotification(
         })
         .eq("id", feedback.id)
         .in("notification_status", ["pending", "retrying"])
-        .is("deletion_due_at", null);
+        .is("deletion_due_at", null)
+        .select("id")
+        .maybeSingle();
       if (updateError) throw updateError;
+      if (!updated) {
+        logger.info(
+          { feedbackId: feedback.id },
+          "feedback notification result ignored after privacy state changed",
+        );
+        return "failed";
+      }
       logger.info(
         { feedbackId: feedback.id, notificationStatus: "sent", attempts },
         "feedback notification sent",
@@ -225,7 +234,7 @@ export async function deliverFeedbackNotification(
       const nextAttempt = retrying
         ? new Date(now.getTime() + retryDelayMs(attempts)).toISOString()
         : null;
-      const { error: updateError } = await supabase
+      const { data: updated, error: updateError } = await supabase
         .from("test_feedback")
         .update({
           notification_status: status,
@@ -237,12 +246,21 @@ export async function deliverFeedbackNotification(
         })
         .eq("id", feedback.id)
         .in("notification_status", ["pending", "retrying"])
-        .is("deletion_due_at", null);
+        .is("deletion_due_at", null)
+        .select("id")
+        .maybeSingle();
       if (updateError) {
         logger.error(
           { err: updateError, feedbackId: feedback.id, notificationStatus: status },
           "failed to record feedback notification state",
         );
+      }
+      if (!updated) {
+        logger.info(
+          { feedbackId: feedback.id },
+          "feedback notification failure ignored after privacy state changed",
+        );
+        return "failed";
       }
       logger.error(
         {
