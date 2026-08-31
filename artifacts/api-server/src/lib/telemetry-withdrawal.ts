@@ -158,6 +158,7 @@ async function updateRecordingsForSessions(
   actorUserId: string,
   sessionIds: string[],
   deletionDueAt: string,
+  withdrawnAt: string,
   microphoneOnly: boolean,
 ): Promise<void> {
   for (const sessionId of sessionIds) {
@@ -165,7 +166,8 @@ async function updateRecordingsForSessions(
       .from("test_recordings")
       .update({ deletion_due_at: deletionDueAt })
       .eq("tester_user_id", actorUserId)
-      .eq("test_session_id", sessionId);
+      .eq("test_session_id", sessionId)
+      .lte("created_at", withdrawnAt);
     if (microphoneOnly) {
       query = query.not("microphone_consent_id", "is", null);
     }
@@ -189,6 +191,7 @@ async function applyTelemetryWithdrawalCleanup(
     .update({ retained_until: consentRetainedUntil })
     .eq("actor_user_id", actorUserId)
     .eq("pilot_id", pilotId)
+    .lte("occurred_at", withdrawnAt)
     .lt("retained_until", consentRetainedUntil);
   if (consentHistory.error) throw consentHistory.error;
 
@@ -196,7 +199,8 @@ async function applyTelemetryWithdrawalCleanup(
     .from("test_sessions")
     .select("id")
     .eq("actor_user_id", actorUserId)
-    .eq("pilot_id", pilotId);
+    .eq("pilot_id", pilotId)
+    .lte("started_at", withdrawnAt);
   if (sessions.error) throw sessions.error;
   const sessionIds = (sessions.data ?? [])
     .map((row: Record<string, unknown>) => row["id"])
@@ -215,7 +219,8 @@ async function applyTelemetryWithdrawalCleanup(
         updated_at: withdrawnAt,
       })
       .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("started_at", withdrawnAt);
     if (sessionUpdate.error) throw sessionUpdate.error;
 
     const eventUpdate = await db
@@ -228,23 +233,32 @@ async function applyTelemetryWithdrawalCleanup(
         deletion_due_at: deletionDueAt,
       })
       .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("occurred_at", withdrawnAt);
     if (eventUpdate.error) throw eventUpdate.error;
 
     const failureDelete = await db
       .from("activity_ingest_failures")
       .delete()
       .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("created_at", withdrawnAt);
     if (failureDelete.error) throw failureDelete.error;
 
     const pilotRecordings = await db
       .from("test_recordings")
       .update({ deletion_due_at: deletionDueAt })
       .eq("tester_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("created_at", withdrawnAt);
     if (pilotRecordings.error) throw pilotRecordings.error;
-    await updateRecordingsForSessions(actorUserId, sessionIds, deletionDueAt, false);
+    await updateRecordingsForSessions(
+      actorUserId,
+      sessionIds,
+      deletionDueAt,
+      withdrawnAt,
+      false,
+    );
 
     const feedback = await db
       .from("test_feedback")
@@ -256,7 +270,8 @@ async function applyTelemetryWithdrawalCleanup(
         updated_at: withdrawnAt,
       })
       .eq("tester_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("created_at", withdrawnAt);
     if (feedback.error) throw feedback.error;
     return;
   }
@@ -275,7 +290,8 @@ async function applyTelemetryWithdrawalCleanup(
     .update(updates)
     .eq("actor_user_id", actorUserId)
     .eq("pilot_id", pilotId)
-    .eq("status", "active");
+    .eq("status", "active")
+    .lte("started_at", withdrawnAt);
   if (sessionUpdate.error) throw sessionUpdate.error;
 
   if (scopes.has("screen") || scopes.has("microphone")) {
@@ -284,7 +300,8 @@ async function applyTelemetryWithdrawalCleanup(
       .from("test_recordings")
       .update({ deletion_due_at: deletionDueAt })
       .eq("tester_user_id", actorUserId)
-      .eq("pilot_id", pilotId);
+      .eq("pilot_id", pilotId)
+      .lte("created_at", withdrawnAt);
     if (microphoneOnly) {
       pilotRecordings = pilotRecordings.not("microphone_consent_id", "is", null);
     }
@@ -294,6 +311,7 @@ async function applyTelemetryWithdrawalCleanup(
       actorUserId,
       sessionIds,
       deletionDueAt,
+      withdrawnAt,
       microphoneOnly,
     );
   }
@@ -413,12 +431,31 @@ export async function reconcileTelemetryWithdrawalJob(
   }
 }
 
+async function purgeExpiredWithdrawalJobs(now: string): Promise<number> {
+  const expired = await db
+    .from(WITHDRAWAL_JOB_TABLE)
+    .select("id")
+    .in("status", ["completed", "cancelled"])
+    .lt("retained_until", now)
+    .limit(WITHDRAWAL_JOB_BATCH_SIZE);
+  if (expired.error) throw expired.error;
+  const ids = (expired.data ?? [])
+    .map((row: Record<string, unknown>) => row["id"])
+    .filter((id: unknown): id is string => typeof id === "string");
+  if (ids.length === 0) return 0;
+  const removed = await db.from(WITHDRAWAL_JOB_TABLE).delete().in("id", ids);
+  if (removed.error) throw removed.error;
+  return ids.length;
+}
+
 export async function runTelemetryWithdrawalSweep(): Promise<{
   attempted: number;
   completed: number;
   pending: number;
+  expired: number;
 }> {
   const now = new Date().toISOString();
+  const expiredCount = await purgeExpiredWithdrawalJobs(now);
   const [due, expired] = await Promise.all([
     db
       .from(WITHDRAWAL_JOB_TABLE)
@@ -448,7 +485,7 @@ export async function runTelemetryWithdrawalSweep(): Promise<{
     if (result.status === "completed") completed += 1;
     else pending += 1;
   }
-  return { attempted: jobs.size, completed, pending };
+  return { attempted: jobs.size, completed, pending, expired: expiredCount };
 }
 
 export function startTelemetryWithdrawalWorker(): { stop: () => void } {
