@@ -281,7 +281,13 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
             .eq("telemetry_status", "granted")
             .eq("telemetry_consent_id", consent.id)
             .maybeSingle();
-    if (sessionFence.error) throw sessionFence.error;
+    if (sessionFence.error) {
+      const failedProjectionConsentFence = await enforceConsentFence();
+      if (failedProjectionConsentFence) {
+        return consentFenceResponse(failedProjectionConsentFence);
+      }
+      throw sessionFence.error;
+    }
 
     if (!sessionFence.data) {
       const missingSessionConsentFence = await enforceConsentFence();
