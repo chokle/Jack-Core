@@ -6,6 +6,9 @@ type NotificationState = "pending" | "sent" | "failed" | "retrying";
 
 interface FeedbackRow {
   id: string;
+  tester_user_id: string | null;
+  pilot_id: string | null;
+  test_session_id: string | null;
   tester_name: string | null;
   tester_trade: string | null;
   useful: "yes" | "partly" | "no";
@@ -154,6 +157,71 @@ function errorCode(error: unknown): { code: string; retryable: boolean } {
   return { code: "email_delivery_unexpected_error", retryable: true };
 }
 
+async function feedbackPrivacyIsCurrent(feedback: FeedbackRow): Promise<boolean> {
+  if (
+    !feedback.tester_user_id ||
+    !feedback.pilot_id ||
+    !feedback.test_session_id
+  ) {
+    return false;
+  }
+
+  // The obligation exists before the append-only withdrawal rows, so it closes
+  // the email race even during the small job-first -> consent-append window.
+  const withdrawal = await supabase
+    .from("telemetry_withdrawal_jobs")
+    .select("id")
+    .eq("actor_user_id", feedback.tester_user_id)
+    .eq("pilot_id", feedback.pilot_id)
+    .in("status", ["awaiting_consent", "pending", "processing", "retrying"])
+    .limit(1);
+  if (withdrawal.error) throw withdrawal.error;
+  if ((withdrawal.data ?? []).length > 0) return false;
+
+  const consent = await supabase
+    .from("telemetry_consents")
+    .select("id,state")
+    .eq("actor_user_id", feedback.tester_user_id)
+    .eq("pilot_id", feedback.pilot_id)
+    .eq("scope", "telemetry")
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (consent.error) throw consent.error;
+  if (!consent.data || consent.data.state !== "granted") return false;
+
+  const session = await supabase
+    .from("test_sessions")
+    .select("id,actor_user_id,pilot_id,telemetry_status,telemetry_consent_id,deletion_due_at")
+    .eq("id", feedback.test_session_id)
+    .eq("actor_user_id", feedback.tester_user_id)
+    .eq("pilot_id", feedback.pilot_id)
+    .maybeSingle();
+  if (session.error) throw session.error;
+  return Boolean(
+    session.data &&
+      session.data.telemetry_status === "granted" &&
+      session.data.telemetry_consent_id === consent.data.id &&
+      session.data.deletion_due_at == null,
+  );
+}
+
+async function suppressFeedbackNotification(feedbackId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const suppressed = await supabase
+    .from("test_feedback")
+    .update({
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+      updated_at: now,
+    })
+    .eq("id", feedbackId)
+    .in("notification_status", ["pending", "retrying"])
+    .is("deletion_due_at", null);
+  if (suppressed.error) throw suppressed.error;
+}
+
 export async function deliverFeedbackNotification(
   feedbackId: string,
   sender: FeedbackEmailSender = sendWithResend,
@@ -164,7 +232,7 @@ export async function deliverFeedbackNotification(
     const { data, error } = await supabase
       .from("test_feedback")
       .select(
-        "id,tester_name,tester_trade,useful,shortfall,additional,features_used,device_category,trigger,created_at,notification_status,notification_attempts,notification_next_attempt_at,deletion_due_at",
+        "id,tester_user_id,pilot_id,test_session_id,tester_name,tester_trade,useful,shortfall,additional,features_used,device_category,trigger,created_at,notification_status,notification_attempts,notification_next_attempt_at,deletion_due_at",
       )
       .eq("id", feedbackId)
       .maybeSingle();
@@ -181,6 +249,10 @@ export async function deliverFeedbackNotification(
     ) {
       return feedback.notification_status === "sent" ? "sent" : "failed";
     }
+    if (!(await feedbackPrivacyIsCurrent(feedback))) {
+      await suppressFeedbackNotification(feedback.id);
+      return "failed";
+    }
 
     const now = new Date();
     if (
@@ -195,6 +267,12 @@ export async function deliverFeedbackNotification(
       const recipients = configuredRecipients();
       if (recipients.length === 0) {
         throw new DeliveryError("feedback_recipient_not_configured", false);
+      }
+      // Re-check immediately before the irreversible external delivery. A
+      // withdrawal may have committed while recipient/config work was running.
+      if (!(await feedbackPrivacyIsCurrent(feedback))) {
+        await suppressFeedbackNotification(feedback.id);
+        return "failed";
       }
       const result = await sender(feedback, recipients, feedbackRecordUrl(feedback.id));
       const { data: updated, error: updateError } = await supabase
