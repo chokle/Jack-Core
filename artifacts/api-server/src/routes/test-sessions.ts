@@ -10,6 +10,7 @@ import {
   recordIngestFailure,
   resolveActiveTesterScope,
   validateCanonicalEventInput,
+  WITHDRAWAL_DELETION_DAYS,
   type CanonicalEventInput,
 } from "../lib/activity-telemetry.js";
 
@@ -124,6 +125,72 @@ async function activeSession(userId: string, pilotId: string) {
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+}
+
+function deletionDueAfterWithdrawal(): string {
+  return new Date(
+    Date.now() + WITHDRAWAL_DELETION_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+}
+
+async function telemetryConsentStillCurrent(
+  userId: string,
+  pilotId: string,
+  expectedConsentId: string,
+): Promise<boolean> {
+  const current = await latestConsent(userId, pilotId, "telemetry");
+  return currentConsentGranted(current) && current.id === expectedConsentId;
+}
+
+async function compensateTelemetryConsentRace(
+  userId: string,
+  pilotId: string,
+  sessionId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const deletionDueAt = deletionDueAfterWithdrawal();
+  const results = await Promise.all([
+    db
+      .from("test_sessions")
+      .update({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+        screen_consent_state: "withdrawn",
+        microphone_consent_state: "withdrawn",
+        recording_status: "withdrawn",
+        deletion_due_at: deletionDueAt,
+        updated_at: now,
+      })
+      .eq("id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("test_events")
+      .update({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: now,
+        deletion_due_at: deletionDueAt,
+      })
+      .eq("test_session_id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("activity_ingest_failures")
+      .delete()
+      .eq("test_session_id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("test_recordings")
+      .update({ deletion_due_at: deletionDueAt })
+      .eq("test_session_id", sessionId)
+      .eq("tester_user_id", userId)
+      .eq("pilot_id", pilotId),
+  ]);
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw failed.error;
 }
 
 async function expireSessionIfNeeded(
@@ -264,6 +331,22 @@ router.post("/testing/sessions/start", async (req, res) => {
         .select("*")
         .single();
       if (updated.error) throw updated.error;
+      if (
+        !(await telemetryConsentStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          telemetryConsent.id,
+        ))
+      ) {
+        await compensateTelemetryConsentRace(
+          identity.userId,
+          membership.scope.pilotId,
+          String(updated.data.id),
+        );
+        return res.status(409).json({
+          error: "Telemetry consent changed while the pilot session was starting.",
+        });
+      }
       await insertCanonicalEvent({
         req,
         actorUserId: identity.userId,
@@ -283,6 +366,22 @@ router.post("/testing/sessions/start", async (req, res) => {
           deviceCategory: validatedStart.value.deviceCategory,
         },
       });
+      if (
+        !(await telemetryConsentStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          telemetryConsent.id,
+        ))
+      ) {
+        await compensateTelemetryConsentRace(
+          identity.userId,
+          membership.scope.pilotId,
+          String(updated.data.id),
+        );
+        return res.status(409).json({
+          error: "Telemetry consent changed while the pilot session was starting.",
+        });
+      }
       return res.json({ session: publicSession(updated.data), resumed: true });
     }
 
@@ -326,9 +425,44 @@ router.post("/testing/sessions/start", async (req, res) => {
     if (inserted.error) {
       if ((inserted.error as { code?: string }).code === "23505") {
         const raced = await activeSession(identity.userId, membership.scope.pilotId);
-        if (raced.data) return res.json({ session: publicSession(raced.data), resumed: true });
+        if (raced.error) throw raced.error;
+        if (raced.data) {
+          if (
+            !(await telemetryConsentStillCurrent(
+              identity.userId,
+              membership.scope.pilotId,
+              telemetryConsent.id,
+            ))
+          ) {
+            await compensateTelemetryConsentRace(
+              identity.userId,
+              membership.scope.pilotId,
+              String(raced.data.id),
+            );
+            return res.status(409).json({
+              error: "Telemetry consent changed while the pilot session was starting.",
+            });
+          }
+          return res.json({ session: publicSession(raced.data), resumed: true });
+        }
       }
       throw inserted.error;
+    }
+    if (
+      !(await telemetryConsentStillCurrent(
+        identity.userId,
+        membership.scope.pilotId,
+        telemetryConsent.id,
+      ))
+    ) {
+      await compensateTelemetryConsentRace(
+        identity.userId,
+        membership.scope.pilotId,
+        String(inserted.data.id),
+      );
+      return res.status(409).json({
+        error: "Telemetry consent changed while the pilot session was starting.",
+      });
     }
     const event = await insertCanonicalEvent({
       req,
@@ -350,6 +484,22 @@ router.post("/testing/sessions/start", async (req, res) => {
       },
     });
     if (event.error) throw new Error(event.error);
+    if (
+      !(await telemetryConsentStillCurrent(
+        identity.userId,
+        membership.scope.pilotId,
+        telemetryConsent.id,
+      ))
+    ) {
+      await compensateTelemetryConsentRace(
+        identity.userId,
+        membership.scope.pilotId,
+        String(inserted.data.id),
+      );
+      return res.status(409).json({
+        error: "Telemetry consent changed while the pilot session was starting.",
+      });
+    }
     return res.status(201).json({ session: publicSession(inserted.data), resumed: false });
   } catch (error) {
     req.log.error({ err: error }, "Could not start pilot session");
