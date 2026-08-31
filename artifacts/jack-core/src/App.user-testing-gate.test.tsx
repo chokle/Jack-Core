@@ -351,6 +351,8 @@ const mockedLoadTelemetryContext = vi.mocked(testSessionService.loadTelemetryCon
 const mockedSaveTelemetryConsents = vi.mocked(testSessionService.saveTelemetryConsents);
 const mockedStartTestSession = vi.mocked(testSessionService.startTestSession);
 const mockedTrackTestEvent = vi.mocked(testSessionService.trackTestEvent);
+const mockedWithdrawTelemetry = vi.mocked(testSessionService.withdrawTelemetry);
+const mockedExportTelemetry = vi.mocked(testSessionService.exportTelemetry);
 
 async function renderAuthenticatedApp(path = "/app?test=true") {
   window.history.replaceState({}, "", path);
@@ -404,15 +406,46 @@ function storageWriteFailureForUserScope() {
 function resetServiceState() {
   testSessionServiceState.contextError = null;
   testSessionServiceState.currentSession = null;
-  testSessionServiceState.telemetryContext.session = null;
-  testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion = "privacy-v1";
-  testSessionServiceState.telemetryContext.consents.telemetry.consentVersion = "consent-v1";
+  const mutableContext = testSessionServiceState.telemetryContext as unknown as Record<string, unknown>;
+  delete mutableContext["privacyScopes"];
+  Object.assign(mutableContext, {
+    enrolled: true,
+    requiresPilotSelection: false,
+    scope: {
+      organizationId: "org-test-1",
+      pilotId: "pilot-test-1",
+      organizationName: "Unit Org",
+      pilotName: "Unit Pilot",
+    },
+    consents: {
+      telemetry: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      screen: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      microphone: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+    },
+    session: null,
+    privacyNoticeVersion: "privacy-v1",
+    consentVersion: "consent-v1",
+  });
   startFailuresRemaining.value = 0;
   mockedLoadCurrentSession.mockClear();
   mockedLoadTelemetryContext.mockClear();
   mockedSaveTelemetryConsents.mockClear();
   mockedStartTestSession.mockClear();
   mockedTrackTestEvent.mockClear();
+  mockedWithdrawTelemetry.mockClear();
+  mockedExportTelemetry.mockClear();
 }
 
 describe("user-testing gate transition", () => {
@@ -713,6 +746,70 @@ describe("user-testing gate transition", () => {
       expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
     });
     expect(localStorage.getItem(acceptedStorageKey(nextIdentity.userId))).toBeNull();
+  });
+
+  it("keeps export and withdrawal controls for a former tester's historical pilot", async () => {
+    localStorage.setItem(acceptedStorageKey(identity.userId), "true");
+    Object.assign(
+      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      {
+        enrolled: false,
+        requiresPilotSelection: false,
+        scope: null,
+        privacyScopes: [
+          {
+            organizationId: "org-history-1",
+            pilotId: "pilot-history-1",
+            organizationName: "Former Org",
+            pilotName: "Completed Pilot",
+            consents: {
+              telemetry: {
+                state: "granted",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              screen: {
+                state: "withdrawn",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              microphone: {
+                state: "withdrawn",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+            },
+          },
+        ],
+        consents: { telemetry: null, screen: null, microphone: null },
+        session: null,
+      },
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId("account-settings"));
+
+    const controls = await screen.findByTestId("telemetry-privacy-controls");
+    expect(within(controls).getByText("Completed Pilot")).toBeTruthy();
+    expect(within(controls).getByText("Former Org")).toBeTruthy();
+    fireEvent.click(within(controls).getByRole("button", { name: "Export telemetry" }));
+    expect(mockedExportTelemetry).toHaveBeenCalledTimes(1);
+
+    const historicalScope = within(
+      screen.getByTestId("telemetry-privacy-scope-pilot-history-1"),
+    );
+    fireEvent.click(
+      historicalScope.getByRole("button", { name: "Withdraw telemetry" }),
+    );
+
+    await waitFor(() => {
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
+        "pilot-history-1",
+        ["telemetry"],
+      );
+    });
+    expect(mockedLoadTelemetryContext.mock.calls.at(-1)?.[0]).toBeUndefined();
   });
 
   it("start with explicit active session records user testing acceptance", async () => {
