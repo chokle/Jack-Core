@@ -13,7 +13,6 @@ import {
 } from "../lib/activity-telemetry.js";
 import {
   activateTelemetryWithdrawalJob,
-  cancelTelemetryWithdrawalJob,
   enqueueTelemetryWithdrawalJob,
   reconcileTelemetryWithdrawalJob,
   type TelemetryWithdrawalScope,
@@ -447,19 +446,15 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     });
 
     const inserted = await db.from("telemetry_consents").insert(rows);
-    if (inserted.error) {
-      try {
-        await cancelTelemetryWithdrawalJob(
-          withdrawalJobId,
-          "authoritative_withdrawal_append_failed",
-        );
-      } catch (cancelError) {
-        req.log.error(
-          { err: cancelError, withdrawalJobId },
-          "Could not cancel an uncommitted telemetry withdrawal obligation",
-        );
-      }
-      throw inserted.error;
+    const appendReportedError = inserted.error;
+    if (appendReportedError) {
+      // A transport error can be ambiguous after the database commits. Never
+      // discard the only cleanup obligation here; the exact manifest verifier
+      // will either prove the rows landed or age out a truly absent append.
+      req.log.error(
+        { err: appendReportedError, withdrawalJobId },
+        "Telemetry withdrawal append result is ambiguous",
+      );
     }
 
     try {
@@ -474,9 +469,12 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
     }
 
     let cleanupPending = true;
+    let manifestCommitted = !appendReportedError;
     try {
       const reconciliation = await reconcileTelemetryWithdrawalJob(withdrawalJobId);
       cleanupPending = reconciliation.status !== "completed";
+      manifestCommitted =
+        manifestCommitted || reconciliation.manifestCommitted === true;
       if (reconciliation.error) {
         req.log.error(
           { err: reconciliation.error, withdrawalJobId },
@@ -490,11 +488,16 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       );
     }
 
-    return res.status(cleanupPending ? 202 : 200).json({
-      withdrawn: [...scopes],
+    const withdrawalPending = !manifestCommitted;
+    return res.status(cleanupPending || withdrawalPending ? 202 : 200).json({
+      withdrawn: manifestCommitted ? [...scopes] : [],
+      requestedWithdrawal: [...scopes],
       deletionDueAt:
-        scopes.has("telemetry") || scopes.has("screen") ? deletionDueAt : null,
+        manifestCommitted && (scopes.has("telemetry") || scopes.has("screen"))
+          ? deletionDueAt
+          : null,
       cleanupPending,
+      withdrawalPending,
       withdrawalJobId,
     });
   } catch (error) {
