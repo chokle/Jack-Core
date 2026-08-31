@@ -30,6 +30,7 @@ beforeEach(() => {
     "activity_ingest_failures",
     "activity_report_runs",
     "telemetry_consents",
+    "telemetry_withdrawal_jobs",
     "admin_access_audit",
     "test_feedback",
     "test_recordings",
