@@ -7,9 +7,13 @@ import {
   type UserTestFeedbackHandle,
 } from "./UserTestFeedback";
 import { markFeedbackFeature } from "@/lib/user-testing/feedback-service";
+import { trackTestEvent } from "@/lib/user-testing/test-session-service";
 
 const toast = vi.fn();
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/lib/user-testing/test-session-service", () => ({
+  trackTestEvent: vi.fn(),
+}));
 
 function renderFeedback(onContinue = vi.fn()) {
   const ref = createRef<UserTestFeedbackHandle>();
@@ -52,6 +56,7 @@ describe("UserTestFeedback", () => {
     localStorage.clear();
     sessionStorage.clear();
     toast.mockReset();
+    vi.mocked(trackTestEvent).mockReset().mockResolvedValue(null);
     vi.stubGlobal("fetch", vi.fn());
     Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value: 0 });
     window.matchMedia = vi.fn().mockReturnValue({ matches: false });
@@ -71,6 +76,68 @@ describe("UserTestFeedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
     await waitFor(() => expect(onContinue).toHaveBeenCalledOnce());
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a delayed submission after the signed-in identity changes", async () => {
+    let resolveSubmission!: (response: Response) => void;
+    let submissionSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation((_input, init) => {
+      submissionSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolve) => {
+        resolveSubmission = resolve;
+      });
+    });
+
+    const ref = createRef<UserTestFeedbackHandle>();
+    const userAContinue = vi.fn();
+    const userBContinue = vi.fn();
+    const { rerender } = render(
+      <UserTestFeedback
+        ref={ref}
+        consented
+        userId="user_a"
+        now={() => 100_000}
+        minimumSessionMs={0}
+        requestTimeoutMs={5_000}
+      />,
+    );
+
+    act(() => {
+      ref.current!.markFeature("ask_jack");
+      ref.current!.request("logout", userAContinue);
+    });
+    fillRequiredAnswers();
+    fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+
+    rerender(
+      <UserTestFeedback
+        ref={ref}
+        consented
+        userId="user_b"
+        now={() => 100_000}
+        minimumSessionMs={0}
+        requestTimeoutMs={5_000}
+      />,
+    );
+    expect(submissionSignal?.aborted).toBe(true);
+
+    act(() => {
+      ref.current!.markFeature("ask_jack");
+      ref.current!.request("logout", userBContinue);
+    });
+    expect(screen.getByRole("dialog", { name: "Before you go — how did Jack do?" })).toBeTruthy();
+
+    await act(async () => {
+      resolveSubmission(new Response(JSON.stringify({ id: "feedback-a" }), { status: 201 }));
+      await Promise.resolve();
+    });
+
+    expect(trackTestEvent).not.toHaveBeenCalled();
+    expect(userAContinue).not.toHaveBeenCalled();
+    expect(userBContinue).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Before you go — how did Jack do?" })).toBeTruthy();
   });
 
   it("Skip for now completes logout without submitting", async () => {
