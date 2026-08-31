@@ -365,6 +365,101 @@ describe("test session service", () => {
     expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
   });
 
+  it("fences a late identity-A flush from identity B's session and queue", async () => {
+    const sessionB = {
+      ...session,
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      appSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    };
+    const updatedB = { ...sessionB, onboardingStep: 2 };
+    let resolveA!: (response: Response) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveA = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: updatedB }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    setTelemetryIdentity("user-a");
+    cacheTestSession(session);
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("queued-a")]),
+    );
+    const flushA = flushTestEvents();
+
+    setTelemetryIdentity("user-b");
+    cacheTestSession(sessionB);
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([
+        queuedEvent("queued-b", {
+          sessionId: sessionB.id,
+          appSessionId: sessionB.appSessionId,
+        }),
+      ]),
+    );
+    await flushTestEvents();
+
+    resolveA(new Response(JSON.stringify({ session }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await flushA;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getCachedTestSession()).toEqual(updatedB);
+    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+  });
+
+  it("prevents a late event flush from restoring telemetry after withdrawal", async () => {
+    let resolveFlush!: (response: Response) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFlush = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ withdrawn: ["telemetry"], deletionDueAt: null }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    cacheTestSession(session);
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("queued-before-withdrawal")]),
+    );
+    const pendingFlush = flushTestEvents();
+    await withdrawTelemetry(session.pilotId);
+
+    resolveFlush(new Response(JSON.stringify({ session }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await pendingFlush;
+
+    expect(getCachedTestSession()).toBeNull();
+    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+  });
+
   it("clears the local session and pending queue immediately on withdrawal", async () => {
     cacheTestSession(session);
     const fetchMock = vi
