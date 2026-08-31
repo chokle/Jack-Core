@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rpc = vi.fn();
-const storageFrom = vi.fn();
-const remove = vi.fn();
-const list = vi.fn();
-const logInfo = vi.fn();
-const logError = vi.fn();
+const { rpc, storageFrom, remove, list, logInfo, logError } = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  storageFrom: vi.fn(),
+  remove: vi.fn(),
+  list: vi.fn(),
+  logInfo: vi.fn(),
+  logError: vi.fn(),
+}));
 
 vi.mock("../supabase.js", () => ({
   supabase: {
