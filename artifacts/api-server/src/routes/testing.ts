@@ -143,9 +143,10 @@ async function compensateRecordingConsentRace(input: {
     .from("jack-test-recordings")
     .remove([input.storagePath]);
 
-  if (marked.error) {
-    // If retention scheduling fails, roll back the just-created metadata row so
-    // no consent-revoked recording remains discoverable without a deletion date.
+  if (marked.error && !removed.error) {
+    // The object is gone, so rolling back the just-created metadata cannot
+    // orphan private storage. If object removal also failed, preserve the row
+    // and storage path for recovery instead of severing the only cleanup link.
     const deleted = await supabase
       .from("test_recordings")
       .delete()
@@ -153,6 +154,7 @@ async function compensateRecordingConsentRace(input: {
       .eq("tester_user_id", input.userId);
     if (deleted.error) throw marked.error;
   }
+  if (marked.error) throw marked.error;
   if (removed.error) throw removed.error;
 }
 
