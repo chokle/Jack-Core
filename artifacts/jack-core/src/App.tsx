@@ -51,6 +51,7 @@ import {
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
 import {
+  cacheTestSession,
   exportTelemetry,
   initializeTelemetryRetry,
   loadTelemetryContext,
@@ -603,6 +604,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
     telemetryContextUserIdRef.current = null;
     setTelemetryContext(null);
+    setTelemetryConsentOpen(false);
     void loadTelemetryContext()
       .then((context) => {
         if (cancelled) return;
@@ -656,7 +658,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
     const pilotId = context.scope.pilotId;
     const retryDelays = [500, 1_500, 3_000] as const;
+    const abortController = new AbortController();
     let cancelled = false;
+    let completed = false;
     let starting = false;
     let retryAttempt = 0;
     let retryTimer: number | undefined;
@@ -665,8 +669,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       if (cancelled || starting) return;
       starting = true;
       try {
-        const startedSession = await startTestSession(pilotId);
-        if (cancelled) return;
+        const startedSession = await startTestSession(pilotId, {
+          signal: abortController.signal,
+        });
+        if (cancelled) {
+          cacheTestSession(null);
+          return;
+        }
+        completed = true;
         setFeedbackSessionId(startedSession.id);
         setTelemetryContext({ ...context, session: startedSession });
       } catch {
@@ -695,6 +705,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
     const cancelBootstrap = () => {
       cancelled = true;
+      if (!completed) {
+        abortController.abort();
+        cacheTestSession(null);
+      }
       if (retryTimer !== undefined) {
         window.clearTimeout(retryTimer);
         retryTimer = undefined;
