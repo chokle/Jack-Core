@@ -234,6 +234,18 @@ async function compensateTelemetryConsentRace(
       .eq("test_session_id", sessionId)
       .eq("tester_user_id", userId)
       .eq("pilot_id", pilotId),
+    db
+      .from("test_feedback")
+      .update({
+        deletion_due_at: deletionDueAt,
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+        notification_next_attempt_at: null,
+        updated_at: now,
+      })
+      .eq("test_session_id", sessionId)
+      .eq("tester_user_id", userId)
+      .eq("pilot_id", pilotId),
   ]);
   const failed = results.find((result) => result.error);
   if (failed?.error) throw failed.error;
@@ -623,12 +635,6 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
   }
   try {
     if (!hasOnlyKeys(req.body ?? {}, EVENT_KEYS) || req.body?.schemaVersion !== 1) {
-      await recordIngestFailure({
-        actorUserId: identity.userId,
-        testSessionId: req.params.id,
-        reasonCode: "invalid_envelope",
-        outcome: "rejected",
-      });
       return res.status(400).json({ error: "Invalid activity-event envelope." });
     }
     const event: CanonicalEventInput = {
@@ -738,12 +744,6 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       .maybeSingle();
     if (session.error) throw session.error;
     if (!session.data) {
-      await recordIngestFailure({
-        actorUserId: identity.userId,
-        testSessionId: req.params.id,
-        reasonCode: "session_not_active",
-        outcome: "rejected",
-      });
       return res.status(404).json({ error: "Active pilot session not found" });
     }
     const pilotId = String(session.data.pilot_id);
@@ -752,14 +752,6 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
       !currentConsentGranted(consent) ||
       consent.id !== String(session.data.telemetry_consent_id)
     ) {
-      await recordIngestFailure({
-        actorUserId: identity.userId,
-        organizationId: session.data.organization_id,
-        pilotId: session.data.pilot_id,
-        testSessionId: session.data.id,
-        reasonCode: "consent_not_granted",
-        outcome: "rejected",
-      });
       return res.status(409).json({ error: "Telemetry consent is not active." });
     }
     const inserted = await insertCanonicalEvent({
@@ -779,6 +771,14 @@ router.post("/testing/sessions/:id/events", async (req, res) => {
         reasonCode: inserted.error,
         outcome: "rejected",
       });
+      if (!(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))) {
+        await compensateTelemetryConsentRace(
+          identity.userId,
+          pilotId,
+          String(session.data.id),
+        );
+        return res.status(409).json({ error: "Telemetry consent is not active." });
+      }
       return res.status(400).json({ error: "Activity event was rejected.", code: inserted.error });
     }
     if (!(await telemetryConsentStillCurrent(identity.userId, pilotId, consent.id))) {
