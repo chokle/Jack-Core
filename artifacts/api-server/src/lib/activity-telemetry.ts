@@ -206,6 +206,19 @@ export async function resolveActiveTesterScope(
   };
 }
 
+export async function activeTesterScopeMatches(
+  userId: string,
+  organizationId: string,
+  pilotId: string,
+): Promise<boolean> {
+  const membership = await resolveActiveTesterScope(userId, pilotId);
+  return Boolean(
+    membership.scope &&
+      membership.scope.organizationId === organizationId &&
+      membership.scope.pilotId === pilotId,
+  );
+}
+
 export async function latestConsent(
   userId: string,
   pilotId: string,
@@ -784,6 +797,7 @@ export async function recordServerAskJackEvent(input: {
   try {
     if (
       !input.actorIdentity ||
+      input.actorIdentity.isAdmin ||
       isUnavailableIdentity(input.actorIdentity) ||
       isPresentationIdentity(input.actorIdentity)
     ) {
@@ -805,11 +819,17 @@ export async function recordServerAskJackEvent(input: {
       .limit(2);
     if (sessions.error || sessions.data?.length !== 1) return;
     const session = sessions.data[0] as Record<string, any>;
-    const consent = await latestConsent(
-      actorUserId,
-      String(session.pilot_id),
-      "telemetry",
-    );
+    const pilotId = String(session.pilot_id);
+    if (
+      !(await activeTesterScopeMatches(
+        actorUserId,
+        String(session.organization_id),
+        pilotId,
+      ))
+    ) {
+      return;
+    }
+    const consent = await latestConsent(actorUserId, pilotId, "telemetry");
     if (
       !currentConsentGranted(consent) ||
       consent.id !== String(session.telemetry_consent_id)
@@ -839,7 +859,6 @@ export async function recordServerAskJackEvent(input: {
       },
     });
     if (result.error) return;
-    const pilotId = String(session.pilot_id);
     if (!(await exactTelemetryConsentStillCurrent(actorUserId, pilotId, consent.id))) {
       await compensateTelemetryWriteAfterWithdrawal(
         actorUserId,
