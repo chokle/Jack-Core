@@ -225,7 +225,12 @@ describe("TestingOverlay consent boundary", () => {
     const onEvent = vi.fn();
     const ref = createRef<TestingOverlayHandle>();
     const rendered = render(
-      <TestingOverlay ref={ref} identityKey="user-a" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-a"
+        ref={ref}
+        identityKey="user-a"
+        onEvent={onEvent}
+      />,
     );
 
     act(() => ref.current?.open());
@@ -257,7 +262,12 @@ describe("TestingOverlay consent boundary", () => {
     expect(uploadOptions.shouldFallback()).toBe(true);
 
     rendered.rerender(
-      <TestingOverlay ref={ref} identityKey="user-b" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-b"
+        ref={ref}
+        identityKey="user-b"
+        onEvent={onEvent}
+      />,
     );
 
     await waitFor(() => expect(uploadOptions.signal.aborted).toBe(true));
@@ -282,7 +292,12 @@ describe("TestingOverlay consent boundary", () => {
     const onEvent = vi.fn();
     const ref = createRef<TestingOverlayHandle>();
     const rendered = render(
-      <TestingOverlay ref={ref} identityKey="user-a" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-a"
+        ref={ref}
+        identityKey="user-a"
+        onEvent={onEvent}
+      />,
     );
 
     act(() => ref.current?.open());
@@ -299,7 +314,12 @@ describe("TestingOverlay consent boundary", () => {
     expect(loadOptions.shouldCache()).toBe(true);
 
     rendered.rerender(
-      <TestingOverlay ref={ref} identityKey="user-b" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-b"
+        ref={ref}
+        identityKey="user-b"
+        onEvent={onEvent}
+      />,
     );
 
     expect(loadOptions.signal.aborted).toBe(true);
@@ -332,7 +352,12 @@ describe("TestingOverlay consent boundary", () => {
     const onEvent = vi.fn();
     const ref = createRef<TestingOverlayHandle>();
     const rendered = render(
-      <TestingOverlay ref={ref} identityKey="user-a" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-a"
+        ref={ref}
+        identityKey="user-a"
+        onEvent={onEvent}
+      />,
     );
 
     act(() => ref.current?.open());
@@ -344,7 +369,12 @@ describe("TestingOverlay consent boundary", () => {
     expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
 
     rendered.rerender(
-      <TestingOverlay ref={ref} identityKey="user-b" onEvent={onEvent} />,
+      <TestingOverlay
+        key="user-b"
+        ref={ref}
+        identityKey="user-b"
+        onEvent={onEvent}
+      />,
     );
     await act(async () => {
       resolveStart?.();
