@@ -27,6 +27,7 @@ import testingRouter from "../testing.js";
 
 const ORGANIZATION_ID = "44444444-4444-4444-8444-444444444444";
 const PILOT_ID = "55555555-5555-4555-8555-555555555555";
+const TELEMETRY_CONSENT_ID = "99999999-9999-4999-8999-999999999999";
 const validBody = {
   feedbackId: "11111111-1111-4111-8111-111111111111",
   goal: "Find a safe procedure",
@@ -78,6 +79,25 @@ function scopeQuery(table: string): Record<string, unknown> | null {
     };
     return query;
   }
+  if (table === "telemetry_consents") {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => query,
+      maybeSingle: async () => ({
+        data: {
+          id: TELEMETRY_CONSENT_ID,
+          state: "granted",
+          privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+          consent_version: "jack-pilot-consent-2026-07-25",
+          occurred_at: "2026-07-25T00:00:00.000Z",
+        },
+        error: null,
+      }),
+    };
+    return query;
+  }
   return null;
 }
 
@@ -118,6 +138,8 @@ beforeEach(() => {
         id: validBody.sessionId,
         organization_id: ORGANIZATION_ID,
         pilot_id: PILOT_ID,
+        telemetry_status: "granted",
+        telemetry_consent_id: TELEMETRY_CONSENT_ID,
       },
       error: null,
     }),
@@ -166,6 +188,7 @@ describe("POST /api/testing/feedback", () => {
     expect(testSessionEq).toHaveBeenCalledWith("organization_id", ORGANIZATION_ID);
     expect(testSessionEq).toHaveBeenCalledWith("pilot_id", PILOT_ID);
     expect(testSessionEq).toHaveBeenCalledWith("status", "active");
+    expect(testSessionEq).toHaveBeenCalledWith("telemetry_status", "granted");
     expect(queueFeedbackNotification).toHaveBeenCalledWith(validBody.feedbackId);
   });
 
@@ -205,6 +228,84 @@ describe("POST /api/testing/feedback", () => {
     expect(queueFeedbackNotification).not.toHaveBeenCalled();
   });
 
+  it("suppresses feedback inserted after telemetry withdrawal", async () => {
+    const defaultImplementation = from.getMockImplementation();
+    let withdrawn = false;
+    let scheduledUpdate: Record<string, unknown> | null = null;
+    const completedQuery = () => {
+      const query = {
+        eq: () => query,
+        then: (
+          onfulfilled?: (result: { data: null; error: null }) => unknown,
+          onrejected?: (reason: unknown) => unknown,
+        ) =>
+          Promise.resolve({ data: null, error: null }).then(onfulfilled, onrejected),
+      };
+      return query;
+    };
+    from.mockImplementation((table: string) => {
+      if (table === "telemetry_consents") {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          order: () => query,
+          limit: () => query,
+          maybeSingle: async () => ({
+            data: {
+              id: withdrawn
+                ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                : TELEMETRY_CONSENT_ID,
+              state: withdrawn ? "withdrawn" : "granted",
+              privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+              consent_version: "jack-pilot-consent-2026-07-25",
+              occurred_at: withdrawn
+                ? "2026-07-26T00:00:00.000Z"
+                : "2026-07-25T00:00:00.000Z",
+            },
+            error: null,
+          }),
+        };
+        return query;
+      }
+      if (table === "test_feedback") {
+        return {
+          insert: () => ({
+            select: () => ({
+              single: async () => {
+                withdrawn = true;
+                return {
+                  data: {
+                    id: validBody.feedbackId,
+                    created_at: "2026-07-26T00:00:00.000Z",
+                  },
+                  error: null,
+                };
+              },
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => {
+            scheduledUpdate = payload;
+            return completedQuery();
+          },
+          delete: () => completedQuery(),
+        };
+      }
+      return defaultImplementation!(table);
+    });
+
+    const response = await request(app()).post("/api/testing/feedback").send(validBody);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ error: "Telemetry consent is not active." });
+    expect(scheduledUpdate).toMatchObject({
+      deletion_due_at: expect.any(String),
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+    });
+    expect(queueFeedbackNotification).not.toHaveBeenCalled();
+  });
+
   it("treats a retried feedback id as the same authoritative record", async () => {
     let feedbackCalls = 0;
     const testSessionQuery = {
@@ -215,6 +316,8 @@ describe("POST /api/testing/feedback", () => {
           id: validBody.sessionId,
           organization_id: ORGANIZATION_ID,
           pilot_id: PILOT_ID,
+          telemetry_status: "granted",
+          telemetry_consent_id: TELEMETRY_CONSENT_ID,
         },
         error: null,
       }),
