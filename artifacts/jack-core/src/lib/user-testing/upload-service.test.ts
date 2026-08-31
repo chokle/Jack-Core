@@ -63,6 +63,9 @@ describe("uploadTestRecording identity boundary", () => {
       metadata(),
       { signal: controller.signal },
     );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.signal).toBe(controller.signal);
     controller.abort();
 
     await expect(pending).resolves.toEqual({ status: "cancelled" });
