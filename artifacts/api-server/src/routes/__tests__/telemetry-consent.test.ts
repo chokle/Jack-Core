@@ -154,6 +154,69 @@ describe("telemetry consent", () => {
     });
   });
 
+  it("only exposes an active session bound to the exact latest telemetry grant", async () => {
+    const oldConsentId = "77777777-7777-4777-8777-777777777777";
+    const currentConsentId = "88888888-8888-4888-8888-888888888888";
+    fake.tables.telemetry_consents = [
+      {
+        id: oldConsentId,
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-consent-2026-07-25",
+        occurred_at: "2026-07-25T00:00:00.000Z",
+      },
+      {
+        id: currentConsentId,
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: "jack-pilot-privacy-2026-07-25",
+        consent_version: "jack-pilot-consent-2026-07-25",
+        occurred_at: "2026-07-26T00:00:00.000Z",
+      },
+    ];
+    fake.tables.test_sessions = [{
+      id: SESSION_ID,
+      actor_user_id: "tester-1",
+      organization_id: ORGANIZATION_ID,
+      pilot_id: PILOT_ID,
+      status: "active",
+      telemetry_status: "granted",
+      telemetry_consent_id: oldConsentId,
+      started_at: "2026-07-25T00:00:00.000Z",
+    }];
+
+    const stale = await request(app()).get(
+      `/api/testing/telemetry/context?pilotId=${PILOT_ID}`,
+    );
+    expect(stale.status).toBe(200);
+    expect(stale.body.session).toBeNull();
+
+    fake.tables.test_sessions[0]!.telemetry_consent_id = currentConsentId;
+    const exact = await request(app()).get(
+      `/api/testing/telemetry/context?pilotId=${PILOT_ID}`,
+    );
+    expect(exact.status).toBe(200);
+    expect(exact.body.session).toMatchObject({
+      id: SESSION_ID,
+      status: "active",
+      telemetryStatus: "granted",
+    });
+
+    fake.tables.test_sessions[0]!.telemetry_status = "withdrawn";
+    const withdrawn = await request(app()).get(
+      `/api/testing/telemetry/context?pilotId=${PILOT_ID}`,
+    );
+    expect(withdrawn.status).toBe(200);
+    expect(withdrawn.body.session).toBeNull();
+  });
+
   it("persists an explicit decline without creating a pilot session", async () => {
     const response = await request(app())
       .post("/api/testing/telemetry/consents")
