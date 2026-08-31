@@ -222,8 +222,9 @@ export class FakeSupabase {
     const rows = (this.tables["telemetry_consents"] ?? []).filter(
       (row) =>
         row["actor_user_id"] === actorUserId &&
-        row["organization_id"] === organizationId &&
-        row["pilot_id"] === pilotId &&
+        (row["organization_id"] === organizationId ||
+          row["organization_id"] == null) &&
+        (row["pilot_id"] === pilotId || row["pilot_id"] == null) &&
         row["scope"] === scope,
     );
     return rows
@@ -260,7 +261,12 @@ export class FakeSupabase {
     return latest?.["id"] === consentId && latest["state"] === "granted";
   }
 
-  telemetryWriteError(table: string, row: Row): { message: string } | null {
+  telemetryWriteError(
+    table: string,
+    row: Row,
+    operation: "insert" | "update",
+    previous?: Row,
+  ): { message: string } | null {
     const actorColumn =
       table === "test_recordings" || table === "test_feedback"
         ? "tester_user_id"
@@ -353,8 +359,35 @@ export class FakeSupabase {
       ) return { message: "microphone consent is not current for recording write" };
     } else if (
       table === "test_feedback" &&
+      organizationId != null &&
       pilotId != null &&
-      row["deletion_due_at"] == null
+      row["deletion_due_at"] == null &&
+      (operation === "insert" ||
+        previous == null ||
+        previous["tester_user_id"] !== row["tester_user_id"] ||
+        previous["organization_id"] !== row["organization_id"] ||
+        previous["pilot_id"] !== row["pilot_id"] ||
+        previous["test_session_id"] !== row["test_session_id"] ||
+        (previous["deletion_due_at"] != null && row["deletion_due_at"] == null) ||
+        [
+          "tester_email",
+          "tester_name",
+          "tester_profile_id",
+          "tester_trade",
+          "session_id",
+          "features_used",
+          "device_category",
+          "trigger",
+          "goal",
+          "useful",
+          "shortfall",
+          "adoption_need",
+          "additional",
+          "app_version",
+        ].some(
+          (column) =>
+            JSON.stringify(previous[column]) !== JSON.stringify(row[column]),
+        ))
     ) {
       const session = (this.tables["test_sessions"] ?? []).find(
         (candidate) => candidate["id"] === row["test_session_id"],
@@ -659,7 +692,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
   private updateValues: Row = {};
   private singleMode: "none" | "maybe" | "single" = "none";
-  private orderBy: { col: string; ascending: boolean } | null = null;
+  private orderBy: Array<{ col: string; ascending: boolean }> = [];
   private limitCount: number | null = null;
 
   constructor(
@@ -750,7 +783,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   order(col: string, opts: { ascending?: boolean } = {}): this {
-    this.orderBy = { col, ascending: opts.ascending ?? true };
+    this.orderBy.push({ col, ascending: opts.ascending ?? true });
     return this;
   }
 
@@ -834,7 +867,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
 
   private runInsert(): Result<unknown> {
     for (const row of this.upsertRows) {
-      const guardError = this.db.telemetryWriteError(this.table, row);
+      const guardError = this.db.telemetryWriteError(this.table, row, "insert");
       if (guardError) return { data: null, error: guardError };
     }
 
@@ -870,8 +903,14 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     const candidates = this.rows
       .filter((row) => this.matches(row))
       .map((row) => ({ ...row, ...this.updateValues }));
-    for (const row of candidates) {
-      const guardError = this.db.telemetryWriteError(this.table, row);
+    for (const [index, row] of candidates.entries()) {
+      const previous = this.rows.filter((candidate) => this.matches(candidate))[index];
+      const guardError = this.db.telemetryWriteError(
+        this.table,
+        row,
+        "update",
+        previous,
+      );
       if (guardError) return { data: null, error: guardError };
     }
 
@@ -891,12 +930,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let matched = this.rows
       .filter((r) => this.matches(r))
       .map((r) => ({ ...r }));
-    if (this.orderBy) {
-      const { col, ascending } = this.orderBy;
+    if (this.orderBy.length > 0) {
       const compareValues = (left: unknown, right: unknown): number => {
         if (left == null && right == null) return 0;
-        if (left == null) return ascending ? 1 : -1;
-        if (right == null) return ascending ? -1 : 1;
+        if (left == null) return 1;
+        if (right == null) return -1;
 
         if (typeof left === "number" && typeof right === "number") {
           return left - right;
@@ -925,8 +963,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       };
 
       matched = matched.sort((a, b) => {
-        const order = compareValues(a[col], b[col]);
-        return ascending ? order : -order;
+        for (const { col, ascending } of this.orderBy) {
+          const order = compareValues(a[col], b[col]);
+          if (order !== 0) return ascending ? order : -order;
+        }
+        return 0;
       });
     }
     if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
