@@ -143,6 +143,11 @@ export class FakeSupabase {
     op: string;
     error: { message: string };
   }> = [];
+  private injectedAfterFailures: Array<{
+    table: string;
+    op: string;
+    error: { message: string };
+  }> = [];
 
   failNext(
     table: string,
@@ -152,8 +157,17 @@ export class FakeSupabase {
     this.injectedFailures.push({ table, op, error });
   }
 
+  failAfterNext(
+    table: string,
+    op: "select" | "upsert" | "delete" | "update" | "insert",
+    error: { message: string },
+  ): void {
+    this.injectedAfterFailures.push({ table, op, error });
+  }
+
   clearFailures(): void {
     this.injectedFailures = [];
+    this.injectedAfterFailures = [];
   }
 
   takeFailure(table: string, op: string): { message: string } | null {
@@ -162,6 +176,14 @@ export class FakeSupabase {
     );
     if (index < 0) return null;
     return this.injectedFailures.splice(index, 1)[0]!.error;
+  }
+
+  takeAfterFailure(table: string, op: string): { message: string } | null {
+    const index = this.injectedAfterFailures.findIndex(
+      (failure) => failure.table === table && failure.op === op,
+    );
+    if (index < 0) return null;
+    return this.injectedAfterFailures.splice(index, 1)[0]!.error;
   }
 
   tables: Record<string, Row[]> = {
@@ -406,11 +428,18 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private run(): Result<unknown> {
     const injectedFailure = this.db.takeFailure(this.table, this.op);
     if (injectedFailure) return { data: null, error: injectedFailure };
-    if (this.op === "upsert") return this.runUpsert();
-    if (this.op === "insert") return this.runInsert();
-    if (this.op === "update") return this.runUpdate();
-    if (this.op === "delete") return this.runDelete();
-    return this.runSelect();
+
+    let result: Result<unknown>;
+    if (this.op === "upsert") result = this.runUpsert();
+    else if (this.op === "insert") result = this.runInsert();
+    else if (this.op === "update") result = this.runUpdate();
+    else if (this.op === "delete") result = this.runDelete();
+    else result = this.runSelect();
+
+    const injectedAfterFailure = this.db.takeAfterFailure(this.table, this.op);
+    return injectedAfterFailure
+      ? { data: result.data, error: injectedAfterFailure }
+      : result;
   }
 
   /**
