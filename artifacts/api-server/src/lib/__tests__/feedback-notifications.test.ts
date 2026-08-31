@@ -16,11 +16,18 @@ import {
 import { fake, resetMocks } from "./mocks.js";
 
 const FEEDBACK_ID = "11111111-1111-4111-8111-111111111111";
+const ACTOR_ID = "tester-feedback-1";
+const PILOT_ID = "22222222-2222-4222-8222-222222222222";
+const SESSION_ID = "33333333-3333-4333-8333-333333333333";
+const CONSENT_ID = "44444444-4444-4444-8444-444444444444";
 
 function seedFeedback() {
   fake.tables["test_feedback"] = [
     {
       id: FEEDBACK_ID,
+      tester_user_id: ACTOR_ID,
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
       tester_name: "Taylor Tester",
       tester_trade: "Electrical",
       useful: "partly",
@@ -45,6 +52,23 @@ afterEach(() => {
 beforeEach(() => {
   resetMocks();
   seedFeedback();
+  fake.tables["telemetry_withdrawal_jobs"] = [];
+  fake.tables["telemetry_consents"] = [{
+    id: CONSENT_ID,
+    actor_user_id: ACTOR_ID,
+    pilot_id: PILOT_ID,
+    scope: "telemetry",
+    state: "granted",
+    occurred_at: "2026-07-23T00:00:00.000Z",
+  }];
+  fake.tables["test_sessions"] = [{
+    id: SESSION_ID,
+    actor_user_id: ACTOR_ID,
+    pilot_id: PILOT_ID,
+    telemetry_status: "granted",
+    telemetry_consent_id: CONSENT_ID,
+    deletion_due_at: null,
+  }];
   process.env["PUBLIC_SITE_URL"] = "https://jack.example.test";
   process.env["FEEDBACK_NOTIFICATION_RECIPIENTS"] = "derek@example.test";
   delete process.env["RESEND_API_KEY"];
@@ -159,6 +183,56 @@ describe("feedback notification delivery", () => {
       notification_status: "pending",
       notification_attempts: 0,
       deletion_due_at: "2026-07-30T00:00:00.000Z",
+    });
+  });
+
+  it("suppresses pending feedback after consent append while cleanup is retrying", async () => {
+    fake.tables["telemetry_withdrawal_jobs"] = [{
+      id: "55555555-5555-4555-8555-555555555555",
+      actor_user_id: ACTOR_ID,
+      pilot_id: PILOT_ID,
+      status: "retrying",
+    }];
+    fake.tables["telemetry_consents"].push({
+      id: "66666666-6666-4666-8666-666666666666",
+      actor_user_id: ACTOR_ID,
+      pilot_id: PILOT_ID,
+      scope: "telemetry",
+      state: "withdrawn",
+      occurred_at: "2026-07-24T00:00:00.000Z",
+    });
+    const sender = vi.fn<FeedbackEmailSender>(async () => ({
+      messageId: "must-not-send",
+    }));
+
+    expect(await deliverFeedbackNotification(FEEDBACK_ID, sender)).toBe("failed");
+
+    expect(sender).not.toHaveBeenCalled();
+    expect(fake.tables["test_feedback"][0]).toMatchObject({
+      notification_status: "failed",
+      notification_attempts: 0,
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+      deletion_due_at: null,
+    });
+  });
+
+  it("suppresses delivery as soon as a withdrawal obligation is staged", async () => {
+    fake.tables["telemetry_withdrawal_jobs"] = [{
+      id: "77777777-7777-4777-8777-777777777777",
+      actor_user_id: ACTOR_ID,
+      pilot_id: PILOT_ID,
+      status: "awaiting_consent",
+    }];
+    const sender = vi.fn<FeedbackEmailSender>(async () => ({
+      messageId: "must-not-send",
+    }));
+
+    expect(await deliverFeedbackNotification(FEEDBACK_ID, sender)).toBe("failed");
+    expect(sender).not.toHaveBeenCalled();
+    expect(fake.tables["test_feedback"][0]).toMatchObject({
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
     });
   });
 
