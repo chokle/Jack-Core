@@ -348,7 +348,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const testStartOwnerRef = useRef<string | null>(null);
   const [testStartPending, setTestStartPending] = useState(false);
   const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
-  const telemetryContextUserIdRef = useRef<string | null>(null);
+  const activeTelemetryUserIdRef = useRef<string | null>(null);
+  const telemetryContextOwnerRef = useRef<string | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
@@ -488,10 +489,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     try {
       const session = await startTestSession(pilotId, {
         requestKey: requestUserId,
-        shouldCache: () => telemetryContextUserIdRef.current === requestUserId,
+        shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
       });
-      if (telemetryContextUserIdRef.current !== requestUserId) return;
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
 
+      telemetryContextOwnerRef.current = requestUserId;
       setFeedbackSessionId(session.id);
       setTelemetryContext((current) =>
         current ? { ...current, session } : current,
@@ -501,7 +503,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
       }, 0);
     } catch (error) {
-      if (telemetryContextUserIdRef.current === requestUserId) {
+      if (activeTelemetryUserIdRef.current === requestUserId) {
         window.alert(error instanceof Error ? error.message : "Test could not start. Please try again.");
       }
     } finally {
@@ -527,19 +529,21 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (!context) {
       try {
         context = await loadTelemetryContext(undefined, {
-          shouldCache: () => telemetryContextUserIdRef.current === requestUserId,
+          shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
         });
       } catch {
-        if (telemetryContextUserIdRef.current === requestUserId) {
+        if (activeTelemetryUserIdRef.current === requestUserId) {
           testingOverlayRef.current?.open();
         }
         return;
       }
-      if (telemetryContextUserIdRef.current !== requestUserId) return;
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
+      telemetryContextOwnerRef.current = requestUserId;
       setTelemetryContext(context);
     }
     if (
-      telemetryContextUserIdRef.current !== requestUserId ||
+      activeTelemetryUserIdRef.current !== requestUserId ||
+      telemetryContextOwnerRef.current !== requestUserId ||
       !context ||
       !context.enrolled ||
       !context.scope
@@ -558,7 +562,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       context.consents.telemetry.consentVersion === context.consentVersion
     ) {
       await launchTestSession(context.scope.pilotId);
-      if (telemetryContextUserIdRef.current === requestUserId) {
+      if (activeTelemetryUserIdRef.current === requestUserId) {
         testingOverlayRef.current?.open();
       }
       return;
@@ -603,6 +607,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (
       !requestUserId ||
       !consentScope ||
+      telemetryContextOwnerRef.current !== requestUserId ||
       (testStartPendingRef.current && testStartOwnerRef.current === requestUserId)
     ) {
       return;
@@ -619,8 +624,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         privacyNoticeVersion: consentContext.privacyNoticeVersion,
         consentVersion: consentContext.consentVersion,
       });
-      if (telemetryContextUserIdRef.current !== requestUserId) return;
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
 
+      telemetryContextOwnerRef.current = requestUserId;
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
       if (choices.telemetry !== "granted") {
@@ -629,7 +635,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         setTestingGate({ accepted: false, restricted: false });
       }
     } catch (error) {
-      if (telemetryContextUserIdRef.current === requestUserId) {
+      if (activeTelemetryUserIdRef.current === requestUserId) {
         window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
       }
     } finally {
@@ -646,34 +652,42 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   ) => {
     const requestUserId = me?.userId;
     const pilotId = telemetryContext?.scope?.pilotId;
-    if (!requestUserId || !pilotId) return;
+    if (
+      !requestUserId ||
+      !pilotId ||
+      telemetryContextOwnerRef.current !== requestUserId
+    ) {
+      return;
+    }
 
     try {
       await withdrawTelemetry(pilotId, scopes);
-      if (telemetryContextUserIdRef.current !== requestUserId) return;
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
 
       const context = await loadTelemetryContext(pilotId, {
-        shouldCache: () => telemetryContextUserIdRef.current === requestUserId,
+        shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
       });
-      if (telemetryContextUserIdRef.current === requestUserId) {
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        telemetryContextOwnerRef.current = requestUserId;
         setTelemetryContext(context);
       }
     } catch (error) {
-      if (telemetryContextUserIdRef.current === requestUserId) {
+      if (activeTelemetryUserIdRef.current === requestUserId) {
         window.alert(error instanceof Error ? error.message : "Consent could not be withdrawn.");
       }
     }
   };
 
   useEffect(() => {
-    telemetryContextUserIdRef.current = null;
+    activeTelemetryUserIdRef.current = null;
+    telemetryContextOwnerRef.current = null;
     setTelemetryContext(null);
     setTelemetryConsentOpen(false);
     if (!me) return;
 
     const contextUserId =
       me.isAdmin === false && me.userId ? me.userId : null;
-    telemetryContextUserIdRef.current = contextUserId;
+    activeTelemetryUserIdRef.current = contextUserId;
     setTelemetryIdentity(contextUserId);
     if (!contextUserId) return;
 
@@ -684,21 +698,22 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     void loadTelemetryContext(undefined, {
       signal: abortController.signal,
       shouldCache: () =>
-        !cancelled && telemetryContextUserIdRef.current === contextUserId,
+        !cancelled && activeTelemetryUserIdRef.current === contextUserId,
     })
       .then((context) => {
         if (
           cancelled ||
-          telemetryContextUserIdRef.current !== contextUserId
+          activeTelemetryUserIdRef.current !== contextUserId
         ) {
           return;
         }
+        telemetryContextOwnerRef.current = contextUserId;
         setTelemetryContext(context);
       })
       .catch(() => {
         if (
           !cancelled &&
-          telemetryContextUserIdRef.current === contextUserId
+          activeTelemetryUserIdRef.current === contextUserId
         ) {
           setTelemetryContext(null);
         }
@@ -716,7 +731,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       me?.isAdmin !== false ||
       !me?.userId ||
       !telemetryContext ||
-      telemetryContextUserIdRef.current !== me.userId
+      telemetryContextOwnerRef.current !== me.userId
     ) {
       return;
     }
@@ -724,6 +739,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     const context = telemetryContext;
     const session = context.session;
     if (session) {
+      setTelemetryConsentOpen(false);
       setFeedbackSessionId(session.id);
       if (session.onboardingStatus !== "completed") {
         window.setTimeout(() => {
@@ -733,7 +749,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       return;
     }
 
-    if (!context.enrolled || !context.scope) return;
+    if (!context.enrolled || !context.scope) {
+      setTelemetryConsentOpen(false);
+      return;
+    }
 
     const telemetryConsent = context.consents.telemetry;
     if (
@@ -745,6 +764,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       return;
     }
 
+    setTelemetryConsentOpen(false);
     if (telemetryConsent.state !== "granted") return;
 
     const contextUserId = me.userId;
@@ -766,15 +786,16 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           requestKey: contextUserId,
           shouldCache: () =>
             !cancelled &&
-            telemetryContextUserIdRef.current === contextUserId,
+            activeTelemetryUserIdRef.current === contextUserId,
         });
         if (
           cancelled ||
-          telemetryContextUserIdRef.current !== contextUserId
+          activeTelemetryUserIdRef.current !== contextUserId
         ) {
           return;
         }
         completed = true;
+        telemetryContextOwnerRef.current = contextUserId;
         setFeedbackSessionId(startedSession.id);
         setTelemetryContext({ ...context, session: startedSession });
       } catch {
