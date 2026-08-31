@@ -1,8 +1,11 @@
 import { Router } from "express";
 import { clerkClient, getAuth } from "@clerk/express";
 import { supabase } from "../lib/supabase.js";
-import { removeGraphSafe } from "../lib/jobs.js";
-import { withdrawMentor } from "../lib/memory-graph.js";
+import {
+  removeContributorGraph,
+  removeVideoGraph,
+  withdrawMentor,
+} from "../lib/memory-graph.js";
 import { removeVideoAssets } from "../lib/video-storage.js";
 
 const router = Router();
@@ -71,8 +74,9 @@ router.delete("/account", async (req, res) => {
     if (videoReadError) throw videoReadError;
     for (const row of videos ?? []) {
       const id = (row as Record<string, unknown>)["id"];
-      if (typeof id === "string") await removeGraphSafe(id);
+      if (typeof id === "string") await removeVideoGraph(id);
     }
+    await removeContributorGraph(userId);
     await removeVideoAssets((videos ?? []) as Array<Record<string, unknown>>);
     const { error: videoDeleteError } = await supabase.from("videos").delete().eq("uploader_user_id", userId);
     if (videoDeleteError) throw videoDeleteError;
@@ -87,6 +91,15 @@ router.delete("/account", async (req, res) => {
       if (typeof id === "string") await withdrawMentor(id);
     }
 
+    // withdrawMentor cascades sessions for owned profiles. This direct delete
+    // also covers contributor-owned sessions whose profile attribution was
+    // already nullable or scrubbed.
+    const { error: interviewSessionDeleteError } = await supabase
+      .from("interview_sessions")
+      .delete()
+      .eq("contributor_user_id", userId);
+    if (interviewSessionDeleteError) throw interviewSessionDeleteError;
+
     const { data: chats, error: chatReadError } = await supabase
       .from("chat_messages")
       .select("session_id")
@@ -97,7 +110,17 @@ router.delete("/account", async (req, res) => {
       const { error } = await supabase.from("parked_thoughts").delete().in("chat_session_id", sessionIds);
       if (error) throw error;
     }
-    const { error: chatDeleteError } = await supabase.from("chat_messages").delete().eq("user_id", userId);
+    // New parked rows carry a direct owner fence. Ambiguous legacy rows are not
+    // guessed from shared session ids and remain a separately authorized cleanup.
+    const { error: parkedOwnerDeleteError } = await supabase
+      .from("parked_thoughts")
+      .delete()
+      .eq("actor_user_id", userId);
+    if (parkedOwnerDeleteError) throw parkedOwnerDeleteError;
+    const { error: chatDeleteError } = await supabase
+      .from("chat_messages")
+      .delete()
+      .eq("user_id", userId);
     if (chatDeleteError) throw chatDeleteError;
 
     await deleteAccountRecordings(userId);
@@ -109,6 +132,8 @@ router.delete("/account", async (req, res) => {
     // requests before removing the Clerk identity. Aggregate snapshots contain
     // no participant identity and may remain only in genuinely de-identified form.
     const attributableDeletes = [
+      supabase.from("end_of_shift_closeouts").delete().eq("actor_user_id", userId),
+      supabase.from("pilot_access_handoffs").delete().eq("user_id", userId),
       supabase.from("activity_ingest_failures").delete().eq("actor_user_id", userId),
       supabase.from("test_events").delete().eq("actor_user_id", userId),
       supabase.from("admin_access_audit").delete().eq("actor_user_id", userId),
@@ -136,11 +161,21 @@ router.delete("/account", async (req, res) => {
       { p_actor_user_id: userId },
     );
     if (telemetryFinishError) throw telemetryFinishError;
+    const { error: membershipCreatorScrubError } = await supabase
+      .from("pilot_memberships")
+      .update({ created_by_user_id: null })
+      .eq("created_by_user_id", userId);
+    if (membershipCreatorScrubError) throw membershipCreatorScrubError;
     const { error: membershipDeleteError } = await supabase
       .from("pilot_memberships")
       .delete()
       .eq("user_id", userId);
     if (membershipDeleteError) throw membershipDeleteError;
+    const { error: platformRoleCreatorScrubError } = await supabase
+      .from("platform_roles")
+      .update({ created_by_user_id: null })
+      .eq("created_by_user_id", userId);
+    if (platformRoleCreatorScrubError) throw platformRoleCreatorScrubError;
     const { error: platformRoleDeleteError } = await supabase
       .from("platform_roles")
       .delete()
