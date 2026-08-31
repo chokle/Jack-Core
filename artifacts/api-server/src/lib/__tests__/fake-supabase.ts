@@ -412,6 +412,8 @@ export class FakeSupabase {
       if (session) {
         if (
           session["actor_user_id"] !== actorUserId ||
+          session["organization_id"] !== organizationId ||
+          session["pilot_id"] !== pilotId ||
           !this.telemetryConsentIsCurrent(
             actorUserId,
             session["organization_id"],
@@ -436,14 +438,41 @@ export class FakeSupabase {
       actorUserId &&
       pilotId != null
     ) {
-      const latest = this.latestTelemetryConsent(
-        actorUserId,
-        organizationId,
-        pilotId,
-        "telemetry",
-      );
-      if (latest?.["state"] !== "granted") {
-        return { message: "telemetry consent is not current for ingest-failure write" };
+      const sessionId = row["test_session_id"];
+      if (sessionId != null) {
+        const session = (this.tables["test_sessions"] ?? []).find(
+          (candidate) => candidate["id"] === sessionId,
+        );
+        if (
+          !session ||
+          session["actor_user_id"] !== actorUserId ||
+          session["organization_id"] !== organizationId ||
+          session["pilot_id"] !== pilotId ||
+          session["status"] !== "active" ||
+          !this.telemetryConsentIsCurrent(
+            actorUserId,
+            organizationId,
+            pilotId,
+            "telemetry",
+            session["telemetry_consent_id"],
+          )
+        ) {
+          return {
+            message: "telemetry consent is not current for ingest-failure write",
+          };
+        }
+      } else {
+        const latest = this.latestTelemetryConsent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+        );
+        if (latest?.["state"] !== "granted") {
+          return {
+            message: "telemetry consent is not current for ingest-failure write",
+          };
+        }
       }
     }
     return null;
