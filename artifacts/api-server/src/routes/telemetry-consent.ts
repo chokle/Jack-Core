@@ -224,9 +224,15 @@ async function currentContext(userId: string, requestedPilotId?: string | null) 
   };
 }
 
-async function withdrawalScope(userId: string, pilotId: string | null) {
-  const activeMembership = await resolveActiveTesterScope(userId, pilotId);
-  if (activeMembership.scope) return activeMembership.scope;
+async function withdrawalScope(
+  userId: string,
+  pilotId: string | null,
+  historicalOnly = false,
+) {
+  if (!historicalOnly) {
+    const activeMembership = await resolveActiveTesterScope(userId, pilotId);
+    if (activeMembership.scope) return activeMembership.scope;
+  }
   if (!pilotId) return null;
   const historicalConsent = await db
     .from("telemetry_consents")
@@ -261,7 +267,7 @@ router.get("/testing/telemetry/context", async (req, res) => {
         enrolled: false,
         requiresPilotSelection: false,
         scope: null,
-        privacyScopes: [],
+        privacyScopes: await historicalPrivacyScopes(identity.userId),
         consents: { telemetry: null, screen: null, microphone: null },
         session: null,
         privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
@@ -367,9 +373,6 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
         "Telemetry preferences are temporarily unavailable.",
       )
     ) return;
-    if (identity.isAdmin) {
-      return res.status(403).json({ error: "Pilot telemetry is unavailable for this account." });
-    }
     if (
       !req.body ||
       typeof req.body !== "object" ||
@@ -398,7 +401,13 @@ router.post("/testing/telemetry/withdraw", async (req, res) => {
       scopes.add("screen");
       scopes.add("microphone");
     }
-    const scope = await withdrawalScope(identity.userId, pilotId);
+    // Admin promotion never enables collection or new consent. It does not
+    // erase the person's right to act on consent history they own.
+    const scope = await withdrawalScope(
+      identity.userId,
+      pilotId,
+      identity.isAdmin,
+    );
     if (!scope) return res.status(404).json({ error: "Pilot consent history not found." });
 
     const now = new Date().toISOString();
@@ -506,8 +515,20 @@ router.get("/testing/telemetry/export", async (req, res) => {
         "Telemetry export is temporarily unavailable.",
       )
     ) return;
-    const [consents, sessions, events, failures, recordings, feedback] = await Promise.all([
+    const [
+      consents,
+      withdrawalJobs,
+      sessions,
+      events,
+      failures,
+      recordings,
+      feedback,
+    ] = await Promise.all([
       db.from("telemetry_consents").select("*").eq("actor_user_id", identity.userId),
+      db
+        .from("telemetry_withdrawal_jobs")
+        .select("id,organization_id,pilot_id,scopes,withdrawn_at,deletion_due_at,status,attempts,completed_at,created_at,updated_at")
+        .eq("actor_user_id", identity.userId),
       db.from("test_sessions").select("*").eq("actor_user_id", identity.userId),
       db.from("test_events").select("*").eq("actor_user_id", identity.userId),
       db.from("activity_ingest_failures").select("*").eq("actor_user_id", identity.userId),
@@ -520,9 +541,15 @@ router.get("/testing/telemetry/export", async (req, res) => {
         .select("id,session_id,test_session_id,features_used,device_category,trigger,goal,useful,shortfall,adoption_need,additional,status,created_at,updated_at,retained_until,deletion_due_at")
         .eq("tester_user_id", identity.userId),
     ]);
-    const failed = [consents, sessions, events, failures, recordings, feedback].find(
-      (result) => result.error,
-    );
+    const failed = [
+      consents,
+      withdrawalJobs,
+      sessions,
+      events,
+      failures,
+      recordings,
+      feedback,
+    ].find((result) => result.error);
     if (failed?.error) throw failed.error;
     res.setHeader("Content-Disposition", 'attachment; filename="jack-telemetry-export.json"');
     res.setHeader("Cache-Control", "no-store");
@@ -531,6 +558,7 @@ router.get("/testing/telemetry/export", async (req, res) => {
       notice:
         "Ask Jack conversation history is product data and is not duplicated in this optional telemetry export.",
       consents: consents.data ?? [],
+      withdrawalJobs: withdrawalJobs.data ?? [],
       sessions: sessions.data ?? [],
       events: events.data ?? [],
       ingestionFailures: failures.data ?? [],
