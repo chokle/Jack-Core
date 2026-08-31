@@ -4,6 +4,10 @@ import { supabase } from "./supabase.js";
 
 const db = supabase as unknown as {
   from: (table: string) => any;
+  rpc: (name: string, params: Record<string, unknown>) => Promise<{
+    data: unknown;
+    error: { message?: string } | null;
+  }>;
 };
 
 const WITHDRAWAL_JOB_TABLE = "telemetry_withdrawal_jobs";
@@ -23,9 +27,10 @@ export interface TelemetryWithdrawalJobInput {
   pilotId: string;
   scopes: TelemetryWithdrawalScope[];
   consentIds: string[];
-  withdrawnAt: string;
   consentRetainedUntil: string;
   deletionDueAt: string;
+  privacyNoticeVersion: string;
+  consentVersion: string;
 }
 
 export interface TelemetryWithdrawalReconcileResult {
@@ -65,71 +70,34 @@ function retryDelayMs(attempts: number): number {
   return Math.min(30_000 * 2 ** Math.max(0, attempts - 1), MAX_RETRY_DELAY_MS);
 }
 
-export async function enqueueTelemetryWithdrawalJob(
+export async function appendTelemetryWithdrawal(
   input: TelemetryWithdrawalJobInput,
-): Promise<void> {
+): Promise<string | null> {
   if (
     input.scopes.length === 0 ||
     input.scopes.length !== input.consentIds.length ||
-    input.scopes.some((scope) => !VALID_SCOPES.has(scope))
+    input.scopes.some((scope) => !VALID_SCOPES.has(scope)) ||
+    new Set(input.scopes).size !== input.scopes.length ||
+    (input.scopes.includes("telemetry") &&
+      (!input.scopes.includes("screen") || !input.scopes.includes("microphone")))
   ) {
     throw new Error("Invalid telemetry withdrawal cleanup obligation.");
   }
 
-  const inserted = await db.from(WITHDRAWAL_JOB_TABLE).insert({
-    id: input.id,
-    actor_user_id: input.actorUserId,
-    organization_id: input.organizationId,
-    pilot_id: input.pilotId,
-    scopes: input.scopes,
-    consent_ids: input.consentIds,
-    withdrawn_at: input.withdrawnAt,
-    consent_retained_until: input.consentRetainedUntil,
-    deletion_due_at: input.deletionDueAt,
-    status: "awaiting_consent",
-    attempts: 0,
-    next_attempt_at: input.withdrawnAt,
-    created_at: input.withdrawnAt,
-    updated_at: input.withdrawnAt,
+  const result = await db.rpc("append_telemetry_withdrawal", {
+    p_job_id: input.id,
+    p_actor_user_id: input.actorUserId,
+    p_organization_id: input.organizationId,
+    p_pilot_id: input.pilotId,
+    p_scopes: input.scopes,
+    p_consent_ids: input.consentIds,
+    p_consent_retained_until: input.consentRetainedUntil,
+    p_deletion_due_at: input.deletionDueAt,
+    p_privacy_notice_version: input.privacyNoticeVersion,
+    p_consent_version: input.consentVersion,
   });
-  if (inserted.error) throw inserted.error;
-}
-
-export async function activateTelemetryWithdrawalJob(jobId: string): Promise<void> {
-  const now = new Date().toISOString();
-  const activated = await db
-    .from(WITHDRAWAL_JOB_TABLE)
-    .update({
-      status: "pending",
-      next_attempt_at: now,
-      updated_at: now,
-      last_error: null,
-    })
-    .eq("id", jobId)
-    .eq("status", "awaiting_consent");
-  if (activated.error) throw activated.error;
-}
-
-export async function cancelTelemetryWithdrawalJob(
-  jobId: string,
-  reason: string,
-): Promise<void> {
-  const now = new Date().toISOString();
-  const cancelled = await db
-    .from(WITHDRAWAL_JOB_TABLE)
-    .update({
-      status: "cancelled",
-      completed_at: now,
-      retained_until: isoAfterMs(90 * 24 * 60 * 60 * 1000),
-      next_attempt_at: null,
-      lease_token: null,
-      lease_expires_at: null,
-      last_error: reason.slice(0, 500),
-      updated_at: now,
-    })
-    .eq("id", jobId)
-    .in("status", ["awaiting_consent", "pending", "retrying", "processing"]);
-  if (cancelled.error) throw cancelled.error;
+  if (result.error) throw result.error;
+  return typeof result.data === "string" ? result.data : null;
 }
 
 async function verifyCommittedWithdrawal(job: Record<string, unknown>): Promise<void> {
@@ -166,54 +134,79 @@ async function verifyCommittedWithdrawal(job: Record<string, unknown>): Promise<
   }
 }
 
+type ConsentEpochs = Record<TelemetryWithdrawalScope, string[]>;
+
+function epochIdsFromJob(job: Record<string, unknown>): ConsentEpochs | null {
+  const raw = job["epoch_consent_ids"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  return {
+    telemetry: stringArray(value["telemetry"]),
+    screen: stringArray(value["screen"]),
+    microphone: stringArray(value["microphone"]),
+  };
+}
+
+async function loadConsentEpochs(
+  job: Record<string, unknown>,
+): Promise<ConsentEpochs> {
+  const recorded = epochIdsFromJob(job);
+  if (recorded) return recorded;
+
+  // Defensive compatibility for an obligation staged before lineage snapshots
+  // existed. New obligations always carry epoch_consent_ids from the atomic RPC.
+  const epochs: ConsentEpochs = {
+    telemetry: [],
+    screen: [],
+    microphone: [],
+  };
+  for (const scope of stringArray(job["scopes"]) as TelemetryWithdrawalScope[]) {
+    const grants = await db
+      .from("telemetry_consents")
+      .select("id")
+      .eq("actor_user_id", job["actor_user_id"])
+      .eq("organization_id", job["organization_id"])
+      .eq("pilot_id", job["pilot_id"])
+      .eq("scope", scope)
+      .eq("state", "granted")
+      .lte("occurred_at", job["withdrawn_at"]);
+    if (grants.error) throw grants.error;
+    epochs[scope] = (grants.data ?? [])
+      .map((row: Record<string, unknown>) => row["id"])
+      .filter((id: unknown): id is string => typeof id === "string");
+  }
+  return epochs;
+}
+
 async function updateRecordingsForSessions(
   actorUserId: string,
   sessionIds: string[],
   deletionDueAt: string,
-  withdrawnAt: string,
-  microphoneOnly: boolean,
 ): Promise<void> {
-  for (const sessionId of sessionIds) {
-    let query = db
-      .from("test_recordings")
-      .update({ deletion_due_at: deletionDueAt })
-      .eq("tester_user_id", actorUserId)
-      .eq("test_session_id", sessionId)
-      .lte("created_at", withdrawnAt);
-    if (microphoneOnly) {
-      query = query.not("microphone_consent_id", "is", null);
-    }
-    const recordings = await query;
-    if (recordings.error) throw recordings.error;
-  }
+  if (sessionIds.length === 0) return;
+  const recordings = await db
+    .from("test_recordings")
+    .update({ deletion_due_at: deletionDueAt })
+    .eq("tester_user_id", actorUserId)
+    .in("test_session_id", sessionIds);
+  if (recordings.error) throw recordings.error;
 }
 
-async function stillCurrentPartialWithdrawals(
-  job: Record<string, unknown>,
-): Promise<Set<TelemetryWithdrawalScope>> {
-  const scopes = stringArray(job["scopes"]) as TelemetryWithdrawalScope[];
-  const consentIds = stringArray(job["consent_ids"]);
-  const current = new Set<TelemetryWithdrawalScope>();
-  for (const [index, scope] of scopes.entries()) {
-    if (scope === "telemetry") continue;
-    const latest = await db
-      .from("telemetry_consents")
-      .select("id,state")
-      .eq("actor_user_id", job["actor_user_id"])
-      .eq("pilot_id", job["pilot_id"])
-      .eq("scope", scope)
-      .order("occurred_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (latest.error) throw latest.error;
-    if (
-      latest.data?.id === consentIds[index] &&
-      latest.data?.state === "withdrawn"
-    ) {
-      current.add(scope);
-    }
-  }
-  return current;
+async function updateRecordingsForConsentIds(
+  actorUserId: string,
+  pilotId: string,
+  column: "screen_consent_id" | "microphone_consent_id",
+  consentIds: string[],
+  deletionDueAt: string,
+): Promise<void> {
+  if (consentIds.length === 0) return;
+  const recordings = await db
+    .from("test_recordings")
+    .update({ deletion_due_at: deletionDueAt })
+    .eq("tester_user_id", actorUserId)
+    .eq("pilot_id", pilotId)
+    .in(column, consentIds);
+  if (recordings.error) throw recordings.error;
 }
 
 async function applyTelemetryWithdrawalCleanup(
@@ -225,139 +218,161 @@ async function applyTelemetryWithdrawalCleanup(
   const deletionDueAt = String(job["deletion_due_at"]);
   const consentRetainedUntil = String(job["consent_retained_until"]);
   const scopes = new Set(stringArray(job["scopes"]));
+  const epochs = await loadConsentEpochs(job);
 
-  const consentHistory = await db
-    .from("telemetry_consents")
-    .update({ retained_until: consentRetainedUntil })
-    .eq("actor_user_id", actorUserId)
-    .eq("pilot_id", pilotId)
-    .lte("occurred_at", withdrawnAt)
-    .lt("retained_until", consentRetainedUntil);
-  if (consentHistory.error) throw consentHistory.error;
+  const consentHistoryIds = [
+    ...new Set([
+      ...stringArray(job["consent_ids"]),
+      ...epochs.telemetry,
+      ...epochs.screen,
+      ...epochs.microphone,
+    ]),
+  ];
+  if (consentHistoryIds.length > 0) {
+    const consentHistory = await db
+      .from("telemetry_consents")
+      .update({ retained_until: consentRetainedUntil })
+      .eq("actor_user_id", actorUserId)
+      .eq("pilot_id", pilotId)
+      .in("id", consentHistoryIds)
+      .lt("retained_until", consentRetainedUntil);
+    if (consentHistory.error) throw consentHistory.error;
+  }
 
-  const sessions = await db
-    .from("test_sessions")
-    .select("id")
-    .eq("actor_user_id", actorUserId)
-    .eq("pilot_id", pilotId)
-    .lte("started_at", withdrawnAt);
-  if (sessions.error) throw sessions.error;
-  const sessionIds = (sessions.data ?? [])
-    .map((row: Record<string, unknown>) => row["id"])
-    .filter((id: unknown): id is string => typeof id === "string");
+  let sessionIds: string[] = [];
+  if (epochs.telemetry.length > 0) {
+    const sessions = await db
+      .from("test_sessions")
+      .select("id")
+      .eq("actor_user_id", actorUserId)
+      .eq("pilot_id", pilotId)
+      .in("telemetry_consent_id", epochs.telemetry);
+    if (sessions.error) throw sessions.error;
+    sessionIds = (sessions.data ?? [])
+      .map((row: Record<string, unknown>) => row["id"])
+      .filter((id: unknown): id is string => typeof id === "string");
+  }
 
   if (scopes.has("telemetry")) {
-    const sessionUpdate = await db
-      .from("test_sessions")
-      .update({
-        status: "withdrawn",
-        telemetry_status: "withdrawn",
-        screen_consent_state: "withdrawn",
-        microphone_consent_state: "withdrawn",
-        recording_status: "withdrawn",
-        deletion_due_at: deletionDueAt,
-        updated_at: withdrawnAt,
-      })
-      .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId)
-      .lte("started_at", withdrawnAt);
-    if (sessionUpdate.error) throw sessionUpdate.error;
+    if (epochs.telemetry.length > 0) {
+      const sessionUpdate = await db
+        .from("test_sessions")
+        .update({
+          status: "withdrawn",
+          telemetry_status: "withdrawn",
+          screen_consent_state: "withdrawn",
+          microphone_consent_state: "withdrawn",
+          recording_status: "withdrawn",
+          deletion_due_at: deletionDueAt,
+          updated_at: withdrawnAt,
+        })
+        .eq("actor_user_id", actorUserId)
+        .eq("pilot_id", pilotId)
+        .in("telemetry_consent_id", epochs.telemetry);
+      if (sessionUpdate.error) throw sessionUpdate.error;
 
-    const eventUpdate = await db
-      .from("test_events")
-      .update({
-        metadata: {},
-        correlation_id: null,
-        request_id: null,
-        redacted_at: withdrawnAt,
-        deletion_due_at: deletionDueAt,
-      })
-      .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId)
-      // received_at is server-controlled. Client occurred_at may be skewed up
-      // to the accepted future window and must not escape withdrawal cleanup.
-      .lte("received_at", withdrawnAt);
-    if (eventUpdate.error) throw eventUpdate.error;
+      const eventUpdate = await db
+        .from("test_events")
+        .update({
+          metadata: {},
+          correlation_id: null,
+          request_id: null,
+          redacted_at: withdrawnAt,
+          deletion_due_at: deletionDueAt,
+        })
+        .eq("actor_user_id", actorUserId)
+        .eq("pilot_id", pilotId)
+        .in("consent_id", epochs.telemetry);
+      if (eventUpdate.error) throw eventUpdate.error;
+    }
 
-    const failureDelete = await db
-      .from("activity_ingest_failures")
-      .delete()
-      .eq("actor_user_id", actorUserId)
-      .eq("pilot_id", pilotId)
-      .lte("created_at", withdrawnAt);
-    if (failureDelete.error) throw failureDelete.error;
+    if (sessionIds.length > 0) {
+      const failureDelete = await db
+        .from("activity_ingest_failures")
+        .delete()
+        .eq("actor_user_id", actorUserId)
+        .eq("pilot_id", pilotId)
+        .in("test_session_id", sessionIds);
+      if (failureDelete.error) throw failureDelete.error;
+    }
 
-    const pilotRecordings = await db
-      .from("test_recordings")
-      .update({ deletion_due_at: deletionDueAt })
-      .eq("tester_user_id", actorUserId)
-      .eq("pilot_id", pilotId)
-      .lte("created_at", withdrawnAt);
-    if (pilotRecordings.error) throw pilotRecordings.error;
-    await updateRecordingsForSessions(
+    await updateRecordingsForSessions(actorUserId, sessionIds, deletionDueAt);
+    await updateRecordingsForConsentIds(
       actorUserId,
-      sessionIds,
+      pilotId,
+      "screen_consent_id",
+      epochs.screen,
       deletionDueAt,
-      withdrawnAt,
-      false,
+    );
+    await updateRecordingsForConsentIds(
+      actorUserId,
+      pilotId,
+      "microphone_consent_id",
+      epochs.microphone,
+      deletionDueAt,
     );
 
-    const feedback = await db
-      .from("test_feedback")
-      .update({
-        deletion_due_at: deletionDueAt,
-        notification_status: "failed",
-        notification_last_error: "telemetry_consent_withdrawn",
-        notification_next_attempt_at: null,
-        updated_at: withdrawnAt,
-      })
-      .eq("tester_user_id", actorUserId)
-      .eq("pilot_id", pilotId)
-      .lte("created_at", withdrawnAt);
-    if (feedback.error) throw feedback.error;
+    if (sessionIds.length > 0) {
+      const feedback = await db
+        .from("test_feedback")
+        .update({
+          deletion_due_at: deletionDueAt,
+          notification_status: "failed",
+          notification_last_error: "telemetry_consent_withdrawn",
+          notification_next_attempt_at: null,
+          updated_at: withdrawnAt,
+        })
+        .eq("tester_user_id", actorUserId)
+        .eq("pilot_id", pilotId)
+        .in("test_session_id", sessionIds);
+      if (feedback.error) throw feedback.error;
+    }
     return;
   }
 
-  const stillCurrent = await stillCurrentPartialWithdrawals(job);
-  const updates: Record<string, unknown> = { updated_at: withdrawnAt };
-  if (stillCurrent.has("screen")) {
-    updates["screen_consent_state"] = "withdrawn";
-    updates["recording_status"] = "withdrawn";
-  }
-  if (stillCurrent.has("microphone")) {
-    updates["microphone_consent_state"] = "withdrawn";
-    updates["recording_status"] = "withdrawn";
-  }
-  if (Object.keys(updates).length > 1) {
-    const sessionUpdate = await db
+  // Separate scope-specific compare-and-swap updates eliminate the read/update
+  // window: a session rebound to a new grant ID cannot match an old epoch ID.
+  if (scopes.has("screen") && epochs.screen.length > 0) {
+    const screenSessions = await db
       .from("test_sessions")
-      .update(updates)
+      .update({
+        screen_consent_state: "withdrawn",
+        recording_status: "withdrawn",
+        updated_at: withdrawnAt,
+      })
       .eq("actor_user_id", actorUserId)
       .eq("pilot_id", pilotId)
       .eq("status", "active")
-      .lte("started_at", withdrawnAt);
-    if (sessionUpdate.error) throw sessionUpdate.error;
+      .in("screen_consent_id", epochs.screen);
+    if (screenSessions.error) throw screenSessions.error;
+    await updateRecordingsForConsentIds(
+      actorUserId,
+      pilotId,
+      "screen_consent_id",
+      epochs.screen,
+      deletionDueAt,
+    );
   }
 
-  if (scopes.has("screen") || scopes.has("microphone")) {
-    const microphoneOnly = !scopes.has("screen");
-    let pilotRecordings = db
-      .from("test_recordings")
-      .update({ deletion_due_at: deletionDueAt })
-      .eq("tester_user_id", actorUserId)
+  if (scopes.has("microphone") && epochs.microphone.length > 0) {
+    const microphoneSessions = await db
+      .from("test_sessions")
+      .update({
+        microphone_consent_state: "withdrawn",
+        recording_status: "withdrawn",
+        updated_at: withdrawnAt,
+      })
+      .eq("actor_user_id", actorUserId)
       .eq("pilot_id", pilotId)
-      .lte("created_at", withdrawnAt);
-    if (microphoneOnly) {
-      pilotRecordings = pilotRecordings.not("microphone_consent_id", "is", null);
-    }
-    const recordings = await pilotRecordings;
-    if (recordings.error) throw recordings.error;
-    await updateRecordingsForSessions(
+      .eq("status", "active")
+      .in("microphone_consent_id", epochs.microphone);
+    if (microphoneSessions.error) throw microphoneSessions.error;
+    await updateRecordingsForConsentIds(
       actorUserId,
-      sessionIds,
+      pilotId,
+      "microphone_consent_id",
+      epochs.microphone,
       deletionDueAt,
-      withdrawnAt,
-      microphoneOnly,
     );
   }
 }
@@ -493,8 +508,10 @@ export async function reconcileTelemetryWithdrawalJob(
   const claimed = await claimJob(loaded.data);
   if (!claimed) return { status: "pending" };
 
+  let manifestVerified = false;
   try {
     await verifyCommittedWithdrawal(claimed);
+    manifestVerified = true;
     await applyTelemetryWithdrawalCleanup(claimed);
     await completeJob(claimed);
     return { status: "completed", manifestCommitted: true };
@@ -521,7 +538,7 @@ export async function reconcileTelemetryWithdrawalJob(
     }
     return {
       status: "pending",
-      manifestCommitted: !(error instanceof UncommittedWithdrawalManifestError),
+      manifestCommitted: manifestVerified,
       error: safeError(error),
     };
   }
