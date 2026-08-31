@@ -51,13 +51,20 @@ const startBody = {
   deviceCategory: "desktop",
 };
 
-function appendTelemetryWithdrawal(): void {
+type ConsentScope = "telemetry" | "screen" | "microphone";
+
+function appendConsentWithdrawal(scope: ConsentScope): void {
+  const ids: Record<ConsentScope, string> = {
+    telemetry: "abababab-abab-4bab-8bab-abababababab",
+    screen: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+    microphone: "efefefef-efef-4fef-8fef-efefefefefef",
+  };
   fake.tables.telemetry_consents.push({
-    id: "abababab-abab-4bab-8bab-abababababab",
+    id: ids[scope],
     actor_user_id: "tester-1",
     organization_id: ORGANIZATION_ID,
     pilot_id: PILOT_ID,
-    scope: "telemetry",
+    scope,
     state: "withdrawn",
     privacy_notice_version: "jack-pilot-privacy-2026-07-25",
     consent_version: "jack-pilot-consent-2026-07-25",
@@ -65,7 +72,14 @@ function appendTelemetryWithdrawal(): void {
   });
 }
 
-function withdrawTelemetryAfterNextInsert(tableName: string) {
+function appendTelemetryWithdrawal(): void {
+  appendConsentWithdrawal("telemetry");
+}
+
+function withdrawConsentAfterNextInsert(
+  tableName: string,
+  scope: ConsentScope,
+) {
   const originalFrom = fake.from.bind(fake);
   let withdrawn = false;
   return vi.spyOn(fake, "from").mockImplementation((table: string) => {
@@ -83,7 +97,7 @@ function withdrawTelemetryAfterNextInsert(tableName: string) {
           (result: unknown) => {
             if (!withdrawn) {
               withdrawn = true;
-              appendTelemetryWithdrawal();
+              appendConsentWithdrawal(scope);
             }
             return onfulfilled ? onfulfilled(result) : result;
           },
@@ -93,6 +107,10 @@ function withdrawTelemetryAfterNextInsert(tableName: string) {
     };
     return query;
   });
+}
+
+function withdrawTelemetryAfterNextInsert(tableName: string) {
+  return withdrawConsentAfterNextInsert(tableName, "telemetry");
 }
 
 beforeEach(() => {
@@ -136,6 +154,7 @@ beforeEach(() => {
   fake.tables.test_sessions = [];
   fake.tables.test_events = [];
   fake.tables.activity_ingest_failures = [];
+  fake.tables.test_feedback = [];
 });
 
 describe("canonical user-test sessions", () => {
@@ -173,6 +192,42 @@ describe("canonical user-test sessions", () => {
       fromSpy.mockRestore();
     }
   });
+
+  it.each(["screen", "microphone"] as const)(
+    "rejects a stale %s grant if it is withdrawn during session insert",
+    async (scope) => {
+      const screenConsent = fake.tables.telemetry_consents.find(
+        (consent) => consent.scope === "screen",
+      );
+      expect(screenConsent).toBeDefined();
+      screenConsent!.state = "granted";
+      if (scope === "microphone") {
+        const microphoneConsent = fake.tables.telemetry_consents.find(
+          (consent) => consent.scope === "microphone",
+        );
+        expect(microphoneConsent).toBeDefined();
+        microphoneConsent!.state = "granted";
+      }
+      const fromSpy = withdrawConsentAfterNextInsert("test_sessions", scope);
+      try {
+        const response = await request(app)
+          .post("/api/testing/sessions/start")
+          .send(startBody);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain("Telemetry consent changed");
+        expect(fake.tables.test_sessions[0]).toMatchObject({
+          status: "withdrawn",
+          telemetry_status: "withdrawn",
+          screen_consent_state: "withdrawn",
+          microphone_consent_state: "withdrawn",
+        });
+        expect(fake.tables.test_events).toHaveLength(0);
+      } finally {
+        fromSpy.mockRestore();
+      }
+    },
+  );
 
   it("redacts and schedules a start event when consent changes after its insert", async () => {
     const fromSpy = withdrawTelemetryAfterNextInsert("test_events");
@@ -238,6 +293,160 @@ describe("canonical user-test sessions", () => {
     expect(second.body.session.id).not.toBe(first.body.session.id);
     expect(fake.tables.test_sessions[0]!.status).toBe("expired");
     expect(fake.tables.test_events.map((event) => event.event_type)).toContain("test_expired");
+  });
+
+  it("redacts a foreground event inserted after telemetry withdrawal", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.test_feedback = [{
+      id: "12121212-1212-4212-8212-121212121212",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: started.body.session.id,
+      notification_status: "pending",
+    }];
+    const fromSpy = withdrawTelemetryAfterNextInsert("test_events");
+    try {
+      const response = await request(app)
+        .post(`/api/testing/sessions/${started.body.session.id}/events`)
+        .send({
+          eventId: "13131313-1313-4313-8313-131313131313",
+          eventType: "feature_viewed",
+          occurredAt: new Date().toISOString(),
+          appSessionId: APP_SESSION_ID,
+          metadata: { feature: "library" },
+          result: "success",
+          deviceCategory: "desktop",
+          schemaVersion: 1,
+        });
+
+      expect(response.status).toBe(409);
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+      });
+      const insertedEvent = fake.tables.test_events.find(
+        (event) => event.event_id === "13131313-1313-4313-8313-131313131313",
+      );
+      expect(insertedEvent).toMatchObject({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        deletion_due_at: expect.any(String),
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+        notification_next_attempt_at: null,
+      });
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("rejects duplicate projection after telemetry withdrawal", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const event = {
+      eventId: "14141414-1414-4414-8414-141414141414",
+      eventType: "feature_viewed",
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: { feature: "library" },
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+    };
+    expect(
+      (
+        await request(app)
+          .post(`/api/testing/sessions/${started.body.session.id}/events`)
+          .send(event)
+      ).status,
+    ).toBe(201);
+
+    appendTelemetryWithdrawal();
+    fake.tables.test_sessions[0]!.status = "withdrawn";
+    fake.tables.test_sessions[0]!.telemetry_status = "withdrawn";
+    const retry = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send(event);
+
+    expect(retry.status).toBe(409);
+    expect(fake.tables.test_sessions[0]!.status).toBe("withdrawn");
+    expect(
+      fake.tables.test_events.filter((row) => row.event_id === event.eventId),
+    ).toHaveLength(1);
+    expect(
+      fake.tables.test_events.find((row) => row.event_id === event.eventId),
+    ).toMatchObject({
+      redacted_at: expect.any(String),
+      deletion_due_at: expect.any(String),
+    });
+  });
+
+  it("rejects a conflicting payload that reuses an existing event id", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const event = {
+      eventId: "15151515-1515-4515-8515-151515151515",
+      eventType: "feature_viewed",
+      occurredAt: new Date().toISOString(),
+      appSessionId: APP_SESSION_ID,
+      metadata: { feature: "library" },
+      result: "success",
+      deviceCategory: "desktop",
+      schemaVersion: 1,
+    };
+    expect(
+      (
+        await request(app)
+          .post(`/api/testing/sessions/${started.body.session.id}/events`)
+          .send(event)
+      ).status,
+    ).toBe(201);
+
+    const conflict = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({ ...event, metadata: { feature: "memory_graph" } });
+
+    expect(conflict.status).toBe(400);
+    expect(conflict.body.code).toBe("idempotency_conflict");
+    expect(
+      fake.tables.test_events.filter((row) => row.event_id === event.eventId),
+    ).toHaveLength(1);
+  });
+
+  it("deletes an ingest-failure counter inserted after withdrawal", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    const fromSpy = withdrawTelemetryAfterNextInsert("activity_ingest_failures");
+    try {
+      const response = await request(app)
+        .post(`/api/testing/sessions/${started.body.session.id}/ingest-failures`)
+        .send({ reasonCode: "queue_overflow", eventCount: 2 });
+
+      expect(response.status).toBe(409);
+      expect(fake.tables.activity_ingest_failures).toHaveLength(0);
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+      });
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("does not persist an unscoped failure for an invalid withdrawn envelope", async () => {
+    const started = await request(app).post("/api/testing/sessions/start").send(startBody);
+    appendTelemetryWithdrawal();
+    fake.tables.test_sessions[0]!.status = "withdrawn";
+    fake.tables.test_sessions[0]!.telemetry_status = "withdrawn";
+
+    const response = await request(app)
+      .post(`/api/testing/sessions/${started.body.session.id}/events`)
+      .send({ schemaVersion: 2 });
+
+    expect(response.status).toBe(400);
+    expect(fake.tables.activity_ingest_failures).toHaveLength(0);
   });
 
   it("accepts minimized events and rejects raw content metadata", async () => {
