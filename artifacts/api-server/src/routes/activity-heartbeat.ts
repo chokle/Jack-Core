@@ -5,10 +5,12 @@ import { denyRestrictedIdentity } from "../lib/identity.js";
 import {
   activityDb as db,
   browserFamily,
+  compensateTelemetryWriteAfterWithdrawal,
   currentConsentGranted,
   latestConsent,
   RAW_EVENT_RETENTION_DAYS,
   TELEMETRY_SCHEMA_VERSION,
+  WITHDRAWAL_DELETION_DAYS,
 } from "../lib/activity-telemetry.js";
 
 const router = Router();
@@ -20,6 +22,45 @@ function retainedUntil(): string {
   return new Date(
     Date.now() + RAW_EVENT_RETENTION_DAYS * 86_400_000,
   ).toISOString();
+}
+
+function withdrawalDeletionDueAt(): string {
+  return new Date(
+    Date.now() + WITHDRAWAL_DELETION_DAYS * 86_400_000,
+  ).toISOString();
+}
+
+async function exactTelemetryConsentStillCurrent(
+  userId: string,
+  pilotId: string,
+  consentId: string,
+): Promise<boolean> {
+  const current = await latestConsent(userId, pilotId, "telemetry");
+  return currentConsentGranted(current) && current.id === consentId;
+}
+
+async function redactRejectedHeartbeat(input: {
+  eventId: string;
+  userId: string;
+  pilotId: string;
+  sessionId: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const redacted = await db
+    .from("test_events")
+    .update({
+      metadata: {},
+      correlation_id: null,
+      request_id: null,
+      redacted_at: now,
+      deletion_due_at: withdrawalDeletionDueAt(),
+    })
+    .eq("event_id", input.eventId)
+    .eq("event_type", "activity_heartbeat")
+    .eq("actor_user_id", input.userId)
+    .eq("pilot_id", input.pilotId)
+    .eq("test_session_id", input.sessionId);
+  if (redacted.error) throw redacted.error;
 }
 
 router.post("/testing/activity-heartbeat", async (req, res) => {
@@ -88,6 +129,7 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       .eq("actor_user_id", identity.userId)
       .eq("app_session_id", appSessionId)
       .eq("status", "active")
+      .eq("telemetry_status", "granted")
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -103,7 +145,10 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
       String(session.data.pilot_id),
       "telemetry",
     );
-    if (!currentConsentGranted(consent)) {
+    if (
+      !currentConsentGranted(consent) ||
+      consent.id !== String(session.data.telemetry_consent_id ?? "")
+    ) {
       return res
         .status(412)
         .json({ error: "Telemetry consent is not currently granted." });
@@ -145,13 +190,81 @@ router.post("/testing/activity-heartbeat", async (req, res) => {
     });
     if (inserted.error) throw inserted.error;
 
-    if (visibility === "foreground" && meaningfulActivity) {
-      const updated = await db
-        .from("test_sessions")
-        .update({ last_activity_at: now, updated_at: now })
-        .eq("id", session.data.id)
-        .eq("actor_user_id", identity.userId);
-      if (updated.error) throw updated.error;
+    const pilotId = String(session.data.pilot_id);
+    const organizationId = String(session.data.organization_id);
+    const testSessionId = String(session.data.id);
+    const exactConsentCurrent = () =>
+      exactTelemetryConsentStillCurrent(
+        identity.userId,
+        pilotId,
+        consent.id,
+      );
+    const compensateWithdrawal = () =>
+      compensateTelemetryWriteAfterWithdrawal(
+        identity.userId,
+        pilotId,
+        testSessionId,
+      );
+
+    if (!(await exactConsentCurrent())) {
+      await compensateWithdrawal();
+      return res
+        .status(412)
+        .json({ error: "Telemetry consent is not currently granted." });
+    }
+
+    const sessionFence =
+      visibility === "foreground" && meaningfulActivity
+        ? await db
+            .from("test_sessions")
+            .update({ last_activity_at: now, updated_at: now })
+            .eq("id", testSessionId)
+            .eq("actor_user_id", identity.userId)
+            .eq("organization_id", organizationId)
+            .eq("pilot_id", pilotId)
+            .eq("app_session_id", appSessionId)
+            .eq("status", "active")
+            .eq("telemetry_status", "granted")
+            .eq("telemetry_consent_id", consent.id)
+            .select("id")
+            .maybeSingle()
+        : await db
+            .from("test_sessions")
+            .select("id")
+            .eq("id", testSessionId)
+            .eq("actor_user_id", identity.userId)
+            .eq("organization_id", organizationId)
+            .eq("pilot_id", pilotId)
+            .eq("app_session_id", appSessionId)
+            .eq("status", "active")
+            .eq("telemetry_status", "granted")
+            .eq("telemetry_consent_id", consent.id)
+            .maybeSingle();
+    if (sessionFence.error) throw sessionFence.error;
+
+    if (!sessionFence.data) {
+      if (!(await exactConsentCurrent())) {
+        await compensateWithdrawal();
+        return res
+          .status(412)
+          .json({ error: "Telemetry consent is not currently granted." });
+      }
+      await redactRejectedHeartbeat({
+        eventId,
+        userId: identity.userId,
+        pilotId,
+        sessionId: testSessionId,
+      });
+      return res
+        .status(409)
+        .json({ error: "No active pilot session was found." });
+    }
+
+    if (!(await exactConsentCurrent())) {
+      await compensateWithdrawal();
+      return res
+        .status(412)
+        .json({ error: "Telemetry consent is not currently granted." });
     }
 
     return res.status(201).json({ accepted: true, eventId });
