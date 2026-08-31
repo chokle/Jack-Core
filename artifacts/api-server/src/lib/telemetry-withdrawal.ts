@@ -119,7 +119,7 @@ export async function cancelTelemetryWithdrawalJob(
       updated_at: now,
     })
     .eq("id", jobId)
-    .in("status", ["awaiting_consent", "pending", "retrying"]);
+    .in("status", ["awaiting_consent", "pending", "retrying", "processing"]);
   if (cancelled.error) throw cancelled.error;
 }
 
