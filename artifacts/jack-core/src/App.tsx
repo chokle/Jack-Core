@@ -653,10 +653,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleTelemetryWithdrawal = async (
+    pilotId: string,
     scopes: Array<"telemetry" | "screen" | "microphone">,
   ) => {
     const requestUserId = me?.userId;
-    const pilotId = telemetryContext?.scope?.pilotId;
     if (
       !requestUserId ||
       !pilotId ||
@@ -669,7 +669,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       await withdrawTelemetry(pilotId, scopes);
       if (activeTelemetryUserIdRef.current !== requestUserId) return;
 
-      const context = await loadTelemetryContext(pilotId, {
+      // Reload the user's canonical active scope plus the full identity-owned
+      // privacy list. A historical-pilot withdrawal must not replace a current
+      // enrollment with the deactivated pilot requested for cleanup.
+      const context = await loadTelemetryContext(undefined, {
         shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
       });
       if (activeTelemetryUserIdRef.current === requestUserId) {
@@ -895,6 +898,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     me?.userId && telemetryContextOwnerRef.current === me.userId
       ? telemetryContext
       : null;
+  const ownedTelemetryPrivacyScopes =
+    ownedTelemetryContext?.privacyScopes ??
+    (ownedTelemetryContext?.scope
+      ? [{
+        ...ownedTelemetryContext.scope,
+        consents: ownedTelemetryContext.consents,
+      }]
+      : []);
   const ownedTestingGate =
     me?.userId && testingGateOwnerRef.current === me.userId
       ? testingGate
@@ -1030,36 +1041,74 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               You control your participation. Ask Jack conversations are stored as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {ownedTelemetryContext?.scope && (
-            <div className="rounded-lg border border-border p-4">
+          {ownedTelemetryPrivacyScopes.length > 0 && (
+            <div
+              className="rounded-lg border border-border p-4"
+              data-testid="telemetry-privacy-controls"
+            >
               <p className="font-semibold">Pilot telemetry</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Export your activity data or withdraw consent. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
+                Export your activity data or withdraw consent. These privacy controls remain available after pilot participation ends. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={exportTelemetry}>Export telemetry</Button>
-                {ownedTelemetryContext.consents.microphone?.state === "granted" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTelemetryWithdrawal(["microphone"])}
+              <Button className="mt-3" variant="outline" onClick={exportTelemetry}>
+                Export telemetry
+              </Button>
+              <div className="mt-3 space-y-3">
+                {ownedTelemetryPrivacyScopes.map((privacyScope) => (
+                  <div
+                    key={privacyScope.pilotId}
+                    className="rounded-md border border-border/70 p-3"
+                    data-testid={`telemetry-privacy-scope-${privacyScope.pilotId}`}
                   >
-                    Withdraw microphone
-                  </Button>
-                )}
-                {ownedTelemetryContext.consents.screen?.state === "granted" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTelemetryWithdrawal(["screen"])}
-                  >
-                    Withdraw screen recording
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => void handleTelemetryWithdrawal(["telemetry"])}
-                >
-                  Withdraw telemetry
-                </Button>
+                    <p className="text-sm font-medium">
+                      {privacyScope.pilotName || "Pilot data"}
+                    </p>
+                    {privacyScope.organizationName && (
+                      <p className="text-xs text-muted-foreground">
+                        {privacyScope.organizationName}
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {privacyScope.consents.microphone?.state === "granted" && (
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            void handleTelemetryWithdrawal(
+                              privacyScope.pilotId,
+                              ["microphone"],
+                            )
+                          }
+                        >
+                          Withdraw microphone
+                        </Button>
+                      )}
+                      {privacyScope.consents.screen?.state === "granted" && (
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            void handleTelemetryWithdrawal(
+                              privacyScope.pilotId,
+                              ["screen"],
+                            )
+                          }
+                        >
+                          Withdraw screen recording
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void handleTelemetryWithdrawal(
+                            privacyScope.pilotId,
+                            ["telemetry"],
+                          )
+                        }
+                      >
+                        Withdraw telemetry
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
