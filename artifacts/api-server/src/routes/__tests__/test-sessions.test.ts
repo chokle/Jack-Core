@@ -13,7 +13,7 @@ const identity = vi.hoisted(() => ({
 
 vi.mock("../../lib/supabase.js", async () => {
   const mocks = await import("../../lib/__tests__/mocks.js");
-  return { supabase: { from: mocks.fake.from.bind(mocks.fake) } };
+  return { supabase: { from: (table: string) => mocks.fake.from(table) } };
 });
 vi.mock("../../lib/admin-auth.js", () => ({
   resolveIdentity: vi.fn(async () => ({ ...identity })),
@@ -195,6 +195,36 @@ describe("canonical user-test sessions", () => {
       });
       expect(fake.tables.test_events[0]?.redacted_at).toEqual(expect.any(String));
       expect(fake.tables.test_events[0]?.deletion_due_at).toEqual(expect.any(String));
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("redacts an expired-session event when withdrawal wins its insert race", async () => {
+    const first = await request(app).post("/api/testing/sessions/start").send(startBody);
+    fake.tables.test_sessions[0]!.expires_at = "2020-01-01T00:00:00.000Z";
+    const fromSpy = withdrawTelemetryAfterNextInsert("test_events");
+    try {
+      const response = await request(app).post("/api/testing/sessions/start").send(startBody);
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain("Telemetry consent changed");
+      expect(fake.tables.test_sessions).toHaveLength(2);
+      expect(fake.tables.test_sessions.every((session) => session.status === "withdrawn")).toBe(
+        true,
+      );
+      const expiredEvent = fake.tables.test_events.find(
+        (event) =>
+          event.test_session_id === first.body.session.id &&
+          event.event_type === "test_expired",
+      );
+      expect(expiredEvent).toMatchObject({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+      });
+      expect(expiredEvent?.redacted_at).toEqual(expect.any(String));
+      expect(expiredEvent?.deletion_due_at).toEqual(expect.any(String));
     } finally {
       fromSpy.mockRestore();
     }
