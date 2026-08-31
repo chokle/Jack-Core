@@ -67,6 +67,7 @@ beforeEach(() => {
   fake.tables.test_sessions = [];
   fake.tables.test_events = [];
   fake.tables.test_recordings = [];
+  fake.tables.test_feedback = [];
 });
 
 describe("telemetry consent", () => {
@@ -215,6 +216,22 @@ describe("telemetry consent", () => {
       tester_user_id: "tester-1",
       test_session_id: SESSION_ID,
     }];
+    fake.tables.test_feedback = [
+      {
+        id: "66666666-6666-4666-8666-666666666666",
+        tester_user_id: "tester-1",
+        pilot_id: PILOT_ID,
+        test_session_id: SESSION_ID,
+        notification_status: "pending",
+      },
+      {
+        id: "99999999-9999-4999-8999-999999999999",
+        tester_user_id: "tester-2",
+        pilot_id: PILOT_ID,
+        test_session_id: SESSION_ID,
+        notification_status: "pending",
+      },
+    ];
     fake.tables.activity_report_runs = [{
       id: "88888888-8888-4888-8888-888888888888",
       organization_id: ORGANIZATION_ID,
@@ -246,6 +263,17 @@ describe("telemetry consent", () => {
     expect(Date.parse(String(fake.tables.telemetry_consents[0]?.retained_until))).toBeGreaterThan(
       Date.now() + 23 * 30 * 24 * 60 * 60 * 1000,
     );
+    expect(fake.tables.test_feedback[0]).toMatchObject({
+      deletion_due_at: expect.any(String),
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+    });
+    expect(fake.tables.test_feedback[1]).toMatchObject({
+      tester_user_id: "tester-2",
+      notification_status: "pending",
+    });
+    expect(fake.tables.test_feedback[1]?.deletion_due_at).toBeUndefined();
     expect(fake.tables.activity_report_runs).toHaveLength(1);
   });
 
