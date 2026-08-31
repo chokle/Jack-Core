@@ -35,8 +35,13 @@ const loadCurrentTestSessionSpy = vi.fn(
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/user-testing/test-session-service", () => ({
   getCachedTestSession: () => state.cachedSession,
-  loadCurrentTestSession: (...args: unknown[]) =>
-    loadCurrentTestSessionSpy(...args),
+  loadCurrentTestSession: (
+    pilotId?: string,
+    options?: {
+      signal?: AbortSignal;
+      shouldCache?: () => boolean;
+    },
+  ) => loadCurrentTestSessionSpy(pilotId, options),
   trackTestEvent: vi.fn(),
 }));
 vi.mock("@/lib/user-testing/recording-service", () => ({
@@ -213,7 +218,7 @@ describe("TestingOverlay consent boundary", () => {
       | undefined;
     uploadTestRecordingSpy.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<{ status: "uploaded"; id: string }>((resolve) => {
           resolveUpload = resolve;
         }),
     );
@@ -270,7 +275,7 @@ describe("TestingOverlay consent boundary", () => {
       | undefined;
     loadCurrentTestSessionSpy.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<Record<string, unknown>>((resolve) => {
           resolveSession = resolve;
         }),
     );
@@ -321,7 +326,7 @@ describe("TestingOverlay consent boundary", () => {
     };
     let resolveStart: (() => void) | undefined;
     state.recordingStart = () =>
-      new Promise((resolve) => {
+      new Promise<void>((resolve) => {
         resolveStart = resolve;
       });
     const onEvent = vi.fn();
