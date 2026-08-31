@@ -1038,7 +1038,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button variant="outline" onClick={exportTelemetry}>Export telemetry</Button>
-                {telemetryContext.consents.microphone?.state === "granted" && (
+                {ownedTelemetryContext.consents.microphone?.state === "granted" && (
                   <Button
                     variant="outline"
                     onClick={() => void handleTelemetryWithdrawal(["microphone"])}
@@ -1046,7 +1046,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                     Withdraw microphone
                   </Button>
                 )}
-                {telemetryContext.consents.screen?.state === "granted" && (
+                {ownedTelemetryContext.consents.screen?.state === "granted" && (
                   <Button
                     variant="outline"
                     onClick={() => void handleTelemetryWithdrawal(["screen"])}
