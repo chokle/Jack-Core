@@ -460,6 +460,29 @@ router.post("/testing/sessions/start", async (req, res) => {
           error: "The pilot session changed while expiration was being recorded.",
         });
       }
+      if (
+        !(await consentSnapshotsStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          startConsents,
+        ))
+      ) {
+        const currentTelemetry = await latestConsent(
+          identity.userId,
+          membership.scope.pilotId,
+          "telemetry",
+        );
+        if (!currentConsentGranted(currentTelemetry)) {
+          await compensateTelemetryConsentRace(
+            identity.userId,
+            membership.scope.pilotId,
+            String(existing.data.id),
+          );
+        }
+        return res.status(409).json({
+          error: "Telemetry consent changed while the pilot session was starting.",
+        });
+      }
     }
     if (existing.data && !existingExpired) {
       if (!existingUsesCurrentConsent) {
@@ -712,6 +735,17 @@ router.post("/testing/sessions/start", async (req, res) => {
           return res.json({ session: publicSession(raced.data), resumed: true });
         }
       }
+      if (
+        !(await consentSnapshotsStillCurrent(
+          identity.userId,
+          membership.scope.pilotId,
+          startConsents,
+        ))
+      ) {
+        return res.status(409).json({
+          error: "Telemetry consent changed while the pilot session was starting.",
+        });
+      }
       throw inserted.error;
     }
     if (
@@ -827,8 +861,6 @@ router.get("/testing/sessions/current", async (req, res) => {
       return res.json({ session: null });
     }
 
-    // Re-read before exposing capture permissions. A consent mutation between
-    // the active-session read and this response must fail closed.
     const finalConsents = await loadConsentSnapshots(
       identity.userId,
       membership.scope.pilotId,
