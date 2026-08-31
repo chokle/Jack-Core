@@ -96,7 +96,7 @@ const upload = multer({
   },
 });
 
-function recordingDeletionDueAt(): string {
+function withdrawalDeletionDueAt(): string {
   return new Date(
     Date.now() + WITHDRAWAL_DELETION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
@@ -133,7 +133,7 @@ async function compensateRecordingConsentRace(input: {
   userId: string;
   storagePath: string;
 }): Promise<void> {
-  const deletionDueAt = recordingDeletionDueAt();
+  const deletionDueAt = withdrawalDeletionDueAt();
   const marked = await supabase
     .from("test_recordings")
     .update({ deletion_due_at: deletionDueAt })
@@ -206,6 +206,44 @@ function queueFeedbackAlert(req: Request, feedbackId: string): void {
   } catch (err) {
     req.log.error({ err, feedbackId }, "failed to enqueue feedback notification");
   }
+}
+
+async function telemetryConsentMatches(
+  userId: string,
+  pilotId: string,
+  expectedConsentId: string,
+): Promise<boolean> {
+  const consent = await latestConsent(userId, pilotId, "telemetry");
+  return currentConsentGranted(consent) && consent.id === expectedConsentId;
+}
+
+async function compensateFeedbackConsentRace(
+  feedbackId: string,
+  userId: string,
+  pilotId: string,
+): Promise<void> {
+  const scheduled = await supabase
+    .from("test_feedback")
+    .update({
+      deletion_due_at: withdrawalDeletionDueAt(),
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+    })
+    .eq("id", feedbackId)
+    .eq("tester_user_id", userId)
+    .eq("pilot_id", pilotId);
+  if (!scheduled.error) return;
+
+  // Roll back only the just-created feedback row when scheduling cannot be
+  // recorded; no external storage is involved, so this cannot orphan data.
+  const deleted = await supabase
+    .from("test_feedback")
+    .delete()
+    .eq("id", feedbackId)
+    .eq("tester_user_id", userId)
+    .eq("pilot_id", pilotId);
+  if (deleted.error) throw scheduled.error;
 }
 
 router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
@@ -296,18 +334,30 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     }
     const pilotSession = await db
       .from("test_sessions")
-      .select("id,organization_id,pilot_id")
+      .select("id,organization_id,pilot_id,telemetry_consent_id")
       .eq("id", sessionId)
       .eq("actor_user_id", identity.userId)
       .eq("organization_id", membership.scope.organizationId)
       .eq("pilot_id", membership.scope.pilotId)
       .eq("status", "active")
+      .eq("telemetry_status", "granted")
       .maybeSingle();
     if (pilotSession.error) throw pilotSession.error;
     if (!pilotSession.data) {
       return res.status(403).json({
         error: "An active owned pilot session is required to submit feedback.",
       });
+    }
+    const telemetryConsent = await latestConsent(
+      identity.userId,
+      membership.scope.pilotId,
+      "telemetry",
+    );
+    if (
+      !currentConsentGranted(telemetryConsent) ||
+      telemetryConsent.id !== String(pilotSession.data.telemetry_consent_id)
+    ) {
+      return res.status(409).json({ error: "Telemetry consent is not active." });
     }
 
     const { data: row, error } = await supabase
@@ -349,10 +399,38 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         if (!existing) {
           return res.status(409).json({ error: "Feedback id is already in use." });
         }
+        if (
+          !(await telemetryConsentMatches(
+            identity.userId,
+            membership.scope.pilotId,
+            telemetryConsent.id,
+          ))
+        ) {
+          await compensateFeedbackConsentRace(
+            String(existing.id),
+            identity.userId,
+            membership.scope.pilotId,
+          );
+          return res.status(409).json({ error: "Telemetry consent is not active." });
+        }
         queueFeedbackAlert(req, existing.id);
         return res.status(200).json({ id: existing.id, createdAt: existing.created_at });
       }
       throw error;
+    }
+    if (
+      !(await telemetryConsentMatches(
+        identity.userId,
+        membership.scope.pilotId,
+        telemetryConsent.id,
+      ))
+    ) {
+      await compensateFeedbackConsentRace(
+        String(row.id),
+        identity.userId,
+        membership.scope.pilotId,
+      );
+      return res.status(409).json({ error: "Telemetry consent is not active." });
     }
     queueFeedbackAlert(req, row.id);
     return res.status(201).json({ id: row.id, createdAt: row.created_at });
