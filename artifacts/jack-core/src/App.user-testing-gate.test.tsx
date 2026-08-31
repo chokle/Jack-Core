@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import * as testSessionService from "@/lib/user-testing/test-session-service";
 
@@ -417,6 +417,7 @@ function resetServiceState() {
 describe("user-testing gate transition", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     sessionStorage.clear();
     localStorage.clear();
     vi.clearAllMocks();
@@ -578,6 +579,57 @@ describe("user-testing gate transition", () => {
     expect(mockedStartTestSession).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps retrying automatic bootstrap beyond the initial backoff window", async () => {
+    vi.useFakeTimers();
+    startFailuresRemaining.value = 6;
+
+    await renderAuthenticatedApp("/app");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(80_000);
+    });
+
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(7);
+    expect(mockedStartTestSession.mock.calls[6]?.[1]?.requestKey).toBe(identity.userId);
+    vi.useRealTimers();
+  });
+
+  it("aborts the old identity bootstrap and starts a separately keyed request", async () => {
+    let firstSignal: AbortSignal | undefined;
+    mockedStartTestSession.mockImplementationOnce(
+      (_pilotId, options) =>
+        new Promise((_, reject) => {
+          firstSignal = options?.signal;
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+
+    const rendered = await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(mockedStartTestSession.mock.calls[0]?.[1]?.requestKey).toBe(
+      identityBase.userId,
+    );
+
+    const nextIdentity = {
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    };
+    setIdentity(nextIdentity);
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2));
+    expect(mockedStartTestSession.mock.calls[1]?.[1]?.requestKey).toBe(
+      nextIdentity.userId,
+    );
+  });
+
   it("aborts and clears an automatic bootstrap when telemetry is withdrawn", async () => {
     let bootstrapSignal: AbortSignal | undefined;
     mockedStartTestSession.mockImplementationOnce(
@@ -629,6 +681,29 @@ describe("user-testing gate transition", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("telemetry-consent-modal")).toBeNull();
     });
+  });
+
+  it("resets recording acceptance during a same-tab account switch", async () => {
+    localStorage.setItem(acceptedStorageKey(identity.userId), "true");
+    const rendered = await renderAuthenticatedApp("/app");
+
+    await waitFor(() => expect(userConsented()).toBe("true"));
+
+    const nextIdentity = {
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    };
+    setIdentity(nextIdentity);
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => {
+      expect(userConsented()).toBe("false");
+      expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
+    });
+    expect(localStorage.getItem(acceptedStorageKey(nextIdentity.userId))).toBeNull();
   });
 
   it("start with explicit active session records user testing acceptance", async () => {
