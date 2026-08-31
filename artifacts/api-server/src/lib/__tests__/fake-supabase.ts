@@ -229,6 +229,15 @@ export class FakeSupabase {
     return rows
       .map((row, index) => ({ row, index }))
       .sort((left, right) => {
+        const leftOccurredAt = Date.parse(String(left.row["occurred_at"] ?? ""));
+        const rightOccurredAt = Date.parse(String(right.row["occurred_at"] ?? ""));
+        if (
+          Number.isFinite(leftOccurredAt) &&
+          Number.isFinite(rightOccurredAt) &&
+          leftOccurredAt !== rightOccurredAt
+        ) {
+          return rightOccurredAt - leftOccurredAt;
+        }
         const leftSequence = Number(left.row["consent_sequence"] ?? left.index);
         const rightSequence = Number(right.row["consent_sequence"] ?? right.index);
         return rightSequence - leftSequence;
@@ -443,6 +452,41 @@ export class FakeSupabase {
           .map((row) => String(row["id"]));
       }
 
+      const sessionIds = new Set(
+        (this.tables["test_sessions"] ?? [])
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["pilot_id"] === pilotId,
+          )
+          .map((row) => row["id"]),
+      );
+      const epochRowIds = {
+        activity_ingest_failures: (this.tables["activity_ingest_failures"] ?? [])
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["pilot_id"] === pilotId,
+          )
+          .map((row) => String(row["id"])),
+        test_feedback: (this.tables["test_feedback"] ?? [])
+          .filter(
+            (row) =>
+              row["tester_user_id"] === actorUserId &&
+              (row["pilot_id"] === pilotId ||
+                sessionIds.has(row["test_session_id"])),
+          )
+          .map((row) => String(row["id"])),
+        test_recordings: (this.tables["test_recordings"] ?? [])
+          .filter(
+            (row) =>
+              row["tester_user_id"] === actorUserId &&
+              (row["pilot_id"] === pilotId ||
+                sessionIds.has(row["test_session_id"])),
+          )
+          .map((row) => String(row["id"])),
+      };
+
       const now = new Date().toISOString();
       jobs.push({
         id: jobId,
@@ -452,6 +496,7 @@ export class FakeSupabase {
         scopes: [...scopes],
         consent_ids: [...consentIds],
         epoch_consent_ids: epochConsentIds,
+        epoch_row_ids: epochRowIds,
         withdrawn_at: now,
         consent_retained_until: params["p_consent_retained_until"],
         deletion_due_at: params["p_deletion_due_at"],
