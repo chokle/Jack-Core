@@ -21,15 +21,29 @@ import {
   depthCue,
 } from "./graph-spatial";
 import { buildSyntheticServerGraph } from "./graph-stress";
-import { selectMemoryGraphModel, CORE_ID, type GraphModel } from "./memory-graph";
+import {
+  selectMemoryGraphModel,
+  CORE_ID,
+  type GraphModel,
+} from "./memory-graph";
 
 function baseModel() {
   // A tiny real-shaped model: core + one seeded trade + two videos.
   return selectMemoryGraphModel(
     null,
     [
-      { id: "v1", title: "Stick Welding Basics", trade: "Welder", status: "completed" },
-      { id: "v2", title: "Panel Wiring", trade: "Electrician", status: "completed" },
+      {
+        id: "v1",
+        title: "Stick Welding Basics",
+        trade: "Welder",
+        status: "completed",
+      },
+      {
+        id: "v2",
+        title: "Panel Wiring",
+        trade: "Electrician",
+        status: "completed",
+      },
     ],
     [
       { code: "W-1", name: "Occupational Skills", trade: "Welder" },
@@ -99,10 +113,45 @@ describe("branch navigator layout", () => {
   });
 
   it("centers a contributor and expands only that contributor's memories", () => {
-    const layout = buildBranchNavigatorLayout(branchModel(), "contributor:welder");
+    const layout = buildBranchNavigatorLayout(
+      branchModel(),
+      "contributor:welder",
+    );
     expect(layout.centerId).toBe("contributor:welder");
     expect(layout.visibleIds).toContain("mentor-memory");
     expect(layout.visibleIds).not.toContain("video:v1");
+  });
+
+  it("centers a competency niche and reveals its descendant memory", () => {
+    const base = branchModel();
+    const model: GraphModel = {
+      ...base,
+      nodes: [
+        ...base.nodes,
+        {
+          id: "comp-memory",
+          kind: "concept",
+          label: "Root pass control",
+          topicId: "topic:Welder",
+          color: [120, 180, 255],
+          meta: { trade: "Welder", confidence: 0.9 },
+        },
+      ],
+      edges: [
+        ...base.edges,
+        { a: "comp:W-1", b: "comp-memory", kind: "concept" },
+      ],
+      degree: {
+        ...base.degree,
+        "comp:W-1": (base.degree["comp:W-1"] ?? 0) + 1,
+        "comp-memory": 1,
+      },
+    };
+    const layout = buildBranchNavigatorLayout(model, "comp:W-1");
+    expect(layout.centerId).toBe("comp:W-1");
+    expect(layout.visibleIds).toContain("topic:Welder");
+    expect(layout.visibleIds).toContain("comp-memory");
+    expect(layout.visibleIds).not.toContain("video:v2");
   });
 
   it("does not allow an atomic memory to become the orbital center", () => {
@@ -124,7 +173,9 @@ describe("withSeededTrades", () => {
     const welderHubs = seeded.nodes.filter((n) => n.id === "topic:Welder");
     expect(welderHubs).toHaveLength(1);
     // Every hub is reachable from the core.
-    const coreEdges = seeded.edges.filter((e) => e.a === CORE_ID && e.kind === "topic");
+    const coreEdges = seeded.edges.filter(
+      (e) => e.a === CORE_ID && e.kind === "topic",
+    );
     expect(coreEdges.length).toBe(seeded.topics.length);
   });
 
@@ -205,7 +256,9 @@ describe("withKnowledgeCounts", () => {
   it("lifts a virgin trade to populated once it has written notes", () => {
     const seeded = withSeededTrades(baseModel());
     // Baseline: Boilermaker has no videos/knowledge — it is virgin.
-    expect(buildHierarchy(seeded).get("topic:Boilermaker")!.populated).toBe(false);
+    expect(buildHierarchy(seeded).get("topic:Boilermaker")!.populated).toBe(
+      false,
+    );
     // Filing a field note under it should light it up.
     const withNotes = withKnowledgeCounts(seeded, { Boilermaker: 4 });
     const boiler = buildHierarchy(withNotes).get("topic:Boilermaker")!;
@@ -281,7 +334,9 @@ describe("computeBrainStats", () => {
     expect(stats.totalTrades).toBe(model.topics.length);
     expect(stats.populatedTrades + stats.dormantTrades).toBe(stats.totalTrades);
     // Welder has an ingested video; Plumber has 3 written notes — both populated.
-    expect(stats.byTrade.find((t) => t.id === "topic:Welder")!.populated).toBe(true);
+    expect(stats.byTrade.find((t) => t.id === "topic:Welder")!.populated).toBe(
+      true,
+    );
     const plumber = stats.byTrade.find((t) => t.id === "topic:Plumber")!;
     expect(plumber.count).toBe(3);
     expect(plumber.entries).toBe(3);
@@ -377,7 +432,9 @@ describe("large-graph visible cap", () => {
   it("never exceeds maxVisible even on a dense synthetic graph", () => {
     const big = buildSyntheticServerGraph(1500);
     const model = selectMemoryGraphModel(big, [], []);
-    const layout = buildSpatialLayout(model, CORE_ID, { maxVisible: DEFAULT_MAX_VISIBLE });
+    const layout = buildSpatialLayout(model, CORE_ID, {
+      maxVisible: DEFAULT_MAX_VISIBLE,
+    });
     expect(layout.visibleIds.length).toBeLessThanOrEqual(DEFAULT_MAX_VISIBLE);
     // The center and its immediate ring are always retained.
     expect(layout.visibleIds).toContain(CORE_ID);
@@ -385,7 +442,9 @@ describe("large-graph visible cap", () => {
     expect(ringKept).toBe(true);
     // Every kept node has a finite position.
     for (const p of layout.positions.values()) {
-      expect(Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)).toBe(true);
+      expect(
+        Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
+      ).toBe(true);
     }
   });
 });
@@ -409,7 +468,10 @@ describe("camera + projection", () => {
   });
 
   it("projects the origin to the viewport center with finite scale", () => {
-    const proj = projectPoint({ x: 0, y: 0, z: 0 }, { yaw: 0, pitch: 0, zoom: 1 });
+    const proj = projectPoint(
+      { x: 0, y: 0, z: 0 },
+      { yaw: 0, pitch: 0, zoom: 1 },
+    );
     expect(proj.x).toBe(0);
     expect(proj.y).toBe(0);
     expect(Number.isFinite(proj.scale)).toBe(true);
@@ -417,8 +479,14 @@ describe("camera + projection", () => {
   });
 
   it("shrinks farther points and grows nearer ones (perspective)", () => {
-    const near = projectPoint({ x: 100, y: 0, z: -300 }, { yaw: 0, pitch: 0, zoom: 1 });
-    const far = projectPoint({ x: 100, y: 0, z: 300 }, { yaw: 0, pitch: 0, zoom: 1 });
+    const near = projectPoint(
+      { x: 100, y: 0, z: -300 },
+      { yaw: 0, pitch: 0, zoom: 1 },
+    );
+    const far = projectPoint(
+      { x: 100, y: 0, z: 300 },
+      { yaw: 0, pitch: 0, zoom: 1 },
+    );
     expect(near.scale).toBeGreaterThan(far.scale);
     expect(near.depth).toBeLessThan(far.depth);
   });

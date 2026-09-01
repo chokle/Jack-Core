@@ -59,6 +59,29 @@ describe("MemoryGraphView graph and inspector state", () => {
     });
   });
 
+  it("promotes a competency niche to the durable branch while leaves stay inside it", () => {
+    const niche = graphInspectorReducer(INITIAL_GRAPH_INSPECTOR_STATE, {
+      type: "open-graph-node",
+      id: "comp:W-1",
+      kind: "competency",
+    });
+    const leaf = graphInspectorReducer(niche, {
+      type: "open-graph-node",
+      id: "concept:root-pass",
+      kind: "concept",
+    });
+    const minimized = graphInspectorReducer(leaf, { type: "minimize" });
+    const restored = graphInspectorReducer(minimized, { type: "restore" });
+
+    expect(niche.branchId).toBe("comp:W-1");
+    expect(leaf).toMatchObject({
+      activeGraphId: "concept:root-pass",
+      branchId: "comp:W-1",
+      inspectorNodeId: "concept:root-pass",
+    });
+    expect(restored.branchId).toBe("comp:W-1");
+  });
+
   it("prunes idempotently when a temporary graph omits the core node", () => {
     const liveIds = new Set<string>();
     const first = graphInspectorReducer(INITIAL_GRAPH_INSPECTOR_STATE, {

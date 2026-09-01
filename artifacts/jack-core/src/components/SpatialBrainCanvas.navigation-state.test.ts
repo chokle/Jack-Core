@@ -22,4 +22,16 @@ describe("SpatialBrainCanvas branch hydration", () => {
       resolveHydratedBranchCenter(hydrated, branchId, branchId, "branches"),
     ).toBe(branchId);
   });
+
+  it("restores a competency niche as a valid durable branch center", () => {
+    const branchId = "comp:W-1";
+    const hydrated = [
+      node(CORE_ID, "core"),
+      node("topic:Welder", "topic"),
+      node(branchId, "competency"),
+    ];
+    expect(
+      resolveHydratedBranchCenter(hydrated, CORE_ID, branchId, "branches"),
+    ).toBe(branchId);
+  });
 });
