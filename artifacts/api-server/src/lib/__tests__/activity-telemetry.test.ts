@@ -4,12 +4,13 @@ import type { CallerIdentity } from "../admin-auth.js";
 
 vi.mock("../supabase.js", async () => {
   const mocks = await import("./mocks.js");
-  return { supabase: { from: mocks.fake.from.bind(mocks.fake) } };
+  return { supabase: { from: (table: string) => mocks.fake.from(table) } };
 });
 
 import { fake, resetMocks } from "./mocks.js";
 import {
   hasAnyReportScope,
+  latestConsent,
   CONSENT_VERSION,
   PRIVACY_NOTICE_VERSION,
   recordServerAskJackEvent,
@@ -20,6 +21,7 @@ const PILOT_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_PILOT_ID = "33333333-3333-4333-8333-333333333333";
 const SESSION_ID = "44444444-4444-4444-8444-444444444444";
 const OTHER_SESSION_ID = "55555555-5555-4555-8555-555555555555";
+const CONSENT_ID = "88888888-8888-4888-8888-888888888888";
 
 function request(sessionId?: string): Request {
   return {
@@ -30,6 +32,75 @@ function request(sessionId?: string): Request {
     },
     log: { warn: vi.fn() },
   } as unknown as Request;
+}
+
+function withdrawTelemetryAfterNextEventInsert() {
+  const originalFrom = fake.from.bind(fake);
+  let withdrawn = false;
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_events") return query;
+    const originalInsert = query.insert.bind(query);
+    query.insert = (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      const builder = originalInsert(rows);
+      const originalThen = builder.then.bind(builder);
+      builder.then = (
+        onfulfilled?: (result: unknown) => unknown,
+        onrejected?: (reason: unknown) => unknown,
+      ) =>
+        originalThen(
+          (result: unknown) => {
+            if (!withdrawn) {
+              withdrawn = true;
+              fake.tables.telemetry_consents.push({
+                id: "99999999-9999-4999-8999-999999999999",
+                actor_user_id: "tester-1",
+                pilot_id: PILOT_ID,
+                scope: "telemetry",
+                state: "withdrawn",
+                privacy_notice_version: PRIVACY_NOTICE_VERSION,
+                consent_version: CONSENT_VERSION,
+                occurred_at: "2026-07-26T00:00:00.000Z",
+              });
+            }
+            return onfulfilled ? onfulfilled(result) : result;
+          },
+          onrejected,
+        );
+      return builder;
+    };
+    return query;
+  });
+}
+
+function completeSessionAfterNextEventInsert() {
+  const originalFrom = fake.from.bind(fake);
+  let completed = false;
+  return vi.spyOn(fake, "from").mockImplementation((table: string) => {
+    const query = originalFrom(table) as any;
+    if (table !== "test_events") return query;
+    const originalInsert = query.insert.bind(query);
+    query.insert = (rows: Record<string, unknown> | Record<string, unknown>[]) => {
+      const builder = originalInsert(rows);
+      const originalThen = builder.then.bind(builder);
+      builder.then = (
+        onfulfilled?: (result: unknown) => unknown,
+        onrejected?: (reason: unknown) => unknown,
+      ) =>
+        originalThen(
+          (result: unknown) => {
+            if (!completed) {
+              completed = true;
+              fake.tables.test_sessions[0]!.status = "completed";
+            }
+            return onfulfilled ? onfulfilled(result) : result;
+          },
+          onrejected,
+        );
+      return builder;
+    };
+    return query;
+  });
 }
 
 function identity(
@@ -48,6 +119,27 @@ function identity(
 
 beforeEach(() => {
   resetMocks();
+  fake.tables.organizations = [{
+    id: ORGANIZATION_ID,
+    name: "Org",
+    status: "active",
+  }];
+  fake.tables.pilots = [{
+    id: PILOT_ID,
+    organization_id: ORGANIZATION_ID,
+    name: "Pilot",
+    status: "active",
+  }];
+  fake.tables.pilot_memberships = [{
+    id: "tester-membership",
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
+    user_id: "tester-1",
+    role: "tester",
+    active: true,
+    valid_from: "2026-01-01T00:00:00.000Z",
+    valid_until: null,
+  }];
   fake.tables.test_sessions = [
     {
       id: SESSION_ID,
@@ -56,6 +148,7 @@ beforeEach(() => {
       pilot_id: PILOT_ID,
       status: "active",
       telemetry_status: "granted",
+      telemetry_consent_id: CONSENT_ID,
       app_session_id: "66666666-6666-4666-8666-666666666666",
       device_category: "desktop",
       question_count: 0,
@@ -68,6 +161,7 @@ beforeEach(() => {
       pilot_id: OTHER_PILOT_ID,
       status: "active",
       telemetry_status: "granted",
+      telemetry_consent_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       app_session_id: "77777777-7777-4777-8777-777777777777",
       device_category: "desktop",
       question_count: 0,
@@ -76,7 +170,7 @@ beforeEach(() => {
   ];
   fake.tables.telemetry_consents = [
     {
-      id: "88888888-8888-4888-8888-888888888888",
+      id: CONSENT_ID,
       actor_user_id: "tester-1",
       pilot_id: PILOT_ID,
       scope: "telemetry",
@@ -87,6 +181,57 @@ beforeEach(() => {
     },
   ];
   fake.tables.test_events = [];
+  fake.tables.activity_ingest_failures = [];
+  fake.tables.test_recordings = [];
+  fake.tables.test_feedback = [];
+});
+
+describe("consent authority ordering", () => {
+  it("preserves occurred-at authority and uses sequence only as the exact tie-breaker", async () => {
+    fake.tables.telemetry_consents = [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-24T00:00:00.000Z",
+        consent_sequence: 99,
+      },
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "withdrawn",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-25T00:00:00.000Z",
+        consent_sequence: 11,
+      },
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        actor_user_id: "tester-1",
+        organization_id: ORGANIZATION_ID,
+        pilot_id: PILOT_ID,
+        scope: "telemetry",
+        state: "granted",
+        privacy_notice_version: PRIVACY_NOTICE_VERSION,
+        consent_version: CONSENT_VERSION,
+        occurred_at: "2026-07-25T00:00:00.000Z",
+        consent_sequence: 10,
+      },
+    ];
+
+    await expect(latestConsent("tester-1", PILOT_ID, "telemetry")).resolves.toMatchObject({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      state: "withdrawn",
+    });
+  });
 });
 
 describe("server-authoritative Ask Jack telemetry", () => {
@@ -124,6 +269,90 @@ describe("server-authoritative Ask Jack telemetry", () => {
     expect(JSON.stringify(fake.tables.test_events[0])).not.toContain("answer");
   });
 
+  it("redacts a server Ask Jack event inserted after withdrawal", async () => {
+    fake.tables.test_feedback = [{
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+      notification_status: "pending",
+    }];
+    const fromSpy = withdrawTelemetryAfterNextEventInsert();
+    try {
+      await recordServerAskJackEvent({
+        req: request(SESSION_ID),
+        actorIdentity: identity(),
+        eventType: "ask_jack_completed",
+        correlationId: "chat-message-race",
+        citationCount: 1,
+      });
+
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+        question_count: 0,
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_events).toHaveLength(1);
+      expect(fake.tables.test_events[0]).toMatchObject({
+        event_type: "ask_jack_completed",
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        deletion_due_at: expect.any(String),
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+      });
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it("redacts only the Ask Jack event that loses a normal terminal transition", async () => {
+    fake.tables.test_feedback = [{
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      tester_user_id: "tester-1",
+      pilot_id: PILOT_ID,
+      test_session_id: SESSION_ID,
+      notification_status: "pending",
+    }];
+    const fromSpy = completeSessionAfterNextEventInsert();
+    try {
+      await recordServerAskJackEvent({
+        req: request(SESSION_ID),
+        actorIdentity: identity(),
+        eventType: "ask_jack_completed",
+        correlationId: "chat-message-completed-race",
+        citationCount: 1,
+      });
+
+      expect(fake.tables.test_sessions[0]).toMatchObject({
+        status: "completed",
+        telemetry_status: "granted",
+        question_count: 0,
+      });
+      expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
+      expect(fake.tables.test_events).toHaveLength(1);
+      expect(fake.tables.test_events[0]).toMatchObject({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: expect.any(String),
+        deletion_due_at: expect.any(String),
+      });
+      expect(fake.tables.test_feedback[0]).toMatchObject({
+        notification_status: "pending",
+      });
+      expect(fake.tables.test_feedback[0]?.deletion_due_at).toBeUndefined();
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
   it.each([
     {
       actorIdentity: identity({ isPresentation: true, classification: "restricted" }),
@@ -132,6 +361,10 @@ describe("server-authoritative Ask Jack telemetry", () => {
     {
       actorIdentity: identity({ classification: "unavailable" }),
       label: "unavailable identity",
+    },
+    {
+      actorIdentity: identity({ isAdmin: true }),
+      label: "promoted admin identity",
     },
   ])("skips Ask Jack telemetry writes for $label", async ({ actorIdentity }) => {
     const originalQuestionCount = fake.tables.test_sessions[0]?.question_count;
@@ -145,6 +378,26 @@ describe("server-authoritative Ask Jack telemetry", () => {
 
     expect(fake.tables.test_events).toHaveLength(0);
     expect(fake.tables.test_sessions[0]?.question_count).toBe(originalQuestionCount);
+  });
+
+  it("skips Ask Jack writes after tester membership deactivation without deleting history", async () => {
+    fake.tables.pilot_memberships[0]!.active = false;
+
+    await recordServerAskJackEvent({
+      req: request(SESSION_ID),
+      actorIdentity: identity(),
+      eventType: "ask_jack_completed",
+      correlationId: "chat-message-after-membership",
+      citationCount: 1,
+    });
+
+    expect(fake.tables.test_events).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "active",
+      telemetry_status: "granted",
+      question_count: 0,
+    });
+    expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
   });
 
   it("returns true when any membership in the valid scope window is report-authorized", async () => {

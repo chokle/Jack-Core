@@ -82,6 +82,27 @@ beforeEach(() => {
     isPresentation: false,
     classification: "resolved",
   });
+  fake.tables.organizations = [{
+    id: ORGANIZATION_ID,
+    name: "Org",
+    status: "active",
+  }];
+  fake.tables.pilots = [{
+    id: PILOT_ID,
+    organization_id: ORGANIZATION_ID,
+    name: "Pilot",
+    status: "active",
+  }];
+  fake.tables.pilot_memberships = [{
+    id: "membership-1",
+    organization_id: ORGANIZATION_ID,
+    pilot_id: PILOT_ID,
+    user_id: USER_ID,
+    role: "tester",
+    active: true,
+    valid_from: "2026-01-01T00:00:00.000Z",
+    valid_until: null,
+  }];
   fake.tables.test_sessions = [{
     id: SESSION_ID,
     actor_user_id: USER_ID,
@@ -89,6 +110,7 @@ beforeEach(() => {
     pilot_id: PILOT_ID,
     status: "active",
     telemetry_status: "granted",
+    telemetry_consent_id: CONSENT_ID,
     app_session_id: APP_SESSION_ID,
     question_count: 0,
     last_activity_at: "2026-07-25T00:00:00.000Z",
@@ -152,6 +174,45 @@ describe("Ask Jack telemetry presentation denial", () => {
     expect(response.status).toBe(500);
     expect(fake.tables.test_events).toHaveLength(0);
     expect(fake.tables.test_sessions[0]?.question_count).toBe(0);
+  });
+
+  it("does not record telemetry for a promoted admin with an old tester session", async () => {
+    resolveIdentity.mockResolvedValue({
+      userId: USER_ID,
+      email: "admin@example.test",
+      name: "Promoted Admin",
+      isAdmin: true,
+      isPresentation: false,
+      classification: "resolved",
+    });
+
+    const response = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_ID)
+      .set("x-jack-test-session-id", SESSION_ID)
+      .send({ message: "How should I set up this weld?" });
+
+    expect(response.status).toBe(200);
+    expect(fake.tables.test_events).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]?.question_count).toBe(0);
+  });
+
+  it("does not record telemetry after tester membership is deactivated", async () => {
+    fake.tables.pilot_memberships[0]!.active = false;
+
+    const response = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", USER_ID)
+      .set("x-jack-test-session-id", SESSION_ID)
+      .send({ message: "How should I set up this weld?" });
+
+    expect(response.status).toBe(200);
+    expect(fake.tables.test_events).toHaveLength(0);
+    expect(fake.tables.test_sessions[0]).toMatchObject({
+      status: "active",
+      question_count: 0,
+    });
+    expect(fake.tables.test_sessions[0]?.deletion_due_at).toBeUndefined();
   });
 
   it("continues to record minimized telemetry for an ordinary consenting tester", async () => {

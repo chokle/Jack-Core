@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -37,6 +38,7 @@ export type TestingOverlayEvent =
   | "stopped";
 
 interface TestingOverlayProps {
+  identityKey: string | null;
   onEvent?: (event: TestingOverlayEvent) => void;
 }
 
@@ -46,13 +48,35 @@ interface TestingOverlayProps {
  * permission is requested until the user clicks the modal's start button.
  */
 export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayProps>(
-  function TestingOverlay({ onEvent }, ref) {
+  function TestingOverlay({ identityKey, onEvent }, ref) {
     const [phase, setPhase] = useState<Phase>("idle");
     const [isPaused, setIsPaused] = useState(false);
     const [micIncluded, setMicIncluded] = useState(false);
     const [showBanner, setShowBanner] = useState(false);
     const serviceRef = useRef<RecordingService | null>(null);
+    const identityRef = useRef<string | null>(identityKey);
+    const operationGenerationRef = useRef(0);
+    const pendingSessionControllerRef = useRef<AbortController | null>(null);
+    const pendingUploadControllerRef = useRef<AbortController | null>(null);
+    const pendingStartTokenRef = useRef<object | null>(null);
     const { toast } = useToast();
+
+    const cancelCurrentOperation = useCallback((resetUi = true) => {
+      operationGenerationRef.current += 1;
+      pendingStartTokenRef.current = null;
+      pendingSessionControllerRef.current?.abort();
+      pendingSessionControllerRef.current = null;
+      pendingUploadControllerRef.current?.abort();
+      pendingUploadControllerRef.current = null;
+      serviceRef.current?.cancel();
+      serviceRef.current = null;
+      if (resetUi) {
+        setIsPaused(false);
+        setMicIncluded(false);
+        setShowBanner(false);
+        setPhase("idle");
+      }
+    }, []);
 
     const open = useCallback(() => {
       setPhase((current) => {
@@ -63,24 +87,30 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     }, [onEvent]);
     useImperativeHandle(ref, () => ({ open }), [open]);
 
+    useLayoutEffect(() => {
+      identityRef.current = identityKey;
+      cancelCurrentOperation();
+      return () => cancelCurrentOperation(false);
+    }, [cancelCurrentOperation, identityKey]);
+
     useEffect(() => {
-      const withdraw = () => {
-        serviceRef.current?.cancel();
-        serviceRef.current = null;
-        setShowBanner(false);
-        setPhase("idle");
-      };
+      const withdraw = () => cancelCurrentOperation();
       window.addEventListener("jack:telemetry-withdrawn", withdraw);
       return () => window.removeEventListener("jack:telemetry-withdrawn", withdraw);
-    }, []);
+    }, [cancelCurrentOperation]);
 
     const handleUpload = useCallback(
-      async (result: TestRecordingResult) => {
-        const session = getCachedTestSession();
-        if (!session) {
-          setPhase("idle");
-          return;
-        }
+      async (
+        result: TestRecordingResult,
+        sessionId: string,
+        operationGeneration: number,
+        operationIdentity: string | null,
+      ) => {
+        const isCurrent = () =>
+          operationGenerationRef.current === operationGeneration &&
+          identityRef.current === operationIdentity;
+        if (!isCurrent()) return;
+
         setPhase("uploading");
         setShowBanner(false);
         void trackTestEvent(
@@ -92,14 +122,33 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
                 : result.stopReason,
           },
         );
-        const outcome = await uploadTestRecording(result.blob, {
-          sessionId: session.id,
-          timestamp: new Date().toISOString(),
-          durationMs: result.durationMs,
-          mimeType: result.mimeType,
-          microphoneIncluded: result.micIncluded,
-          appVersion: import.meta.env.VITE_APP_VERSION,
-        });
+        const controller = new AbortController();
+        pendingUploadControllerRef.current?.abort();
+        pendingUploadControllerRef.current = controller;
+        let outcome: Awaited<ReturnType<typeof uploadTestRecording>>;
+        try {
+          outcome = await uploadTestRecording(
+            result.blob,
+            {
+              sessionId,
+              timestamp: new Date().toISOString(),
+              durationMs: result.durationMs,
+              mimeType: result.mimeType,
+              microphoneIncluded: result.micIncluded,
+              appVersion: import.meta.env.VITE_APP_VERSION,
+              identityKey: operationIdentity ?? undefined,
+            },
+            {
+              signal: controller.signal,
+              shouldFallback: isCurrent,
+            },
+          );
+        } finally {
+          if (pendingUploadControllerRef.current === controller) {
+            pendingUploadControllerRef.current = null;
+          }
+        }
+        if (!isCurrent() || outcome.status === "cancelled") return;
 
         if (outcome.status === "uploaded") {
           void trackTestEvent(
@@ -115,7 +164,7 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
           void trackTestEvent(
             "recording_upload_failed",
             { error_code: "upload_failed" },
-            `recording_upload_failed:${session.id}`,
+            `recording_upload_failed:${sessionId}`,
           );
           toast({
             title: "Saved recording to your downloads",
@@ -130,50 +179,108 @@ export const TestingOverlay = forwardRef<TestingOverlayHandle, TestingOverlayPro
     );
 
     const handleStart = useCallback(async () => {
-      if (!isScreenRecordingSupported()) {
-        toast({
-          title: "Screen recording isn't available",
-          description: "Jack remains fully available without a recording.",
-        });
-        onEvent?.("unavailable");
-        setPhase("idle");
-        return;
-      }
+      if (pendingStartTokenRef.current) return;
+      const startToken = {};
+      pendingStartTokenRef.current = startToken;
 
-      const session = getCachedTestSession();
-      const currentSession = session ?? (await loadCurrentTestSession().catch(() => null));
-
-      if (!currentSession || currentSession.status !== "active") {
-        onEvent?.("unavailable");
-        setPhase("idle");
-        return;
-      }
-
-      const includeMicrophone = currentSession.microphoneConsentState === "granted";
-      const service = new RecordingService({
-        onStop: (result) => void handleUpload(result),
-        onError: () =>
-          void trackTestEvent("reliability_error", {
-            error_code: "recording_unavailable",
-          }),
-      });
-      serviceRef.current = service;
       try {
-        await service.start(includeMicrophone);
-      } catch {
-        serviceRef.current = null;
-        onEvent?.("cancelled");
-        setPhase("idle");
-        return;
+        const operationGeneration = operationGenerationRef.current;
+        const operationIdentity = identityRef.current;
+        const isCurrent = () =>
+          operationGenerationRef.current === operationGeneration &&
+          identityRef.current === operationIdentity;
+
+        if (!isScreenRecordingSupported()) {
+          toast({
+            title: "Screen recording isn't available",
+            description: "Jack remains fully available without a recording.",
+          });
+          onEvent?.("unavailable");
+          setPhase("idle");
+          return;
+        }
+
+        let currentSession = getCachedTestSession();
+        if (!currentSession) {
+          const controller = new AbortController();
+          pendingSessionControllerRef.current = controller;
+          try {
+            currentSession = await loadCurrentTestSession(undefined, {
+              signal: controller.signal,
+              shouldCache: isCurrent,
+            });
+          } catch {
+            currentSession = null;
+          } finally {
+            if (pendingSessionControllerRef.current === controller) {
+              pendingSessionControllerRef.current = null;
+            }
+          }
+        }
+
+        if (!isCurrent()) return;
+        if (!currentSession || currentSession.status !== "active") {
+          onEvent?.("unavailable");
+          setPhase("idle");
+          return;
+        }
+
+        const sessionId = currentSession.id;
+        const includeMicrophone =
+          currentSession.microphoneConsentState === "granted";
+        const service = new RecordingService({
+          onStop: (result) => {
+            if (isCurrent() && serviceRef.current === service) {
+              void handleUpload(
+                result,
+                sessionId,
+                operationGeneration,
+                operationIdentity,
+              );
+            }
+          },
+          onError: () => {
+            if (isCurrent() && serviceRef.current === service) {
+              void trackTestEvent("reliability_error", {
+                error_code: "recording_unavailable",
+              });
+            }
+          },
+        });
+        serviceRef.current = service;
+        try {
+          await service.start(includeMicrophone);
+        } catch {
+          if (serviceRef.current === service) {
+            serviceRef.current = null;
+          }
+          if (!isCurrent()) return;
+          onEvent?.("cancelled");
+          setPhase("idle");
+          return;
+        }
+
+        if (!isCurrent() || serviceRef.current !== service) {
+          service.cancel();
+          if (serviceRef.current === service) {
+            serviceRef.current = null;
+          }
+          return;
+        }
+
+        void trackTestEvent("recording_started", {
+          microphone_included: service.micIncluded,
+        });
+        onEvent?.("started");
+        setMicIncluded(service.micIncluded);
+        setIsPaused(false);
+        setShowBanner(true);
+        setPhase("recording");
+      } finally {
+        if (pendingStartTokenRef.current === startToken) {
+          pendingStartTokenRef.current = null;
+        }
       }
-      void trackTestEvent("recording_started", {
-        microphone_included: service.micIncluded,
-      });
-      onEvent?.("started");
-      setMicIncluded(service.micIncluded);
-      setIsPaused(false);
-      setShowBanner(true);
-      setPhase("recording");
     }, [handleUpload, onEvent, toast]);
 
     const handleCancelConsent = useCallback(() => {

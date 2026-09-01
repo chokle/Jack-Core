@@ -16,6 +16,24 @@ export type TestEventType =
 
 export type ConsentState = "granted" | "declined" | "withdrawn";
 
+export interface TelemetryConsentSnapshot {
+  state: ConsentState;
+  privacyNoticeVersion: string;
+  consentVersion: string;
+}
+
+export interface TelemetryPrivacyScope {
+  organizationId: string;
+  pilotId: string;
+  organizationName?: string;
+  pilotName?: string;
+  consents: {
+    telemetry: TelemetryConsentSnapshot | null;
+    screen: TelemetryConsentSnapshot | null;
+    microphone: TelemetryConsentSnapshot | null;
+  };
+}
+
 export interface TestSession {
   id: string;
   organizationId: string;
@@ -45,6 +63,8 @@ export interface TelemetryContext {
     organizationName?: string;
     pilotName?: string;
   } | null;
+  /** Identity-owned historical consent scopes, independent of active enrollment. */
+  privacyScopes: TelemetryPrivacyScope[];
   consents: {
     telemetry: {
       state: ConsentState;
@@ -87,10 +107,21 @@ interface QueuedEvent {
 const SESSION_CACHE_KEY = "jack.userTesting.activeSession.v2";
 const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
+const TELEMETRY_IDENTITY_KEY = "jack.userTesting.identity.v1";
 const MAX_QUEUE_SIZE = 100;
-let startRequest: Promise<TestSession> | null = null;
-let flushRequest: Promise<TestSession | null> | null = null;
+interface FlushRequestState {
+  generation: number;
+  controller: AbortController;
+  promise: Promise<TestSession | null>;
+}
+
+const startRequests = new Map<string, Promise<TestSession>>();
+let startGeneration = 0;
+let flushGeneration = 0;
+let flushRequest: FlushRequestState | null = null;
 let initialized = false;
+let memoryQueue: QueuedEvent[] = [];
+let memoryQueueIsAuthoritative = false;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -137,7 +168,20 @@ export function cacheTestSession(session: TestSession | null): void {
   }
 }
 
+export function invalidateTestSessionStarts(): void {
+  startGeneration += 1;
+  flushGeneration += 1;
+  startRequests.clear();
+  flushRequest?.controller.abort();
+  flushRequest = null;
+  memoryQueue = [];
+  memoryQueueIsAuthoritative = false;
+  cacheTestSession(null);
+}
+
 function readQueue(): QueuedEvent[] {
+  if (memoryQueueIsAuthoritative) return [...memoryQueue];
+
   try {
     const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
     return Array.isArray(value) ? (value as QueuedEvent[]) : [];
@@ -149,8 +193,39 @@ function readQueue(): QueuedEvent[] {
 function writeQueue(queue: QueuedEvent[]): void {
   try {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
+    memoryQueue = [];
+    memoryQueueIsAuthoritative = false;
   } catch {
-    // A later server refresh remains authoritative when local storage is unavailable.
+    // Keep the desired queue authoritative in memory. This both preserves newly
+    // tracked events and prevents stale persisted events from being resurrected
+    // after a successful submission or identity reset.
+    memoryQueue = [...queue];
+    memoryQueueIsAuthoritative = true;
+  }
+}
+
+export function setTelemetryIdentity(userId: string | null): void {
+  const nextUserId = userId?.trim() || null;
+  let previousUserId: string | null = null;
+  try {
+    previousUserId = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+  } catch {
+    // Treat unavailable identity storage as a fresh scope.
+  }
+
+  if (previousUserId !== nextUserId) {
+    invalidateTestSessionStarts();
+    writeQueue([]);
+  }
+
+  try {
+    if (nextUserId) {
+      localStorage.setItem(TELEMETRY_IDENTITY_KEY, nextUserId);
+    } else {
+      localStorage.removeItem(TELEMETRY_IDENTITY_KEY);
+    }
+  } catch {
+    // The caller still keeps the active identity in memory.
   }
 }
 
@@ -160,13 +235,19 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function loadTelemetryContext(pilotId?: string): Promise<TelemetryContext> {
+export async function loadTelemetryContext(
+  pilotId?: string,
+  options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
+): Promise<TelemetryContext> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/telemetry/context${query}`, {
     credentials: "include",
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   const context = await readJson<TelemetryContext>(response);
-  cacheTestSession(context.session);
+  if (options.shouldCache?.() ?? true) {
+    cacheTestSession(context.session);
+  }
   return context;
 }
 
@@ -192,7 +273,7 @@ export async function withdrawTelemetry(
   scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
-    cacheTestSession(null);
+    invalidateTestSessionStarts();
     writeQueue([]);
   }
   window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
@@ -212,18 +293,36 @@ export function exportTelemetry(): void {
   window.location.assign("/api/testing/telemetry/export");
 }
 
-async function readSessionResponse(response: Response): Promise<TestSession> {
+async function readSessionResponse(
+  response: Response,
+  generation: number,
+  shouldCache?: () => boolean,
+): Promise<TestSession> {
   const body = await readJson<{ session: TestSession }>(response);
-  cacheTestSession(body.session);
+  if (generation === startGeneration && (shouldCache?.() ?? true)) {
+    cacheTestSession(body.session);
+  }
   return body.session;
 }
 
-export function startTestSession(pilotId?: string): Promise<TestSession> {
-  if (startRequest) return startRequest;
-  startRequest = fetch("/api/testing/sessions/start", {
+export function startTestSession(
+  pilotId?: string,
+  options: {
+    signal?: AbortSignal;
+    requestKey?: string;
+    shouldCache?: () => boolean;
+  } = {},
+): Promise<TestSession> {
+  const requestKey = options.requestKey?.trim() || "default";
+  const existing = startRequests.get(requestKey);
+  if (existing) return existing;
+
+  const generation = startGeneration;
+  const request = fetch("/api/testing/sessions/start", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
+    ...(options.signal ? { signal: options.signal } : {}),
     body: JSON.stringify({
       ...(pilotId ? { pilotId } : {}),
       appSessionId: getAppSessionId(),
@@ -231,22 +330,34 @@ export function startTestSession(pilotId?: string): Promise<TestSession> {
       deployVersion: import.meta.env.VITE_DEPLOY_VERSION || undefined,
       deviceCategory: deviceCategory(),
     }),
-  })
-    .then(readSessionResponse)
-    .finally(() => {
-      startRequest = null;
-    });
-  return startRequest;
+  }).then((response) =>
+    readSessionResponse(response, generation, options.shouldCache),
+  );
+
+  let tracked: Promise<TestSession>;
+  tracked = request.finally(() => {
+    if (startRequests.get(requestKey) === tracked) {
+      startRequests.delete(requestKey);
+    }
+  });
+  startRequests.set(requestKey, tracked);
+  return tracked;
 }
 
-export async function loadCurrentTestSession(pilotId?: string): Promise<TestSession | null> {
+export async function loadCurrentTestSession(
+  pilotId?: string,
+  options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
+): Promise<TestSession | null> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
   const response = await fetch(`/api/testing/sessions/current${query}`, {
     credentials: "include",
+    ...(options.signal ? { signal: options.signal } : {}),
   });
   if (!response.ok) return null;
   const body = (await response.json()) as { session: TestSession | null };
-  cacheTestSession(body.session);
+  if (options.shouldCache?.() ?? true) {
+    cacheTestSession(body.session);
+  }
   return body.session;
 }
 
@@ -264,21 +375,45 @@ async function reportDropped(sessionId: string, count: number): Promise<void> {
 }
 
 export function flushTestEvents(): Promise<TestSession | null> {
-  if (flushRequest) return flushRequest;
-  flushRequest = (async () => {
+  const generation = flushGeneration;
+  if (flushRequest?.generation === generation) {
+    return flushRequest.promise;
+  }
+
+  const controller = new AbortController();
+  const isCurrent = () =>
+    generation === flushGeneration && !controller.signal.aborted;
+  const request = (async () => {
     let latest = getCachedTestSession();
     let queue = readQueue();
+    const processedEventIds = new Set<string>();
 
-    const persistQueue = (updated: QueuedEvent[]): void => {
-      queue = updated;
-      writeQueue(updated);
+    const mergeNewEvents = () => {
+      const queuedIds = new Set(queue.map((event) => event.eventId));
+      for (const event of readQueue()) {
+        if (
+          !processedEventIds.has(event.eventId) &&
+          !queuedIds.has(event.eventId)
+        ) {
+          queue.push(event);
+          queuedIds.add(event.eventId);
+        }
+      }
     };
-
+    const advanceQueue = (eventId: string) => {
+      processedEventIds.add(eventId);
+      queue = queue.filter((event) => event.eventId !== eventId);
+      mergeNewEvents();
+      writeQueue(queue);
+    };
     const isRetryable = (status: number): boolean =>
       status >= 500 || status === 408 || status === 429;
 
-    while (queue.length > 0) {
+    while (isCurrent()) {
+      mergeNewEvents();
       const next = queue[0];
+      if (!next) return latest;
+
       try {
         const response = await fetch(
           `/api/testing/sessions/${encodeURIComponent(next.sessionId)}/events`,
@@ -286,6 +421,7 @@ export function flushTestEvents(): Promise<TestSession | null> {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
             body: JSON.stringify({
               eventId: next.eventId,
               eventType: next.eventType,
@@ -303,33 +439,46 @@ export function flushTestEvents(): Promise<TestSession | null> {
             }),
           },
         );
+        if (!isCurrent()) return null;
 
         if (!response.ok) {
           if (isRetryable(response.status)) {
-            persistQueue(queue);
             return latest;
           }
 
-          persistQueue(queue.slice(1));
+          if (!isCurrent()) return null;
+          advanceQueue(next.eventId);
           continue;
         }
 
         const body = (await response.json()) as { session: TestSession };
+        if (!isCurrent()) return null;
+
         latest = body.session;
         cacheTestSession(latest);
-        persistQueue(queue.slice(1));
+        if (!isCurrent()) return null;
+        advanceQueue(next.eventId);
       } catch {
-        persistQueue(queue);
+        if (!isCurrent()) return null;
         return latest;
       }
     }
 
-    persistQueue([]);
-    return latest;
-  })().finally(() => {
-    flushRequest = null;
+    return null;
+  })();
+
+  const entry: FlushRequestState = {
+    generation,
+    controller,
+    promise: Promise.resolve(null),
+  };
+  entry.promise = request.finally(() => {
+    if (flushRequest === entry) {
+      flushRequest = null;
+    }
   });
-  return flushRequest;
+  flushRequest = entry;
+  return entry.promise;
 }
 
 export async function trackTestEvent(

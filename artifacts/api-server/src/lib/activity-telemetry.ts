@@ -206,6 +206,19 @@ export async function resolveActiveTesterScope(
   };
 }
 
+export async function activeTesterScopeMatches(
+  userId: string,
+  organizationId: string,
+  pilotId: string,
+): Promise<boolean> {
+  const membership = await resolveActiveTesterScope(userId, pilotId);
+  return Boolean(
+    membership.scope &&
+      membership.scope.organizationId === organizationId &&
+      membership.scope.pilotId === pilotId,
+  );
+}
+
 export async function latestConsent(
   userId: string,
   pilotId: string,
@@ -213,11 +226,12 @@ export async function latestConsent(
 ): Promise<ConsentSnapshot | null> {
   const result = await db
     .from("telemetry_consents")
-    .select("id,state,privacy_notice_version,consent_version,occurred_at")
+    .select("id,state,privacy_notice_version,consent_version,occurred_at,consent_sequence")
     .eq("actor_user_id", userId)
     .eq("pilot_id", pilotId)
     .eq("scope", scope)
     .order("occurred_at", { ascending: false })
+    .order("consent_sequence", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (result.error) throw result.error;
@@ -679,6 +693,101 @@ export function requestIdentifier(req: Request): string {
   return typeof pinoId === "string" && IDENTIFIER_RE.test(pinoId) ? pinoId : randomUUID();
 }
 
+export async function compensateTelemetryWriteAfterWithdrawal(
+  userId: string,
+  pilotId: string,
+  sessionId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const deletionDueAt = isoAfter(WITHDRAWAL_DELETION_DAYS);
+  const results = await Promise.all([
+    db
+      .from("test_sessions")
+      .update({
+        status: "withdrawn",
+        telemetry_status: "withdrawn",
+        screen_consent_state: "withdrawn",
+        microphone_consent_state: "withdrawn",
+        recording_status: "withdrawn",
+        deletion_due_at: deletionDueAt,
+        updated_at: now,
+      })
+      .eq("id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("test_events")
+      .update({
+        metadata: {},
+        correlation_id: null,
+        request_id: null,
+        redacted_at: now,
+        deletion_due_at: deletionDueAt,
+      })
+      .eq("test_session_id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("activity_ingest_failures")
+      .delete()
+      .eq("test_session_id", sessionId)
+      .eq("actor_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("test_recordings")
+      .update({ deletion_due_at: deletionDueAt })
+      .eq("test_session_id", sessionId)
+      .eq("tester_user_id", userId)
+      .eq("pilot_id", pilotId),
+    db
+      .from("test_feedback")
+      .update({
+        deletion_due_at: deletionDueAt,
+        notification_status: "failed",
+        notification_last_error: "telemetry_consent_withdrawn",
+        notification_next_attempt_at: null,
+        updated_at: now,
+      })
+      .eq("test_session_id", sessionId)
+      .eq("tester_user_id", userId)
+      .eq("pilot_id", pilotId),
+  ]);
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw failed.error;
+}
+
+async function exactTelemetryConsentStillCurrent(
+  userId: string,
+  pilotId: string,
+  consentId: string,
+): Promise<boolean> {
+  const current = await latestConsent(userId, pilotId, "telemetry");
+  return currentConsentGranted(current) && current.id === consentId;
+}
+
+async function redactRejectedTelemetryEvent(input: {
+  eventId: string;
+  userId: string;
+  pilotId: string;
+  sessionId: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const redacted = await db
+    .from("test_events")
+    .update({
+      metadata: {},
+      correlation_id: null,
+      request_id: null,
+      redacted_at: now,
+      deletion_due_at: isoAfter(WITHDRAWAL_DELETION_DAYS),
+    })
+    .eq("event_id", input.eventId)
+    .eq("actor_user_id", input.userId)
+    .eq("pilot_id", input.pilotId)
+    .eq("test_session_id", input.sessionId);
+  if (redacted.error) throw redacted.error;
+}
+
 export async function recordServerAskJackEvent(input: {
   req: Request;
   actorIdentity: CallerIdentity | null;
@@ -689,6 +798,7 @@ export async function recordServerAskJackEvent(input: {
   try {
     if (
       !input.actorIdentity ||
+      input.actorIdentity.isAdmin ||
       isUnavailableIdentity(input.actorIdentity) ||
       isPresentationIdentity(input.actorIdentity)
     ) {
@@ -710,12 +820,21 @@ export async function recordServerAskJackEvent(input: {
       .limit(2);
     if (sessions.error || sessions.data?.length !== 1) return;
     const session = sessions.data[0] as Record<string, any>;
-    const consent = await latestConsent(
-      actorUserId,
-      String(session.pilot_id),
-      "telemetry",
-    );
-    if (!currentConsentGranted(consent)) return;
+    const pilotId = String(session.pilot_id);
+    if (
+      !(await activeTesterScopeMatches(
+        actorUserId,
+        String(session.organization_id),
+        pilotId,
+      ))
+    ) {
+      return;
+    }
+    const consent = await latestConsent(actorUserId, pilotId, "telemetry");
+    if (
+      !currentConsentGranted(consent) ||
+      consent.id !== String(session.telemetry_consent_id)
+    ) return;
     const result = await insertCanonicalEvent({
       req: input.req,
       actorUserId,
@@ -740,16 +859,56 @@ export async function recordServerAskJackEvent(input: {
             : deviceCategory(input.req.headers["user-agent"]),
       },
     });
-    if (!result.error && !result.duplicate) {
-      await db
+    if (result.error) return;
+    if (!(await exactTelemetryConsentStillCurrent(actorUserId, pilotId, consent.id))) {
+      await compensateTelemetryWriteAfterWithdrawal(
+        actorUserId,
+        pilotId,
+        String(session.id),
+      );
+      return;
+    }
+    if (!result.duplicate) {
+      const now = new Date().toISOString();
+      const projected = await db
         .from("test_sessions")
         .update({
           question_count: Number(session.question_count ?? 0) + 1,
-          last_activity_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          last_activity_at: now,
+          updated_at: now,
         })
         .eq("id", session.id)
-        .eq("actor_user_id", actorUserId);
+        .eq("actor_user_id", actorUserId)
+        .eq("status", "active")
+        .eq("telemetry_status", "granted")
+        .eq("telemetry_consent_id", consent.id)
+        .select("id")
+        .maybeSingle();
+      if (projected.error) throw projected.error;
+      if (!projected.data) {
+        if (!(await exactTelemetryConsentStillCurrent(actorUserId, pilotId, consent.id))) {
+          await compensateTelemetryWriteAfterWithdrawal(
+            actorUserId,
+            pilotId,
+            String(session.id),
+          );
+        } else if (!result.duplicate && result.row?.["event_id"]) {
+          await redactRejectedTelemetryEvent({
+            eventId: String(result.row["event_id"]),
+            userId: actorUserId,
+            pilotId,
+            sessionId: String(session.id),
+          });
+        }
+        return;
+      }
+      if (!(await exactTelemetryConsentStillCurrent(actorUserId, pilotId, consent.id))) {
+        await compensateTelemetryWriteAfterWithdrawal(
+          actorUserId,
+          pilotId,
+          String(session.id),
+        );
+      }
     }
   } catch (error) {
     input.req.log?.warn({ err: error }, "server activity telemetry write failed");

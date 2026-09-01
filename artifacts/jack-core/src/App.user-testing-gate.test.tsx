@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import * as testSessionService from "@/lib/user-testing/test-session-service";
 
@@ -38,6 +38,7 @@ function acceptedStorageKey(userId: string) {
 const modalCloseAfterStart = { value: false };
 const recordingSupported = { value: false };
 const rejectStart = { value: false };
+const startFailuresRemaining = { value: 0 };
 const modalStartSpy = vi.fn();
 const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
@@ -286,6 +287,7 @@ vi.mock("@/lib/user-testing/recording-service", () => {
       return Promise.resolve(null);
     }
 
+    cancel() {}
     pause() {}
     resume() {}
   }
@@ -317,6 +319,10 @@ vi.mock("@/lib/user-testing/test-session-service", async () => {
       return JSON.parse(JSON.stringify(testSessionServiceState.saveTelemetryResult));
     }),
     startTestSession: vi.fn(async () => {
+      if (startFailuresRemaining.value > 0) {
+        startFailuresRemaining.value -= 1;
+        throw new Error("temporary session start failure");
+      }
       const session = cloneStartedSession();
       actual.cacheTestSession(session);
       return session;
@@ -345,6 +351,8 @@ const mockedLoadTelemetryContext = vi.mocked(testSessionService.loadTelemetryCon
 const mockedSaveTelemetryConsents = vi.mocked(testSessionService.saveTelemetryConsents);
 const mockedStartTestSession = vi.mocked(testSessionService.startTestSession);
 const mockedTrackTestEvent = vi.mocked(testSessionService.trackTestEvent);
+const mockedWithdrawTelemetry = vi.mocked(testSessionService.withdrawTelemetry);
+const mockedExportTelemetry = vi.mocked(testSessionService.exportTelemetry);
 
 async function renderAuthenticatedApp(path = "/app?test=true") {
   window.history.replaceState({}, "", path);
@@ -398,16 +406,52 @@ function storageWriteFailureForUserScope() {
 function resetServiceState() {
   testSessionServiceState.contextError = null;
   testSessionServiceState.currentSession = null;
+  const mutableContext = testSessionServiceState.telemetryContext as unknown as Record<string, unknown>;
+  delete mutableContext["privacyScopes"];
+  Object.assign(mutableContext, {
+    enrolled: true,
+    requiresPilotSelection: false,
+    scope: {
+      organizationId: "org-test-1",
+      pilotId: "pilot-test-1",
+      organizationName: "Unit Org",
+      pilotName: "Unit Pilot",
+    },
+    consents: {
+      telemetry: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      screen: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+      microphone: {
+        state: "granted",
+        privacyNoticeVersion: "privacy-v1",
+        consentVersion: "consent-v1",
+      },
+    },
+    session: null,
+    privacyNoticeVersion: "privacy-v1",
+    consentVersion: "consent-v1",
+  });
+  startFailuresRemaining.value = 0;
   mockedLoadCurrentSession.mockClear();
   mockedLoadTelemetryContext.mockClear();
   mockedSaveTelemetryConsents.mockClear();
   mockedStartTestSession.mockClear();
   mockedTrackTestEvent.mockClear();
+  mockedWithdrawTelemetry.mockClear();
+  mockedExportTelemetry.mockClear();
 }
 
 describe("user-testing gate transition", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     sessionStorage.clear();
     localStorage.clear();
     vi.clearAllMocks();
@@ -428,7 +472,9 @@ describe("user-testing gate transition", () => {
 
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     expect(userConsented()).toBe("false");
-    expect(mockedStartTestSession).not.toHaveBeenCalled();
+    // Current telemetry consent bootstraps exactly one scoped session on login
+    // without treating that as screen-recording participation acceptance.
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
     expect(uploadRecordingSpy).not.toHaveBeenCalled();
@@ -495,6 +541,7 @@ describe("user-testing gate transition", () => {
     await waitFor(() => {
       expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
     });
+    expect(userConsented()).toBe("false");
     await screen.findByTestId("user-testing-cancel");
 
     await startFlowFromOpenOverlay({ expectRecording: true });
@@ -503,20 +550,323 @@ describe("user-testing gate transition", () => {
     });
   });
 
-  it("start requires an active session before recording can start", async () => {
+  it("auto-bootstrap creates the telemetry session before explicit recording start", async () => {
     recordingSupported.value = true;
     testSessionServiceState.currentSession = null;
 
     await renderAndOpenInitialModal();
-    await startFlowFromOpenOverlay();
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(userConsented()).toBe("false");
+    expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
+
+    await startFlowFromOpenOverlay({ expectRecording: true });
 
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-      expect(userConsented()).toBe("false");
+      expect(userConsented()).toBe("true");
     });
+    expect(recordingServiceStartSpy).toHaveBeenCalledTimes(1);
+    expect(uploadRecordingSpy).not.toHaveBeenCalled();
+  });
+
+  it("automatic telemetry consent stays separate from recording acceptance", async () => {
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-stale";
+
+    await renderAuthenticatedApp("/app");
+    const modal = await screen.findByTestId("telemetry-consent-modal");
+    fireEvent.click(within(modal).getAllByRole("checkbox")[0]);
+    fireEvent.click(within(modal).getByRole("button", { name: "Save choices" }));
+
+    await waitFor(() => expect(mockedSaveTelemetryConsents).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+
+    expect(userConsented()).toBe("false");
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
-    expect(uploadRecordingSpy).not.toHaveBeenCalled();
+  });
+
+  it("automatic telemetry bootstrap preserves a Torch interview handoff", async () => {
+    await renderAuthenticatedApp(
+      "/app?view=interview&source=torch-command-centre&starvingPointId=sp-1&title=Boiler+check&trade=Plumbing",
+    );
+
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("interview-page")).toBeTruthy();
+    expect(screen.queryByTestId("memory-graph-view")).toBeNull();
+  });
+
+  it("retries a transient automatic session-start failure without dropping context", async () => {
+    startFailuresRemaining.value = 1;
+
+    await renderAuthenticatedApp("/app");
+
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2), {
+      timeout: 3_000,
+    });
+    expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
+    expect(userConsented()).toBe("false");
+
+    openFromAnyEntry();
+    await screen.findByTestId("user-testing-cancel");
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps retrying automatic bootstrap beyond the initial backoff window", async () => {
+    vi.useFakeTimers();
+    startFailuresRemaining.value = 6;
+
+    await renderAuthenticatedApp("/app");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
+
+    const retryDelays = [500, 1_500, 3_000, 10_000, 30_000, 30_000];
+    for (const [index, delay] of retryDelays.entries()) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay);
+      });
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(index + 2);
+    }
+
+    expect(mockedStartTestSession.mock.calls[6]?.[1]?.requestKey).toBe(identity.userId);
+    vi.useRealTimers();
+  });
+
+  it("aborts the old identity bootstrap and starts a separately keyed request", async () => {
+    let firstSignal: AbortSignal | undefined;
+    mockedStartTestSession.mockImplementationOnce(
+      (_pilotId, options) =>
+        new Promise((_, reject) => {
+          firstSignal = options?.signal;
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+
+    const rendered = await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(mockedStartTestSession.mock.calls[0]?.[1]?.requestKey).toBe(
+      identityBase.userId,
+    );
+
+    const nextIdentity = {
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    };
+    setIdentity(nextIdentity);
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2));
+    expect(mockedStartTestSession.mock.calls[1]?.[1]?.requestKey).toBe(
+      nextIdentity.userId,
+    );
+  });
+
+  it("aborts and clears an automatic bootstrap when telemetry is withdrawn", async () => {
+    let bootstrapSignal: AbortSignal | undefined;
+    mockedStartTestSession.mockImplementationOnce(
+      (_pilotId, options) =>
+        new Promise((_, reject) => {
+          bootstrapSignal = options?.signal;
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    expect(bootstrapSignal?.aborted).toBe(false);
+
+    setCachedActiveSession();
+    window.dispatchEvent(
+      new CustomEvent("jack:telemetry-withdrawn", {
+        detail: { withdrawn: ["telemetry"], deletionDueAt: null },
+      }),
+    );
+
+    await waitFor(() => expect(bootstrapSignal?.aborted).toBe(true));
+    expect(sessionStorage.getItem(ACTIVE_SESSION_KEY)).toBeNull();
+    expect(mockedStartTestSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes another user's consent prompt when the Clerk identity changes", async () => {
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-stale";
+
+    const rendered = await renderAuthenticatedApp("/app");
+    await screen.findByTestId("telemetry-consent-modal");
+
+    setIdentity({
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    });
+    testSessionServiceState.telemetryContext.consents.telemetry.privacyNoticeVersion =
+      "privacy-v1";
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("telemetry-consent-modal")).toBeNull();
+    });
+  });
+
+  it("resets recording acceptance during a same-tab account switch", async () => {
+    localStorage.setItem(acceptedStorageKey(identity.userId), "true");
+    const rendered = await renderAuthenticatedApp("/app");
+
+    await waitFor(() => expect(userConsented()).toBe("true"));
+
+    const nextIdentity = {
+      userId: "other-user-profile",
+      isAdmin: false,
+      name: "Other User",
+      email: "other@torchlabs.ca",
+    };
+    setIdentity(nextIdentity);
+    const module = await import("./App");
+    rendered.rerender(<module.default />);
+
+    await waitFor(() => {
+      expect(userConsented()).toBe("false");
+      expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
+    });
+    expect(localStorage.getItem(acceptedStorageKey(nextIdentity.userId))).toBeNull();
+  });
+
+  it("keeps export and withdrawal controls for a former tester without prior gate storage", async () => {
+    Object.assign(
+      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      {
+        enrolled: false,
+        requiresPilotSelection: false,
+        scope: null,
+        privacyScopes: [
+          {
+            organizationId: "org-history-1",
+            pilotId: "pilot-history-1",
+            organizationName: "Former Org",
+            pilotName: "Completed Pilot",
+            consents: {
+              telemetry: {
+                state: "granted",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              screen: {
+                state: "withdrawn",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              microphone: {
+                state: "withdrawn",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+            },
+          },
+        ],
+        consents: { telemetry: null, screen: null, microphone: null },
+        session: null,
+      },
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+    });
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
+    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+    fireEvent.click(screen.getByTestId("account-settings"));
+
+    const controls = await screen.findByTestId("telemetry-privacy-controls");
+    expect(within(controls).getByText("Completed Pilot")).toBeTruthy();
+    expect(within(controls).getByText("Former Org")).toBeTruthy();
+    fireEvent.click(within(controls).getByRole("button", { name: "Export telemetry" }));
+    expect(mockedExportTelemetry).toHaveBeenCalledTimes(1);
+
+    const historicalScope = within(
+      screen.getByTestId("telemetry-privacy-scope-pilot-history-1"),
+    );
+    fireEvent.click(
+      historicalScope.getByRole("button", { name: "Withdraw telemetry" }),
+    );
+
+    await waitFor(() => {
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
+        "pilot-history-1",
+        ["telemetry"],
+      );
+    });
+    expect(mockedLoadTelemetryContext.mock.calls.at(-1)?.[0]).toBeUndefined();
+  });
+
+  it("keeps owned historical privacy controls after promotion without enabling collection", async () => {
+    setIdentity({ ...identityBase, isAdmin: true });
+    Object.assign(
+      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      {
+        enrolled: false,
+        requiresPilotSelection: false,
+        scope: null,
+        privacyScopes: [
+          {
+            organizationId: "org-history-admin",
+            pilotId: "pilot-history-admin",
+            organizationName: "Former Org",
+            pilotName: "Admin History",
+            consents: {
+              telemetry: {
+                state: "granted",
+                privacyNoticeVersion: "privacy-v1",
+                consentVersion: "consent-v1",
+              },
+              screen: null,
+              microphone: null,
+            },
+          },
+        ],
+        consents: { telemetry: null, screen: null, microphone: null },
+        session: null,
+      },
+    );
+
+    await renderAuthenticatedApp("/app");
+    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("account-settings"));
+    const controls = await screen.findByTestId("telemetry-privacy-controls");
+    expect(within(controls).getByText("Admin History")).toBeTruthy();
+    fireEvent.click(
+      within(screen.getByTestId("telemetry-privacy-scope-pilot-history-admin")).getByRole(
+        "button",
+        { name: "Withdraw telemetry" },
+      ),
+    );
+    await waitFor(() => {
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
+        "pilot-history-admin",
+        ["telemetry"],
+      );
+    });
+    expect(mockedStartTestSession).not.toHaveBeenCalled();
   });
 
   it("start with explicit active session records user testing acceptance", async () => {

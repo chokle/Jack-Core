@@ -13,6 +13,7 @@ import { denyRestrictedIdentity } from "../lib/identity.js";
 import { userTestingLimiter } from "../lib/rate-limit.js";
 import { queueFeedbackNotification } from "../lib/feedback-notifications.js";
 import {
+  activeTesterScopeMatches,
   activityDb,
   auditReportAccess,
   authorizeReportScope,
@@ -20,6 +21,7 @@ import {
   latestConsent,
   requestIdentifier,
   resolveActiveTesterScope,
+  WITHDRAWAL_DELETION_DAYS,
 } from "../lib/activity-telemetry.js";
 
 const router = Router();
@@ -95,6 +97,103 @@ const upload = multer({
   },
 });
 
+function withdrawalDeletionDueAt(): string {
+  return new Date(
+    Date.now() + WITHDRAWAL_DELETION_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+}
+
+function pendingRecordingCleanupDueAt(): string {
+  // A recording starts life as cleanup-due. This gives any uploaded object a
+  // durable database cleanup link even if the process or storage call fails
+  // before the row can be finalized.
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function recordingConsentsRemainCurrent(input: {
+  userId: string;
+  organizationId: string;
+  pilotId: string;
+  telemetryConsentId: string;
+  screenConsentId: string;
+  microphoneIncluded: boolean;
+  microphoneConsentId: string | null;
+}): Promise<boolean> {
+  const [testerScopeCurrent, telemetry, screen, microphone] = await Promise.all([
+    activeTesterScopeMatches(input.userId, input.organizationId, input.pilotId),
+    latestConsent(input.userId, input.pilotId, "telemetry"),
+    latestConsent(input.userId, input.pilotId, "screen"),
+    input.microphoneIncluded
+      ? latestConsent(input.userId, input.pilotId, "microphone")
+      : Promise.resolve(null),
+  ]);
+  return Boolean(
+    testerScopeCurrent &&
+      currentConsentGranted(telemetry) &&
+      telemetry.id === input.telemetryConsentId &&
+      currentConsentGranted(screen) &&
+      screen.id === input.screenConsentId &&
+      (!input.microphoneIncluded ||
+        (currentConsentGranted(microphone) &&
+          microphone.id === input.microphoneConsentId)),
+  );
+}
+
+async function compensateRecordingConsentRace(input: {
+  recordingId: string;
+  userId: string;
+  storagePath: string;
+}): Promise<void> {
+  const deletionDueAt = withdrawalDeletionDueAt();
+  const marked = await supabase
+    .from("test_recordings")
+    .update({ deletion_due_at: deletionDueAt })
+    .eq("id", input.recordingId)
+    .eq("tester_user_id", input.userId);
+  const removed = await supabase.storage
+    .from("jack-test-recordings")
+    .remove([input.storagePath]);
+
+  if (marked.error && !removed.error) {
+    // The object is gone, so rolling back the just-created metadata cannot
+    // orphan private storage. If object removal also failed, preserve the row
+    // and storage path for recovery instead of severing the only cleanup link.
+    const deleted = await supabase
+      .from("test_recordings")
+      .delete()
+      .eq("id", input.recordingId)
+      .eq("tester_user_id", input.userId);
+    if (deleted.error) throw marked.error;
+  }
+  if (marked.error) throw marked.error;
+  if (removed.error) throw removed.error;
+}
+
+async function discardPendingRecording(input: {
+  recordingId: string;
+  userId: string;
+  storagePath: string;
+  removeStorage: boolean;
+}): Promise<unknown | null> {
+  if (input.removeStorage) {
+    const removed = await supabase.storage
+      .from("jack-test-recordings")
+      .remove([input.storagePath]);
+    if (removed.error) {
+      // Do not delete the metadata row: it was inserted cleanup-due and is the
+      // only durable link an operator/cleanup worker has to a partial object.
+      return removed.error;
+    }
+  }
+
+  const deleted = await supabase
+    .from("test_recordings")
+    .delete()
+    .eq("id", input.recordingId)
+    .eq("tester_user_id", input.userId);
+  return deleted.error ?? null;
+}
+
 function isFileSizeLimitError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as { status?: unknown; statusCode?: unknown; message?: unknown };
@@ -145,6 +244,64 @@ function queueFeedbackAlert(req: Request, feedbackId: string): void {
   }
 }
 
+async function feedbackContextStillCurrent(input: {
+  userId: string;
+  organizationId: string;
+  pilotId: string;
+  sessionId: string;
+  telemetryConsentId: string;
+}): Promise<boolean> {
+  const [session, consent] = await Promise.all([
+    db
+      .from("test_sessions")
+      .select("id")
+      .eq("id", input.sessionId)
+      .eq("actor_user_id", input.userId)
+      .eq("organization_id", input.organizationId)
+      .eq("pilot_id", input.pilotId)
+      .eq("status", "active")
+      .eq("telemetry_status", "granted")
+      .eq("telemetry_consent_id", input.telemetryConsentId)
+      .maybeSingle(),
+    latestConsent(input.userId, input.pilotId, "telemetry"),
+  ]);
+  if (session.error) throw session.error;
+  return Boolean(
+    session.data &&
+      currentConsentGranted(consent) &&
+      consent.id === input.telemetryConsentId,
+  );
+}
+
+async function compensateFeedbackConsentRace(
+  feedbackId: string,
+  userId: string,
+  pilotId: string,
+): Promise<void> {
+  const scheduled = await supabase
+    .from("test_feedback")
+    .update({
+      deletion_due_at: withdrawalDeletionDueAt(),
+      notification_status: "failed",
+      notification_last_error: "telemetry_consent_withdrawn",
+      notification_next_attempt_at: null,
+    })
+    .eq("id", feedbackId)
+    .eq("tester_user_id", userId)
+    .eq("pilot_id", pilotId);
+  if (!scheduled.error) return;
+
+  // Roll back only the just-created feedback row when scheduling cannot be
+  // recorded; no external storage is involved, so this cannot orphan data.
+  const deleted = await supabase
+    .from("test_feedback")
+    .delete()
+    .eq("id", feedbackId)
+    .eq("tester_user_id", userId)
+    .eq("pilot_id", pilotId);
+  if (deleted.error) throw scheduled.error;
+}
+
 router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
   try {
     const identity = await resolveIdentity(req);
@@ -159,6 +316,9 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         "User-testing feedback is temporarily unavailable.",
       )
     ) return;
+    if (identity.isAdmin) {
+      return res.status(403).json({ error: "User-testing feedback is unavailable for admins." });
+    }
     if (!identity.email) {
       return res.status(403).json({ error: "User-testing feedback requires a signed-in tester." });
     }
@@ -233,14 +393,34 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
     }
     const pilotSession = await db
       .from("test_sessions")
-      .select("id,organization_id,pilot_id")
+      .select("id,organization_id,pilot_id,telemetry_consent_id")
       .eq("id", sessionId)
       .eq("actor_user_id", identity.userId)
+      .eq("organization_id", membership.scope.organizationId)
       .eq("pilot_id", membership.scope.pilotId)
       .eq("status", "active")
+      .eq("telemetry_status", "granted")
       .maybeSingle();
     if (pilotSession.error) throw pilotSession.error;
+    if (!pilotSession.data) {
+      return res.status(403).json({
+        error: "An active owned pilot session is required to submit feedback.",
+      });
+    }
+    const telemetryConsent = await latestConsent(
+      identity.userId,
+      membership.scope.pilotId,
+      "telemetry",
+    );
+    if (
+      !currentConsentGranted(telemetryConsent) ||
+      telemetryConsent.id !== String(pilotSession.data.telemetry_consent_id)
+    ) {
+      return res.status(409).json({ error: "Telemetry consent is not active." });
+    }
 
+    const normalizedFeatures = [...new Set(features as string[])];
+    const canonicalAppVersion = appVersion ?? null;
     const { data: row, error } = await supabase
       .from("test_feedback")
       .insert({
@@ -251,10 +431,10 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         tester_profile_id: profile?.id ?? null,
         tester_trade: profile?.trade ?? null,
         session_id: sessionId,
-        test_session_id: pilotSession.data?.id ?? null,
+        test_session_id: pilotSession.data.id,
         organization_id: membership.scope.organizationId,
         pilot_id: membership.scope.pilotId,
-        features_used: [...new Set(features)],
+        features_used: normalizedFeatures,
         device_category: device,
         trigger,
         goal,
@@ -262,7 +442,7 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         shortfall,
         adoption_need: adoptionNeed,
         additional,
-        app_version: appVersion,
+        app_version: canonicalAppVersion,
         status: "new",
         notification_status: "pending",
       })
@@ -272,7 +452,9 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
       if ((error as { code?: string }).code === "23505") {
         const { data: existing, error: existingError } = await supabase
           .from("test_feedback")
-          .select("id, created_at")
+          .select(
+            "id,created_at,organization_id,pilot_id,session_id,test_session_id,features_used,device_category,trigger,goal,useful,shortfall,adoption_need,additional,app_version",
+          )
           .eq("id", feedbackId)
           .eq("tester_user_id", identity.userId)
           .maybeSingle();
@@ -280,10 +462,68 @@ router.post("/testing/feedback", userTestingLimiter, async (req, res) => {
         if (!existing) {
           return res.status(409).json({ error: "Feedback id is already in use." });
         }
+        const existingFeatures = existing.features_used;
+        const featuresMatch =
+          Array.isArray(existingFeatures) &&
+          existingFeatures.length === normalizedFeatures.length &&
+          existingFeatures.every((feature) => typeof feature === "string") &&
+          JSON.stringify([...new Set(existingFeatures)].sort()) ===
+            JSON.stringify([...normalizedFeatures].sort());
+        const retryMatches =
+          String(existing.organization_id) === membership.scope.organizationId &&
+          String(existing.pilot_id) === membership.scope.pilotId &&
+          String(existing.session_id) === sessionId &&
+          String(existing.test_session_id) === String(pilotSession.data.id) &&
+          featuresMatch &&
+          existing.device_category === device &&
+          existing.trigger === trigger &&
+          existing.goal === goal &&
+          existing.useful === useful &&
+          existing.shortfall === shortfall &&
+          existing.adoption_need === adoptionNeed &&
+          existing.additional === additional &&
+          existing.app_version === canonicalAppVersion;
+        if (!retryMatches) {
+          return res.status(409).json({
+            error: "Feedback id does not match this submission context.",
+          });
+        }
+        if (
+          !(await feedbackContextStillCurrent({
+            userId: identity.userId,
+            organizationId: membership.scope.organizationId,
+            pilotId: membership.scope.pilotId,
+            sessionId,
+            telemetryConsentId: telemetryConsent.id,
+          }))
+        ) {
+          await compensateFeedbackConsentRace(
+            String(existing.id),
+            identity.userId,
+            membership.scope.pilotId,
+          );
+          return res.status(409).json({ error: "Telemetry consent is not active." });
+        }
         queueFeedbackAlert(req, existing.id);
         return res.status(200).json({ id: existing.id, createdAt: existing.created_at });
       }
       throw error;
+    }
+    if (
+      !(await feedbackContextStillCurrent({
+        userId: identity.userId,
+        organizationId: membership.scope.organizationId,
+        pilotId: membership.scope.pilotId,
+        sessionId,
+        telemetryConsentId: telemetryConsent.id,
+      }))
+    ) {
+      await compensateFeedbackConsentRace(
+        String(row.id),
+        identity.userId,
+        membership.scope.pilotId,
+      );
+      return res.status(409).json({ error: "Telemetry consent is not active." });
     }
     queueFeedbackAlert(req, row.id);
     return res.status(201).json({ id: row.id, createdAt: row.created_at });
@@ -552,6 +792,9 @@ router.post(
           "Screen recording is temporarily unavailable.",
         )
       ) return;
+      if (identity.isAdmin) {
+        return res.status(403).json({ error: "Screen recording is unavailable for admins." });
+      }
       const pilotSession = await db
         .from("test_sessions")
         .select("*")
@@ -567,46 +810,52 @@ router.post(
           error: "An active owned pilot session with screen consent is required.",
         });
       }
-      const screenConsent = await latestConsent(
-        identity.userId,
-        String(pilotSession.data.pilot_id),
-        "screen",
-      );
-      if (!currentConsentGranted(screenConsent)) {
+      const microphoneIncluded = stringField(req.body, "microphoneIncluded") === "true";
+      const pilotId = String(pilotSession.data.pilot_id);
+      const organizationId = String(pilotSession.data.organization_id);
+      if (
+        !(await activeTesterScopeMatches(identity.userId, organizationId, pilotId))
+      ) {
+        return res.status(403).json({
+          error: "An active tester membership for this pilot is required.",
+        });
+      }
+      const [telemetryConsent, screenConsent, microphoneConsent] = await Promise.all([
+        latestConsent(identity.userId, pilotId, "telemetry"),
+        latestConsent(identity.userId, pilotId, "screen"),
+        microphoneIncluded
+          ? latestConsent(identity.userId, pilotId, "microphone")
+          : Promise.resolve(null),
+      ]);
+      if (
+        !currentConsentGranted(telemetryConsent) ||
+        telemetryConsent.id !== String(pilotSession.data.telemetry_consent_id)
+      ) {
+        return res.status(412).json({ error: "Telemetry consent is not active." });
+      }
+      if (
+        !currentConsentGranted(screenConsent) ||
+        screenConsent.id !== String(pilotSession.data.screen_consent_id)
+      ) {
         return res.status(412).json({ error: "Screen consent is not active." });
       }
-      const microphoneIncluded = stringField(req.body, "microphoneIncluded") === "true";
-      const microphoneConsent = microphoneIncluded
-        ? await latestConsent(identity.userId, String(pilotSession.data.pilot_id), "microphone")
-        : null;
-      if (microphoneIncluded && !currentConsentGranted(microphoneConsent)) {
+      if (
+        microphoneIncluded &&
+        (!currentConsentGranted(microphoneConsent) ||
+          microphoneConsent.id !== String(pilotSession.data.microphone_consent_id))
+      ) {
         return res.status(412).json({ error: "Microphone consent is not active." });
       }
 
       const filename = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
       const recordingId = crypto.randomUUID();
       const storagePath = `recordings/${recordingId}/${filename}`;
+      const pendingDeletionDueAt = pendingRecordingCleanupDueAt();
 
-      const { error: uploadErr } = await supabase.storage
-        .from("jack-test-recordings")
-        .upload(storagePath, fs.createReadStream(tempPath), {
-          contentType: req.file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadErr) {
-        if (isFileSizeLimitError(uploadErr)) {
-          return res.status(413).json({
-            error:
-              "This recording exceeds the storage plan's file size limit. Please try a shorter session.",
-          });
-        }
-        throw uploadErr;
-      }
-
-      // Only the private storage_path is stored — never a public URL — since a
-      // screen recording can contain arbitrary on-screen content.
-      const { data: row, error: insertErr } = await supabase
+      // Insert the private path before storage upload and keep the row
+      // cleanup-due until every consent fence passes. A failed/partial upload
+      // can therefore never leave an object without a durable cleanup link.
+      const { data: pendingRow, error: insertErr } = await supabase
         .from("test_recordings")
         .insert({
           id: recordingId,
@@ -625,14 +874,145 @@ router.post(
           user_agent: null,
           screen_resolution: null,
           app_version: stringField(req.body, "appVersion") ?? null,
+          deletion_due_at: pendingDeletionDueAt,
         })
         .select("id, created_at")
         .single();
 
-      if (insertErr) {
-        // Roll back the uploaded object if we can't record its metadata.
-        await supabase.storage.from("jack-test-recordings").remove([storagePath]);
-        throw insertErr;
+      if (insertErr || !pendingRow) {
+        throw insertErr ?? new Error("Recording metadata insert returned no row.");
+      }
+
+      const consentInput = {
+        userId: identity.userId,
+        organizationId,
+        pilotId,
+        telemetryConsentId: telemetryConsent.id,
+        screenConsentId: screenConsent.id,
+        microphoneIncluded,
+        microphoneConsentId: microphoneConsent?.id ?? null,
+      };
+      if (!(await recordingConsentsRemainCurrent(consentInput))) {
+        const cleanupErr = await discardPendingRecording({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+          removeStorage: false,
+        });
+        if (cleanupErr) {
+          req.log.error(
+            { err: cleanupErr, recordingId },
+            "failed to roll back pre-upload recording metadata; cleanup remains scheduled",
+          );
+        }
+        return res.status(412).json({
+          error: "Recording consent changed before upload. The recording was not retained.",
+        });
+      }
+
+      let uploadErr: unknown = null;
+      try {
+        const uploadResult = await supabase.storage
+          .from("jack-test-recordings")
+          .upload(storagePath, fs.createReadStream(tempPath), {
+            contentType: req.file.mimetype,
+            upsert: false,
+          });
+        uploadErr = uploadResult.error;
+      } catch (err) {
+        uploadErr = err;
+      }
+
+      if (uploadErr) {
+        const cleanupErr = await discardPendingRecording({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+          removeStorage: true,
+        });
+        if (cleanupErr) {
+          req.log.error(
+            { err: cleanupErr, recordingId, storagePath },
+            "failed to remove a partial recording; cleanup remains scheduled",
+          );
+        }
+        if (isFileSizeLimitError(uploadErr)) {
+          return res.status(413).json({
+            error:
+              "This recording exceeds the storage plan's file size limit. Please try a shorter session.",
+          });
+        }
+        throw uploadErr;
+      }
+
+      if (!(await recordingConsentsRemainCurrent(consentInput))) {
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        return res.status(412).json({
+          error: "Recording consent changed during upload. The recording was not retained.",
+        });
+      }
+
+      const { data: row, error: finalizeErr } = await supabase
+        .from("test_recordings")
+        .update({ deletion_due_at: null })
+        .eq("id", recordingId)
+        .eq("tester_user_id", identity.userId)
+        .eq("deletion_due_at", pendingDeletionDueAt)
+        .select("id, created_at")
+        .maybeSingle();
+      if (finalizeErr || !row) {
+        let consentsStillCurrent = false;
+        let consentReadError: unknown = null;
+        try {
+          consentsStillCurrent = await recordingConsentsRemainCurrent(consentInput);
+        } catch (err) {
+          consentReadError = err;
+        }
+        // Removal is mandatory even when the diagnostic consent read failed:
+        // the metadata CAS did not prove this private object was activated.
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        if (consentReadError) throw consentReadError;
+        if (!consentsStillCurrent) {
+          return res.status(412).json({
+            error: "Recording consent changed during upload. The recording was not retained.",
+          });
+        }
+        if (finalizeErr) throw finalizeErr;
+        return res.status(409).json({
+          error: "Recording could not be finalized and was not retained.",
+        });
+      }
+
+      let finalConsentsCurrent: boolean;
+      try {
+        finalConsentsCurrent = await recordingConsentsRemainCurrent(consentInput);
+      } catch (err) {
+        // The row is already active at this fence. An unreadable consent state
+        // is not permission to retain the uploaded private recording.
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        throw err;
+      }
+      if (!finalConsentsCurrent) {
+        await compensateRecordingConsentRace({
+          recordingId,
+          userId: identity.userId,
+          storagePath,
+        });
+        return res.status(412).json({
+          error: "Recording consent changed during upload. The recording was not retained.",
+        });
       }
 
       return res.status(201).json({ id: row.id, createdAt: row.created_at });

@@ -207,6 +207,12 @@ router.post("/parking-lot", parkingLotLimiter, async (req, res) => {
     const { data: inserted, error: insErr } = await supabase
       .from("parked_thoughts")
       .insert({
+        // New rows carry direct account attribution whenever a real signed-in
+        // actor exists. The account-deletion fence can therefore serialize and
+        // reject a stale parking write even when its chat session row is gone.
+        // Public anonymous chat bookmarks remain cookie-scoped and unattributed.
+        actor_user_id:
+          req.userId && req.userId !== PRESENTATION_USER_ID ? req.userId : null,
         source: body.source,
         chat_session_id: chatSessionId,
         interview_session_id: interviewSessionId,

@@ -6,6 +6,17 @@ import { isPublicApiPath } from "./requireAuth.js";
 function usesRouteScopedAuthorization(req: Request): boolean {
   const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
   if (req.method === "DELETE" && path === "/account") return true;
+  if (
+    req.method === "GET" &&
+    (path === "/me" ||
+      path === "/testing/telemetry/context" ||
+      path === "/testing/telemetry/export")
+  ) {
+    return true;
+  }
+  if (req.method === "POST" && path === "/testing/telemetry/withdraw") {
+    return true;
+  }
   return path === "/testing/progress" || path.startsWith("/testing/reports");
 }
 

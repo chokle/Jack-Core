@@ -25,6 +25,7 @@ vi.mock("../routes/index.js", async () => {
   const express = await import("express");
   const router = express.Router();
   router.get("/me", (req, res) => res.json({ userId: req.userId }));
+  router.get("/private", (_req, res) => res.json({ private: true }));
   router.get("/healthz", (_req, res) => res.json({ ok: true }));
   return { default: router };
 });
@@ -64,7 +65,7 @@ describe("app-wide authentication composition", () => {
     expect(response.body.error).toContain("sign in required");
   });
 
-  it("rejects a signed-in user without active pilot membership or admin authority", async () => {
+  it("allows identity-only /me for former users but denies unrelated pilot APIs", async () => {
     getAuth.mockReturnValue({ userId: "user_unapproved" });
     resolveActiveTesterScope.mockResolvedValue({ scope: null, reason: "not_enrolled" });
     resolveIdentity.mockResolvedValue({
@@ -76,10 +77,13 @@ describe("app-wide authentication composition", () => {
       classification: "resolved",
     });
 
-    const response = await request(app).get("/api/me");
+    const identityResponse = await request(app).get("/api/me");
+    expect(identityResponse.status).toBe(200);
+    expect(identityResponse.body).toEqual({ userId: "user_unapproved" });
 
-    expect(response.status).toBe(403);
-    expect(response.body.error).toContain("active Torch pilot membership");
+    const unrelated = await request(app).get("/api/private");
+    expect(unrelated.status).toBe(403);
+    expect(unrelated.body.error).toContain("active Torch pilot membership");
   });
 
   it("allows the health probe without a session", async () => {

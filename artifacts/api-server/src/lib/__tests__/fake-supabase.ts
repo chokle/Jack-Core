@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * In-memory fake of the tiny slice of the Supabase JS client that memory-graph.ts
  * and distillation.ts use. It supports the chainable query-builder surface the
@@ -27,6 +29,7 @@ type Filter =
   | { kind: "is"; col: string; val: unknown }
   | { kind: "not-is"; col: string; val: unknown }
   | { kind: "gte"; col: string; val: unknown }
+  | { kind: "lte"; col: string; val: unknown }
   | { kind: "lt"; col: string; val: unknown };
 
 interface Result<T> {
@@ -137,6 +140,54 @@ function cosine(a: number[], b: number[]): number {
 }
 
 export class FakeSupabase {
+  private injectedFailures: Array<{
+    table: string;
+    op: string;
+    error: { message: string };
+  }> = [];
+  private injectedAfterFailures: Array<{
+    table: string;
+    op: string;
+    error: { message: string };
+  }> = [];
+
+  failNext(
+    table: string,
+    op: "select" | "upsert" | "delete" | "update" | "insert",
+    error: { message: string },
+  ): void {
+    this.injectedFailures.push({ table, op, error });
+  }
+
+  failAfterNext(
+    table: string,
+    op: "select" | "upsert" | "delete" | "update" | "insert",
+    error: { message: string },
+  ): void {
+    this.injectedAfterFailures.push({ table, op, error });
+  }
+
+  clearFailures(): void {
+    this.injectedFailures = [];
+    this.injectedAfterFailures = [];
+  }
+
+  takeFailure(table: string, op: string): { message: string } | null {
+    const index = this.injectedFailures.findIndex(
+      (failure) => failure.table === table && failure.op === op,
+    );
+    if (index < 0) return null;
+    return this.injectedFailures.splice(index, 1)[0]!.error;
+  }
+
+  takeAfterFailure(table: string, op: string): { message: string } | null {
+    const index = this.injectedAfterFailures.findIndex(
+      (failure) => failure.table === table && failure.op === op,
+    );
+    if (index < 0) return null;
+    return this.injectedAfterFailures.splice(index, 1)[0]!.error;
+  }
+
   tables: Record<string, Row[]> = {
     videos: [],
     competencies: [],
@@ -151,10 +202,698 @@ export class FakeSupabase {
     return new QueryBuilder(this, table);
   }
 
+  private telemetryActorHash(actorUserId: string): string {
+    return createHash("sha256").update(actorUserId, "utf8").digest("hex");
+  }
+
+  isTelemetryActorFenced(actorUserId: string): boolean {
+    const actorHash = this.telemetryActorHash(actorUserId);
+    return (this.tables["telemetry_account_deletion_fences"] ?? []).some(
+      (row) => row["actor_hash"] === actorHash,
+    );
+  }
+
+  private latestTelemetryConsent(
+    actorUserId: string,
+    organizationId: unknown,
+    pilotId: unknown,
+    scope: string,
+  ): Row | null {
+    const rows = (this.tables["telemetry_consents"] ?? []).filter(
+      (row) =>
+        row["actor_user_id"] === actorUserId &&
+        (row["organization_id"] === organizationId ||
+          row["organization_id"] == null) &&
+        (row["pilot_id"] === pilotId || row["pilot_id"] == null) &&
+        row["scope"] === scope,
+    );
+    return rows
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) => {
+        const leftOccurredAt = Date.parse(String(left.row["occurred_at"] ?? ""));
+        const rightOccurredAt = Date.parse(String(right.row["occurred_at"] ?? ""));
+        if (
+          Number.isFinite(leftOccurredAt) &&
+          Number.isFinite(rightOccurredAt) &&
+          leftOccurredAt !== rightOccurredAt
+        ) {
+          return rightOccurredAt - leftOccurredAt;
+        }
+        const leftSequence = Number(left.row["consent_sequence"] ?? left.index);
+        const rightSequence = Number(right.row["consent_sequence"] ?? right.index);
+        return rightSequence - leftSequence;
+      })[0]?.row ?? null;
+  }
+
+  private telemetryConsentIsCurrent(
+    actorUserId: string,
+    organizationId: unknown,
+    pilotId: unknown,
+    scope: string,
+    consentId: unknown,
+  ): boolean {
+    const latest = this.latestTelemetryConsent(
+      actorUserId,
+      organizationId,
+      pilotId,
+      scope,
+    );
+    return latest?.["id"] === consentId && latest?.["state"] === "granted";
+  }
+
+  telemetryWriteError(
+    table: string,
+    row: Row,
+    operation: "insert" | "update",
+    previous?: Row,
+  ): { message: string } | null {
+    const accountActorColumns: Record<string, string[]> = {
+      telemetry_consents: ["actor_user_id"],
+      telemetry_withdrawal_jobs: ["actor_user_id"],
+      test_sessions: ["actor_user_id"],
+      test_events: ["actor_user_id"],
+      test_recordings: ["tester_user_id"],
+      test_feedback: ["tester_user_id"],
+      activity_ingest_failures: ["actor_user_id"],
+      videos: ["uploader_user_id"],
+      chat_messages: ["user_id"],
+      mentor_profiles: ["contributor_user_id"],
+      interview_sessions: ["contributor_user_id"],
+      parked_thoughts: ["actor_user_id"],
+      end_of_shift_closeouts: ["actor_user_id"],
+      pilot_access_handoffs: ["user_id"],
+      pilot_memberships: ["user_id", "created_by_user_id"],
+      platform_roles: ["user_id", "created_by_user_id"],
+      activity_report_runs: ["requested_by_user_id"],
+      admin_access_audit: ["actor_user_id", "target_user_id"],
+    };
+    const fencedActor = (accountActorColumns[table] ?? [])
+      .map((column) => String(row[column] ?? ""))
+      .find(
+        (candidate) =>
+          candidate.length > 0 && this.isTelemetryActorFenced(candidate),
+      );
+    if (fencedActor) {
+      return { message: "account deletion is already in progress" };
+    }
+
+    const actorColumn =
+      table === "test_recordings" || table === "test_feedback"
+        ? "tester_user_id"
+        : "actor_user_id";
+    const actorUserId = String(row[actorColumn] ?? "");
+    const organizationId = row["organization_id"];
+    const pilotId = row["pilot_id"];
+    if (table === "test_sessions") {
+      if (
+        row["status"] === "active" &&
+        row["telemetry_status"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+          row["telemetry_consent_id"],
+        )
+      ) return { message: "telemetry consent is not current for session write" };
+      if (
+        row["status"] === "active" &&
+        row["screen_consent_state"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "screen",
+          row["screen_consent_id"],
+        )
+      ) return { message: "screen consent is not current for session write" };
+      if (
+        row["status"] === "active" &&
+        row["microphone_consent_state"] === "granted" &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "microphone",
+          row["microphone_consent_id"],
+        )
+      ) return { message: "microphone consent is not current for session write" };
+    } else if (
+      table === "test_events" &&
+      row["redacted_at"] == null &&
+      !this.telemetryConsentIsCurrent(
+        actorUserId,
+        organizationId,
+        pilotId,
+        "telemetry",
+        row["consent_id"],
+      )
+    ) {
+      return { message: "telemetry consent is not current for event write" };
+    } else if (
+      table === "test_recordings" &&
+      organizationId != null &&
+      row["deletion_due_at"] == null
+    ) {
+      if (
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "screen",
+          row["screen_consent_id"],
+        )
+      ) return { message: "screen consent is not current for recording write" };
+      if (
+        row["microphone_consent_id"] != null &&
+        !this.telemetryConsentIsCurrent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "microphone",
+          row["microphone_consent_id"],
+        )
+      ) return { message: "microphone consent is not current for recording write" };
+    } else if (
+      table === "test_feedback" &&
+      organizationId != null &&
+      pilotId != null &&
+      row["deletion_due_at"] == null &&
+      (operation === "insert" ||
+        previous == null ||
+        previous["tester_user_id"] !== row["tester_user_id"] ||
+        previous["organization_id"] !== row["organization_id"] ||
+        previous["pilot_id"] !== row["pilot_id"] ||
+        previous["test_session_id"] !== row["test_session_id"] ||
+        (previous["deletion_due_at"] != null && row["deletion_due_at"] == null) ||
+        [
+          "tester_email",
+          "tester_name",
+          "tester_profile_id",
+          "tester_trade",
+          "session_id",
+          "features_used",
+          "device_category",
+          "trigger",
+          "goal",
+          "useful",
+          "shortfall",
+          "adoption_need",
+          "additional",
+          "app_version",
+        ].some(
+          (column) =>
+            JSON.stringify(previous[column]) !== JSON.stringify(row[column]),
+        ))
+    ) {
+      const session = (this.tables["test_sessions"] ?? []).find(
+        (candidate) => candidate["id"] === row["test_session_id"],
+      );
+      if (session) {
+        if (
+          session["actor_user_id"] !== actorUserId ||
+          session["organization_id"] !== organizationId ||
+          session["pilot_id"] !== pilotId ||
+          !this.telemetryConsentIsCurrent(
+            actorUserId,
+            session["organization_id"],
+            session["pilot_id"],
+            "telemetry",
+            session["telemetry_consent_id"],
+          )
+        ) return { message: "telemetry consent is not current for feedback write" };
+      } else {
+        const latest = this.latestTelemetryConsent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+        );
+        if (latest?.["state"] !== "granted") {
+          return { message: "telemetry consent is not current for feedback write" };
+        }
+      }
+    } else if (
+      table === "activity_ingest_failures" &&
+      actorUserId &&
+      pilotId != null
+    ) {
+      const sessionId = row["test_session_id"];
+      if (sessionId != null) {
+        const session = (this.tables["test_sessions"] ?? []).find(
+          (candidate) => candidate["id"] === sessionId,
+        );
+        if (
+          !session ||
+          session["actor_user_id"] !== actorUserId ||
+          session["organization_id"] !== organizationId ||
+          session["pilot_id"] !== pilotId ||
+          session["status"] !== "active" ||
+          !this.telemetryConsentIsCurrent(
+            actorUserId,
+            organizationId,
+            pilotId,
+            "telemetry",
+            session["telemetry_consent_id"],
+          )
+        ) {
+          return {
+            message: "telemetry consent is not current for ingest-failure write",
+          };
+        }
+      } else {
+        const latest = this.latestTelemetryConsent(
+          actorUserId,
+          organizationId,
+          pilotId,
+          "telemetry",
+        );
+        if (latest?.["state"] !== "granted") {
+          return {
+            message: "telemetry consent is not current for ingest-failure write",
+          };
+        }
+      }
+    }
+    return null;
+  }
+
   async rpc(
     name: string,
     params: Record<string, unknown>,
   ): Promise<Result<unknown>> {
+    const rpcTable = `rpc:${name}`;
+    const injectedFailure = this.takeFailure(rpcTable, "insert");
+    if (injectedFailure) return { data: null, error: injectedFailure };
+
+    if (name === "apply_fenced_video_graph_identity") {
+      const videoId = String(params["p_video_id"] ?? "").trim();
+      if (!videoId) {
+        return { data: null, error: { message: "video id is required for graph sync" } };
+      }
+
+      const videoNodeId = `video:${videoId}`;
+      const nodes = (this.tables["knowledge_nodes"] ??= []);
+      const edges = (this.tables["knowledge_edges"] ??= []);
+      const video = (this.tables["videos"] ?? []).find((row) => row["id"] === videoId);
+      const oldContributorIds = new Set(
+        edges
+          .filter(
+            (edge) =>
+              edge["target_id"] === videoNodeId &&
+              edge["kind"] === "video" &&
+              String(edge["source_id"] ?? "").startsWith("contributor:"),
+          )
+          .map((edge) => String(edge["source_id"])),
+      );
+
+      const deleteNode = (id: string): void => {
+        this.tables["knowledge_nodes"] = (this.tables["knowledge_nodes"] ?? []).filter(
+          (row) => row["id"] !== id,
+        );
+        this.tables["knowledge_edges"] = (this.tables["knowledge_edges"] ?? []).filter(
+          (edge) => edge["source_id"] !== id && edge["target_id"] !== id,
+        );
+      };
+      const pruneOldContributors = (): void => {
+        for (const contributorId of oldContributorIds) {
+          const stillSourcesVideo = (this.tables["knowledge_edges"] ?? []).some(
+            (edge) =>
+              edge["source_id"] === contributorId && edge["kind"] === "video",
+          );
+          if (!stillSourcesVideo) deleteNode(contributorId);
+        }
+      };
+
+      // A delayed sync after an ordinary source deletion is cleanup-only.
+      if (!video) {
+        deleteNode(videoNodeId);
+        pruneOldContributors();
+        return { data: false, error: null };
+      }
+
+      const actorUserId = String(video["uploader_user_id"] ?? "").trim();
+      const sourceFenced = (this.tables["account_deletion_source_fences"] ?? []).some(
+        (row) =>
+          row["source_type"] === "video" &&
+          String(row["source_id"]) === videoId,
+      );
+      if (sourceFenced || (actorUserId && this.isTelemetryActorFenced(actorUserId))) {
+        return {
+          data: null,
+          error: { message: "video graph source is fenced by account deletion" },
+        };
+      }
+
+      const now = new Date().toISOString();
+      const trade = String(video["trade"] ?? "").trim() || null;
+      const rawCodes = Array.isArray(video["competency_codes"])
+        ? (video["competency_codes"] as unknown[])
+        : [];
+      const codes = [
+        ...new Set(
+          rawCodes
+            .filter((code): code is string => typeof code === "string")
+            .map((code) => code.trim())
+            .filter(Boolean),
+        ),
+      ];
+      const parentId = trade ? `topic:${trade}` : "__jack__";
+      const contributorId = actorUserId ? `contributor:${actorUserId}` : null;
+
+      const upsertNode = (row: Row, ignoreDuplicates = false): void => {
+        const rows = (this.tables["knowledge_nodes"] ??= []);
+        const existingIndex = rows.findIndex((candidate) => candidate["id"] === row["id"]);
+        if (existingIndex >= 0) {
+          if (!ignoreDuplicates) rows[existingIndex] = { ...rows[existingIndex]!, ...row };
+        } else {
+          rows.push({ ...row });
+        }
+      };
+      const upsertEdge = (row: Row): void => {
+        const rows = (this.tables["knowledge_edges"] ??= []);
+        const existingIndex = rows.findIndex((candidate) => candidate["id"] === row["id"]);
+        if (existingIndex >= 0) rows[existingIndex] = { ...rows[existingIndex]!, ...row };
+        else rows.push({ ...row });
+      };
+
+      upsertNode({ id: "__jack__", kind: "core", label: "JACK", updated_at: now });
+      if (trade) {
+        upsertNode({
+          id: `topic:${trade}`,
+          kind: "topic",
+          label: trade,
+          trade,
+          updated_at: now,
+        });
+      }
+      for (const code of codes) {
+        upsertNode(
+          {
+            id: `comp:${code}`,
+            kind: "competency",
+            label: code,
+            ref_id: code,
+            meta: { code },
+            updated_at: now,
+          },
+          true,
+        );
+      }
+
+      const uploaderEmail = actorUserId
+        ? String(video["uploader_email"] ?? "").trim() || null
+        : null;
+      const uploaderName = actorUserId
+        ? String(video["uploader_name"] ?? "").trim() || null
+        : null;
+      upsertNode({
+        id: videoNodeId,
+        kind: "video",
+        label: String(video["title"] ?? "Untitled"),
+        trade,
+        ref_id: videoId,
+        meta: {
+          status: video["status"] ?? null,
+          ...(trade ? { trade } : {}),
+          ...(video["description"] != null
+            ? { description: video["description"] }
+            : {}),
+          competencyCodes: codes,
+          ...(actorUserId ? { uploaderUserId: actorUserId } : {}),
+          ...(uploaderEmail ? { uploaderEmail } : {}),
+          ...(uploaderName ? { uploaderName } : {}),
+          ...(video["created_at"] != null ? { createdAt: video["created_at"] } : {}),
+          ...(video["updated_at"] != null || video["created_at"] != null
+            ? { updatedAt: video["updated_at"] ?? video["created_at"] }
+            : {}),
+        },
+        updated_at: now,
+      });
+      if (contributorId) {
+        upsertNode({
+          id: contributorId,
+          kind: "contributor",
+          label: uploaderName ?? uploaderEmail ?? "Contributor",
+          trade,
+          ref_id: actorUserId,
+          meta: {
+            userId: actorUserId,
+            ...(uploaderEmail ? { email: uploaderEmail } : {}),
+            ...(uploaderName ? { name: uploaderName } : {}),
+            ...(trade ? { trade } : {}),
+          },
+          updated_at: now,
+        });
+      }
+
+      this.tables["knowledge_edges"] = (this.tables["knowledge_edges"] ?? []).filter(
+        (edge) =>
+          !(
+            (edge["source_id"] === videoNodeId && edge["kind"] !== "knowledge") ||
+            edge["target_id"] === videoNodeId
+          ),
+      );
+
+      if (trade) {
+        upsertEdge({
+          id: `e:__jack__->topic:${trade}`,
+          source_id: "__jack__",
+          target_id: `topic:${trade}`,
+          kind: "topic",
+          weight: 1,
+          meta: {},
+        });
+      }
+      if (contributorId) {
+        upsertEdge({
+          id: `e:${parentId}->${contributorId}`,
+          source_id: parentId,
+          target_id: contributorId,
+          kind: "contributor",
+          weight: 1,
+          meta: {},
+        });
+        upsertEdge({
+          id: `e:${contributorId}->${videoNodeId}`,
+          source_id: contributorId,
+          target_id: videoNodeId,
+          kind: "video",
+          weight: 1,
+          meta: { role: "uploader", userId: actorUserId },
+        });
+      } else {
+        upsertEdge({
+          id: `e:${parentId}->${videoNodeId}`,
+          source_id: parentId,
+          target_id: videoNodeId,
+          kind: "video",
+          weight: 1,
+          meta: {},
+        });
+      }
+      for (const code of codes) {
+        upsertEdge({
+          id: `e:${videoNodeId}->comp:${code}`,
+          source_id: videoNodeId,
+          target_id: `comp:${code}`,
+          kind: "competency",
+          weight: 1,
+          meta: {},
+        });
+      }
+      pruneOldContributors();
+
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: true, error: afterFailure }
+        : { data: true, error: null };
+    }
+
+    if (name === "append_telemetry_withdrawal") {
+      const actorUserId = String(params["p_actor_user_id"] ?? "");
+      const scopes = (params["p_scopes"] as string[] | undefined) ?? [];
+      const consentIds = (params["p_consent_ids"] as string[] | undefined) ?? [];
+      const jobId = String(params["p_job_id"] ?? "");
+      if (
+        !actorUserId ||
+        !jobId ||
+        scopes.length === 0 ||
+        scopes.length !== consentIds.length ||
+        new Set(scopes).size !== scopes.length ||
+        scopes.some((scope) => !["telemetry", "screen", "microphone"].includes(scope)) ||
+        (scopes.includes("telemetry") &&
+          (!scopes.includes("screen") || !scopes.includes("microphone")))
+      ) {
+        return { data: null, error: { message: "invalid telemetry withdrawal manifest" } };
+      }
+      if (this.isTelemetryActorFenced(actorUserId)) {
+        return { data: null, error: { message: "account deletion is already in progress" } };
+      }
+      const jobs = (this.tables["telemetry_withdrawal_jobs"] ??= []);
+      const consents = (this.tables["telemetry_consents"] ??= []);
+      if (
+        jobs.some((row) => row["id"] === jobId) ||
+        consentIds.some((id) => consents.some((row) => row["id"] === id))
+      ) {
+        return { data: null, error: { message: "duplicate withdrawal manifest" } };
+      }
+
+      const organizationId = params["p_organization_id"];
+      const pilotId = params["p_pilot_id"];
+      const epochConsentIds: Record<string, string[]> = {};
+      for (const scope of scopes) {
+        epochConsentIds[scope] = consents
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["organization_id"] === organizationId &&
+              row["pilot_id"] === pilotId &&
+              row["scope"] === scope &&
+              row["state"] === "granted",
+          )
+          .map((row) => String(row["id"]));
+      }
+
+      const sessionIds = new Set(
+        (this.tables["test_sessions"] ?? [])
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["pilot_id"] === pilotId,
+          )
+          .map((row) => row["id"]),
+      );
+      const epochRowIds = {
+        activity_ingest_failures: (this.tables["activity_ingest_failures"] ?? [])
+          .filter(
+            (row) =>
+              row["actor_user_id"] === actorUserId &&
+              row["pilot_id"] === pilotId,
+          )
+          .map((row) => String(row["id"])),
+        test_feedback: (this.tables["test_feedback"] ?? [])
+          .filter(
+            (row) =>
+              row["tester_user_id"] === actorUserId &&
+              (row["pilot_id"] === pilotId ||
+                sessionIds.has(row["test_session_id"])),
+          )
+          .map((row) => String(row["id"])),
+        test_recordings: (this.tables["test_recordings"] ?? [])
+          .filter(
+            (row) =>
+              row["tester_user_id"] === actorUserId &&
+              (row["pilot_id"] === pilotId ||
+                sessionIds.has(row["test_session_id"])),
+          )
+          .map((row) => String(row["id"])),
+      };
+
+      const now = new Date().toISOString();
+      jobs.push({
+        id: jobId,
+        actor_user_id: actorUserId,
+        organization_id: organizationId,
+        pilot_id: pilotId,
+        scopes: [...scopes],
+        consent_ids: [...consentIds],
+        epoch_consent_ids: epochConsentIds,
+        epoch_row_ids: epochRowIds,
+        withdrawn_at: now,
+        consent_retained_until: params["p_consent_retained_until"],
+        deletion_due_at: params["p_deletion_due_at"],
+        status: "pending",
+        attempts: 0,
+        next_attempt_at: now,
+        created_at: now,
+        updated_at: now,
+      });
+      for (const [index, scope] of scopes.entries()) {
+        consents.push({
+          id: consentIds[index],
+          consent_sequence: consents.length + 1,
+          actor_user_id: actorUserId,
+          organization_id: organizationId,
+          pilot_id: pilotId,
+          scope,
+          state: "withdrawn",
+          privacy_notice_version: params["p_privacy_notice_version"],
+          consent_version: params["p_consent_version"],
+          source: "account_privacy",
+          occurred_at: now,
+          retained_until: params["p_consent_retained_until"],
+          created_at: now,
+        });
+      }
+
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: now, error: afterFailure }
+        : { data: now, error: null };
+    }
+
+    if (
+      name === "begin_telemetry_account_deletion" ||
+      name === "finish_telemetry_account_deletion"
+    ) {
+      const actorUserId = String(params["p_actor_user_id"] ?? "");
+      if (!actorUserId) {
+        return { data: null, error: { message: "invalid account deletion actor" } };
+      }
+      const fences = (this.tables["telemetry_account_deletion_fences"] ??= []);
+      const actorHash = this.telemetryActorHash(actorUserId);
+      const now = new Date().toISOString();
+      const existing = fences.find((row) => row["actor_hash"] === actorHash);
+      if (existing) existing["last_attempt_at"] = now;
+      else {
+        fences.push({
+          actor_hash: actorHash,
+          first_started_at: now,
+          last_attempt_at: now,
+        });
+      }
+      const sourceFences = (this.tables["account_deletion_source_fences"] ??= []);
+      const sourceTables: Array<[string, string, string]> = [
+        ["video", "videos", "uploader_user_id"],
+        ["mentor_profile", "mentor_profiles", "contributor_user_id"],
+        ["interview_session", "interview_sessions", "contributor_user_id"],
+      ];
+      for (const [sourceType, table, actorColumn] of sourceTables) {
+        for (const row of this.tables[table] ?? []) {
+          if (row[actorColumn] !== actorUserId) continue;
+          const sourceId = String(row["id"] ?? "");
+          if (
+            sourceId &&
+            !sourceFences.some(
+              (candidate) =>
+                candidate["source_type"] === sourceType &&
+                candidate["source_id"] === sourceId,
+            )
+          ) {
+            sourceFences.push({
+              source_type: sourceType,
+              source_id: sourceId,
+              actor_hash: actorHash,
+              created_at: now,
+            });
+          }
+        }
+      }
+
+      this.tables["telemetry_withdrawal_jobs"] = (
+        this.tables["telemetry_withdrawal_jobs"] ?? []
+      ).filter((row) => row["actor_user_id"] !== actorUserId);
+      if (name === "finish_telemetry_account_deletion") {
+        this.tables["telemetry_consents"] = (
+          this.tables["telemetry_consents"] ?? []
+        ).filter((row) => row["actor_user_id"] !== actorUserId);
+      }
+      const afterFailure = this.takeAfterFailure(rpcTable, "insert");
+      return afterFailure
+        ? { data: null, error: afterFailure }
+        : { data: null, error: null };
+    }
     if (name === "match_knowledge_nodes") {
       const query = (params["query_embedding"] as number[]) ?? [];
       const category = params["filter_category"] as string;
@@ -251,7 +990,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private upsertOpts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
   private updateValues: Row = {};
   private singleMode: "none" | "maybe" | "single" = "none";
-  private orderBy: { col: string; ascending: boolean } | null = null;
+  private orderBy: Array<{ col: string; ascending: boolean }> = [];
   private limitCount: number | null = null;
 
   constructor(
@@ -331,13 +1070,18 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     return this;
   }
 
+  lte(col: string, val: unknown): this {
+    this.filters.push({ kind: "lte", col, val });
+    return this;
+  }
+
   gte(col: string, val: unknown): this {
     this.filters.push({ kind: "gte", col, val });
     return this;
   }
 
   order(col: string, opts: { ascending?: boolean } = {}): this {
-    this.orderBy = { col, ascending: opts.ascending ?? true };
+    this.orderBy.push({ col, ascending: opts.ascending ?? true });
     return this;
   }
 
@@ -365,17 +1109,27 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       if (f.kind === "is") return (row[f.col] ?? null) === f.val;
       if (f.kind === "not-is") return (row[f.col] ?? null) !== f.val;
       if (f.kind === "gte") return (row[f.col] as never) >= (f.val as never);
+      if (f.kind === "lte") return (row[f.col] as never) <= (f.val as never);
       if (f.kind === "lt") return (row[f.col] as never) < (f.val as never);
       return f.vals.includes(row[f.col]);
     });
   }
 
   private run(): Result<unknown> {
-    if (this.op === "upsert") return this.runUpsert();
-    if (this.op === "insert") return this.runInsert();
-    if (this.op === "update") return this.runUpdate();
-    if (this.op === "delete") return this.runDelete();
-    return this.runSelect();
+    const injectedFailure = this.db.takeFailure(this.table, this.op);
+    if (injectedFailure) return { data: null, error: injectedFailure };
+
+    let result: Result<unknown>;
+    if (this.op === "upsert") result = this.runUpsert();
+    else if (this.op === "insert") result = this.runInsert();
+    else if (this.op === "update") result = this.runUpdate();
+    else if (this.op === "delete") result = this.runDelete();
+    else result = this.runSelect();
+
+    const injectedAfterFailure = this.db.takeAfterFailure(this.table, this.op);
+    return injectedAfterFailure
+      ? { data: result.data, error: injectedAfterFailure }
+      : result;
   }
 
   /**
@@ -410,6 +1164,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private runInsert(): Result<unknown> {
+    for (const row of this.upsertRows) {
+      const guardError = this.db.telemetryWriteError(this.table, row, "insert");
+      if (guardError) return { data: null, error: guardError };
+    }
+
     // Referential integrity applies to the insert path too — several FK-bearing
     // tables (transcript_segments, interview_*) are written via `.insert()`.
     const fkError = this.checkForeignKeys();
@@ -420,6 +1179,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let n = 0;
     for (const incoming of this.upsertRows) {
       const row: Row = { created_at: now, ...incoming };
+      if (this.table === "telemetry_consents") {
+        row["occurred_at"] = now;
+        row["created_at"] = now;
+        row["consent_sequence"] =
+          (this.db.tables["telemetry_consents"] ?? []).length + n + 1;
+      }
       if (row["id"] === undefined)
         row["id"] = `fake-${this.table}-${this.rows.length + n}`;
       this.rows.push(row);
@@ -433,6 +1198,20 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   }
 
   private runUpdate(): Result<unknown> {
+    const candidates = this.rows
+      .filter((row) => this.matches(row))
+      .map((row) => ({ ...row, ...this.updateValues }));
+    for (const [index, row] of candidates.entries()) {
+      const previous = this.rows.filter((candidate) => this.matches(candidate))[index];
+      const guardError = this.db.telemetryWriteError(
+        this.table,
+        row,
+        "update",
+        previous,
+      );
+      if (guardError) return { data: null, error: guardError };
+    }
+
     const updated: Row[] = [];
     for (const r of this.rows) {
       if (!this.matches(r)) continue;
@@ -449,12 +1228,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
     let matched = this.rows
       .filter((r) => this.matches(r))
       .map((r) => ({ ...r }));
-    if (this.orderBy) {
-      const { col, ascending } = this.orderBy;
+    if (this.orderBy.length > 0) {
       const compareValues = (left: unknown, right: unknown): number => {
         if (left == null && right == null) return 0;
-        if (left == null) return ascending ? 1 : -1;
-        if (right == null) return ascending ? -1 : 1;
+        if (left == null) return 1;
+        if (right == null) return -1;
 
         if (typeof left === "number" && typeof right === "number") {
           return left - right;
@@ -483,8 +1261,11 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
       };
 
       matched = matched.sort((a, b) => {
-        const order = compareValues(a[col], b[col]);
-        return ascending ? order : -order;
+        for (const { col, ascending } of this.orderBy) {
+          const order = compareValues(a[col], b[col]);
+          if (order !== 0) return ascending ? order : -order;
+        }
+        return 0;
       });
     }
     if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
@@ -526,6 +1307,18 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
           }
         }
       }
+    }
+
+    for (const incoming of this.upsertRows) {
+      const existing = this.rows.find((row) => row["id"] === incoming["id"]);
+      const merged = existing ? { ...existing, ...incoming } : incoming;
+      const guardError = this.db.telemetryWriteError(
+        this.table,
+        merged,
+        existing ? "update" : "insert",
+        existing,
+      );
+      if (guardError) return { data: null, error: guardError };
     }
 
     // Model referential integrity: a child row's FK column (e.g. an edge

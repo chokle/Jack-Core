@@ -3,6 +3,10 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const deletedTables = vi.hoisted(() => [] as string[]);
+const rpcCalls = vi.hoisted(
+  () => [] as Array<{ name: string; params: Record<string, unknown> }>,
+);
+const operationOrder = vi.hoisted(() => [] as string[]);
 const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
@@ -16,17 +20,29 @@ const recordingRows = vi.hoisted(
 const removeRecordingObjects = vi.hoisted(() =>
   vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({ error: null })),
 );
+const removeVideoGraph = vi.hoisted(() => vi.fn(async () => {}));
+const removeContributorGraph = vi.hoisted(() => vi.fn(async () => {}));
+const withdrawMentor = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("@clerk/express", () => ({
   getAuth: () => ({ userId: "user-1" }),
   clerkClient: { users: { deleteUser } },
 }));
-vi.mock("../../lib/jobs.js", () => ({ removeGraphSafe: vi.fn() }));
-vi.mock("../../lib/memory-graph.js", () => ({ withdrawMentor: vi.fn() }));
+vi.mock("../../lib/memory-graph.js", () => ({
+  removeVideoGraph,
+  removeContributorGraph,
+  withdrawMentor,
+}));
 vi.mock("../../lib/video-storage.js", () => ({ removeVideoAssets: vi.fn(async () => {}) }));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
+    rpc: async (name: string, params: Record<string, unknown>) => {
+      rpcCalls.push({ name, params });
+      operationOrder.push(`rpc:${name}`);
+      return { data: null, error: null };
+    },
     from: (table: string) => {
+      operationOrder.push(`from:${table}`);
       let operation: "select" | "delete" = "select";
       let updateValues: Record<string, unknown> | null = null;
       let limit: number | undefined;
@@ -102,12 +118,20 @@ function app(): Express {
 
 beforeEach(() => {
   deletedTables.length = 0;
+  rpcCalls.length = 0;
+  operationOrder.length = 0;
   deletions.length = 0;
   updates.length = 0;
   recordingRows.length = 0;
   deleteUser.mockClear();
   removeRecordingObjects.mockReset();
   removeRecordingObjects.mockResolvedValue({ error: null });
+  removeVideoGraph.mockReset();
+  removeVideoGraph.mockResolvedValue(undefined);
+  removeContributorGraph.mockReset();
+  removeContributorGraph.mockResolvedValue(undefined);
+  withdrawMentor.mockReset();
+  withdrawMentor.mockResolvedValue(undefined);
 });
 
 describe("account deletion telemetry coverage", () => {
@@ -122,17 +146,34 @@ describe("account deletion telemetry coverage", () => {
     expect(new Set(deletedTables)).toEqual(
       new Set([
         "videos",
+        "interview_sessions",
+        "parked_thoughts",
         "chat_messages",
         "test_recordings",
         "test_feedback",
+        "end_of_shift_closeouts",
+        "pilot_access_handoffs",
         "activity_ingest_failures",
         "test_events",
         "admin_access_audit",
         "test_sessions",
-        "telemetry_consents",
         "pilot_memberships",
         "platform_roles",
       ]),
+    );
+    expect(rpcCalls).toEqual([
+      {
+        name: "begin_telemetry_account_deletion",
+        params: { p_actor_user_id: "user-1" },
+      },
+      {
+        name: "finish_telemetry_account_deletion",
+        params: { p_actor_user_id: "user-1" },
+      },
+    ]);
+    expect(operationOrder[0]).toBe("rpc:begin_telemetry_account_deletion");
+    expect(operationOrder.indexOf("rpc:finish_telemetry_account_deletion")).toBeGreaterThan(
+      operationOrder.indexOf("from:test_sessions"),
     );
     expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
     expect(
@@ -145,6 +186,43 @@ describe("account deletion telemetry coverage", () => {
         value: "user-1",
       },
     ]);
+    expect(
+      updates.filter(({ table }) => table === "pilot_memberships"),
+    ).toEqual([
+      {
+        table: "pilot_memberships",
+        values: { created_by_user_id: null },
+        column: "created_by_user_id",
+        value: "user-1",
+      },
+    ]);
+    expect(
+      updates.filter(({ table }) => table === "platform_roles"),
+    ).toEqual([
+      {
+        table: "platform_roles",
+        values: { created_by_user_id: null },
+        column: "created_by_user_id",
+        value: "user-1",
+      },
+    ]);
+    expect(removeContributorGraph).toHaveBeenCalledWith("user-1");
+    expect(deleteUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("keeps the identity when strict contributor graph cleanup fails", async () => {
+    removeContributorGraph.mockRejectedValueOnce(new Error("graph unavailable"));
+
+    const failed = await request(app()).delete("/api/account");
+
+    expect(failed.status).toBe(500);
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+    ]);
+
+    const retried = await request(app()).delete("/api/account");
+    expect(retried.status).toBe(204);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 
@@ -179,10 +257,18 @@ describe("account deletion telemetry coverage", () => {
     expect(failed.status).toBe(500);
     expect(recordingRows).toHaveLength(1);
     expect(deleteUser).not.toHaveBeenCalled();
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+    ]);
 
     const retried = await request(app()).delete("/api/account");
     expect(retried.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_telemetry_account_deletion",
+      "begin_telemetry_account_deletion",
+      "finish_telemetry_account_deletion",
+    ]);
   });
 });

@@ -27,6 +27,7 @@ export function initializeActivityHeartbeat(): () => void {
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        testSessionId: session.id,
         appSessionId: session.appSessionId,
         visibility: foreground ? "foreground" : "hidden",
         meaningfulActivity,

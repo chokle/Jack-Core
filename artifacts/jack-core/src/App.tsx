@@ -51,16 +51,21 @@ import {
 import { useMemoryGraphData } from "./lib/use-memory-graph";
 import { timeAgo } from "./lib/memory-graph";
 import {
+  cacheTestSession,
   exportTelemetry,
   initializeTelemetryRetry,
   loadTelemetryContext,
   saveTelemetryConsents,
+  setTelemetryIdentity,
   startTestSession,
   trackTestEvent,
   withdrawTelemetry,
   type TelemetryContext,
 } from "./lib/user-testing/test-session-service";
-import { setFeedbackSessionId } from "./lib/user-testing/feedback-service";
+import {
+  setFeedbackIdentity,
+  setFeedbackSessionId,
+} from "./lib/user-testing/feedback-service";
 import { handoffInterviewResume } from "./lib/interview-resume";
 import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from "@workspace/api-client-react";
 
@@ -343,8 +348,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const testingOverlayRef = useRef<TestingOverlayHandle>(null);
   const feedbackRef = useRef<UserTestFeedbackHandle>(null);
   const testStartPendingRef = useRef(false);
+  const testStartOwnerRef = useRef<string | null>(null);
   const [testStartPending, setTestStartPending] = useState(false);
   const [telemetryContext, setTelemetryContext] = useState<TelemetryContext | null>(null);
+  const activeTelemetryUserIdRef = useRef<string | null>(null);
+  const telemetryContextOwnerRef = useRef<string | null>(null);
+  const testingGateOwnerRef = useRef<string | null>(null);
   const [telemetryConsentOpen, setTelemetryConsentOpen] = useState(false);
   const [testingGate, setTestingGate] = useState<{
     accepted: boolean;
@@ -367,18 +376,21 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
 
   useEffect(() => {
-    if (me?.isAdmin !== false) return;
-    setTestingGate((prev) => {
-      if (!me?.userId) return prev;
-      if (prev.accepted) return prev;
-      const accepted = readUserTestingAccepted(me.userId);
-      if (accepted) {
-        return { accepted: true, restricted: false };
-      }
-      return {
-        accepted: false,
-        restricted: !readUserTestingDeclined(me.userId),
-      };
+    testingGateOwnerRef.current = me?.userId ?? null;
+    testingAcceptanceInProgress.current = false;
+    testStartPendingRef.current = false;
+    testStartOwnerRef.current = null;
+    setTestStartPending(false);
+
+    if (me?.isAdmin !== false || !me?.userId) {
+      setTestingGate({ accepted: false, restricted: true });
+      return;
+    }
+
+    const accepted = readUserTestingAccepted(me.userId);
+    setTestingGate({
+      accepted,
+      restricted: accepted ? false : !readUserTestingDeclined(me.userId),
     });
   }, [me?.userId, me?.isAdmin]);
 
@@ -468,14 +480,26 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const launchTestSession = async (pilotId?: string) => {
-    if (testStartPendingRef.current) return;
+    const requestUserId = me?.userId;
+    if (
+      !requestUserId ||
+      (testStartPendingRef.current && testStartOwnerRef.current === requestUserId)
+    ) {
+      return;
+    }
+
     testStartPendingRef.current = true;
+    testStartOwnerRef.current = requestUserId;
     setTestStartPending(true);
     try {
-      const session = await startTestSession(pilotId);
+      const session = await startTestSession(pilotId, {
+        requestKey: requestUserId,
+        shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
+      });
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
+
+      telemetryContextOwnerRef.current = requestUserId;
       setFeedbackSessionId(session.id);
-      setTestingGate({ accepted: true, restricted: false });
-      clearUserTestingDeclined(me?.userId);
       setTelemetryContext((current) =>
         current ? { ...current, session } : current,
       );
@@ -484,27 +508,56 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
       }, 0);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Test could not start. Please try again.");
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        window.alert(error instanceof Error ? error.message : "Test could not start. Please try again.");
+      }
     } finally {
-      testStartPendingRef.current = false;
-      setTestStartPending(false);
+      if (testStartOwnerRef.current === requestUserId) {
+        testStartPendingRef.current = false;
+        testStartOwnerRef.current = null;
+        setTestStartPending(false);
+      }
     }
   };
 
   const handleStartUserTest = async () => {
-    if (testStartPendingRef.current) return;
+    const requestUserId = me?.userId;
+    if (
+      !requestUserId ||
+      (testStartPendingRef.current && testStartOwnerRef.current === requestUserId)
+    ) {
+      return;
+    }
+
     setTestingGate((prev) => ({ ...prev, restricted: false }));
     let context = telemetryContext;
     if (!context) {
       try {
-        context = await loadTelemetryContext();
+        context = await loadTelemetryContext(undefined, {
+          shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
+        });
       } catch {
-        testingOverlayRef.current?.open();
+        if (activeTelemetryUserIdRef.current === requestUserId) {
+          testingOverlayRef.current?.open();
+        }
         return;
       }
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
+      telemetryContextOwnerRef.current = requestUserId;
       setTelemetryContext(context);
     }
+    if (
+      activeTelemetryUserIdRef.current !== requestUserId ||
+      telemetryContextOwnerRef.current !== requestUserId
+    ) {
+      return;
+    }
     if (!context || !context.enrolled || !context.scope) {
+      testingOverlayRef.current?.open();
+      return;
+    }
+    if (context.session) {
+      setFeedbackSessionId(context.session.id);
       testingOverlayRef.current?.open();
       return;
     }
@@ -514,7 +567,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       context.consents.telemetry.consentVersion === context.consentVersion
     ) {
       await launchTestSession(context.scope.pilotId);
-      testingOverlayRef.current?.open();
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        testingOverlayRef.current?.open();
+      }
       return;
     }
     setTelemetryConsentOpen(true);
@@ -552,67 +607,260 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleTelemetryConsent = async (choices: TelemetryConsentChoices) => {
-    if (!telemetryContext?.scope || testStartPendingRef.current) return;
+    const requestUserId = me?.userId;
+    const consentScope = telemetryContext?.scope;
+    if (
+      !requestUserId ||
+      !consentScope ||
+      telemetryContextOwnerRef.current !== requestUserId ||
+      (testStartPendingRef.current && testStartOwnerRef.current === requestUserId)
+    ) {
+      return;
+    }
+
+    const consentContext = telemetryContext;
     testStartPendingRef.current = true;
+    testStartOwnerRef.current = requestUserId;
     setTestStartPending(true);
     try {
       const context = await saveTelemetryConsents({
-        pilotId: telemetryContext.scope.pilotId,
+        pilotId: consentScope.pilotId,
         ...choices,
-        privacyNoticeVersion: telemetryContext.privacyNoticeVersion,
-        consentVersion: telemetryContext.consentVersion,
+        privacyNoticeVersion: consentContext.privacyNoticeVersion,
+        consentVersion: consentContext.consentVersion,
       });
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
+
+      telemetryContextOwnerRef.current = requestUserId;
       setTelemetryContext(context);
       setTelemetryConsentOpen(false);
-      if (choices.telemetry === "granted") {
-        testStartPendingRef.current = false;
-        setTestStartPending(false);
-        await launchTestSession(context.scope?.pilotId);
-      } else {
-        persistUserTestingDeclined(me?.userId);
-        clearUserTestingAccepted(me?.userId);
+      if (choices.telemetry !== "granted") {
+        persistUserTestingDeclined(requestUserId);
+        clearUserTestingAccepted(requestUserId);
         setTestingGate({ accepted: false, restricted: false });
-        handleNavigate("graph");
       }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        window.alert(error instanceof Error ? error.message : "Consent choices could not be saved.");
+      }
     } finally {
-      testStartPendingRef.current = false;
-      setTestStartPending(false);
+      if (testStartOwnerRef.current === requestUserId) {
+        testStartPendingRef.current = false;
+        testStartOwnerRef.current = null;
+        setTestStartPending(false);
+      }
     }
   };
 
   const handleTelemetryWithdrawal = async (
+    pilotId: string,
     scopes: Array<"telemetry" | "screen" | "microphone">,
   ) => {
-    const pilotId = telemetryContext?.scope?.pilotId;
-    if (!pilotId) return;
+    const requestUserId = me?.userId;
+    if (
+      !requestUserId ||
+      !pilotId ||
+      telemetryContextOwnerRef.current !== requestUserId
+    ) {
+      return;
+    }
+
     try {
       await withdrawTelemetry(pilotId, scopes);
-      setTelemetryContext(await loadTelemetryContext(pilotId));
+      if (activeTelemetryUserIdRef.current !== requestUserId) return;
+
+      // Reload the user's canonical active scope plus the full identity-owned
+      // privacy list. A historical-pilot withdrawal must not replace a current
+      // enrollment with the deactivated pilot requested for cleanup.
+      const context = await loadTelemetryContext(undefined, {
+        shouldCache: () => activeTelemetryUserIdRef.current === requestUserId,
+      });
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        telemetryContextOwnerRef.current = requestUserId;
+        setTelemetryContext(context);
+      }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Consent could not be withdrawn.");
+      if (activeTelemetryUserIdRef.current === requestUserId) {
+        window.alert(error instanceof Error ? error.message : "Consent could not be withdrawn.");
+      }
     }
   };
 
   useEffect(() => {
-    if (me?.isAdmin !== false) return;
-    const stopRetry = initializeTelemetryRetry();
-    void loadTelemetryContext().then((context) => {
-      setTelemetryContext(context);
-      const session = context.session;
-      if (session) {
-        setFeedbackSessionId(session.id);
-      }
-      if (session && session.onboardingStatus !== "completed") {
-        handleNavigate("graph");
+    activeTelemetryUserIdRef.current = null;
+    telemetryContextOwnerRef.current = null;
+    setTelemetryContext(null);
+    setTelemetryConsentOpen(false);
+    if (!me) return;
+
+    setFeedbackIdentity(me.userId ?? null);
+
+    const contextUserId = me.userId || null;
+    activeTelemetryUserIdRef.current = contextUserId;
+    // Admin promotion must clear every collection/session queue while still
+    // loading identity-owned historical privacy controls.
+    setTelemetryIdentity(me.isAdmin === false ? contextUserId : null);
+    if (!contextUserId) return;
+
+    const stopRetry =
+      me.isAdmin === false ? initializeTelemetryRetry() : () => {};
+    const abortController = new AbortController();
+    let cancelled = false;
+
+    void loadTelemetryContext(undefined, {
+      signal: abortController.signal,
+      shouldCache: () =>
+        !cancelled && activeTelemetryUserIdRef.current === contextUserId,
+    })
+      .then((context) => {
+        if (
+          cancelled ||
+          activeTelemetryUserIdRef.current !== contextUserId
+        ) {
+          return;
+        }
+        telemetryContextOwnerRef.current = contextUserId;
+        setTelemetryContext(context);
+      })
+      .catch(() => {
+        if (
+          !cancelled &&
+          activeTelemetryUserIdRef.current === contextUserId
+        ) {
+          setTelemetryContext(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      stopRetry();
+    };
+  }, [me?.userId, me?.isAdmin]);
+
+  useEffect(() => {
+    if (
+      me?.isAdmin !== false ||
+      !me?.userId ||
+      !telemetryContext ||
+      telemetryContextOwnerRef.current !== me.userId
+    ) {
+      return;
+    }
+
+    const context = telemetryContext;
+    const session = context.session;
+    if (session) {
+      setTelemetryConsentOpen(false);
+      setFeedbackSessionId(session.id);
+      if (session.onboardingStatus !== "completed") {
         window.setTimeout(() => {
           window.dispatchEvent(new CustomEvent("jack:test-session-started", { detail: session }));
         }, 0);
       }
-    }).catch(() => setTelemetryContext(null));
-    return stopRetry;
-  }, [me?.isAdmin]);
+      return;
+    }
+
+    if (!context.enrolled || !context.scope) {
+      setTelemetryConsentOpen(false);
+      // A former tester is no longer eligible for the participation prompt,
+      // but remains entitled to Account & privacy. Do not persist a recording
+      // decision; simply remove the active-pilot gate for this session.
+      setTestingGate({ accepted: false, restricted: false });
+      return;
+    }
+
+    const telemetryConsent = context.consents.telemetry;
+    if (
+      !telemetryConsent ||
+      telemetryConsent.privacyNoticeVersion !== context.privacyNoticeVersion ||
+      telemetryConsent.consentVersion !== context.consentVersion
+    ) {
+      setTelemetryConsentOpen(true);
+      return;
+    }
+
+    setTelemetryConsentOpen(false);
+    if (telemetryConsent.state !== "granted") return;
+
+    const contextUserId = me.userId;
+    const pilotId = context.scope.pilotId;
+    const retryDelays = [500, 1_500, 3_000, 10_000, 30_000] as const;
+    const abortController = new AbortController();
+    let cancelled = false;
+    let completed = false;
+    let starting = false;
+    let retryAttempt = 0;
+    let retryTimer: number | undefined;
+
+    const startScopedSession = async () => {
+      if (cancelled || starting) return;
+      starting = true;
+      try {
+        const startedSession = await startTestSession(pilotId, {
+          signal: abortController.signal,
+          requestKey: contextUserId,
+          shouldCache: () =>
+            !cancelled &&
+            activeTelemetryUserIdRef.current === contextUserId,
+        });
+        if (
+          cancelled ||
+          activeTelemetryUserIdRef.current !== contextUserId
+        ) {
+          return;
+        }
+        completed = true;
+        telemetryContextOwnerRef.current = contextUserId;
+        setFeedbackSessionId(startedSession.id);
+        setTelemetryContext({ ...context, session: startedSession });
+      } catch {
+        if (cancelled) return;
+        const delay =
+          retryDelays[Math.min(retryAttempt, retryDelays.length - 1)] ??
+          30_000;
+        retryAttempt += 1;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = undefined;
+          void startScopedSession();
+        }, delay);
+      } finally {
+        starting = false;
+      }
+    };
+
+    const retryOnReconnect = () => {
+      if (cancelled || starting) return;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      retryAttempt = 0;
+      void startScopedSession();
+    };
+
+    const cancelBootstrap = () => {
+      cancelled = true;
+      if (!completed) {
+        abortController.abort();
+        cacheTestSession(null);
+      }
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+    };
+
+    window.addEventListener("online", retryOnReconnect);
+    window.addEventListener("jack:telemetry-withdrawn", cancelBootstrap);
+    void startScopedSession();
+
+    return () => {
+      cancelBootstrap();
+      window.removeEventListener("online", retryOnReconnect);
+      window.removeEventListener("jack:telemetry-withdrawn", cancelBootstrap);
+    };
+  }, [me?.userId, me?.isAdmin, telemetryContext]);
 
   useEffect(() => {
     const continueTest = () => testingOverlayRef.current?.open();
@@ -652,7 +900,26 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const inGraph = view === "graph" && !selectedVideoId;
   const activeNav: JackView = selectedVideoId ? "library" : view;
-  const canViewCloseout = me?.isAdmin === false && !!(telemetryContext?.scope?.pilotId);
+  const ownedTelemetryContext =
+    me?.userId && telemetryContextOwnerRef.current === me.userId
+      ? telemetryContext
+      : null;
+  const ownedTelemetryPrivacyScopes =
+    ownedTelemetryContext?.privacyScopes ??
+    (ownedTelemetryContext?.scope
+      ? [{
+        ...ownedTelemetryContext.scope,
+        consents: ownedTelemetryContext.consents,
+      }]
+      : []);
+  const ownedTestingGate =
+    me?.userId && testingGateOwnerRef.current === me.userId
+      ? testingGate
+      : { accepted: false, restricted: true };
+  // Pilot is the primary product path during the active pilot. Telemetry
+  // participation is optional and must never determine access to Closeout.
+  // The Closeout API resolves and enforces active pilot membership server-side.
+  const canViewCloseout = me?.isAdmin === false;
 
   return (
     <>
@@ -714,14 +981,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <KnowledgeReview />
         ) : view === "reports" ? (
           <PilotActivityReports />
-        ) : view === "closeout" ? (
+        ) : view === "closeout" && canViewCloseout ? (
           <EndOfShiftCloseout
+            key={`closeout:${me?.userId ?? "signed-out"}`}
             participantId={me?.userId ?? "participant"}
             participantName={me?.name || me?.email}
-            organizationName={telemetryContext?.scope?.organizationName}
-            pilotName={telemetryContext?.scope?.pilotName}
-            organizationId={telemetryContext?.scope?.organizationId}
-            pilotId={telemetryContext?.scope?.pilotId}
           />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
@@ -729,13 +993,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       </JackShell>
 
       <TelemetryConsentModal
-        open={telemetryConsentOpen}
+        key={`telemetry-consent:${me?.userId ?? "signed-out"}`}
+        open={telemetryConsentOpen && !!ownedTelemetryContext?.scope}
         saving={testStartPending}
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
       <UserTestingGate
-        open={me?.isAdmin === false && testingGate.restricted && !testingGate.accepted}
+        key={`user-testing-gate:${me?.userId ?? "signed-out"}`}
+        open={
+          me?.isAdmin === false &&
+          ownedTestingGate.restricted &&
+          !ownedTestingGate.accepted
+        }
         onStart={handleStartUserTest}
       />
 
@@ -754,14 +1024,17 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       />
 
       <TestingOverlay
+        key={`testing-overlay:${me?.userId ?? "signed-out"}`}
         ref={testingOverlayRef}
+        identityKey={me?.userId ?? null}
         onEvent={handleTestingEvent}
       />
       <UserTestFeedback
+        key={`user-feedback:${me?.userId ?? "signed-out"}`}
         ref={feedbackRef}
-        consented={testingGate.accepted}
+        consented={ownedTestingGate.accepted}
         userId={isSignedIn ? me?.userId : null}
-        pilotId={telemetryContext?.scope?.pilotId}
+        pilotId={ownedTelemetryContext?.scope?.pilotId}
       />
 
       <AlertDialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
@@ -772,36 +1045,74 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               You control your participation. Ask Jack conversations are stored as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {telemetryContext?.scope && (
-            <div className="rounded-lg border border-border p-4">
+          {ownedTelemetryPrivacyScopes.length > 0 && (
+            <div
+              className="rounded-lg border border-border p-4"
+              data-testid="telemetry-privacy-controls"
+            >
               <p className="font-semibold">Pilot telemetry</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Export your activity data or withdraw consent. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
+                Export your activity data or withdraw consent. These privacy controls remain available after pilot participation ends. Withdrawal stops future collection and active recording immediately and schedules attributable telemetry for deletion within 30 days.
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={exportTelemetry}>Export telemetry</Button>
-                {telemetryContext.consents.microphone?.state === "granted" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTelemetryWithdrawal(["microphone"])}
+              <Button className="mt-3" variant="outline" onClick={exportTelemetry}>
+                Export telemetry
+              </Button>
+              <div className="mt-3 space-y-3">
+                {ownedTelemetryPrivacyScopes.map((privacyScope) => (
+                  <div
+                    key={privacyScope.pilotId}
+                    className="rounded-md border border-border/70 p-3"
+                    data-testid={`telemetry-privacy-scope-${privacyScope.pilotId}`}
                   >
-                    Withdraw microphone
-                  </Button>
-                )}
-                {telemetryContext.consents.screen?.state === "granted" && (
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleTelemetryWithdrawal(["screen"])}
-                  >
-                    Withdraw screen recording
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => void handleTelemetryWithdrawal(["telemetry"])}
-                >
-                  Withdraw telemetry
-                </Button>
+                    <p className="text-sm font-medium">
+                      {privacyScope.pilotName || "Pilot data"}
+                    </p>
+                    {privacyScope.organizationName && (
+                      <p className="text-xs text-muted-foreground">
+                        {privacyScope.organizationName}
+                      </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {privacyScope.consents.microphone?.state === "granted" && (
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            void handleTelemetryWithdrawal(
+                              privacyScope.pilotId,
+                              ["microphone"],
+                            )
+                          }
+                        >
+                          Withdraw microphone
+                        </Button>
+                      )}
+                      {privacyScope.consents.screen?.state === "granted" && (
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            void handleTelemetryWithdrawal(
+                              privacyScope.pilotId,
+                              ["screen"],
+                            )
+                          }
+                        >
+                          Withdraw screen recording
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void handleTelemetryWithdrawal(
+                            privacyScope.pilotId,
+                            ["telemetry"],
+                          )
+                        }
+                      >
+                        Withdraw telemetry
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
