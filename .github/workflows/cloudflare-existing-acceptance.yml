@@ -1,0 +1,104 @@
+name: Cloudflare Existing Rollout Acceptance
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-existing-acceptance-20260901
+
+permissions:
+  contents: read
+
+env:
+  WRANGLER_LOG_SANITIZE: "true"
+
+jobs:
+  accept-existing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Fail closed on Cloudflare credential
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::Missing required GitHub Actions secret: CLOUDFLARE_API_TOKEN"
+            exit 1
+          }
+
+      - name: Resolve Cloudflare account context
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CONFIGURED_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node cloudflare/resolve-account-context.mjs
+
+      - name: Verify Cloudflare authentication
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: timeout --kill-after=5s 2m npx --yes wrangler@4.127.1 whoami
+
+      - name: Accept already-deployed exact rollout
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ROLLOUT_TARGET: https://jack-core-production.dchoks87.workers.dev
+          CLOUDFLARE_ROLLOUT_RELEASE: d3c33db1-2d06-475d-9de5-47f1af4403c5
+          CLOUDFLARE_EXPECTED_DIGEST: sha256:459f141fa1eed62293cc7302787e0e0849bf8199f208f4b83e4c99c756fa51c4
+        run: node cloudflare/run-rollout-acceptance.mjs
+
+      - name: Smoke-test accepted workers.dev deployment
+        shell: bash
+        env:
+          TARGET: https://jack-core-production.dchoks87.workers.dev
+          RELEASE: d3c33db1-2d06-475d-9de5-47f1af4403c5
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --header 'Cache-Control: no-cache' --max-time 30 "$TARGET/?release=$RELEASE" > /dev/null
+          curl --fail --silent --show-error --header 'Cache-Control: no-cache' --max-time 30 "$TARGET/api/healthz?release=$RELEASE" | tee /tmp/healthz.json
+          node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/healthz.json","utf8")); if(body.status!=="ok") process.exit(1)'
+          auth_status="$(curl --silent --show-error --output /tmp/unauthorized.json --write-out '%{http_code}' --header 'Cache-Control: no-cache' --max-time 30 "$TARGET/api/me?release=$RELEASE")"
+          test "$auth_status" = "401"
+          node -e 'const fs=require("node:fs"); const body=JSON.parse(fs.readFileSync("/tmp/unauthorized.json","utf8")); if(!String(body.error||"").includes("sign in required")) process.exit(1)'
+
+      - name: Capture Cloudflare state on failure
+        if: failure()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          applications="$(timeout --kill-after=5s 45s npx --yes wrangler@4.127.1 containers list --json || true)"
+          printf '%s\n' "$applications"
+          application_id="$(node -e '
+            try {
+              const payload = JSON.parse(process.argv[1] || "[]");
+              const rows = Array.isArray(payload) ? payload : payload.result ?? payload.applications ?? [];
+              const application = rows.find((row) => row.name === "jack-core-production");
+              process.stdout.write(application?.id ?? application?.application_id ?? "");
+            } catch {}
+          ' "$applications")"
+          if [[ -n "$application_id" ]]; then
+            timeout --kill-after=5s 45s npx --yes wrangler@4.127.1 containers instances "$application_id" --json || true
+          fi
+
+      - name: Record acceptance evidence
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "## Existing Cloudflare rollout acceptance"
+            echo "- Worker release: d3c33db1-2d06-475d-9de5-47f1af4403c5"
+            echo "- container digest: sha256:459f141fa1eed62293cc7302787e0e0849bf8199f208f4b83e4c99c756fa51c4"
+            echo "- exact container rollout: PASS"
+            echo "- serving instance version: PASS"
+            echo "- public shell: PASS"
+            echo "- /api/healthz: PASS"
+            echo "- anonymous /api/me rejected: PASS (401)"
+            echo "- production DNS: unchanged"
+          } >> "$GITHUB_STEP_SUMMARY"
