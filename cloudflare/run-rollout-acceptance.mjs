@@ -183,6 +183,7 @@ export async function main() {
     release,
     expectedDigest,
     adapter: createProductionRolloutAdapter({ target }),
+    config: { primaryAttempts: 240 },
   });
   if (!result.ready) {
     console.error(`::error::Cloudflare rollout rejected: ${result.message}`);
