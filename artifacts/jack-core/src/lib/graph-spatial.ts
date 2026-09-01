@@ -632,6 +632,15 @@ export function buildBranchNavigatorLayout(
       keep.add(id);
       for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);
     }
+
+    // A real video linked to a competency can remain a same-depth cross-link
+    // because it also has a shorter route through its trade or contributor.
+    // Keep direct competency evidence visible without making it a branch center.
+    if (nodeById.get(centerId)?.kind === "competency") {
+      for (const relatedId of hierarchy.get(centerId)?.relatedNodeIds ?? []) {
+        keep.add(relatedId);
+      }
+    }
   }
 
   const visibleIds = layout.visibleIds.filter((id) => keep.has(id));

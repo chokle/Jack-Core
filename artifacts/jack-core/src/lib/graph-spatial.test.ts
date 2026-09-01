@@ -105,35 +105,38 @@ describe("branch navigator layout", () => {
     expect(layout.visibleIds).not.toContain("video:v1");
   });
 
-  it("centers a competency niche and reveals its descendant memory", () => {
-    const base = branchModel();
-    const model: GraphModel = {
-      ...base,
-      nodes: [
-        ...base.nodes,
-        {
-          id: "comp-memory",
-          kind: "concept",
-          label: "Root pass control",
-          topicId: "topic:Welder",
-          color: [120, 180, 255],
-          meta: { trade: "Welder", confidence: 0.9 },
-        },
-      ],
-      edges: [
-        ...base.edges,
-        { a: "comp:W-1", b: "comp-memory", kind: "concept" },
-      ],
-      degree: {
-        ...base.degree,
-        "comp:W-1": (base.degree["comp:W-1"] ?? 0) + 1,
-        "comp-memory": 1,
-      },
-    };
-    const layout = buildBranchNavigatorLayout(model, "comp:W-1");
+  it("centers a competency niche and reveals its real linked video", () => {
+    const model = withSeededTrades(
+      selectMemoryGraphModel(
+        null,
+        [
+          {
+            id: "v1",
+            title: "Stick Welding Basics",
+            trade: "Welder",
+            status: "completed",
+            competencyCodes: ["W-1"],
+          },
+          {
+            id: "v2",
+            title: "Panel Wiring",
+            trade: "Electrician",
+            status: "completed",
+          },
+        ],
+        [
+          { code: "W-1", name: "Occupational Skills", trade: "Welder" },
+          { code: "E-1", name: "Occupational Skills", trade: "Electrician" },
+        ],
+      ),
+    );
+    const hierarchy = buildHierarchy(model);
+    expect(hierarchy.get("comp:W-1")?.relatedNodeIds).toContain("video:v1");
+
+    const layout = buildBranchNavigatorLayout(model, "comp:W-1", hierarchy);
     expect(layout.centerId).toBe("comp:W-1");
     expect(layout.visibleIds).toContain("topic:Welder");
-    expect(layout.visibleIds).toContain("comp-memory");
+    expect(layout.visibleIds).toContain("video:v1");
     expect(layout.visibleIds).not.toContain("video:v2");
   });
 
