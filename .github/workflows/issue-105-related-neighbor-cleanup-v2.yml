@@ -1,0 +1,71 @@
+name: Issue 105 model-shape cleanup v2
+
+on:
+  push:
+    branches:
+      - fix/living-memory-competency-drilldown-105
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply bounded model-shape correction
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("artifacts/jack-core/src/lib/graph-spatial.ts")
+          text = source.read_text()
+          old = '''    const stack = [centerId];\n    while (stack.length > 0) {\n      const id = stack.pop()!;\n      keep.add(id);\n      for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);\n    }\n  }\n\n  const visibleIds = layout.visibleIds.filter((id) => keep.has(id));'''
+          new = '''    const stack = [centerId];\n    while (stack.length > 0) {\n      const id = stack.pop()!;\n      keep.add(id);\n      for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);\n    }\n\n    // A real video linked to a competency can remain a same-depth cross-link\n    // because it also has a shorter route through its trade or contributor.\n    // Keep direct competency evidence visible without making it a branch center.\n    if (nodeById.get(centerId)?.kind === "competency") {\n      for (const relatedId of hierarchy.get(centerId)?.relatedNodeIds ?? []) {\n        keep.add(relatedId);\n      }\n    }\n  }\n\n  const visibleIds = layout.visibleIds.filter((id) => keep.has(id));'''
+          if text.count(old) != 1:
+              raise SystemExit(f"branch traversal anchor count={text.count(old)}")
+          source.write_text(text.replace(old, new, 1))
+
+          test = Path("artifacts/jack-core/src/lib/graph-spatial.test.ts")
+          text = test.read_text()
+          old_case = '''  it("centers a competency niche and reveals its descendant memory", () => {\n    const base = branchModel();\n    const model: GraphModel = {\n      ...base,\n      nodes: [\n        ...base.nodes,\n        {\n          id: "comp-memory",\n          kind: "concept",\n          label: "Root pass control",\n          topicId: "topic:Welder",\n          color: [120, 180, 255],\n          meta: { trade: "Welder", confidence: 0.9 },\n        },\n      ],\n      edges: [\n        ...base.edges,\n        { a: "comp:W-1", b: "comp-memory", kind: "concept" },\n      ],\n      degree: {\n        ...base.degree,\n        "comp:W-1": (base.degree["comp:W-1"] ?? 0) + 1,\n        "comp-memory": 1,\n      },\n    };\n    const layout = buildBranchNavigatorLayout(model, "comp:W-1");\n    expect(layout.centerId).toBe("comp:W-1");\n    expect(layout.visibleIds).toContain("topic:Welder");\n    expect(layout.visibleIds).toContain("comp-memory");\n    expect(layout.visibleIds).not.toContain("video:v2");\n  });'''
+          new_case = '''  it("centers a competency niche and reveals its real linked video", () => {\n    const model = withSeededTrades(\n      selectMemoryGraphModel(\n        null,\n        [\n          {\n            id: "v1",\n            title: "Stick Welding Basics",\n            trade: "Welder",\n            status: "completed",\n            competencyCodes: ["W-1"],\n          },\n          {\n            id: "v2",\n            title: "Panel Wiring",\n            trade: "Electrician",\n            status: "completed",\n          },\n        ],\n        [\n          { code: "W-1", name: "Occupational Skills", trade: "Welder" },\n          { code: "E-1", name: "Occupational Skills", trade: "Electrician" },\n        ],\n      ),\n    );\n    const hierarchy = buildHierarchy(model);\n    expect(hierarchy.get("comp:W-1")?.relatedNodeIds).toContain("video:v1");\n\n    const layout = buildBranchNavigatorLayout(model, "comp:W-1", hierarchy);\n    expect(layout.centerId).toBe("comp:W-1");\n    expect(layout.visibleIds).toContain("topic:Welder");\n    expect(layout.visibleIds).toContain("video:v1");\n    expect(layout.visibleIds).not.toContain("video:v2");\n  });'''
+          if text.count(old_case) != 1:
+              raise SystemExit(f"competency regression anchor count={text.count(old_case)}")
+          test.write_text(text.replace(old_case, new_case, 1))
+
+      - name: Focused Living Memory tests
+        run: >-
+          pnpm --filter @workspace/jack-core exec vitest run
+          src/components/MemoryGraphView.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.pointer.test.ts
+          src/lib/graph-spatial.test.ts
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Workspace build
+        run: pnpm build
+      - name: Diff integrity
+        run: git diff --check
+      - name: Commit verified correction
+        run: |
+          git add artifacts/jack-core/src/lib/graph-spatial.ts artifacts/jack-core/src/lib/graph-spatial.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(living-memory): retain competency-linked evidence"
+          git push origin HEAD:fix/living-memory-competency-drilldown-105
