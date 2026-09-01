@@ -916,8 +916,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     me?.userId && testingGateOwnerRef.current === me.userId
       ? testingGate
       : { accepted: false, restricted: true };
-  const canViewCloseout =
-    me?.isAdmin === false && !!ownedTelemetryContext?.scope?.pilotId;
+  // Pilot is the primary product path during the active pilot. Telemetry
+  // participation is optional and must never determine access to Closeout.
+  // The Closeout API resolves and enforces active pilot membership server-side.
+  const canViewCloseout = me?.isAdmin === false;
 
   return (
     <>
@@ -984,10 +986,6 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             key={`closeout:${me?.userId ?? "signed-out"}`}
             participantId={me?.userId ?? "participant"}
             participantName={me?.name || me?.email}
-            organizationName={ownedTelemetryContext?.scope?.organizationName}
-            pilotName={ownedTelemetryContext?.scope?.pilotName}
-            organizationId={ownedTelemetryContext?.scope?.organizationId}
-            pilotId={ownedTelemetryContext?.scope?.pilotId}
           />
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
