@@ -1,0 +1,85 @@
+name: Issue 105 QC cleanup
+
+on:
+  push:
+    branches:
+      - fix/living-memory-competency-drilldown-105
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Restore base style and reapply bounded graph changes
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          base = "eadd181d0968f6284f42a0eef824d5f3aab029b2"
+          source = "artifacts/jack-core/src/lib/graph-spatial.ts"
+          test = "artifacts/jack-core/src/lib/graph-spatial.test.ts"
+
+          for path in (source, test):
+              content = subprocess.check_output(["git", "show", f"{base}:{path}"], text=True)
+              Path(path).write_text(content)
+
+          p = Path(source)
+          text = p.read_text()
+          old = '''    requested?.kind === "topic" ||\n    requested?.kind === "mentor" ||'''
+          new = '''    requested?.kind === "topic" ||\n    requested?.kind === "competency" ||\n    requested?.kind === "mentor" ||'''
+          if text.count(old) != 1:
+              raise SystemExit(f"source predicate anchor count={text.count(old)}")
+          text = text.replace(old, new, 1)
+          old_doc = ''' * The permanent navigation layer contains Jack, trade hubs, and human\n * contributors. Selecting a trade or human expands only that hierarchy branch;\n * atomic memories never become orbital centers themselves.'''
+          new_doc = ''' * The permanent navigation layer contains Jack, trade hubs, human contributors,\n * and competency niches. Selecting one expands only that hierarchy branch; atomic\n * memories never become orbital centers themselves.'''
+          if text.count(old_doc) != 1:
+              raise SystemExit(f"source doc anchor count={text.count(old_doc)}")
+          p.write_text(text.replace(old_doc, new_doc, 1))
+
+          p = Path(test)
+          text = p.read_text()
+          marker = '''\n  it("does not allow an atomic memory to become the orbital center", () => {'''
+          if text.count(marker) != 1:
+              raise SystemExit(f"test anchor count={text.count(marker)}")
+          case = '''\n  it("centers a competency niche and reveals its descendant memory", () => {\n    const base = branchModel();\n    const model: GraphModel = {\n      ...base,\n      nodes: [\n        ...base.nodes,\n        {\n          id: "comp-memory",\n          kind: "concept",\n          label: "Root pass control",\n          topicId: "topic:Welder",\n          color: [120, 180, 255],\n          meta: { trade: "Welder", confidence: 0.9 },\n        },\n      ],\n      edges: [\n        ...base.edges,\n        { a: "comp:W-1", b: "comp-memory", kind: "concept" },\n      ],\n      degree: {\n        ...base.degree,\n        "comp:W-1": (base.degree["comp:W-1"] ?? 0) + 1,\n        "comp-memory": 1,\n      },\n    };\n    const layout = buildBranchNavigatorLayout(model, "comp:W-1");\n    expect(layout.centerId).toBe("comp:W-1");\n    expect(layout.visibleIds).toContain("topic:Welder");\n    expect(layout.visibleIds).toContain("comp-memory");\n    expect(layout.visibleIds).not.toContain("video:v2");\n  });\n'''
+          p.write_text(text.replace(marker, case + marker, 1))
+
+      - name: Focused Living Memory tests
+        run: >-
+          pnpm --filter @workspace/jack-core exec vitest run
+          src/components/MemoryGraphView.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.pointer.test.ts
+          src/lib/graph-spatial.test.ts
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Workspace build
+        run: pnpm build
+      - name: Diff integrity
+        run: git diff --check
+      - name: Commit QC cleanup
+        run: |
+          git add artifacts/jack-core/src/lib/graph-spatial.ts artifacts/jack-core/src/lib/graph-spatial.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(living-memory): trim QC formatting churn"
+          git push origin HEAD:fix/living-memory-competency-drilldown-105
