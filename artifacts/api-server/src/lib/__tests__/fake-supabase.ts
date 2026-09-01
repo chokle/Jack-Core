@@ -258,7 +258,7 @@ export class FakeSupabase {
       pilotId,
       scope,
     );
-    return latest?.["id"] === consentId && latest["state"] === "granted";
+    return latest?.["id"] === consentId && latest?.["state"] === "granted";
   }
 
   telemetryWriteError(
