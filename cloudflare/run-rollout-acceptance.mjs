@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { runRolloutAcceptance } from "./rollout-acceptance.mjs";
 
 export const WRANGLER_VERSION = "4.127.1";
+export const PRODUCTION_PRIMARY_ATTEMPTS = 240;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 function killProcessTree(child) {
@@ -183,6 +184,7 @@ export async function main() {
     release,
     expectedDigest,
     adapter: createProductionRolloutAdapter({ target }),
+    config: { primaryAttempts: PRODUCTION_PRIMARY_ATTEMPTS },
   });
   if (!result.ready) {
     console.error(`::error::Cloudflare rollout rejected: ${result.message}`);
