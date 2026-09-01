@@ -1,0 +1,181 @@
+name: Issue 105 bounded repair v2
+
+on:
+  push:
+    branches:
+      - fix/living-memory-competency-drilldown-105
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply exact bounded repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "artifacts/jack-core/src/components/MemoryGraphView.tsx",
+              '''    kind === "core" ||\n    kind === "topic" ||\n    kind === "mentor" ||''',
+              '''    kind === "core" ||\n    kind === "topic" ||\n    kind === "competency" ||\n    kind === "mentor" ||''',
+              "MemoryGraphView branch-root predicate",
+          )
+
+          replace_once(
+              "artifacts/jack-core/src/lib/graph-spatial.ts",
+              '''    requested?.kind === "topic" ||\n    requested?.kind === "mentor" ||''',
+              '''    requested?.kind === "topic" ||\n    requested?.kind === "competency" ||\n    requested?.kind === "mentor" ||''',
+              "graph-spatial center predicate",
+          )
+          replace_once(
+              "artifacts/jack-core/src/lib/graph-spatial.ts",
+              ''' * The permanent navigation layer contains Jack, trade hubs, and human\n * contributors. Selecting a trade or human expands only that hierarchy branch;\n * atomic memories never become orbital centers themselves.''',
+              ''' * The permanent navigation layer contains Jack, trade hubs, human contributors,\n * and competency niches. Selecting one expands only that hierarchy branch; atomic\n * memories never become orbital centers themselves.''',
+              "graph-spatial navigator documentation",
+          )
+
+          spatial = Path("artifacts/jack-core/src/components/SpatialBrainCanvas.tsx")
+          text = spatial.read_text()
+
+          replacements = [
+              (
+                  '''      branch.kind === "core" ||\n      branch.kind === "topic" ||\n      branch.kind === "mentor" ||''',
+                  '''      branch.kind === "core" ||\n      branch.kind === "topic" ||\n      branch.kind === "competency" ||\n      branch.kind === "mentor" ||''',
+                  "Spatial hydration predicate",
+              ),
+              (
+                  '''            kind === "topic" ||\n            kind === "mentor" ||''',
+                  '''            kind === "topic" ||\n            kind === "competency" ||\n            kind === "mentor" ||''',
+                  "Spatial focus predicate",
+              ),
+              (
+                  '''        if (kind === "topic" || kind === "mentor" || kind === "contributor") {''',
+                  '''        if (\n          kind === "topic" ||\n          kind === "competency" ||\n          kind === "mentor" ||\n          kind === "contributor"\n        ) {''',
+                  "Spatial branch effect predicate",
+              ),
+              (
+                  '''            (kind === "topic" || kind === "mentor" || kind === "contributor")''',
+                  '''            (kind === "topic" ||\n              kind === "competency" ||\n              kind === "mentor" ||\n              kind === "contributor")''',
+                  "Spatial mode predicate",
+              ),
+          ]
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              text = text.replace(old, new, 1)
+
+          hit_fn = '''export function graphNodeHitRadius(\n  screenRadius: number,\n  pointerType: string,\n): number {\n  const minimum =\n    pointerType === "touch" ? 22 : pointerType === "pen" ? 18 : 12;\n  return Math.max(screenRadius + 8, minimum);\n}\n'''
+          if text.count(hit_fn) != 1:
+              raise SystemExit("graphNodeHitRadius anchor mismatch")
+          text = text.replace(
+              hit_fn,
+              hit_fn + '''\n/** Rank overlapping enlarged targets by intent, then proximity, then depth. */\nexport function graphHitPriority(\n  distance: number,\n  screenRadius: number,\n  depth: number,\n  pointerType: string,\n): [number, number, number] | null {\n  if (distance >= graphNodeHitRadius(screenRadius, pointerType)) return null;\n  const direct = distance <= Math.max(2, screenRadius);\n  return [direct ? 0 : 1, distance, depth];\n}\n''',
+              1,
+          )
+
+          old_pick = '''      // ----- picking (nearest projected node under the cursor) --------------\n      const pick = (\n        sx: number,\n        sy: number,\n        pointerType: string = "mouse",\n      ): SN | null => {\n        let best: SN | null = null;\n        let bestDepth = Infinity;\n        for (const n of nodesRef.current.values()) {\n          if (n.vis < 0.15) continue;\n          const dx = n.sx - sx;\n          const dy = n.sy - sy;\n          const d = Math.hypot(dx, dy);\n          const hit = graphNodeHitRadius(n.sr, pointerType);\n          // Prefer the nearest-to-viewer node among overlapping hits.\n          if (d < hit && n.depth < bestDepth) {\n            best = n;\n            bestDepth = n.depth;\n          }\n        }\n        return best;\n      };'''
+          new_pick = '''      // ----- picking (intent-first priority for overlapping hit targets) -----\n      const pick = (\n        sx: number,\n        sy: number,\n        pointerType: string = "mouse",\n      ): SN | null => {\n        let best: SN | null = null;\n        let bestPriority: [number, number, number] | null = null;\n        for (const n of nodesRef.current.values()) {\n          if (n.vis < 0.15) continue;\n          const distance = Math.hypot(n.sx - sx, n.sy - sy);\n          const priority = graphHitPriority(distance, n.sr, n.depth, pointerType);\n          if (!priority) continue;\n          if (\n            !bestPriority ||\n            priority[0] < bestPriority[0] ||\n            (priority[0] === bestPriority[0] && priority[1] < bestPriority[1]) ||\n            (priority[0] === bestPriority[0] &&\n              priority[1] === bestPriority[1] &&\n              priority[2] < bestPriority[2])\n          ) {\n            best = n;\n            bestPriority = priority;\n          }\n        }\n        return best;\n      };'''
+          if text.count(old_pick) != 1:
+              raise SystemExit(f"Spatial pick block: expected exactly one match, found {text.count(old_pick)}")
+          spatial.write_text(text.replace(old_pick, new_pick, 1))
+
+          nav_test = Path("artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts")
+          nav = nav_test.read_text()
+          marker = '''\n  it("prunes idempotently when a temporary graph omits the core node", () => {'''
+          if nav.count(marker) != 1:
+              raise SystemExit("MemoryGraphView navigation test anchor mismatch")
+          nav_case = '''\n  it("promotes a competency niche to the durable branch while leaves stay inside it", () => {\n    const niche = graphInspectorReducer(INITIAL_GRAPH_INSPECTOR_STATE, {\n      type: "open-graph-node",\n      id: "comp:W-1",\n      kind: "competency",\n    });\n    const leaf = graphInspectorReducer(niche, {\n      type: "open-graph-node",\n      id: "concept:root-pass",\n      kind: "concept",\n    });\n    const minimized = graphInspectorReducer(leaf, { type: "minimize" });\n    const restored = graphInspectorReducer(minimized, { type: "restore" });\n\n    expect(niche.branchId).toBe("comp:W-1");\n    expect(leaf).toMatchObject({\n      activeGraphId: "concept:root-pass",\n      branchId: "comp:W-1",\n      inspectorNodeId: "concept:root-pass",\n    });\n    expect(restored.branchId).toBe("comp:W-1");\n  });\n'''
+          nav_test.write_text(nav.replace(marker, nav_case + marker, 1))
+
+          hyd_test = Path("artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts")
+          hyd = hyd_test.read_text()
+          final = "\n});\n"
+          pos = hyd.rfind(final)
+          if pos < 0:
+              raise SystemExit("Spatial hydration test closing marker missing")
+          hyd_case = '''\n\n  it("restores a competency niche as a valid durable branch center", () => {\n    const branchId = "comp:W-1";\n    const hydrated = [\n      node(CORE_ID, "core"),\n      node("topic:Welder", "topic"),\n      node(branchId, "competency"),\n    ];\n    expect(\n      resolveHydratedBranchCenter(hydrated, CORE_ID, branchId, "branches"),\n    ).toBe(branchId);\n  });'''
+          hyd_test.write_text(hyd[:pos] + hyd_case + hyd[pos:])
+
+          ptr_test = Path("artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts")
+          ptr = ptr_test.read_text()
+          old_import = '''import {\n  graphNodeHitRadius,\n  graphTapSlop,\n  resolveGraphTapTarget,\n} from "./SpatialBrainCanvas";'''
+          new_import = '''import {\n  graphHitPriority,\n  graphNodeHitRadius,\n  graphTapSlop,\n  resolveGraphTapTarget,\n} from "./SpatialBrainCanvas";'''
+          if ptr.count(old_import) != 1:
+              raise SystemExit("Spatial pointer import anchor mismatch")
+          ptr = ptr.replace(old_import, new_import, 1)
+          pos = ptr.rfind(final)
+          if pos < 0:
+              raise SystemExit("Spatial pointer test closing marker missing")
+          ptr_case = '''\n\n  it("prefers a direct rendered hit over an overlapping enlarged target", () => {\n    const directFarther = graphHitPriority(3, 4, 100, "touch");\n    const enlargedNearer = graphHitPriority(12, 4, -100, "touch");\n    expect(directFarther).not.toBeNull();\n    expect(enlargedNearer).not.toBeNull();\n    expect(directFarther![0]).toBeLessThan(enlargedNearer![0]);\n    expect(graphHitPriority(23, 4, -100, "touch")).toBeNull();\n  });'''
+          ptr_test.write_text(ptr[:pos] + ptr_case + ptr[pos:])
+
+          graph_test = Path("artifacts/jack-core/src/lib/graph-spatial.test.ts")
+          gt = graph_test.read_text()
+          marker = '''\n  it("does not allow an atomic memory to become the orbital center", () => {'''
+          if gt.count(marker) != 1:
+              raise SystemExit("graph-spatial test anchor mismatch")
+          graph_case = '''\n  it("centers a competency niche and reveals its descendant memory", () => {\n    const base = branchModel();\n    const model: GraphModel = {\n      ...base,\n      nodes: [\n        ...base.nodes,\n        {\n          id: "comp-memory",\n          kind: "concept",\n          label: "Root pass control",\n          topicId: "topic:Welder",\n          color: [120, 180, 255],\n          meta: { trade: "Welder", confidence: 0.9 },\n        },\n      ],\n      edges: [\n        ...base.edges,\n        { a: "comp:W-1", b: "comp-memory", kind: "concept" },\n      ],\n      degree: {\n        ...base.degree,\n        "comp:W-1": (base.degree["comp:W-1"] ?? 0) + 1,\n        "comp-memory": 1,\n      },\n    };\n    const layout = buildBranchNavigatorLayout(model, "comp:W-1");\n    expect(layout.centerId).toBe("comp:W-1");\n    expect(layout.visibleIds).toContain("topic:Welder");\n    expect(layout.visibleIds).toContain("comp-memory");\n    expect(layout.visibleIds).not.toContain("video:v2");\n  });\n'''
+          graph_test.write_text(gt.replace(marker, graph_case + marker, 1))
+
+      - name: Format touched files
+        run: >-
+          pnpm exec prettier --write
+          artifacts/jack-core/src/components/MemoryGraphView.tsx
+          artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts
+          artifacts/jack-core/src/components/SpatialBrainCanvas.tsx
+          artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts
+          artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts
+          artifacts/jack-core/src/lib/graph-spatial.ts
+          artifacts/jack-core/src/lib/graph-spatial.test.ts
+
+      - name: Focused Living Memory tests
+        run: >-
+          pnpm --filter @workspace/jack-core exec vitest run
+          src/components/MemoryGraphView.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.navigation-state.test.ts
+          src/components/SpatialBrainCanvas.pointer.test.ts
+          src/lib/graph-spatial.test.ts
+
+      - name: Jack full tests
+        run: pnpm --filter @workspace/jack-core test
+      - name: Workspace typecheck
+        run: pnpm typecheck
+      - name: Workspace build
+        run: pnpm build
+      - name: Diff and format checks
+        run: |
+          pnpm exec prettier --check artifacts/jack-core/src/components/MemoryGraphView.tsx artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.tsx artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts artifacts/jack-core/src/lib/graph-spatial.ts artifacts/jack-core/src/lib/graph-spatial.test.ts
+          git diff --check
+      - name: Commit verified repair
+        run: |
+          git add artifacts/jack-core/src/components/MemoryGraphView.tsx artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.tsx artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts artifacts/jack-core/src/lib/graph-spatial.ts artifacts/jack-core/src/lib/graph-spatial.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(living-memory): restore competency drilldown"
+          git push origin HEAD:fix/living-memory-competency-drilldown-105
