@@ -49,15 +49,15 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ROLLOUT_TARGET: https://jack-core-production.dchoks87.workers.dev
-          CLOUDFLARE_ROLLOUT_RELEASE: d3c33db1-2d06-475d-9de5-47f1af4403c5
-          CLOUDFLARE_EXPECTED_DIGEST: sha256:459f141fa1eed62293cc7302787e0e0849bf8199f208f4b83e4c99c756fa51c4
+          CLOUDFLARE_ROLLOUT_RELEASE: 94702f20-3656-4ff6-9204-fa7c06d4fec5
+          CLOUDFLARE_EXPECTED_DIGEST: sha256:49f6fcad7b355ae38a0869a89523f5627e929fa5aa199c1314501ce1db3d2287
         run: node cloudflare/run-rollout-acceptance.mjs
 
       - name: Smoke-test accepted workers.dev deployment
         shell: bash
         env:
           TARGET: https://jack-core-production.dchoks87.workers.dev
-          RELEASE: d3c33db1-2d06-475d-9de5-47f1af4403c5
+          RELEASE: 94702f20-3656-4ff6-9204-fa7c06d4fec5
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --header 'Cache-Control: no-cache' --max-time 30 "$TARGET/?release=$RELEASE" > /dev/null
@@ -93,8 +93,8 @@ jobs:
         run: |
           {
             echo "## Existing Cloudflare rollout acceptance"
-            echo "- Worker release: d3c33db1-2d06-475d-9de5-47f1af4403c5"
-            echo "- container digest: sha256:459f141fa1eed62293cc7302787e0e0849bf8199f208f4b83e4c99c756fa51c4"
+            echo "- Worker release: 94702f20-3656-4ff6-9204-fa7c06d4fec5"
+            echo "- container digest: sha256:49f6fcad7b355ae38a0869a89523f5627e929fa5aa199c1314501ce1db3d2287"
             echo "- exact container rollout: PASS"
             echo "- serving instance version: PASS"
             echo "- public shell: PASS"
