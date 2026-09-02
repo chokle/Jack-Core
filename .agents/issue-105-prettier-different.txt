@@ -1,0 +1,2 @@
+artifacts/jack-core/src/lib/graph-spatial.test.ts
+artifacts/jack-core/src/lib/graph-spatial.ts
