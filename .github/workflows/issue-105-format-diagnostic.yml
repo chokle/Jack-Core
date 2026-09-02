@@ -1,0 +1,44 @@
+name: Issue 105 format diagnostic
+
+on:
+  push:
+    branches:
+      - fix/105-current-main-drilldown
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture Prettier differences
+        run: |
+          mkdir -p .agents
+          pnpm exec prettier --list-different \
+            artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts \
+            artifacts/jack-core/src/components/MemoryGraphView.tsx \
+            artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts \
+            artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts \
+            artifacts/jack-core/src/components/SpatialBrainCanvas.tsx \
+            artifacts/jack-core/src/lib/graph-spatial.test.ts \
+            artifacts/jack-core/src/lib/graph-spatial.ts \
+            > .agents/issue-105-prettier-different.txt || true
+          git add .agents/issue-105-prettier-different.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: capture issue 105 format diagnostics"
+          git push origin HEAD:fix/105-current-main-drilldown
