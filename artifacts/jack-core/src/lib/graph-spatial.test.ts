@@ -105,6 +105,41 @@ describe("branch navigator layout", () => {
     expect(layout.visibleIds).not.toContain("video:v1");
   });
 
+  it("centers a competency niche and reveals its real linked video", () => {
+    const model = withSeededTrades(
+      selectMemoryGraphModel(
+        null,
+        [
+          {
+            id: "v1",
+            title: "Stick Welding Basics",
+            trade: "Welder",
+            status: "completed",
+            competencyCodes: ["W-1"],
+          },
+          {
+            id: "v2",
+            title: "Panel Wiring",
+            trade: "Electrician",
+            status: "completed",
+          },
+        ],
+        [
+          { code: "W-1", name: "Occupational Skills", trade: "Welder" },
+          { code: "E-1", name: "Occupational Skills", trade: "Electrician" },
+        ],
+      ),
+    );
+    const hierarchy = buildHierarchy(model);
+    expect(hierarchy.get("comp:W-1")?.relatedNodeIds).toContain("video:v1");
+
+    const layout = buildBranchNavigatorLayout(model, "comp:W-1", hierarchy);
+    expect(layout.centerId).toBe("comp:W-1");
+    expect(layout.visibleIds).toContain("topic:Welder");
+    expect(layout.visibleIds).toContain("video:v1");
+    expect(layout.visibleIds).not.toContain("video:v2");
+  });
+
   it("does not allow an atomic memory to become the orbital center", () => {
     const layout = buildBranchNavigatorLayout(branchModel(), "mentor-memory");
     expect(layout.centerId).toBe(CORE_ID);

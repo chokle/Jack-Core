@@ -113,6 +113,7 @@ export function resolveHydratedBranchCenter(
     (viewMode === "focus" ||
       branch.kind === "core" ||
       branch.kind === "topic" ||
+      branch.kind === "competency" ||
       branch.kind === "mentor" ||
       branch.kind === "contributor");
 
@@ -220,6 +221,18 @@ export function graphNodeHitRadius(
   const minimum =
     pointerType === "touch" ? 22 : pointerType === "pen" ? 18 : 12;
   return Math.max(screenRadius + 8, minimum);
+}
+
+/** Rank overlapping enlarged targets by intent, then proximity, then depth. */
+export function graphHitPriority(
+  distance: number,
+  screenRadius: number,
+  depth: number,
+  pointerType: string,
+): [number, number, number] | null {
+  if (distance >= graphNodeHitRadius(screenRadius, pointerType)) return null;
+  const direct = distance <= Math.max(2, screenRadius);
+  return [direct ? 0 : 1, distance, depth];
 }
 
 /** Movement tolerated before a press becomes an orbit gesture. */
@@ -546,6 +559,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           if (
             id === CORE_ID ||
             kind === "topic" ||
+            kind === "competency" ||
             kind === "mentor" ||
             kind === "contributor"
           ) {
@@ -684,7 +698,12 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const kind = modelRef.current.nodes.find(
           (node) => node.id === branchId,
         )?.kind;
-        if (kind === "topic" || kind === "mentor" || kind === "contributor") {
+        if (
+          kind === "topic" ||
+          kind === "competency" ||
+          kind === "mentor" ||
+          kind === "contributor"
+        ) {
           recenterRef.current(branchId);
         }
       }
@@ -708,7 +727,10 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         )?.kind;
         recenterRef.current(
           branch &&
-            (kind === "topic" || kind === "mentor" || kind === "contributor")
+            (kind === "topic" ||
+              kind === "competency" ||
+              kind === "mentor" ||
+              kind === "contributor")
             ? branch
             : CORE_ID,
         );
@@ -762,24 +784,35 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
       const ro = new ResizeObserver(resize);
       ro.observe(canvas);
 
-      // ----- picking (nearest projected node under the cursor) --------------
+      // ----- picking (intent-first priority for overlapping hit targets) -----
       const pick = (
         sx: number,
         sy: number,
         pointerType: string = "mouse",
       ): SN | null => {
         let best: SN | null = null;
-        let bestDepth = Infinity;
+        let bestPriority: [number, number, number] | null = null;
         for (const n of nodesRef.current.values()) {
           if (n.vis < 0.15) continue;
-          const dx = n.sx - sx;
-          const dy = n.sy - sy;
-          const d = Math.hypot(dx, dy);
-          const hit = graphNodeHitRadius(n.sr, pointerType);
-          // Prefer the nearest-to-viewer node among overlapping hits.
-          if (d < hit && n.depth < bestDepth) {
+          const distance = Math.hypot(n.sx - sx, n.sy - sy);
+          const priority = graphHitPriority(
+            distance,
+            n.sr,
+            n.depth,
+            pointerType,
+          );
+          if (!priority) continue;
+          if (
+            !bestPriority ||
+            priority[0] < bestPriority[0] ||
+            (priority[0] === bestPriority[0] &&
+              priority[1] < bestPriority[1]) ||
+            (priority[0] === bestPriority[0] &&
+              priority[1] === bestPriority[1] &&
+              priority[2] < bestPriority[2])
+          ) {
             best = n;
-            bestDepth = n.depth;
+            bestPriority = priority;
           }
         }
         return best;

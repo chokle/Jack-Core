@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  graphHitPriority,
   graphNodeHitRadius,
   graphTapSlop,
   resolveGraphTapTarget,
@@ -33,5 +34,14 @@ describe("SpatialBrainCanvas pointer selection", () => {
     expect(resolveGraphTapTarget("concept:1", "concept:2", false)).toBe(
       "concept:2",
     );
+  });
+
+  it("prefers a direct rendered hit over an overlapping enlarged target", () => {
+    const directFarther = graphHitPriority(3, 4, 100, "touch");
+    const enlargedNearer = graphHitPriority(12, 4, -100, "touch");
+    expect(directFarther).not.toBeNull();
+    expect(enlargedNearer).not.toBeNull();
+    expect(directFarther![0]).toBeLessThan(enlargedNearer![0]);
+    expect(graphHitPriority(23, 4, -100, "touch")).toBeNull();
   });
 });

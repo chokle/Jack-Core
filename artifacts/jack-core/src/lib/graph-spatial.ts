@@ -580,9 +580,9 @@ export function buildSpatialLayout(
 /**
  * Build the progressive-disclosure layout used by Living Memory.
  *
- * The permanent navigation layer contains Jack, trade hubs, and human
- * contributors. Selecting a trade or human expands only that hierarchy branch;
- * atomic memories never become orbital centers themselves.
+ * The permanent navigation layer contains Jack, trade hubs, human contributors,
+ * and competency niches. Selecting one expands only that hierarchy branch; atomic
+ * memories never become orbital centers themselves.
  */
 export function buildBranchNavigatorLayout(
   model: GraphModel,
@@ -594,6 +594,7 @@ export function buildBranchNavigatorLayout(
   const canCenter =
     requestedCenterId === CORE_ID ||
     requested?.kind === "topic" ||
+    requested?.kind === "competency" ||
     requested?.kind === "mentor" ||
     requested?.kind === "contributor";
   const centerId = canCenter ? requestedCenterId : CORE_ID;
@@ -630,6 +631,15 @@ export function buildBranchNavigatorLayout(
       const id = stack.pop()!;
       keep.add(id);
       for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);
+    }
+
+    // A real video linked to a competency can remain a same-depth cross-link
+    // because it also has a shorter route through its trade or contributor.
+    // Keep direct competency evidence visible without making it a branch center.
+    if (nodeById.get(centerId)?.kind === "competency") {
+      for (const relatedId of hierarchy.get(centerId)?.relatedNodeIds ?? []) {
+        keep.add(relatedId);
+      }
     }
   }
 
