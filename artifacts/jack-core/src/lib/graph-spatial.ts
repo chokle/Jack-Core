@@ -125,7 +125,8 @@ export function withSeededTrades(model: GraphModel): GraphModel {
   const existingTrades = new Set(model.topics.map((t) => t.trade));
   const existingIds = new Set(model.nodes.map((n) => n.id));
   const missing = MAJOR_TRADES.filter(
-    (trade) => !existingTrades.has(trade) && !existingIds.has(topicIdForTrade(trade)),
+    (trade) =>
+      !existingTrades.has(trade) && !existingIds.has(topicIdForTrade(trade)),
   );
   if (missing.length === 0) return model;
 
@@ -135,9 +136,17 @@ export function withSeededTrades(model: GraphModel): GraphModel {
 
   missing.forEach((trade, i) => {
     const id = topicIdForTrade(trade);
-    const color = TOPIC_PALETTE[(model.topics.length + i) % TOPIC_PALETTE.length]!;
+    const color =
+      TOPIC_PALETTE[(model.topics.length + i) % TOPIC_PALETTE.length]!;
     topics.push({ id, trade, label: trade, color, metrics: emptyMetrics() });
-    nodes.push({ id, kind: "topic", label: trade, topicId: id, color, meta: { trade } });
+    nodes.push({
+      id,
+      kind: "topic",
+      label: trade,
+      topicId: id,
+      color,
+      meta: { trade },
+    });
     edges.push({ a: CORE_ID, b: id, kind: "topic" });
   });
 
@@ -234,7 +243,14 @@ export function computeBrainStats(model: GraphModel): BrainStats {
       typeof node?.meta.knowledgeObjectCount === "number"
         ? node.meta.knowledgeObjectCount
         : 0;
-    return { id: t.id, label: t.label, trade: t.trade, count, entries, populated: count > 0 };
+    return {
+      id: t.id,
+      label: t.label,
+      trade: t.trade,
+      count,
+      entries,
+      populated: count > 0,
+    };
   });
   byTrade.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   const populated = byTrade.filter((t) => t.populated);
@@ -245,7 +261,9 @@ export function computeBrainStats(model: GraphModel): BrainStats {
     totalContent: byTrade.reduce((s, t) => s + t.count, 0),
     totalEntries: byTrade.reduce((s, t) => s + t.entries, 0),
     largest: byTrade[0] ?? null,
-    smallestPopulated: populated.length ? populated[populated.length - 1] : null,
+    smallestPopulated: populated.length
+      ? populated[populated.length - 1]
+      : null,
     byTrade,
   };
 }
@@ -289,7 +307,9 @@ export function buildAdjacency(model: GraphModel): Map<string, string[]> {
  * with only its competency scaffold still reads as an unpopulated virgin
  * cluster) and child count elsewhere.
  */
-export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> {
+export function buildHierarchy(
+  model: GraphModel,
+): Map<string, SpatialNodeInfo> {
   const adj = buildAdjacency(model);
   const nodeIds = model.nodes.map((n) => n.id);
   const hasCore = model.nodes.some((n) => n.id === CORE_ID);
@@ -312,7 +332,8 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
     }
   }
   // Disconnected nodes (no path to root) hang directly off the root at depth 1.
-  for (const id of nodeIds) if (!depth.has(id)) depth.set(id, id === root ? 0 : 1);
+  for (const id of nodeIds)
+    if (!depth.has(id)) depth.set(id, id === root ? 0 : 1);
 
   const edgeWeight = new Map<string, number>();
   for (const e of model.edges) {
@@ -350,7 +371,8 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
     const p = parent.get(id) ?? null;
     if (p && p !== id) children.get(p)?.push(id);
   }
-  for (const list of children.values()) list.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const list of children.values())
+    list.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   const metricsByTrade = new Map(model.topics.map((t) => [t.trade, t.metrics]));
 
@@ -389,9 +411,7 @@ export function buildHierarchy(model: GraphModel): Map<string, SpatialNodeInfo> 
           );
 
     const populated =
-      n.kind === "topic" || n.kind === "competency"
-        ? contentCount > 0
-        : true;
+      n.kind === "topic" || n.kind === "competency" ? contentCount > 0 : true;
 
     info.set(id, {
       id,
@@ -426,7 +446,8 @@ function normalize(v: Vec3): Vec3 {
 
 /** Two unit vectors spanning the plane perpendicular to `dir` (deterministic). */
 function basisPerp(dir: Vec3): [Vec3, Vec3] {
-  const ref: Vec3 = Math.abs(dir.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+  const ref: Vec3 =
+    Math.abs(dir.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
   const u = normalize({
     x: dir.y * ref.z - dir.z * ref.y,
     y: dir.z * ref.x - dir.x * ref.z,
@@ -560,9 +581,18 @@ export function buildSpatialLayout(
         const ang = ((i + 0.5) / sorted.length) * Math.PI * 2;
         const rad = sorted.length === 1 ? 0 : spread;
         positions.set(id, {
-          x: parentPos.x + outward.x * along + (Math.cos(ang) * u.x + Math.sin(ang) * v.x) * rad,
-          y: parentPos.y + outward.y * along + (Math.cos(ang) * u.y + Math.sin(ang) * v.y) * rad,
-          z: parentPos.z + outward.z * along + (Math.cos(ang) * u.z + Math.sin(ang) * v.z) * rad,
+          x:
+            parentPos.x +
+            outward.x * along +
+            (Math.cos(ang) * u.x + Math.sin(ang) * v.x) * rad,
+          y:
+            parentPos.y +
+            outward.y * along +
+            (Math.cos(ang) * u.y + Math.sin(ang) * v.y) * rad,
+          z:
+            parentPos.z +
+            outward.z * along +
+            (Math.cos(ang) * u.z + Math.sin(ang) * v.z) * rad,
         });
       });
     }
@@ -630,7 +660,8 @@ export function buildBranchNavigatorLayout(
     while (stack.length > 0) {
       const id = stack.pop()!;
       keep.add(id);
-      for (const childId of hierarchy.get(id)?.childIds ?? []) stack.push(childId);
+      for (const childId of hierarchy.get(id)?.childIds ?? [])
+        stack.push(childId);
     }
 
     // A real video linked to a competency can remain a same-depth cross-link
@@ -648,9 +679,7 @@ export function buildBranchNavigatorLayout(
   return {
     ...layout,
     visibleIds,
-    positions: new Map(
-      [...layout.positions].filter(([id]) => visible.has(id)),
-    ),
+    positions: new Map([...layout.positions].filter(([id]) => visible.has(id))),
     hopFromCenter: new Map(
       [...layout.hopFromCenter].filter(([id]) => visible.has(id)),
     ),
@@ -664,7 +693,11 @@ export function buildBranchNavigatorLayout(
 export const PITCH_LIMIT = (Math.PI / 180) * 60;
 
 export function clampPitch(pitch: number): number {
-  return pitch < -PITCH_LIMIT ? -PITCH_LIMIT : pitch > PITCH_LIMIT ? PITCH_LIMIT : pitch;
+  return pitch < -PITCH_LIMIT
+    ? -PITCH_LIMIT
+    : pitch > PITCH_LIMIT
+      ? PITCH_LIMIT
+      : pitch;
 }
 
 /** Rotate a world point by the camera's yaw (around Y) then pitch (around X). */
