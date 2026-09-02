@@ -141,6 +141,7 @@ function isBranchRoot(kind: NodeKind): boolean {
   return (
     kind === "core" ||
     kind === "topic" ||
+    kind === "competency" ||
     kind === "mentor" ||
     kind === "contributor"
   );
