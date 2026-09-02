@@ -25,7 +25,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Capture Prettier differences
+      - name: Capture head and baseline Prettier differences
         run: |
           mkdir -p .agents
           pnpm exec prettier --list-different \
@@ -36,9 +36,19 @@ jobs:
             artifacts/jack-core/src/components/SpatialBrainCanvas.tsx \
             artifacts/jack-core/src/lib/graph-spatial.test.ts \
             artifacts/jack-core/src/lib/graph-spatial.ts \
-            > .agents/issue-105-prettier-different.txt || true
-          git add .agents/issue-105-prettier-different.txt
+            > .agents/issue-105-prettier-head.txt || true
+          git worktree add --detach /tmp/issue105-base origin/main
+          pnpm exec prettier --list-different \
+            /tmp/issue105-base/artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts \
+            /tmp/issue105-base/artifacts/jack-core/src/components/MemoryGraphView.tsx \
+            /tmp/issue105-base/artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts \
+            /tmp/issue105-base/artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts \
+            /tmp/issue105-base/artifacts/jack-core/src/components/SpatialBrainCanvas.tsx \
+            /tmp/issue105-base/artifacts/jack-core/src/lib/graph-spatial.test.ts \
+            /tmp/issue105-base/artifacts/jack-core/src/lib/graph-spatial.ts \
+            > .agents/issue-105-prettier-base.txt || true
+          git add .agents/issue-105-prettier-head.txt .agents/issue-105-prettier-base.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: capture issue 105 format diagnostics"
+          git commit -m "chore: capture issue 105 head/base format diagnostics"
           git push origin HEAD:fix/105-current-main-drilldown
