@@ -94,8 +94,8 @@ where consent.id = history.id;
 
 select pg_catalog.setval(
   'public.telemetry_consent_sequence_seq'::regclass,
-  pg_catalog.greatest(
-    pg_catalog.coalesce(
+  greatest(
+    coalesce(
       (select pg_catalog.max(consent_sequence) from public.telemetry_consents),
       0
     ),
