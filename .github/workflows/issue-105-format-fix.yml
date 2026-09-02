@@ -1,0 +1,50 @@
+name: Issue 105 format repair
+
+on:
+  push:
+    branches:
+      - fix/105-current-main-drilldown
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format bounded Living Memory files
+        run: >-
+          pnpm exec prettier --write
+          artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts
+          artifacts/jack-core/src/components/MemoryGraphView.tsx
+          artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts
+          artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts
+          artifacts/jack-core/src/components/SpatialBrainCanvas.tsx
+          artifacts/jack-core/src/lib/graph-spatial.test.ts
+          artifacts/jack-core/src/lib/graph-spatial.ts
+      - name: Diff integrity
+        run: git diff --check
+      - name: Commit formatting only when needed
+        run: |
+          git add artifacts/jack-core/src/components/MemoryGraphView.navigation-state.test.ts artifacts/jack-core/src/components/MemoryGraphView.tsx artifacts/jack-core/src/components/SpatialBrainCanvas.navigation-state.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.pointer.test.ts artifacts/jack-core/src/components/SpatialBrainCanvas.tsx artifacts/jack-core/src/lib/graph-spatial.test.ts artifacts/jack-core/src/lib/graph-spatial.ts
+          if git diff --cached --quiet; then
+            echo "No formatting changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "style(living-memory): normalize issue 105 repair"
+          git push origin HEAD:fix/105-current-main-drilldown
