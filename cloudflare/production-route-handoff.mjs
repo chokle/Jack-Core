@@ -3,10 +3,36 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_ZONE = "torchlabs.ca";
 const DEFAULT_HOST = "jack.torchlabs.ca";
 const DEFAULT_SCRIPT = "jack-core-production";
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 function required(value, label) {
   if (!value) throw new Error(`${label} is required`);
   return value;
+}
+
+async function fetchWithTimeout(
+  fetchImpl,
+  url,
+  options = {},
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`request timed out after ${timeoutMs}ms: ${url}`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      fetchImpl(url, { ...options, signal: controller.signal }),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function readJson(response) {
@@ -18,8 +44,15 @@ async function readJson(response) {
   }
 }
 
-async function cfRequest(fetchImpl, token, path, options = {}) {
-  const response = await fetchImpl(
+async function cfRequest(
+  fetchImpl,
+  token,
+  path,
+  options = {},
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+) {
+  const response = await fetchWithTimeout(
+    fetchImpl,
     `https://api.cloudflare.com/client/v4${path}`,
     {
       ...options,
@@ -29,6 +62,7 @@ async function cfRequest(fetchImpl, token, path, options = {}) {
         ...(options.headers ?? {}),
       },
     },
+    timeoutMs,
   );
   const payload = await readJson(response);
   if (!response.ok || payload.success === false) {
@@ -57,17 +91,20 @@ function assertNoLegacyHeaders(response, label) {
   }
 }
 
-async function probeProduction(fetchImpl, host) {
+async function probeProduction(
+  fetchImpl,
+  host,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+) {
   const nonce = Date.now();
   const options = {
-    redirect: "follow",
+    redirect: "manual",
     headers: { "Cache-Control": "no-cache" },
   };
+  const request = (path) =>
+    fetchWithTimeout(fetchImpl, `https://${host}${path}`, options, timeoutMs);
 
-  const root = await fetchImpl(
-    `https://${host}/?route_handoff=${nonce}`,
-    options,
-  );
+  const root = await request(`/?route_handoff=${nonce}`);
   if (root.status !== 200)
     throw new Error(`production root returned ${root.status}`);
   assertNoLegacyHeaders(root, "production root");
@@ -82,10 +119,7 @@ async function probeProduction(fetchImpl, host) {
   }
   await root.text();
 
-  const health = await fetchImpl(
-    `https://${host}/api/healthz?route_handoff=${nonce}`,
-    options,
-  );
+  const health = await request(`/api/healthz?route_handoff=${nonce}`);
   if (health.status !== 200)
     throw new Error(`/api/healthz returned ${health.status}`);
   assertNoLegacyHeaders(health, "/api/healthz");
@@ -93,10 +127,7 @@ async function probeProduction(fetchImpl, host) {
   if (healthBody?.status !== "ok")
     throw new Error("/api/healthz did not report status=ok");
 
-  const me = await fetchImpl(
-    `https://${host}/api/me?route_handoff=${nonce}`,
-    options,
-  );
+  const me = await request(`/api/me?route_handoff=${nonce}`);
   if (me.status !== 401)
     throw new Error(`anonymous /api/me returned ${me.status}, expected 401`);
   assertNoLegacyHeaders(me, "anonymous /api/me");
@@ -114,13 +145,15 @@ export async function runProductionRouteHandoff({
   zoneName = DEFAULT_ZONE,
   host = DEFAULT_HOST,
   desiredScript = DEFAULT_SCRIPT,
+  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 } = {}) {
   required(fetchImpl, "fetch implementation");
   required(token, "CLOUDFLARE_API_TOKEN");
 
-  const zones = await cfRequest(
-    fetchImpl,
-    token,
+  const requestCloudflare = (path, options = {}) =>
+    cfRequest(fetchImpl, token, path, options, requestTimeoutMs);
+
+  const zones = await requestCloudflare(
     `/zones?name=${encodeURIComponent(zoneName)}&status=active&per_page=50`,
   );
   if (!Array.isArray(zones) || zones.length !== 1) {
@@ -129,7 +162,7 @@ export async function runProductionRouteHandoff({
   const zoneId = required(zones[0].id, "Cloudflare zone id");
   const pattern = `${host}/*`;
   const routesPath = `/zones/${zoneId}/workers/routes`;
-  const routes = await cfRequest(fetchImpl, token, routesPath);
+  const routes = await requestCloudflare(routesPath);
   const route = (routes ?? []).find(
     (candidate) => candidate.pattern === pattern,
   );
@@ -140,17 +173,19 @@ export async function runProductionRouteHandoff({
     `Existing ${pattern} route owner`,
   );
   let changed = false;
-
-  if (previousScript !== desiredScript) {
-    await cfRequest(fetchImpl, token, `${routesPath}/${route.id}`, {
-      method: "PUT",
-      body: JSON.stringify({ pattern, script: desiredScript }),
-    });
-    changed = true;
-  }
+  let updateAttempted = false;
 
   try {
-    const afterRoutes = await cfRequest(fetchImpl, token, routesPath);
+    if (previousScript !== desiredScript) {
+      updateAttempted = true;
+      await requestCloudflare(`${routesPath}/${route.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ pattern, script: desiredScript }),
+      });
+      changed = true;
+    }
+
+    const afterRoutes = await requestCloudflare(routesPath);
     const after = (afterRoutes ?? []).find(
       (candidate) => candidate.id === route.id,
     );
@@ -160,7 +195,7 @@ export async function runProductionRouteHandoff({
       );
     }
 
-    await probeProduction(fetchImpl, host);
+    await probeProduction(fetchImpl, host, requestTimeoutMs);
     return {
       routeId: route.id,
       pattern,
@@ -170,14 +205,54 @@ export async function runProductionRouteHandoff({
       verification: "PASS",
     };
   } catch (error) {
-    if (changed) {
-      await cfRequest(fetchImpl, token, `${routesPath}/${route.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ pattern, script: previousScript }),
-      });
+    let restored = false;
+    if (updateAttempted) {
+      try {
+        const recoveryRoutes = await requestCloudflare(routesPath);
+        const current = (recoveryRoutes ?? []).find(
+          (candidate) => candidate.id === route.id,
+        );
+        if (!current) {
+          throw new Error(
+            `Production route ${route.id} disappeared during recovery`,
+          );
+        }
+
+        if (current.script === desiredScript) {
+          await requestCloudflare(`${routesPath}/${route.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ pattern, script: previousScript }),
+          });
+          const restoredRoutes = await requestCloudflare(routesPath);
+          const restoredRoute = (restoredRoutes ?? []).find(
+            (candidate) => candidate.id === route.id,
+          );
+          if (
+            restoredRoute?.pattern !== pattern ||
+            restoredRoute?.script !== previousScript
+          ) {
+            throw new Error(
+              `Rollback did not converge to ${previousScript}; current owner is ${restoredRoute?.script ?? "unknown"}`,
+            );
+          }
+          restored = true;
+        } else if (current.script === previousScript) {
+          restored = true;
+        } else {
+          throw new Error(
+            `Rollback refused: production route is now owned by ${current.script}`,
+          );
+        }
+      } catch (recoveryError) {
+        throw new Error(
+          `Production route handoff failed; rollback not confirmed: ${recoveryError.message}; original error: ${error.message}`,
+          { cause: error },
+        );
+      }
     }
+
     throw new Error(
-      `Production route handoff failed${changed ? `; restored ${previousScript}` : ""}: ${error.message}`,
+      `Production route handoff failed${restored ? `; restored ${previousScript}` : ""}: ${error.message}`,
       { cause: error },
     );
   }
