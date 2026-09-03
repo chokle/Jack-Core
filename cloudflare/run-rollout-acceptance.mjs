@@ -118,6 +118,7 @@ function parseWranglerJson(stdout, label) {
 export function createProductionRolloutAdapter({
   target,
   runCommand = runBoundedCommand,
+  freshControlPlaneReads = false,
 }) {
   const baseUrl = new URL(target);
 
@@ -132,22 +133,29 @@ export function createProductionRolloutAdapter({
 
   return {
     listApplications: ({ timeoutMs }) =>
-      wranglerJson(["containers", "list", "--per-page", "100", "--json"], {
-        timeoutMs,
-        label: "Wrangler application read",
-      }),
+      wranglerJson(
+        freshControlPlaneReads
+          ? ["containers", "list", "--json"]
+          : ["containers", "list", "--per-page", "100", "--json"],
+        {
+          timeoutMs,
+          label: "Wrangler application read",
+        },
+      ),
     listInstances: (applicationId, { timeoutMs }) =>
       wranglerJson(
-        [
-          "containers",
-          "instances",
-          applicationId,
-          "--search",
-          "jack-production",
-          "--per-page",
-          "100",
-          "--json",
-        ],
+        freshControlPlaneReads
+          ? ["containers", "instances", applicationId, "--json"]
+          : [
+              "containers",
+              "instances",
+              applicationId,
+              "--search",
+              "jack-production",
+              "--per-page",
+              "100",
+              "--json",
+            ],
         {
           timeoutMs,
           label: "Wrangler instance read",
@@ -183,7 +191,10 @@ export async function main() {
     target,
     release,
     expectedDigest,
-    adapter: createProductionRolloutAdapter({ target }),
+    adapter: createProductionRolloutAdapter({
+      target,
+      freshControlPlaneReads: true,
+    }),
     config: { primaryAttempts: PRODUCTION_PRIMARY_ATTEMPTS },
   });
   if (!result.ready) {

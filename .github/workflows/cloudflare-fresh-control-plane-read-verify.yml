@@ -1,0 +1,30 @@
+name: Cloudflare Fresh Control-Plane Read Verification
+
+on:
+  pull_request:
+    paths:
+      - "cloudflare/run-rollout-acceptance.mjs"
+      - "cloudflare/fresh-control-plane-read.test.mjs"
+      - ".github/workflows/cloudflare-fresh-control-plane-read-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Fresh control-plane read regression
+        run: node --test cloudflare/fresh-control-plane-read.test.mjs
+      - name: Syntax check rollout runner
+        run: node --check cloudflare/run-rollout-acceptance.mjs
+      - name: Format check
+        run: npx --yes prettier@3.6.2 --check cloudflare/run-rollout-acceptance.mjs cloudflare/fresh-control-plane-read.test.mjs .github/workflows/cloudflare-fresh-control-plane-read-verify.yml
