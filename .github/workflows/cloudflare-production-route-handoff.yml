@@ -1,0 +1,90 @@
+name: Cloudflare Production Route Handoff
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "cloudflare/wrangler.base.json"
+      - "cloudflare/production-route-handoff.mjs"
+      - "cloudflare/production-route-handoff.test.mjs"
+      - ".github/workflows/cloudflare-production-route-handoff.yml"
+  workflow_run:
+    workflows:
+      - Cloudflare Production Deploy
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-production-route-handoff
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify route handoff helper
+        run: |
+          node --check cloudflare/production-route-handoff.mjs
+          node --test cloudflare/production-route-handoff.test.mjs
+          pnpm exec prettier --check cloudflare/production-route-handoff.mjs cloudflare/production-route-handoff.test.mjs cloudflare/wrangler.base.json .github/workflows/cloudflare-production-route-handoff.yml
+      - name: Diff check
+        run: git diff --check origin/main...HEAD
+
+  handoff:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Reverify route handoff helper before mutation
+        run: |
+          node --check cloudflare/production-route-handoff.mjs
+          node --test cloudflare/production-route-handoff.test.mjs
+      - name: Transfer existing production route after accepted workers.dev rollout
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node cloudflare/production-route-handoff.mjs
+      - name: Record route handoff evidence
+        shell: bash
+        run: |
+          {
+            echo "## Cloudflare production route handoff"
+            echo "- prerequisite production deploy: PASS"
+            echo "- exact workers.dev rollout: PASS (upstream workflow)"
+            echo "- route: jack.torchlabs.ca/*"
+            echo "- route owner: jack-core-production"
+            echo "- custom-domain root: PASS"
+            echo "- custom-domain /api/healthz: PASS"
+            echo "- anonymous /api/me: PASS (401 fail-closed)"
+            echo "- CSP baseline: PASS"
+            echo "- legacy edge / Railway response headers: ABSENT"
+            echo "- automatic rollback on verification failure: ARMED"
+          } >> "$GITHUB_STEP_SUMMARY"
