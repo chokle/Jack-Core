@@ -23,9 +23,18 @@ function appResponse(body, status = 200, headers = {}) {
   });
 }
 
-function harness({ failHealth = false, legacyHeader = false } = {}) {
+function harness({
+  failHealth = false,
+  legacyHeader = false,
+  redirectRoot = false,
+  rejectMutatingPut = false,
+  rollbackFails = false,
+  stallHealth = false,
+  stallRouteReadAfterHandoff = false,
+} = {}) {
   let routeScript = "jack-production-csp-stable-20260828";
   const mutations = [];
+  let routeReadsAfterHandoff = 0;
 
   const fetchImpl = async (url, options = {}) => {
     const target = new URL(url);
@@ -34,6 +43,12 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
         return jsonResponse([{ id: "zone-1", name: "torchlabs.ca" }]);
       }
       if (target.pathname === "/client/v4/zones/zone-1/workers/routes") {
+        if (routeScript === "jack-core-production") {
+          routeReadsAfterHandoff += 1;
+          if (stallRouteReadAfterHandoff && routeReadsAfterHandoff === 1) {
+            return new Promise(() => {});
+          }
+        }
         return jsonResponse([
           {
             id: "route-1",
@@ -47,8 +62,17 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
       ) {
         assert.equal(options.method, "PUT");
         const body = JSON.parse(options.body);
-        routeScript = body.script;
         mutations.push(body.script);
+        if (
+          body.script === "jack-production-csp-stable-20260828" &&
+          rollbackFails
+        ) {
+          return jsonResponse({ id: "route-1", ...body });
+        }
+        routeScript = body.script;
+        if (body.script === "jack-core-production" && rejectMutatingPut) {
+          return jsonResponse({ id: "route-1", ...body }, { status: 500 });
+        }
         return jsonResponse({ id: "route-1", ...body });
       }
       throw new Error(`unexpected Cloudflare URL ${url}`);
@@ -59,12 +83,17 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
       ? { "x-jack-edge-recovery": "legacy" }
       : {};
     if (target.pathname === "/") {
+      if (redirectRoot) {
+        assert.equal(options.redirect, "manual");
+        return appResponse("", 302, { location: "https://example.com/" });
+      }
       return appResponse("<html>Jack</html>", 200, {
         "content-security-policy": "default-src 'self'; object-src 'none'",
         ...edgeHeaders,
       });
     }
     if (target.pathname === "/api/healthz") {
+      if (stallHealth) return new Promise(() => {});
       return appResponse(
         failHealth ? { status: "bad" } : { status: "ok" },
         failHealth ? 500 : 200,
@@ -141,6 +170,82 @@ test("rejects legacy edge or Railway routing evidence and rolls back", async () 
       token: "test-token",
     }),
     /legacy routing headers/,
+  );
+
+  assert.equal(state.routeScript, "jack-production-csp-stable-20260828");
+});
+
+test("rejects redirects during custom-domain verification and rolls back", async () => {
+  const state = harness({ redirectRoot: true });
+
+  await assert.rejects(
+    runProductionRouteHandoff({
+      fetchImpl: state.fetchImpl,
+      token: "test-token",
+    }),
+    /production root returned 302/,
+  );
+
+  assert.equal(state.routeScript, "jack-production-csp-stable-20260828");
+});
+
+test("recovers when the route PUT mutates state before returning an error", async () => {
+  const state = harness({ rejectMutatingPut: true });
+
+  await assert.rejects(
+    runProductionRouteHandoff({
+      fetchImpl: state.fetchImpl,
+      token: "test-token",
+    }),
+    /restored jack-production-csp-stable-20260828/,
+  );
+
+  assert.equal(state.routeScript, "jack-production-csp-stable-20260828");
+  assert.deepEqual(state.mutations, [
+    "jack-core-production",
+    "jack-production-csp-stable-20260828",
+  ]);
+});
+
+test("does not claim restoration when rollback fails to converge", async () => {
+  const state = harness({ failHealth: true, rollbackFails: true });
+
+  await assert.rejects(
+    runProductionRouteHandoff({
+      fetchImpl: state.fetchImpl,
+      token: "test-token",
+    }),
+    /rollback not confirmed: Rollback did not converge/,
+  );
+
+  assert.equal(state.routeScript, "jack-core-production");
+});
+
+test("times out a stalled production probe and rolls back", async () => {
+  const state = harness({ stallHealth: true });
+
+  await assert.rejects(
+    runProductionRouteHandoff({
+      fetchImpl: state.fetchImpl,
+      token: "test-token",
+      requestTimeoutMs: 10,
+    }),
+    /request timed out.*restored|restored.*request timed out/,
+  );
+
+  assert.equal(state.routeScript, "jack-production-csp-stable-20260828");
+});
+
+test("times out a stalled post-update Cloudflare read and rolls back", async () => {
+  const state = harness({ stallRouteReadAfterHandoff: true });
+
+  await assert.rejects(
+    runProductionRouteHandoff({
+      fetchImpl: state.fetchImpl,
+      token: "test-token",
+      requestTimeoutMs: 10,
+    }),
+    /restored jack-production-csp-stable-20260828.*request timed out/,
   );
 
   assert.equal(state.routeScript, "jack-production-csp-stable-20260828");
