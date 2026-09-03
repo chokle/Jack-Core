@@ -13,16 +13,14 @@ function jsonResponse(result, init = {}) {
 }
 
 function appResponse(body, status = 200, headers = {}) {
-  return new Response(
-    typeof body === "string" ? body : JSON.stringify(body),
-    {
-      status,
-      headers: {
-        "content-type": typeof body === "string" ? "text/html" : "application/json",
-        ...headers,
-      },
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type":
+        typeof body === "string" ? "text/html" : "application/json",
+      ...headers,
     },
-  );
+  });
 }
 
 function harness({ failHealth = false, legacyHeader = false } = {}) {
@@ -44,7 +42,9 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
           },
         ]);
       }
-      if (target.pathname === "/client/v4/zones/zone-1/workers/routes/route-1") {
+      if (
+        target.pathname === "/client/v4/zones/zone-1/workers/routes/route-1"
+      ) {
         assert.equal(options.method, "PUT");
         const body = JSON.parse(options.body);
         routeScript = body.script;
@@ -55,7 +55,9 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
     }
 
     assert.equal(target.hostname, "jack.torchlabs.ca");
-    const edgeHeaders = legacyHeader ? { "x-jack-edge-recovery": "legacy" } : {};
+    const edgeHeaders = legacyHeader
+      ? { "x-jack-edge-recovery": "legacy" }
+      : {};
     if (target.pathname === "/") {
       return appResponse("<html>Jack</html>", 200, {
         "content-security-policy": "default-src 'self'; object-src 'none'",
