@@ -3,12 +3,6 @@
   "main": "./worker.mjs",
   "compatibility_date": "2026-08-25",
   "workers_dev": true,
-  "routes": [
-    {
-      "pattern": "jack.torchlabs.ca/*",
-      "zone_name": "torchlabs.ca"
-    }
-  ],
   "observability": {
     "enabled": true
   },
