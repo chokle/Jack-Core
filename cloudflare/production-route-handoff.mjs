@@ -19,14 +19,17 @@ async function readJson(response) {
 }
 
 async function cfRequest(fetchImpl, token, path, options = {}) {
-  const response = await fetchImpl(`https://api.cloudflare.com/client/v4${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
+  const response = await fetchImpl(
+    `https://api.cloudflare.com/client/v4${path}`,
+    {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers ?? {}),
+      },
     },
-  });
+  );
   const payload = await readJson(response);
   if (!response.ok || payload.success === false) {
     throw new Error(
@@ -48,7 +51,9 @@ function assertNoLegacyHeaders(response, label) {
     }
   }
   if (legacy.length) {
-    throw new Error(`${label} still exposes legacy routing headers: ${legacy.join(", ")}`);
+    throw new Error(
+      `${label} still exposes legacy routing headers: ${legacy.join(", ")}`,
+    );
   }
 }
 
@@ -59,12 +64,21 @@ async function probeProduction(fetchImpl, host) {
     headers: { "Cache-Control": "no-cache" },
   };
 
-  const root = await fetchImpl(`https://${host}/?route_handoff=${nonce}`, options);
-  if (root.status !== 200) throw new Error(`production root returned ${root.status}`);
+  const root = await fetchImpl(
+    `https://${host}/?route_handoff=${nonce}`,
+    options,
+  );
+  if (root.status !== 200)
+    throw new Error(`production root returned ${root.status}`);
   assertNoLegacyHeaders(root, "production root");
   const csp = root.headers.get("content-security-policy") ?? "";
-  if (!csp.includes("default-src 'self'") || !csp.includes("object-src 'none'")) {
-    throw new Error("production root CSP is missing required baseline directives");
+  if (
+    !csp.includes("default-src 'self'") ||
+    !csp.includes("object-src 'none'")
+  ) {
+    throw new Error(
+      "production root CSP is missing required baseline directives",
+    );
   }
   await root.text();
 
@@ -72,17 +86,25 @@ async function probeProduction(fetchImpl, host) {
     `https://${host}/api/healthz?route_handoff=${nonce}`,
     options,
   );
-  if (health.status !== 200) throw new Error(`/api/healthz returned ${health.status}`);
+  if (health.status !== 200)
+    throw new Error(`/api/healthz returned ${health.status}`);
   assertNoLegacyHeaders(health, "/api/healthz");
   const healthBody = await health.json();
-  if (healthBody?.status !== "ok") throw new Error("/api/healthz did not report status=ok");
+  if (healthBody?.status !== "ok")
+    throw new Error("/api/healthz did not report status=ok");
 
-  const me = await fetchImpl(`https://${host}/api/me?route_handoff=${nonce}`, options);
-  if (me.status !== 401) throw new Error(`anonymous /api/me returned ${me.status}, expected 401`);
+  const me = await fetchImpl(
+    `https://${host}/api/me?route_handoff=${nonce}`,
+    options,
+  );
+  if (me.status !== 401)
+    throw new Error(`anonymous /api/me returned ${me.status}, expected 401`);
   assertNoLegacyHeaders(me, "anonymous /api/me");
   const meBody = await me.json();
   if (!String(meBody?.error ?? "").includes("sign in required")) {
-    throw new Error("anonymous /api/me did not fail closed with sign-in-required semantics");
+    throw new Error(
+      "anonymous /api/me did not fail closed with sign-in-required semantics",
+    );
   }
 }
 
@@ -108,9 +130,15 @@ export async function runProductionRouteHandoff({
   const pattern = `${host}/*`;
   const routesPath = `/zones/${zoneId}/workers/routes`;
   const routes = await cfRequest(fetchImpl, token, routesPath);
-  const route = (routes ?? []).find((candidate) => candidate.pattern === pattern);
-  if (!route?.id) throw new Error(`Existing production route ${pattern} was not found`);
-  const previousScript = required(route.script, `Existing ${pattern} route owner`);
+  const route = (routes ?? []).find(
+    (candidate) => candidate.pattern === pattern,
+  );
+  if (!route?.id)
+    throw new Error(`Existing production route ${pattern} was not found`);
+  const previousScript = required(
+    route.script,
+    `Existing ${pattern} route owner`,
+  );
   let changed = false;
 
   if (previousScript !== desiredScript) {
@@ -123,7 +151,9 @@ export async function runProductionRouteHandoff({
 
   try {
     const afterRoutes = await cfRequest(fetchImpl, token, routesPath);
-    const after = (afterRoutes ?? []).find((candidate) => candidate.id === route.id);
+    const after = (afterRoutes ?? []).find(
+      (candidate) => candidate.id === route.id,
+    );
     if (after?.pattern !== pattern || after?.script !== desiredScript) {
       throw new Error(
         `Production route handoff did not converge to ${desiredScript}`,
@@ -153,7 +183,9 @@ export async function runProductionRouteHandoff({
   }
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+const invokedPath = process.argv[1]
+  ? pathToFileURL(process.argv[1]).href
+  : null;
 if (invokedPath === import.meta.url) {
   runProductionRouteHandoff({ token: process.env.CLOUDFLARE_API_TOKEN })
     .then((result) => {
