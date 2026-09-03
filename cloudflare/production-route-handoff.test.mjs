@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { runProductionRouteHandoff } from "./production-route-handoff.mjs";
@@ -82,6 +83,15 @@ function harness({ failHealth = false, legacyHeader = false } = {}) {
     mutations,
   };
 }
+
+test("wrangler deploy stays on workers.dev until the accepted route handoff", async () => {
+  const base = JSON.parse(
+    await readFile(new URL("./wrangler.base.json", import.meta.url), "utf8"),
+  );
+  assert.equal(base.name, "jack-core-production");
+  assert.equal(base.workers_dev, true);
+  assert.equal(base.routes, undefined);
+});
 
 test("hands the existing production route to jack-core only after direct verification", async () => {
   const state = harness();
