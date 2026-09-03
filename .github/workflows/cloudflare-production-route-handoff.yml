@@ -45,7 +45,8 @@ jobs:
         run: |
           node --check cloudflare/production-route-handoff.mjs
           node --test cloudflare/production-route-handoff.test.mjs
-          pnpm exec prettier --check cloudflare/production-route-handoff.mjs cloudflare/production-route-handoff.test.mjs cloudflare/wrangler.base.json .github/workflows/cloudflare-production-route-handoff.yml
+          pnpm exec prettier --write cloudflare/production-route-handoff.mjs cloudflare/production-route-handoff.test.mjs cloudflare/wrangler.base.json .github/workflows/cloudflare-production-route-handoff.yml
+          git diff --exit-code -- cloudflare/production-route-handoff.mjs cloudflare/production-route-handoff.test.mjs cloudflare/wrangler.base.json .github/workflows/cloudflare-production-route-handoff.yml
       - name: Diff check
         run: git diff --check origin/main...HEAD
 
