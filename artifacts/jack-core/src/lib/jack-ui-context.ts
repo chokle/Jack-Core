@@ -25,6 +25,10 @@ function cleanText(value: string | null | undefined, max = MAX_LABEL) {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function elementText(node: HTMLElement | null | undefined, max = MAX_LABEL) {
+  return cleanText(node?.innerText || node?.textContent, max);
+}
+
 function firstVisible(selectors: string[]): HTMLElement | null {
   for (const selector of selectors) {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector));
@@ -43,7 +47,7 @@ function activeSurface() {
     "[role='navigation'] [aria-current='page']",
     "nav:not([aria-label='breadcrumb']) [aria-current='page']",
   ]);
-  return cleanText(active?.innerText) || cleanText(document.title) || "Jack";
+  return elementText(active) || cleanText(document.title) || "Jack";
 }
 
 function breadcrumbPath() {
@@ -54,7 +58,7 @@ function breadcrumbPath() {
       "a, [aria-current='page'], [role='link']:not([aria-hidden='true'])",
     ),
   )
-    .map((node) => cleanText(node.innerText))
+    .map((node) => elementText(node))
     .filter(Boolean);
   return Array.from(new Set(items)).slice(0, MAX_PATH_ITEMS);
 }
@@ -86,7 +90,7 @@ function inspectorState() {
   const heading = inspector.querySelector<HTMLElement>("h1, h2, h3, [role='heading']");
   return {
     open: true,
-    label: cleanText(heading?.innerText || inspector.getAttribute("aria-label")) || null,
+    label: elementText(heading) || cleanText(inspector.getAttribute("aria-label")) || null,
   };
 }
 
@@ -94,7 +98,7 @@ function hasSourceAction() {
   const actions = Array.from(
     document.querySelectorAll<HTMLElement>("a, button, [role='button']"),
   );
-  return actions.some((node) => /\b(source|citation|evidence)\b/i.test(cleanText(node.innerText, 80)));
+  return actions.some((node) => /\b(source|citation|evidence)\b/i.test(elementText(node, 80)));
 }
 
 export function collectJackUiContext(): JackUiContext {
