@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
 import { askJack, getMe } from "@workspace/api-client-react";
+import {
+  collectJackUiContext,
+  encodeJackUiContextHeader,
+  jackUiContextLabel,
+  type JackUiContext,
+} from "../lib/jack-ui-context";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -41,9 +47,19 @@ function plainSpeech(text: string) {
     .trim();
 }
 
-function currentSurface() {
-  const active = document.querySelector<HTMLElement>("[aria-current='page']");
-  return active?.innerText?.trim().slice(0, 80) || document.title || "Jack";
+function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
+  if (!a) return false;
+  return (
+    a.route === b.route &&
+    a.surface === b.surface &&
+    a.path.join("|") === b.path.join("|") &&
+    a.inspector.open === b.inspector.open &&
+    a.inspector.label === b.inspector.label &&
+    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    a.navigation.canBack === b.navigation.canBack &&
+    a.navigation.canUp === b.navigation.canUp &&
+    a.navigation.hasSourceAction === b.navigation.hasSourceAction
+  );
 }
 
 export function FloatingJack() {
@@ -53,6 +69,7 @@ export function FloatingJack() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
@@ -73,6 +90,22 @@ export function FloatingJack() {
       cancelled = true;
       window.clearTimeout(initial);
       window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshContext = () => {
+      const next = collectJackUiContext();
+      setUiContext((current) => (sameUiContext(current, next) ? current : next));
+    };
+    refreshContext();
+    const interval = window.setInterval(refreshContext, 750);
+    window.addEventListener("popstate", refreshContext);
+    window.addEventListener("hashchange", refreshContext);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("popstate", refreshContext);
+      window.removeEventListener("hashchange", refreshContext);
     };
   }, []);
 
@@ -101,11 +134,16 @@ export function FloatingJack() {
     setInput("");
 
     try {
+      const context = collectJackUiContext();
+      setUiContext(context);
       const response = await askJack(
         { message: trimmed },
         {
           credentials: "include",
-          headers: { "X-Jack-Surface": currentSurface() },
+          headers: {
+            "X-Jack-Surface": context.surface,
+            "X-Jack-Context": encodeJackUiContextHeader(context),
+          },
         },
       );
       setAnswer(response.answer);
@@ -190,6 +228,12 @@ export function FloatingJack() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+          </div>
+        )}
+
+        {uiContext && (
+          <div className="mb-1.5 px-4 font-mono text-[11px] text-muted-foreground">
+            Jack is with you: {jackUiContextLabel(uiContext)}
           </div>
         )}
 
