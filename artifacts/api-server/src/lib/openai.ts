@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { createHash } from "crypto";
 import { trackInference } from "./vitality.js";
+import {
+  currentJackUiRequestContext,
+  formatJackUiContextForModel,
+} from "./jack-ui-request-context.js";
 
 let cachedOpenAI: OpenAI | null = null;
 
@@ -24,15 +28,38 @@ export const openai = new Proxy({} as OpenAI, {
 });
 
 /**
+ * Add request-local Jack application context to Ask Jack model input without
+ * mutating the user's question, retrieval query, persisted conversation, or
+ * non-chat background inference. The request middleware populates the context
+ * only for /chat, so jobs/interviews/distillation keep their existing prompts.
+ */
+export function withJackUiRequestContext(
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
+  const context = currentJackUiRequestContext();
+  if (!context) return params;
+
+  const uiMessage: OpenAI.Chat.Completions.ChatCompletionSystemMessageParam = {
+    role: "system",
+    content: formatJackUiContextForModel(context),
+  };
+  const messages = [...params.messages];
+  const insertAt = messages[0]?.role === "system" ? 1 : 0;
+  messages.splice(insertAt, 0, uiMessage);
+  return { ...params, messages };
+}
+
+/**
  * Chat-completion wrapper that reports "reasoning" activity to the Vitality
  * Engine (llm:start/end, plus an error signal on failure). Use this instead of
  * `openai.chat.completions.create` directly so the heartbeat widget reflects
  * every model call. Non-streaming only — Jack does not stream completions.
  */
 export function chatCompletion(
-  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-  return trackInference(() => openai.chat.completions.create(params));
+  const request = withJackUiRequestContext(params);
+  return trackInference(() => openai.chat.completions.create(request));
 }
 
 /**
@@ -71,7 +98,7 @@ function embeddingKey(model: string, input: string): string {
  */
 export async function createEmbedding(
   input: string,
-  opts: { model?: string; cache?: boolean } = {}
+  opts: { model?: string; cache?: boolean } = {},
 ): Promise<number[]> {
   const model = opts.model ?? MODELS.embedding;
   const useCache = opts.cache ?? true;
@@ -85,7 +112,9 @@ export async function createEmbedding(
   }
 
   const request = (async () => {
-    const res = await trackInference(() => openai.embeddings.create({ model, input }));
+    const res = await trackInference(() =>
+      openai.embeddings.create({ model, input }),
+    );
     const embedding = res.data[0]?.embedding ?? [];
 
     if (useCache && embedding.length > 0) {
@@ -117,7 +146,7 @@ export async function createEmbedding(
  */
 export async function createEmbeddings(
   inputs: string[],
-  opts: { model?: string; batchSize?: number } = {}
+  opts: { model?: string; batchSize?: number } = {},
 ): Promise<number[][]> {
   const model = opts.model ?? MODELS.embedding;
   const batchSize = opts.batchSize ?? 96;
@@ -125,7 +154,9 @@ export async function createEmbeddings(
 
   for (let i = 0; i < inputs.length; i += batchSize) {
     const batch = inputs.slice(i, i + batchSize);
-    const res = await trackInference(() => openai.embeddings.create({ model, input: batch }));
+    const res = await trackInference(() =>
+      openai.embeddings.create({ model, input: batch }),
+    );
     // The API may return items out of order — sort by `index` to realign them
     // with the inputs before appending.
     const ordered = [...res.data].sort((a, b) => a.index - b.index);
