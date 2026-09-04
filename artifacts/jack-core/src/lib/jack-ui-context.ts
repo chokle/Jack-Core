@@ -122,17 +122,44 @@ export function jackUiContextLabel(context: JackUiContext) {
 }
 
 export function encodeJackUiContextHeader(context: JackUiContext) {
-  const encoded = encodeURIComponent(JSON.stringify(context));
-  return encoded.length <= MAX_HEADER_CHARS
-    ? encoded
-    : encodeURIComponent(
-        JSON.stringify({
-          ...context,
-          visibleIds: context.visibleIds.slice(0, 4),
-          path: context.path.slice(0, 5),
-          inspector: context.inspector.open
-            ? { open: true, label: context.inspector.label?.slice(0, 60) ?? null }
-            : context.inspector,
-        }),
-      ).slice(0, MAX_HEADER_CHARS);
+  let candidate: JackUiContext = context;
+  let encoded = encodeURIComponent(JSON.stringify(candidate));
+  if (encoded.length <= MAX_HEADER_CHARS) return encoded;
+
+  candidate = {
+    ...context,
+    route: context.route.slice(0, 180),
+    surface: context.surface.slice(0, 80),
+    path: context.path.slice(0, 4).map((item) => item.slice(0, 60)),
+    inspector: {
+      open: context.inspector.open,
+      label: context.inspector.label?.slice(0, 60) ?? null,
+    },
+    visibleIds: context.visibleIds.slice(0, 3).map((id) => id.slice(0, 80)),
+  };
+  encoded = encodeURIComponent(JSON.stringify(candidate));
+  if (encoded.length <= MAX_HEADER_CHARS) return encoded;
+
+  candidate = {
+    ...candidate,
+    route: candidate.route.slice(0, 100),
+    path: candidate.path.slice(0, 2).map((item) => item.slice(0, 40)),
+    inspector: { open: candidate.inspector.open, label: null },
+    visibleIds: [],
+  };
+  encoded = encodeURIComponent(JSON.stringify(candidate));
+  if (encoded.length <= MAX_HEADER_CHARS) return encoded;
+
+  return encodeURIComponent(
+    JSON.stringify({
+      version: 1,
+      route: "",
+      surface: "Jack",
+      path: ["Jack"],
+      inspector: { open: false, label: null },
+      visibleIds: [],
+      navigation: candidate.navigation,
+      capturedAt: candidate.capturedAt,
+    } satisfies JackUiContext),
+  );
 }
