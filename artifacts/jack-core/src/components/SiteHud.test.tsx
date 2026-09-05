@@ -149,13 +149,38 @@ describe("Site HUD demo", () => {
     expect(mode()).toBe("ONLINE");
     expect(screen.getByText(/Demo queue:/).textContent).toContain("0 pending");
     expect(screen.getByText(/Reconciliation transmits nothing/)).toBeTruthy();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(
-      screen.queryByRole("region", { name: "Signal / simulation" }),
-    ).toBeNull();
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Signal / simulation" }),
-    );
+  });
+
+  it("keeps Escape local after a focused simulation control becomes disabled", () => {
+    render(<SiteHud {...createSiteHudFixture(NOW)} />);
+    openPanel("Signal / simulation");
+    const loss = screen.getByRole("button", {
+      name: "Simulate reception loss",
+    });
+    loss.focus();
+    fireEvent.click(loss);
+    const panel = screen.getByRole("region", { name: "Signal / simulation" });
+    expect(document.activeElement).toBe(panel);
+    const appEscape = vi.fn();
+    window.addEventListener("keydown", appEscape);
+    try {
+      fireEvent.keyDown(panel, { key: "Escape" });
+      expect(appEscape).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("region", { name: "Signal / simulation" }),
+      ).toBeNull();
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Signal / simulation" }),
+      );
+      openPanel("Signal / simulation");
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(appEscape).toHaveBeenCalledOnce();
+      expect(
+        screen.getByRole("region", { name: "Signal / simulation" }),
+      ).toBeTruthy();
+    } finally {
+      window.removeEventListener("keydown", appEscape);
+    }
   });
 
   it("honors browser offline state and reconnect loss during reconciliation", () => {

@@ -12,6 +12,7 @@ import {
   connectivityReducer,
   initialConnectivityState,
   projectSiteHud,
+  type ConnectivityEvent,
   type HudCrewMember,
   type HudSiteContext,
   type HudWorkerInput,
@@ -133,17 +134,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
   }, [clock]);
 
   useEffect(() => {
-    if (!panel) return;
-    panelRef.current?.focus();
-    // A simulation action can disable the focused button and move focus to body.
-    const dismiss = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      panelButtons.current[panel]?.focus();
-      setPanel(null);
-    };
-    window.addEventListener("keydown", dismiss);
-    return () => window.removeEventListener("keydown", dismiss);
+    if (panel) panelRef.current?.focus();
   }, [panel]);
 
   const view = projectSiteHud(site, workers, {
@@ -161,6 +152,11 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
     if (panel) panelButtons.current[panel]?.focus();
     setPanel(null);
   };
+  const applyDemoEvent = (event: ConnectivityEvent) => {
+    // Keep keyboard focus in the HUD when the action disables its own button.
+    panelRef.current?.focus({ preventScroll: true });
+    dispatch(event);
+  };
   const describeMember = (member: HudCrewMember) =>
     `${member.name}; ${member.status}; ${sourceLabel(member.source)}; ${timeLabel(member.observedAt)}; ${ageLabel(member.ageMs)}${member.stale ? "; location may have changed" : ""}`;
 
@@ -169,6 +165,12 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
       className="site-hud"
       data-mode={connectivity.mode}
       aria-label="Site HUD simulation"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && panel) {
+          event.stopPropagation();
+          closePanel();
+        }
+      }}
     >
       <div className="site-hud__instrument">
         <div className="site-hud__heading">
@@ -471,7 +473,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
                   disabled={connectivity.mode === "OTG"}
                   onClick={() => {
                     simulatedOffline.current = true;
-                    dispatch({ type: "disconnected" });
+                    applyDemoEvent({ type: "disconnected" });
                   }}
                 >
                   Simulate reception loss
@@ -482,7 +484,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
                   onClick={() => {
                     if (!browserIsOnline()) return;
                     simulatedOffline.current = false;
-                    dispatch({ type: "reconnected" });
+                    applyDemoEvent({ type: "reconnected" });
                   }}
                 >
                   Simulate reconnect
@@ -491,7 +493,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
                   type="button"
                   disabled={!offline}
                   onClick={() => {
-                    dispatch({
+                    applyDemoEvent({
                       type: "local-event",
                       id: `demo-check-in-${++eventSequence.current}`,
                       createdAt: clock(),
@@ -507,7 +509,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
                   }
                   onClick={() => {
                     if (!browserIsOnline() || simulatedOffline.current) return;
-                    dispatch({
+                    applyDemoEvent({
                       type: "sync-completed",
                       generation: connectivity.generation,
                     });
