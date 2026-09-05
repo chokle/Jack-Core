@@ -73,6 +73,7 @@ export function parseJackUiContextHeader(
   if (
     route === null ||
     !route.startsWith("/") ||
+    route.startsWith("//") ||
     route.includes("?") ||
     route.includes("#") ||
     surface === null ||
