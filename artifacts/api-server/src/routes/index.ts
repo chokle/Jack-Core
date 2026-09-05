@@ -20,6 +20,7 @@ import endOfShiftCloseoutRouter from "./end-of-shift-closeout.js";
 import accountRouter from "./account.js";
 import pilotEnrollmentsRouter from "./pilot-enrollments.js";
 import { jackUiRequestContextMiddleware } from "../lib/jack-ui-request-context.js";
+import { askJackTelemetrySessionMiddleware } from "../lib/ask-jack-telemetry-session.js";
 
 const router: IRouter = Router();
 
@@ -27,6 +28,7 @@ router.use(healthRouter);
 router.use(meRouter);
 router.use(videosRouter);
 router.use(searchRouter);
+router.use(askJackTelemetrySessionMiddleware);
 router.use("/chat", jackUiRequestContextMiddleware);
 router.use(chatRouter);
 router.use(competenciesRouter);
