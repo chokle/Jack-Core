@@ -149,17 +149,16 @@ const DIRECTIONAL_NODE_VERB =
   /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)$/i;
 
 function looksLikeContentClauseTarget(target: string) {
+  // Suffix qualification is intentionally conservative for ambiguous verbs.
+  // Sentence-like targets stay on the API path; explicit prefix qualification
+  // or a directional verb remains available for legitimate labels containing
+  // question words or relation words (for example, "How to Weld").
   return (
     /^(?:what(?:s| is| are| was| were)?|how|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
       target,
     ) ||
-    /\b(?:procedure|instructions?|steps?|settings?|parameters?|amperage|voltage|current|wire feed|gas flow|root gap|heat input|travel speed)\s+(?:for|to|on|about)\b/i.test(
-      target,
-    ) ||
-    /\b(?:wrong with|right|correct|proper|recommended|best|required|needed)\b.*\b(?:for|with|on|about)\b/i.test(
-      target,
-    ) ||
-    /\b(?:for|with|about)\s+(?:this|that|these|those|my|our|the|a|an)\b/i.test(
+    /\b(?:for|with|about|in|of|at|on|to)\b/i.test(target) ||
+    /\b(?:wrong|right|correct|proper|recommended|best|required|needed)\b/i.test(
       target,
     )
   );
