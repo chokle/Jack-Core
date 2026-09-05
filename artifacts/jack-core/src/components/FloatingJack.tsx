@@ -71,6 +71,7 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
     a.visibleIds.join("|") === b.visibleIds.join("|") &&
     a.navigation.canBack === b.navigation.canBack &&
     a.navigation.canUp === b.navigation.canUp &&
+    a.navigation.canForward === b.navigation.canForward &&
     a.navigation.hasSourceAction === b.navigation.hasSourceAction
   );
 }
@@ -502,6 +503,7 @@ export function FloatingJack() {
                   {[
                     uiContext.navigation.canBack && "Back",
                     uiContext.navigation.canUp && "Up",
+                    uiContext.navigation.canForward && "Forward",
                     uiContext.navigation.hasSourceAction && "Source",
                   ]
                     .filter(Boolean)

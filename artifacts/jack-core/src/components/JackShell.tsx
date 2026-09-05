@@ -44,6 +44,10 @@ interface JackShellProps {
   userTestStarting?: boolean;
   canViewPilotReports?: boolean;
   canUseParticipantCloseout?: boolean;
+  canHistoryBack?: boolean;
+  canHistoryForward?: boolean;
+  onHistoryBack?: () => void;
+  onHistoryForward?: () => void;
   children: ReactNode;
 }
 
@@ -66,6 +70,10 @@ export function JackShell({
   userTestStarting,
   canViewPilotReports,
   canUseParticipantCloseout,
+  canHistoryBack = false,
+  canHistoryForward = false,
+  onHistoryBack,
+  onHistoryForward,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -328,6 +336,33 @@ export function JackShell({
         data-jack-surface={surfaceLabel[active]}
       >
         {children}
+        {/* These app-owned targets give Jack a bounded page/video history. The
+            controls stay out of the visual layout; graph and video surfaces
+            retain precedence for their own rendered Back actions. */}
+        <nav
+          aria-label="Jack navigation history"
+          data-jack-command-index
+          className="sr-only"
+        >
+          <button
+            type="button"
+            data-jack-action="back"
+            disabled={!canHistoryBack}
+            aria-disabled={!canHistoryBack}
+            onClick={onHistoryBack}
+          >
+            Back to previous Jack view
+          </button>
+          <button
+            type="button"
+            data-jack-action="forward"
+            disabled={!canHistoryForward}
+            aria-disabled={!canHistoryForward}
+            onClick={onHistoryForward}
+          >
+            Forward to next Jack view
+          </button>
+        </nav>
       </main>
     </div>
   );

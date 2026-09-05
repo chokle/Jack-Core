@@ -71,6 +71,15 @@ import { setAuthTokenGetter, useGetMe, type Citation, type ParkedThought } from 
 
 const queryClient = new QueryClient();
 
+type JackAppLocation = {
+  view: JackView;
+  selectedVideoId: string | null;
+};
+
+// Voice forward/back is intentionally bounded. Jack's rendered navigation is
+// a small in-app history, not an unbounded copy of every graph interaction.
+const MAX_JACK_NAVIGATION_ENTRIES = 32;
+
 const configuredClerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const pilotAuthBypass = import.meta.env.VITE_PILOT_AUTH_BYPASS === "true";
 const isLocalClerkHost =
@@ -308,6 +317,18 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     return "graph";
   });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const navigationRef = useRef<{
+    entries: JackAppLocation[];
+    index: number;
+  }>({ entries: [], index: -1 });
+  const navigationLocationRef = useRef<JackAppLocation>({
+    view,
+    selectedVideoId,
+  });
+  const [navigationAvailability, setNavigationAvailability] = useState({
+    canBack: false,
+    canForward: false,
+  });
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
@@ -423,10 +444,76 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     setIsChatOpen(true);
   };
 
+  const syncNavigationAvailability = () => {
+    const { entries, index } = navigationRef.current;
+    setNavigationAvailability({
+      canBack: index > 0,
+      canForward: index >= 0 && index < entries.length - 1,
+    });
+  };
+
+  const ensureNavigation = () => {
+    if (navigationRef.current.index >= 0) return;
+    navigationRef.current = {
+      entries: [navigationLocationRef.current],
+      index: 0,
+    };
+  };
+
+  const applyLocation = (location: JackAppLocation) => {
+    navigationLocationRef.current = location;
+    setSelectedVideoId(location.selectedVideoId);
+    setView(location.view);
+  };
+
+  const navigateToLocation = (location: JackAppLocation) => {
+    ensureNavigation();
+    const navigation = navigationRef.current;
+    const current = navigation.entries[navigation.index];
+    if (
+      current?.view === location.view &&
+      current.selectedVideoId === location.selectedVideoId
+    ) {
+      return;
+    }
+
+    const entries = [
+      ...navigation.entries.slice(0, navigation.index + 1),
+      location,
+    ];
+    const overflow = Math.max(0, entries.length - MAX_JACK_NAVIGATION_ENTRIES);
+    navigationRef.current = {
+      entries: overflow > 0 ? entries.slice(overflow) : entries,
+      index: entries.length - 1 - overflow,
+    };
+    applyLocation(location);
+    syncNavigationAvailability();
+  };
+
+  const moveNavigation = (delta: -1 | 1) => {
+    ensureNavigation();
+    const navigation = navigationRef.current;
+    const nextIndex = navigation.index + delta;
+    const next = navigation.entries[nextIndex];
+    if (!next) return false;
+    navigationRef.current.index = nextIndex;
+    applyLocation(next);
+    syncNavigationAvailability();
+    return true;
+  };
+
+  const handleHistoryBack = () => {
+    moveNavigation(-1);
+  };
+
+  const handleHistoryForward = () => {
+    moveNavigation(1);
+  };
+
   const handleSelectVideo = (videoId: string) => {
     feedbackRef.current?.markFeature("video_detail");
     setSeek(undefined);
-    setSelectedVideoId(videoId);
+    navigateToLocation({ view, selectedVideoId: videoId });
   };
 
   const handleNavigate = (next: JackView) => {
@@ -442,19 +529,17 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       feedbackRef.current?.markFeature(feature[next]);
       void trackTestEvent("feature_viewed", { feature: feature[next] });
     }
-    setSelectedVideoId(null);
     setFieldNotePreload(undefined);
-    setView(next);
+    navigateToLocation({ view: next, selectedVideoId: null });
   };
 
   const handleFieldNoteClick = (citation: Citation) => {
     setIsChatOpen(false);
     setResumedThought(null);
-    setSelectedVideoId(null);
     setInterviewPreload(undefined);
     fieldNoteHandoffToken.current += 1;
     setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
-    setView("interview");
+    navigateToLocation({ view: "interview", selectedVideoId: null });
   };
 
   const deleteAccount = async () => {
@@ -475,8 +560,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleCitationClick = (videoId: string, startTime: number) => {
-    setSelectedVideoId(videoId);
     setSeek({ time: startTime, token: Date.now() });
+    navigateToLocation({ view, selectedVideoId: videoId });
   };
 
   const launchTestSession = async (pilotId?: string) => {
@@ -893,8 +978,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // on the graph so the durable mentor action remains available.
   const handleResumeInterview = (sessionId: string) => {
     handoffInterviewResume(sessionId, () => {
-      setSelectedVideoId(null);
-      setView("interview");
+      navigateToLocation({ view: "interview", selectedVideoId: null });
     });
   };
 
@@ -961,11 +1045,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         userTestStarting={testStartPending}
         canViewPilotReports={me?.canViewPilotReports === true}
         canUseParticipantCloseout={canViewCloseout}
+        canHistoryBack={navigationAvailability.canBack}
+        canHistoryForward={navigationAvailability.canForward}
+        onHistoryBack={handleHistoryBack}
+        onHistoryForward={handleHistoryForward}
       >
         {selectedVideoId ? (
           <VideoDetail
             videoId={selectedVideoId}
-            onBack={() => setSelectedVideoId(null)}
+            onBack={() => {
+              if (!moveNavigation(-1)) {
+                applyLocation({ view, selectedVideoId: null });
+              }
+            }}
             originLabel={videoOriginLabel}
             onOpenChat={handleOpenChat}
             seek={seek}

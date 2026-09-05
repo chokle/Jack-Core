@@ -14,6 +14,7 @@ describe("Jack local commands", () => {
     ["Library", "library"],
     ["open the video library", "library"],
     ["go forward to Library", "library"],
+    ["forward to Library", "library"],
     ["Jack, can you open the Library?", "library"],
     ["Living Memory", "graph"],
     ["navigate to the memory graph", "graph"],
@@ -27,10 +28,27 @@ describe("Jack local commands", () => {
   });
 
   it.each([
+    "forward",
+    "go forward",
+    "go forward one level",
+    "move forward",
+    "next",
+  ])("resolves bare forward navigation locally: %s", (message) => {
+    expect(resolveJackLocalCommand(message)).toEqual({
+      kind: "app",
+      action: "forward",
+      label: "the next view",
+    });
+  });
+
+  it.each([
     ["go to Root Pass", "Root Pass"],
     ["go forward to Root Pass", "Root Pass"],
+    ["forward to node Root Pass", "Root Pass"],
     ["navigate to the Root Pass node", "Root Pass"],
     ["open Fit Up concept", "Fit Up"],
+    ["go to node Root Pass", "Root Pass"],
+    ["open concept Fit Up", "Fit Up"],
   ])("resolves a named graph node: %s", (message, target) => {
     expect(resolveJackLocalCommand(message)).toEqual({
       kind: "node",

@@ -11,6 +11,7 @@ export interface JackUiContext {
   navigation: {
     canBack: boolean;
     canUp: boolean;
+    canForward: boolean;
     hasSourceAction: boolean;
   };
   capturedAt: string;
@@ -23,6 +24,7 @@ export interface JackUiContext {
  */
 export type JackUiActionName =
   | "back"
+  | "forward"
   | "up"
   | "source"
   | "node"
@@ -258,6 +260,7 @@ export function collectJackUiContext(): JackUiContext {
     navigation: {
       canBack: Boolean(jackUiAction("back") || jackUiAction("up")),
       canUp: Boolean(jackUiAction("up")),
+      canForward: Boolean(jackUiAction("forward")),
       hasSourceAction: hasSourceAction(),
     },
     capturedAt: new Date().toISOString(),
