@@ -11,7 +11,7 @@ function encoded(overrides: Record<string, unknown> = {}) {
   return encodeURIComponent(
     JSON.stringify({
       version: 1,
-      route: "/app?view=memory",
+      route: "/app",
       surface: "Living Memory",
       path: ["Jack", "Welding", "FCAW"],
       inspector: { open: true, label: "Wire feed" },
@@ -29,7 +29,7 @@ describe("Jack UI request context", () => {
   it("accepts a fresh bounded Jack-app packet", () => {
     const context = parseJackUiContextHeader(encoded(), NOW);
     expect(context).toMatchObject({
-      route: "/app?view=memory",
+      route: "/app",
       surface: "Living Memory",
       path: ["Jack", "Welding", "FCAW"],
       inspector: { open: true, label: "Wire feed" },
@@ -52,6 +52,14 @@ describe("Jack UI request context", () => {
         encoded({ capturedAt: "2026-09-04T22:00:20.000Z" }),
         NOW,
       ),
+    ).toBeNull();
+  });
+
+  it("rejects client-supplied query, fragment, and absolute route values", () => {
+    expect(parseJackUiContextHeader(encoded({ route: "/app?token=secret" }), NOW)).toBeNull();
+    expect(parseJackUiContextHeader(encoded({ route: "/app#access_token=secret" }), NOW)).toBeNull();
+    expect(
+      parseJackUiContextHeader(encoded({ route: "https://jack.torchlabs.ca/app" }), NOW),
     ).toBeNull();
   });
 
