@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { JackSpeechPlayer } from "./jack-speech";
+import { setAuthTokenGetter } from "@workspace/api-client-react";
 const play = vi.fn();
 const pause = vi.fn();
 const fetchAudio = vi.fn();
@@ -33,10 +34,62 @@ beforeEach(() => {
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
 });
 afterEach(() => {
+  setAuthTokenGetter(null);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+it("uses the current Clerk token for every speech request without relying on cookies", async () => {
+  let token = "first-session-token";
+  setAuthTokenGetter(() => token);
+  fetchAudio.mockImplementation(async (_url, options) => {
+    if (new Headers(options.headers).get("authorization") !== `Bearer ${token}`)
+      return new Response("Unauthorized", { status: 401 });
+    return new Response("audio", { headers: { "content-type": "audio/mpeg" } });
+  });
+  const state = vi.fn();
+  const player = new JackSpeechPlayer(state);
+  await player.speak("First response");
+  expect(state).toHaveBeenLastCalledWith("playing");
+  token = "refreshed-session-token";
+  await player.speak("After navigation");
+  expect(state).toHaveBeenLastCalledWith("playing");
+  expect(
+    new Headers(fetchAudio.mock.calls[0][1].headers).get("authorization"),
+  ).toBe("Bearer first-session-token");
+  expect(
+    new Headers(fetchAudio.mock.calls[1][1].headers).get("authorization"),
+  ).toBe("Bearer refreshed-session-token");
+  player.cancel();
+});
+it.each(["cancel", "deadline"])(
+  "suppresses audio when %s occurs while Clerk token is pending",
+  async (reason) => {
+    vi.useFakeTimers();
+    let resolveToken!: (token: string) => void;
+    setAuthTokenGetter(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveToken = resolve;
+        }),
+    );
+    const state = vi.fn();
+    const player = new JackSpeechPlayer(state);
+    const work = player.speak("Pending token");
+    expect(fetchAudio).not.toHaveBeenCalled();
+    if (reason === "cancel") player.cancel();
+    else await vi.advanceTimersByTimeAsync(40_000);
+    resolveToken("late-token");
+    await work;
+    expect(fetchAudio.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+    expect(state).not.toHaveBeenCalledWith("playing");
+    if (reason === "deadline")
+      expect(state).toHaveBeenLastCalledWith("unavailable");
+    else expect(state).not.toHaveBeenCalledWith("unavailable");
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
 it("requests only canonical authenticated audio and releases it after playback", async () => {
   const state = vi.fn();
   const player = new JackSpeechPlayer(state);

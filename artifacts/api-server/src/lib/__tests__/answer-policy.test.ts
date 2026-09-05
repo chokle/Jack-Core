@@ -2,6 +2,35 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it("removes the observed location reply's help offer and literal bold markers", () => {
+    const raw =
+      "It looks like you're in the **Living Memory** section related to **Welding Machine Parameter Setup**. This area is for accessing information or procedures about setting up welding machines. If you need explanations on specific parameters or how to set something up, which aspect you're interested in, and I can help clarify!";
+    const answer = sanitizeJackAnswer(raw, "Where am I?");
+    expect(answer).toContain("you're in the Living Memory");
+    expect(answer).toContain("Welding Machine Parameter Setup");
+    expect(answer).not.toMatch(/\*\*|If you need|I can help/);
+  });
+
+  it("does not promote uncertain location to a verified fact", () => {
+    const raw =
+      "It looks like you're in Library, but I don't have your current view.";
+    expect(sanitizeJackAnswer(raw, "Where am I?")).toBe(raw);
+  });
+
+  it("preserves branch and selected node specificity in direct location replies", () => {
+    const raw =
+      "You're in Living Memory, under Jack > Welder. Welding Machine Parameter Setup is open.";
+    expect(sanitizeJackAnswer(raw, "Jack, where am I?")).toBe(raw);
+  });
+
+  it("does not apply location formatting to a compound field question", () => {
+    const raw =
+      "Check the **root gap**. If you need a different gap, check the procedure first.";
+    expect(
+      sanitizeJackAnswer(raw, "Where am I, and how do I set the root gap?"),
+    ).toBe(raw);
+  });
+
   it("replaces a navigation refusal with a concrete Jack workspace move", () => {
     const raw =
       "I can't navigate to video libraries or specific sections, but I can help answer questions or provide information on welding topics. Let me know what you need.";
