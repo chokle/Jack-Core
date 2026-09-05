@@ -153,10 +153,15 @@ function looksLikeContentClauseTarget(target: string) {
     /^(?:what(?:s| is| are| was| were)?|how|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
       target,
     ) ||
-    /\b(?:procedure|instructions?|steps?|settings?|parameters?)\s+(?:for|to|on|about)\b/i.test(
+    /\b(?:procedure|instructions?|steps?|settings?|parameters?|amperage|voltage|current|wire feed|gas flow|root gap|heat input|travel speed)\s+(?:for|to|on|about)\b/i.test(
       target,
     ) ||
-    /\b(?:wrong with|right for|need(?:ed)? for)\b/i.test(target)
+    /\b(?:wrong with|right|correct|proper|recommended|best|required|needed)\b.*\b(?:for|with|on|about)\b/i.test(
+      target,
+    ) ||
+    /\b(?:for|with|about)\s+(?:this|that|these|those|my|our|the|a|an)\b/i.test(
+      target,
+    )
   );
 }
 
