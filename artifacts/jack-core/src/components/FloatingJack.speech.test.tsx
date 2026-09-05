@@ -116,7 +116,22 @@ describe("FloatingJack speech output", () => {
     const utterance = synthesis.speak.mock.calls[0][0] as FakeUtterance;
     expect(utterance.voice).toBe(male);
     expect(utterance.rate).toBe(0.96);
-    expect(utterance.pitch).toBe(0.88);
+    expect(utterance.pitch).toBe(0.92);
+  });
+
+  it("uses the lower Android fallback register when Chrome exposes no gender", async () => {
+    const synthesis = makeSpeechSynthesis();
+    synthesis.setVoices([voice("English United States", "en-US")]);
+    await renderJack(synthesis);
+
+    await submit("What is this?");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+
+    const utterance = synthesis.speak.mock.calls[0][0] as FakeUtterance;
+    expect(utterance.voice?.name).toBe("English United States");
+    expect(utterance.pitch).toBe(0.64);
   });
 
   it("waits for Chrome's delayed voice list before speaking", async () => {
@@ -128,7 +143,6 @@ describe("FloatingJack speech output", () => {
     expect(synthesis.addEventListener).toHaveBeenCalledWith(
       "voiceschanged",
       expect.any(Function),
-      { once: true },
     );
 
     const male = voice("Google UK English Male", "en-GB");

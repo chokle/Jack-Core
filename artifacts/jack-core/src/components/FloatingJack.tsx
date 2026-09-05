@@ -12,7 +12,14 @@ import {
   resolveJackLocalCommand,
   unavailableJackLocalCommand,
 } from "../lib/jack-local-command";
-import { selectJackVoice } from "../lib/jack-speech";
+import {
+  getJackVoiceHint,
+  isJackVoiceHintMatch,
+  isExplicitlyMasculineJackVoice,
+  selectJackVoice,
+} from "../lib/jack-speech";
+
+const JACK_VOICE_DISCOVERY_GRACE_MS = 750;
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -206,7 +213,7 @@ export function FloatingJack() {
       setPending(false);
       setListening(false);
     }
-  }, [authorized]);
+  }, [authorized, cancelSpeech]);
 
   useEffect(() => {
     return () => {
@@ -226,6 +233,7 @@ export function FloatingJack() {
     speechWaitCleanupRef.current?.();
     speechWaitCleanupRef.current = null;
     synthesis.cancel();
+    const voiceHint = getJackVoiceHint();
 
     const speakNow = () => {
       if (speechRequestRef.current !== request) return;
@@ -233,26 +241,44 @@ export function FloatingJack() {
       const utterance = new SpeechSynthesisUtterance(plainSpeech(text));
       const voices =
         typeof synthesis.getVoices === "function" ? synthesis.getVoices() : [];
-      const voice = selectJackVoice(voices, navigator.language || "en-US");
+      const voice = selectJackVoice(
+        voices,
+        navigator.language || "en-US",
+        voiceHint,
+      );
       if (voice) utterance.voice = voice;
-      // A browser without explicit voice-gender metadata still gets a lower,
-      // steadier fallback register for Jack's field voice.
+      // Android Chrome exposes locale voices without gender metadata. Use a
+      // materially lower pitch in that case; a mild 0.88 adjustment still
+      // sounded like the device's default feminine voice on Pixel hardware.
       utterance.rate = 0.96;
-      utterance.pitch = 0.88;
+      utterance.pitch = isExplicitlyMasculineJackVoice(voice) ? 0.92 : 0.64;
       synthesis.speak(utterance);
     };
 
-    const voices =
-      typeof synthesis.getVoices === "function" ? synthesis.getVoices() : [];
-    if (voices.length || typeof synthesis.addEventListener !== "function") {
+    const readVoices = () =>
+      typeof synthesis.getVoices === "function"
+        ? synthesis.getVoices()
+        : ([] as SpeechSynthesisVoice[]);
+    const voices = readVoices();
+    const isPreferredVoice = (voice: SpeechSynthesisVoice) =>
+      isExplicitlyMasculineJackVoice(voice) ||
+      isJackVoiceHintMatch(voice, voiceHint);
+    const hasPreferredVoice = voices.some(isPreferredVoice);
+    if (
+      hasPreferredVoice ||
+      typeof synthesis.addEventListener !== "function" ||
+      typeof synthesis.getVoices !== "function"
+    ) {
       speakNow();
       return;
     }
 
     let timeoutId: number | undefined;
     const onVoicesChanged = () => {
-      speechWaitCleanupRef.current?.();
-      speakNow();
+      if (readVoices().some(isPreferredVoice)) {
+        cleanupWait();
+        speakNow();
+      }
     };
     const cleanupWait = () => {
       synthesis.removeEventListener?.("voiceschanged", onVoicesChanged);
@@ -261,13 +287,11 @@ export function FloatingJack() {
         speechWaitCleanupRef.current = null;
     };
     speechWaitCleanupRef.current = cleanupWait;
-    synthesis.addEventListener("voiceschanged", onVoicesChanged, {
-      once: true,
-    });
+    synthesis.addEventListener("voiceschanged", onVoicesChanged);
     timeoutId = window.setTimeout(() => {
       cleanupWait();
       speakNow();
-    }, 1_500);
+    }, JACK_VOICE_DISCOVERY_GRACE_MS);
   };
 
   const submit = async (message: string) => {

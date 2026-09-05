@@ -84,6 +84,8 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
   assert.doesNotMatch(generator, /PILOT_AUTH_BYPASS !== "false"/);
   assert.match(dockerfile, /ARG VITE_PILOT_AUTH_BYPASS=false/);
+  assert.match(dockerfile, /ARG VITE_JACK_VOICE_HINT/);
+  assert.match(dockerfile, /ENV VITE_JACK_VOICE_HINT=\$VITE_JACK_VOICE_HINT/);
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
   assert.match(workflow, /--secrets-file/);
@@ -97,6 +99,14 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     workflow.match(/secrets\.VITE_CLERK_PUBLISHABLE_KEY/g)?.length,
     3,
     "Clerk publishable key must be bound to preflight, config generation, and container build",
+  );
+  assert.match(
+    workflow,
+    /VITE_JACK_VOICE_HINT: \$\{\{ vars\.VITE_JACK_VOICE_HINT \}\}/,
+  );
+  assert.match(
+    workflow,
+    /--build-arg VITE_JACK_VOICE_HINT=\"\$VITE_JACK_VOICE_HINT\"/,
   );
   assert.match(workflow, /- name: Resolve deployed container digest/);
   assert.match(
