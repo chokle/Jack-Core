@@ -14,7 +14,8 @@ const api = vi.hoisted(() => ({
   getMe: vi.fn(),
 }));
 
-vi.mock("@workspace/api-client-react", () => ({
+vi.mock("@workspace/api-client-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@workspace/api-client-react")>()),
   askJack: api.askJack,
   getMe: api.getMe,
 }));
@@ -46,6 +47,14 @@ beforeEach(() => {
   FakeSpeechRecognition.latest = null;
   window.history.replaceState({}, "", "/app");
   document.title = "Jack";
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockImplementation(
+        async () => new Response("Unavailable", { status: 503 }),
+      ),
+  );
   Object.defineProperty(window, "SpeechRecognition", {
     configurable: true,
     writable: true,
@@ -55,6 +64,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
