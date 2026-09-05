@@ -11,6 +11,7 @@ export interface JackUiContext {
   navigation: {
     canBack: boolean;
     canUp: boolean;
+    canForward: boolean;
     hasSourceAction: boolean;
   };
   capturedAt: string;
@@ -23,8 +24,10 @@ export interface JackUiContext {
  */
 export type JackUiActionName =
   | "back"
+  | "forward"
   | "up"
   | "source"
+  | "node"
   | "library"
   | "graph"
   | "interview"
@@ -46,7 +49,10 @@ function elementText(node: HTMLElement | null | undefined, max = MAX_LABEL) {
   return cleanText(node?.innerText || node?.textContent, max);
 }
 
-function isElementVisible(node: HTMLElement | null | undefined) {
+function isElementVisible(
+  node: HTMLElement | null | undefined,
+  options: { allowTransparent?: boolean } = {},
+) {
   if (node?.closest("[data-floating-jack]")) return false;
   let current = node ?? null;
   while (current) {
@@ -62,7 +68,7 @@ function isElementVisible(node: HTMLElement | null | undefined) {
       style.display === "none" ||
       style.visibility === "hidden" ||
       style.visibility === "collapse" ||
-      style.opacity === "0"
+      (style.opacity === "0" && !options.allowTransparent)
     ) {
       return false;
     }
@@ -71,10 +77,13 @@ function isElementVisible(node: HTMLElement | null | undefined) {
   return true;
 }
 
-function firstVisible(selectors: string[]): HTMLElement | null {
+function firstVisible(
+  selectors: string[],
+  options: { allowTransparent?: boolean } = {},
+): HTMLElement | null {
   for (const selector of selectors) {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const visible = nodes.find((node) => isElementVisible(node));
+    const visible = nodes.find((node) => isElementVisible(node, options));
     if (visible) return visible;
   }
   return null;
@@ -84,7 +93,7 @@ function activeSurface() {
   const surface = Array.from(
     document.querySelectorAll<HTMLElement>("[data-jack-surface]"),
   )
-    .filter(isElementVisible)
+    .filter((node) => isElementVisible(node, { allowTransparent: true }))
     .at(-1);
   if (surface) return cleanText(surface.dataset.jackSurface);
   const active = firstVisible([
@@ -96,7 +105,9 @@ function activeSurface() {
 }
 
 function breadcrumbPath() {
-  const state = firstVisible(["[data-jack-path]"]);
+  const state = firstVisible(["[data-jack-path]"], {
+    allowTransparent: true,
+  });
   if (state) {
     try {
       const path: unknown = JSON.parse(state.dataset.jackPath ?? "[]");
@@ -134,7 +145,13 @@ function visibleRecordIds() {
     ),
   );
   for (const node of nodes) {
-    if (!isElementVisible(node)) continue;
+    if (
+      !isElementVisible(node, {
+        allowTransparent: Boolean(node.dataset.videoId),
+      })
+    )
+      continue;
+    if (node.closest("[data-jack-command-index]")) continue;
     for (const key of [
       "nodeId",
       "branchId",
@@ -185,6 +202,7 @@ function normalizeActionTarget(value: string) {
 function actionTargetValues(node: HTMLElement) {
   return [
     node.dataset.videoTitle,
+    node.dataset.nodeLabel,
     node.dataset.jackLabel,
     node.getAttribute("aria-label"),
     elementText(node),
@@ -192,8 +210,8 @@ function actionTargetValues(node: HTMLElement) {
 }
 
 /**
- * Find a visible application-owned action. An optional target is only used for
- * explicitly named video actions; exact title matches win over partial matches.
+ * Find a visible application-owned action. A target is used only for explicitly
+ * named video or graph-node actions; exact labels win over partial matches.
  */
 export function jackUiAction(
   action: JackUiActionName,
@@ -215,7 +233,9 @@ export function jackUiAction(
         Number(Boolean(a.closest("[data-jack-inspector]"))),
     );
 
-  if (!target || action !== "video") return nodes[0] ?? null;
+  if (!target || (action !== "video" && action !== "node")) {
+    return nodes[0] ?? null;
+  }
 
   const wanted = normalizeActionTarget(target);
   if (!wanted) return null;
@@ -253,6 +273,7 @@ export function collectJackUiContext(): JackUiContext {
     navigation: {
       canBack: Boolean(jackUiAction("back") || jackUiAction("up")),
       canUp: Boolean(jackUiAction("up")),
+      canForward: Boolean(jackUiAction("forward")),
       hasSourceAction: hasSourceAction(),
     },
     capturedAt: new Date().toISOString(),

@@ -1,9 +1,10 @@
 import { jackUiAction, type JackUiActionName } from "./jack-ui-context";
 
-export type JackLocalAppAction = Exclude<JackUiActionName, "video">;
+export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
 
 export type JackLocalCommand =
   | { kind: "app"; action: JackLocalAppAction; label: string }
+  | { kind: "node"; target: string; label: string }
   | { kind: "video"; target: string | null; label: string };
 
 const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
@@ -33,6 +34,7 @@ const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
 
 const ACTION_LABELS: Record<JackLocalAppAction, string> = {
   back: "the previous view",
+  forward: "the next view",
   up: "the parent view",
   source: "the source",
   library: "Library",
@@ -91,7 +93,7 @@ function parseSectionCommand(intent: string): JackLocalCommand | null {
     };
   }
   const match = intent.match(
-    /^(?:go to|navigate to|open|show|switch to|take me to|bring me to|view|visit)(?: me)?\s+(?:the\s+)?(.+)$/i,
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|switch to|take me to|take me forward to|bring me to|bring me forward to|move forward to|view|visit)(?: me)?\s+(?:the\s+)?(.+)$/i,
   );
   if (!match) return null;
   const candidate = match[1]
@@ -129,7 +131,7 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   }
 
   const match = intent.match(
-    /^(?:open|show|view|play|watch|go to|navigate to|take me to)(?: me)?\s+(?:the\s+)?(?:video|clip)\b(?:\s+(?:called|named|titled)\s+)?(.*)$/i,
+    /^(?:open|show|view|play|watch|go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:video|clip)\b(?:\s+(?:called|named|titled)\s+)?(.*)$/i,
   );
   if (!match) return null;
   const target = stripTarget(match[1]);
@@ -143,9 +145,27 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   };
 }
 
+function parseNodeCommand(intent: string): JackLocalCommand | null {
+  const match = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  if (!match) return null;
+
+  const target = match[1]
+    .replace(/^(?:node|concept|topic|branch)\s+/i, "")
+    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
+  if (!target) return null;
+
+  return { kind: "node", target, label: `node ${target}` };
+}
+
 /**
  * Resolve only the small set of imperative commands that Jack can execute in
- * the rendered app. Everything else remains a content question for the API.
+ * the rendered app. Bare forward is backed by the app's bounded page-history
+ * stack; named forward targets still resolve through the rendered controls.
+ * Everything else remains a content question for the API.
  */
 export function resolveJackLocalCommand(
   message: string,
@@ -162,6 +182,16 @@ export function resolveJackLocalCommand(
     return { kind: "app", action: "back", label: ACTION_LABELS.back };
   }
   if (
+    normalizedIntent === "forward" ||
+    normalizedIntent === "go forward" ||
+    normalizedIntent === "go forward one level" ||
+    normalizedIntent === "move forward" ||
+    normalizedIntent === "move forward one level" ||
+    normalizedIntent === "next"
+  ) {
+    return { kind: "app", action: "forward", label: ACTION_LABELS.forward };
+  }
+  if (
     normalizedIntent === "go up" ||
     normalizedIntent === "go up one level" ||
     normalizedIntent === "move up"
@@ -172,13 +202,20 @@ export function resolveJackLocalCommand(
     return { kind: "app", action: "source", label: ACTION_LABELS.source };
   }
 
-  return parseSectionCommand(intent) ?? parseVideoCommand(intent);
+  return (
+    parseSectionCommand(intent) ??
+    parseVideoCommand(intent) ??
+    parseNodeCommand(intent)
+  );
 }
 
 /** Execute a previously resolved command only through an app-owned action. */
 export function resolveJackLocalAction(
   command: JackLocalCommand,
 ): HTMLElement | null {
+  if (command.kind === "node") {
+    return jackUiAction("node", command.target);
+  }
   if (command.kind === "video") {
     if (command.target) {
       // Never substitute an unrelated visible card for a named recording.
@@ -196,6 +233,9 @@ export function resolveJackLocalAction(
 }
 
 export function unavailableJackLocalCommand(command: JackLocalCommand) {
+  if (command.kind === "node") {
+    return `I don’t see “${command.target}” in the visible Living Memory graph.`;
+  }
   if (command.kind === "video") {
     return command.target
       ? `I don’t see “${command.target}” as a visible video in Jack’s Library.`
@@ -206,6 +246,9 @@ export function unavailableJackLocalCommand(command: JackLocalCommand) {
   }
   if (command.action === "back" || command.action === "up") {
     return "There isn’t a previous Jack view to return to here.";
+  }
+  if (command.action === "forward") {
+    return "There isn’t a next Jack view to move forward to here.";
   }
   return `${command.label} is not available from the current Jack view.`;
 }

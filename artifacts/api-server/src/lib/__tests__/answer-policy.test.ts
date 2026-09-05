@@ -25,14 +25,14 @@ describe("sanitizeJackAnswer", () => {
     );
   });
 
-  it.each(["retrieval from the video library", "failed on retrieval from library"])(
-    "treats library retrieval wording as navigation: %s",
-    (request) => {
-      const raw =
-        "I cant navigate to video libraries or specific sections, but I can help answer questions.";
-      expect(sanitizeJackAnswer(raw, request)).toMatch(/^Open Library from Jack/);
-    },
-  );
+  it.each([
+    "retrieval from the video library",
+    "failed on retrieval from library",
+  ])("treats library retrieval wording as navigation: %s", (request) => {
+    const raw =
+      "I cant navigate to video libraries or specific sections, but I can help answer questions.";
+    expect(sanitizeJackAnswer(raw, request)).toMatch(/^Open Library from Jack/);
+  });
 
   it("removes office filler while preserving the useful field answer", () => {
     const answer = sanitizeJackAnswer(
@@ -74,8 +74,8 @@ describe("sanitizeJackAnswer", () => {
   });
 
   it("preserves useful content around a generic opening", () => {
-    expect(sanitizeJackAnswer("Sure, set 90 amps and check the root gap.")).toBe(
-      "set 90 amps and check the root gap.",
-    );
+    expect(
+      sanitizeJackAnswer("Sure, set 90 amps and check the root gap."),
+    ).toBe("set 90 amps and check the root gap.");
   });
 });

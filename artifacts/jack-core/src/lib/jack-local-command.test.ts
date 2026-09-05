@@ -13,6 +13,8 @@ describe("Jack local commands", () => {
   it.each([
     ["Library", "library"],
     ["open the video library", "library"],
+    ["go forward to Library", "library"],
+    ["forward to Library", "library"],
     ["Jack, can you open the Library?", "library"],
     ["Living Memory", "graph"],
     ["navigate to the memory graph", "graph"],
@@ -22,6 +24,36 @@ describe("Jack local commands", () => {
     expect(resolveJackLocalCommand(message)).toMatchObject({
       kind: "app",
       action,
+    });
+  });
+
+  it.each([
+    "forward",
+    "go forward",
+    "go forward one level",
+    "move forward",
+    "next",
+  ])("resolves bare forward navigation locally: %s", (message) => {
+    expect(resolveJackLocalCommand(message)).toEqual({
+      kind: "app",
+      action: "forward",
+      label: "the next view",
+    });
+  });
+
+  it.each([
+    ["go to Root Pass", "Root Pass"],
+    ["go forward to Root Pass", "Root Pass"],
+    ["forward to node Root Pass", "Root Pass"],
+    ["navigate to the Root Pass node", "Root Pass"],
+    ["open Fit Up concept", "Fit Up"],
+    ["go to node Root Pass", "Root Pass"],
+    ["open concept Fit Up", "Fit Up"],
+  ])("resolves a named graph node: %s", (message, target) => {
+    expect(resolveJackLocalCommand(message)).toEqual({
+      kind: "node",
+      target,
+      label: `node ${target}`,
     });
   });
 
@@ -69,6 +101,24 @@ describe("Jack local commands", () => {
     expect(command).toBeTruthy();
     const action = resolveJackLocalAction(command!);
     action?.click();
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it("targets a visible graph node by its explicit label", () => {
+    const click = vi.fn();
+    document.body.innerHTML = `
+      <button data-jack-action="node" data-node-label="Root Pass" onclick="">
+        Open Root Pass
+      </button>
+    `;
+    const button = document.querySelector<HTMLElement>(
+      "[data-jack-action='node']",
+    )!;
+    button.addEventListener("click", click);
+
+    const command = resolveJackLocalCommand("go to Root Pass");
+    expect(command).toMatchObject({ kind: "node", target: "Root Pass" });
+    resolveJackLocalAction(command!)?.click();
     expect(click).toHaveBeenCalledTimes(1);
   });
 

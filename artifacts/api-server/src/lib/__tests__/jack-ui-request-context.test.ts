@@ -16,7 +16,12 @@ function encoded(overrides: Record<string, unknown> = {}) {
       path: ["Jack", "Welding", "FCAW"],
       inspector: { open: true, label: "Wire feed" },
       visibleIds: ["node-42"],
-      navigation: { canBack: true, canUp: true, hasSourceAction: true },
+      navigation: {
+        canBack: true,
+        canUp: true,
+        canForward: true,
+        hasSourceAction: true,
+      },
       capturedAt: "2026-09-04T22:00:00.000Z",
       ...overrides,
     }),
@@ -34,13 +39,31 @@ describe("Jack UI request context", () => {
       path: ["Jack", "Welding", "FCAW"],
       inspector: { open: true, label: "Wire feed" },
       visibleIds: ["node-42"],
-      navigation: { canBack: true, canUp: true, hasSourceAction: true },
+      navigation: {
+        canBack: true,
+        canUp: true,
+        canForward: true,
+        hasSourceAction: true,
+      },
     });
   });
 
   it("rejects malformed, oversized, stale, and future packets", () => {
     expect(parseJackUiContextHeader("%7Bbad", NOW)).toBeNull();
     expect(parseJackUiContextHeader("x".repeat(3501), NOW)).toBeNull();
+    expect(
+      parseJackUiContextHeader(
+        encoded({
+          navigation: {
+            canBack: true,
+            canUp: true,
+            canForward: "yes",
+            hasSourceAction: true,
+          },
+        }),
+        NOW,
+      ),
+    ).toBeNull();
     expect(
       parseJackUiContextHeader(
         encoded({ capturedAt: "2026-09-04T21:59:00.000Z" }),
@@ -55,14 +78,37 @@ describe("Jack UI request context", () => {
     ).toBeNull();
   });
 
+  it("defaults the forward affordance for an older v1 packet", () => {
+    const context = parseJackUiContextHeader(
+      encoded({
+        navigation: { canBack: true, canUp: true, hasSourceAction: true },
+      }),
+      NOW,
+    );
+    expect(context?.navigation.canForward).toBe(false);
+  });
+
   it("rejects client-supplied query, fragment, absolute, and network-path route values", () => {
-    expect(parseJackUiContextHeader(encoded({ route: "/app?token=secret" }), NOW)).toBeNull();
-    expect(parseJackUiContextHeader(encoded({ route: "/app#access_token=secret" }), NOW)).toBeNull();
     expect(
-      parseJackUiContextHeader(encoded({ route: "https://jack.torchlabs.ca/app" }), NOW),
+      parseJackUiContextHeader(encoded({ route: "/app?token=secret" }), NOW),
     ).toBeNull();
     expect(
-      parseJackUiContextHeader(encoded({ route: "//external.example/path" }), NOW),
+      parseJackUiContextHeader(
+        encoded({ route: "/app#access_token=secret" }),
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      parseJackUiContextHeader(
+        encoded({ route: "https://jack.torchlabs.ca/app" }),
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      parseJackUiContextHeader(
+        encoded({ route: "//external.example/path" }),
+        NOW,
+      ),
     ).toBeNull();
   });
 
@@ -90,20 +136,27 @@ describe("Jack UI request context", () => {
                 path: [surface],
                 inspector: { open: false, label: null },
                 visibleIds: [],
-                navigation: { canBack: false, canUp: false, hasSourceAction: false },
+                navigation: {
+                  canBack: false,
+                  canUp: false,
+                  canForward: false,
+                  hasSourceAction: false,
+                },
                 capturedAt: new Date().toISOString(),
               }),
             ),
         } as unknown as Request;
 
         jackUiRequestContextMiddleware(req, {} as Response, () => {
-          setTimeout(() => resolve(currentJackUiRequestContext()?.surface ?? null), delayMs);
+          setTimeout(
+            () => resolve(currentJackUiRequestContext()?.surface ?? null),
+            delayMs,
+          );
         });
       });
 
-    await expect(Promise.all([run("Living Memory", 5), run("Library", 0)])).resolves.toEqual([
-      "Living Memory",
-      "Library",
-    ]);
+    await expect(
+      Promise.all([run("Living Memory", 5), run("Library", 0)]),
+    ).resolves.toEqual(["Living Memory", "Library"]);
   });
 });

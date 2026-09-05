@@ -100,6 +100,23 @@ describe("Jack UI context", () => {
     expect(after.navigation.hasSourceAction).toBe(false);
   });
 
+  it("keeps the current semantic video visible while its entry animation fades in", () => {
+    document.body.innerHTML = `
+      <main
+        style="opacity: 0"
+        data-jack-surface="Video"
+        data-jack-path='["Library","Root Pass Demo"]'
+        data-video-id="v1"
+      ></main>
+    `;
+
+    const context = collectJackUiContext();
+
+    expect(context.surface).toBe("Video");
+    expect(context.path).toEqual(["Library", "Root Pass Demo"]);
+    expect(context.visibleIds).toContain("v1");
+  });
+
   it("bounds the encoded header even with many visible ids", () => {
     document.body.innerHTML = Array.from(
       { length: 80 },

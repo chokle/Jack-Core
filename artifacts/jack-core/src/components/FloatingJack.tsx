@@ -71,6 +71,7 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
     a.visibleIds.join("|") === b.visibleIds.join("|") &&
     a.navigation.canBack === b.navigation.canBack &&
     a.navigation.canUp === b.navigation.canUp &&
+    a.navigation.canForward === b.navigation.canForward &&
     a.navigation.hasSourceAction === b.navigation.hasSourceAction
   );
 }
@@ -320,6 +321,10 @@ export function FloatingJack() {
         const action = resolveJackLocalAction(localCommand);
         if (action) {
           action.click();
+          // React may commit a shell/graph navigation after the click returns.
+          // Refresh once on the next task as well as through the DOM observer so
+          // the pill never keeps the pre-navigation surface as stale context.
+          window.setTimeout(refreshContext, 0);
           return;
         }
         const localAnswer = unavailableJackLocalCommand(localCommand);
@@ -498,6 +503,7 @@ export function FloatingJack() {
                   {[
                     uiContext.navigation.canBack && "Back",
                     uiContext.navigation.canUp && "Up",
+                    uiContext.navigation.canForward && "Forward",
                     uiContext.navigation.hasSourceAction && "Source",
                   ]
                     .filter(Boolean)
