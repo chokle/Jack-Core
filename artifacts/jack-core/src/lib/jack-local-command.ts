@@ -1,9 +1,10 @@
 import { jackUiAction, type JackUiActionName } from "./jack-ui-context";
 
-export type JackLocalAppAction = Exclude<JackUiActionName, "video">;
+export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
 
 export type JackLocalCommand =
   | { kind: "app"; action: JackLocalAppAction; label: string }
+  | { kind: "node"; target: string; label: string }
   | { kind: "video"; target: string | null; label: string };
 
 const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
@@ -143,6 +144,21 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   };
 }
 
+function parseNodeCommand(intent: string): JackLocalCommand | null {
+  const match = intent.match(
+    /^(?:go to|navigate to|open|show|view|visit|find|locate|take me to|bring me to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  if (!match) return null;
+
+  const target = match[1]
+    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
+  if (!target) return null;
+
+  return { kind: "node", target, label: `node ${target}` };
+}
+
 /**
  * Resolve only the small set of imperative commands that Jack can execute in
  * the rendered app. Everything else remains a content question for the API.
@@ -172,13 +188,20 @@ export function resolveJackLocalCommand(
     return { kind: "app", action: "source", label: ACTION_LABELS.source };
   }
 
-  return parseSectionCommand(intent) ?? parseVideoCommand(intent);
+  return (
+    parseSectionCommand(intent) ??
+    parseVideoCommand(intent) ??
+    parseNodeCommand(intent)
+  );
 }
 
 /** Execute a previously resolved command only through an app-owned action. */
 export function resolveJackLocalAction(
   command: JackLocalCommand,
 ): HTMLElement | null {
+  if (command.kind === "node") {
+    return jackUiAction("node", command.target);
+  }
   if (command.kind === "video") {
     if (command.target) {
       // Never substitute an unrelated visible card for a named recording.
@@ -196,6 +219,9 @@ export function resolveJackLocalAction(
 }
 
 export function unavailableJackLocalCommand(command: JackLocalCommand) {
+  if (command.kind === "node") {
+    return `I don’t see “${command.target}” in the visible Living Memory graph.`;
+  }
   if (command.kind === "video") {
     return command.target
       ? `I don’t see “${command.target}” as a visible video in Jack’s Library.`

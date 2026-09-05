@@ -26,6 +26,18 @@ describe("Jack local commands", () => {
   });
 
   it.each([
+    ["go to Root Pass", "Root Pass"],
+    ["navigate to the Root Pass node", "Root Pass"],
+    ["open Fit Up concept", "Fit Up"],
+  ])("resolves a named graph node: %s", (message, target) => {
+    expect(resolveJackLocalCommand(message)).toEqual({
+      kind: "node",
+      target,
+      label: `node ${target}`,
+    });
+  });
+
+  it.each([
     "Show me the source",
     "show the original source for that.",
     "open this video",
@@ -69,6 +81,24 @@ describe("Jack local commands", () => {
     expect(command).toBeTruthy();
     const action = resolveJackLocalAction(command!);
     action?.click();
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it("targets a visible graph node by its explicit label", () => {
+    const click = vi.fn();
+    document.body.innerHTML = `
+      <button data-jack-action="node" data-node-label="Root Pass" onclick="">
+        Open Root Pass
+      </button>
+    `;
+    const button = document.querySelector<HTMLElement>(
+      "[data-jack-action='node']",
+    )!;
+    button.addEventListener("click", click);
+
+    const command = resolveJackLocalCommand("go to Root Pass");
+    expect(command).toMatchObject({ kind: "node", target: "Root Pass" });
+    resolveJackLocalAction(command!)?.click();
     expect(click).toHaveBeenCalledTimes(1);
   });
 

@@ -320,6 +320,10 @@ export function FloatingJack() {
         const action = resolveJackLocalAction(localCommand);
         if (action) {
           action.click();
+          // React may commit a shell/graph navigation after the click returns.
+          // Refresh once on the next task as well as through the DOM observer so
+          // the pill never keeps the pre-navigation surface as stale context.
+          window.setTimeout(refreshContext, 0);
           return;
         }
         const localAnswer = unavailableJackLocalCommand(localCommand);

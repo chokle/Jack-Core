@@ -389,6 +389,32 @@ describe("Jack Everywhere rendered component acceptance", () => {
     },
   );
 
+  it("navigates to a named Living Memory node through an app-owned action", async () => {
+    await renderApp();
+    await submit("Go to the Root Pass node");
+
+    await waitFor(() =>
+      expect(collectJackUiContext().path).toContain("Root Pass"),
+    );
+    const context = collectJackUiContext();
+    expect(context.surface).toBe("Living Memory");
+    expect(context.path).toContain("Root Pass");
+    expect(context.inspector.open).toBe(true);
+    expect(context.visibleIds).toContain("concept:root-pass");
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
+  it("navigates between named app pages locally in both directions", async () => {
+    await renderApp();
+    await submit("Go to the Library");
+    expect(awareness()).toContain("Library");
+    await submit("Go to Living Memory");
+    await waitFor(() =>
+      expect(collectJackUiContext().surface).toBe("Living Memory"),
+    );
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
   it("closes the real inspector and then goes up the selected node's breadcrumb", async () => {
     await renderApp();
     await selectNode("Root Pass");

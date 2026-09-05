@@ -25,6 +25,7 @@ export type JackUiActionName =
   | "back"
   | "up"
   | "source"
+  | "node"
   | "library"
   | "graph"
   | "interview"
@@ -135,6 +136,7 @@ function visibleRecordIds() {
   );
   for (const node of nodes) {
     if (!isElementVisible(node)) continue;
+    if (node.closest("[data-jack-command-index]")) continue;
     for (const key of [
       "nodeId",
       "branchId",
@@ -185,6 +187,7 @@ function normalizeActionTarget(value: string) {
 function actionTargetValues(node: HTMLElement) {
   return [
     node.dataset.videoTitle,
+    node.dataset.nodeLabel,
     node.dataset.jackLabel,
     node.getAttribute("aria-label"),
     elementText(node),
@@ -192,8 +195,8 @@ function actionTargetValues(node: HTMLElement) {
 }
 
 /**
- * Find a visible application-owned action. An optional target is only used for
- * explicitly named video actions; exact title matches win over partial matches.
+ * Find a visible application-owned action. A target is used only for explicitly
+ * named video or graph-node actions; exact labels win over partial matches.
  */
 export function jackUiAction(
   action: JackUiActionName,
@@ -215,7 +218,9 @@ export function jackUiAction(
         Number(Boolean(a.closest("[data-jack-inspector]"))),
     );
 
-  if (!target || action !== "video") return nodes[0] ?? null;
+  if (!target || (action !== "video" && action !== "node")) {
+    return nodes[0] ?? null;
+  }
 
   const wanted = normalizeActionTarget(target);
   if (!wanted) return null;
