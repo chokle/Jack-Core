@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { JackShell, type JackView } from "./JackShell";
 import type { GraphModel } from "../lib/memory-graph";
+import { collectJackUiContext } from "../lib/jack-ui-context";
 
 vi.mock("./SystemHealthWidget", () => ({ SystemHealthWidget: () => null }));
 
@@ -32,6 +33,31 @@ afterEach(() => {
 });
 
 describe("Site HUD demo entry", () => {
+  it("keeps fictional site data out of Jack Everywhere context across panels", () => {
+    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
+    const { rerender } = render(shell("demo-account"));
+    const snapshot = () => ({ ...collectJackUiContext(), capturedAt: null });
+    const baseline = snapshot();
+    expect(baseline.surface).toBe("Living Memory");
+    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
+    expect(snapshot()).toEqual(baseline);
+    for (const name of [
+      "Floor / elevation",
+      "Crew roster",
+      "Safety landmarks",
+      "Site alerts",
+      "Signal / simulation",
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      if (name === "Floor / elevation") {
+        fireEvent.click(screen.getByRole("button", { name: "Level 1 4 m" }));
+      }
+      expect(snapshot()).toEqual(baseline);
+    }
+    rerender(shell("demo-account", "library"));
+    expect(collectJackUiContext().surface).toBe("Library");
+  });
+
   it.each([undefined, "false", "1"])(
     "stays absent unless the build flag is exactly true (%s)",
     (flag) => {

@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  askJack as sendAskJack,
   useAskJack,
   useGetChatHistory,
   useClearChatHistory,
@@ -37,6 +38,10 @@ import { StructuredAnswer } from "@/components/StructuredAnswer";
 import { ParkThisThoughtButton } from "@/components/ParkedThoughts";
 import { timeAgo } from "@/lib/memory-graph";
 import { getCachedTestSession } from "@/lib/user-testing/test-session-service";
+import {
+  collectJackUiContext,
+  encodeJackUiContextHeader,
+} from "@/lib/jack-ui-context";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
@@ -74,16 +79,25 @@ export function AskJack({
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
-  const telemetrySession = getCachedTestSession();
-  const askJack = useAskJack(
-    telemetrySession
-      ? {
-          request: {
-            headers: { "X-Jack-Test-Session-Id": telemetrySession.id },
+  const askJack = useAskJack({
+    mutation: {
+      mutationFn: ({ data }) => {
+        // Read UI and telemetry state when this turn actually sends, including
+        // queued turns whose selection may have changed while Jack responded.
+        const context = collectJackUiContext();
+        const telemetrySession = getCachedTestSession();
+        return sendAskJack(data, {
+          headers: {
+            "X-Jack-Surface": encodeURIComponent(context.surface),
+            "X-Jack-Context": encodeJackUiContextHeader(context),
+            ...(telemetrySession
+              ? { "X-Jack-Test-Session-Id": telemetrySession.id }
+              : {}),
           },
-        }
-      : undefined,
-  );
+        });
+      },
+    },
+  });
   const queryClient = useQueryClient();
   const clearHistory = useClearChatHistory();
   const [confirmingClear, setConfirmingClear] = useState(false);
@@ -482,7 +496,7 @@ export function AskJack({
             </div>
           </ScrollArea>
 
-          <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-sidebar-primary/5 border-t border-sidebar-border space-y-2 shrink-0">
+          <div className="p-4 pb-[calc(var(--jack-pill-height,0px)+max(1rem,env(safe-area-inset-bottom)))] bg-sidebar-primary/5 border-t border-sidebar-border space-y-2 shrink-0">
             {errorMessage && (
               <div
                 role="alert"

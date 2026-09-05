@@ -620,20 +620,28 @@ export function MemoryGraphView({
   // crumb is a live node the reviewer can jump back to, so exploration always
   // has an "up" path even after diving deep into a cluster.
   const trail = useMemo(() => {
-    if (!activeGraphNode) return [] as { id: string; label: string }[];
     const items: { id: string; label: string }[] = [
       { id: CORE_ID, label: "Jack" },
     ];
-    if (activeGraphNode.kind !== "core") {
-      const topicId = activeGraphNode.topicId;
-      if (topicId && topicId !== activeGraphNode.id) {
-        const t = nodeById.get(topicId);
-        if (t) items.push({ id: t.id, label: t.label });
-      }
+    const branch = nodeById.get(graphInspector.branchId);
+    const parent =
+      branch && branch.id !== CORE_ID
+        ? branch
+        : activeGraphNode?.topicId
+          ? nodeById.get(activeGraphNode.topicId)
+          : null;
+    if (parent && parent.id !== CORE_ID) {
+      items.push({ id: parent.id, label: parent.label });
+    }
+    if (
+      activeGraphNode &&
+      !items.some((item) => item.id === activeGraphNode.id)
+    ) {
       items.push({ id: activeGraphNode.id, label: activeGraphNode.label });
     }
     return items;
-  }, [activeGraphNode, nodeById]);
+  }, [activeGraphNode, graphInspector.branchId, nodeById]);
+  const contextPath = JSON.stringify(trail.map((item) => item.label));
 
   const togglePin = useCallback((id: string) => {
     setPinnedIds((prev) => {
@@ -742,6 +750,13 @@ export function MemoryGraphView({
     <div
       ref={containerRef}
       className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]"
+      data-jack-surface="Living Memory"
+      data-jack-path={contextPath}
+      data-graph-id={CORE_ID}
+      data-branch-id={graphInspector.branchId}
+      data-topic-id={activeGraphNode?.topicId}
+      data-node-id={activeGraphNode?.id}
+      data-jack-label={activeGraphNode?.label}
     >
       {/* Graph stage */}
       <div ref={stageRef} className="relative flex-1 overflow-hidden">
@@ -794,6 +809,18 @@ export function MemoryGraphView({
             </div>
           </div>
           <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+            {trail.length > 1 && graphInspector.visibility !== "expanded" && (
+              <button
+                type="button"
+                data-jack-action="back"
+                onClick={() => openGraphNode(trail[trail.length - 2].id)}
+                aria-label={`Back to ${trail[trail.length - 2].label}`}
+                className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/10 bg-black/40 px-3 text-xs font-semibold text-white/75 transition-colors hover:bg-black/60 hover:text-white"
+              >
+                <CornerDownLeft className="h-4 w-4" aria-hidden="true" />
+                Back
+              </button>
+            )}
             <button
               type="button"
               onClick={onboarding.reopen}
@@ -874,6 +901,9 @@ export function MemoryGraphView({
                             <button
                               type="button"
                               onClick={() => openGraphNode(item.id)}
+                              data-jack-action={
+                                i === trail.length - 2 ? "up" : undefined
+                              }
                               className="max-w-[10rem] truncate text-white/60 transition-colors hover:text-white"
                             >
                               {item.label}
@@ -1050,6 +1080,7 @@ export function MemoryGraphView({
             onMinimize={() => dispatchGraphInspector({ type: "minimize" })}
             onRestore={() => dispatchGraphInspector({ type: "restore" })}
             onClose={() => dispatchGraphInspector({ type: "close" })}
+            closeAction="back"
             ariaLabel={`${inspected.label} details`}
             defaultPlacement={isDesktop ? "top-right" : "bottom"}
             maxHeight={isDesktop ? "70vh" : "80dvh"}
@@ -1101,7 +1132,17 @@ export function MemoryGraphView({
               ) : null
             }
           >
-            <NodeDetailBody {...detailProps} />
+            <div
+              data-jack-inspector
+              data-jack-label={inspected.label}
+              data-jack-path={contextPath}
+              data-graph-id={CORE_ID}
+              data-branch-id={graphInspector.branchId}
+              data-node-id={inspected.id}
+              aria-label={`${inspected.label} details`}
+            >
+              <NodeDetailBody {...detailProps} />
+            </div>
           </FloatingPanel>
         )}
 
@@ -2763,6 +2804,7 @@ export function NodeDetailBody({
       )}
       {isVideo && (
         <button
+          data-jack-action="source"
           onClick={() => onOpenVideo(node.id.replace("video:", ""))}
           className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/15 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/25"
         >
@@ -2771,6 +2813,7 @@ export function NodeDetailBody({
       )}
       {knowledge && primarySource && (
         <button
+          data-jack-action="source"
           onClick={() =>
             onJumpToTimestamp(
               primarySource.videoId,
