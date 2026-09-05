@@ -12,14 +12,7 @@ import {
   resolveJackLocalCommand,
   unavailableJackLocalCommand,
 } from "../lib/jack-local-command";
-import {
-  getJackVoiceHint,
-  isJackVoiceHintMatch,
-  isExplicitlyMasculineJackVoice,
-  selectJackVoice,
-} from "../lib/jack-speech";
-
-const JACK_VOICE_DISCOVERY_GRACE_MS = 750;
+import { JackSpeechPlayer, type JackVoiceState } from "../lib/jack-speech";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -60,7 +53,7 @@ function plainSpeech(text: string) {
     .trim();
 }
 
-function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
+function sameSelectionContext(a: JackUiContext | null, b: JackUiContext) {
   if (!a) return false;
   return (
     a.route === b.route &&
@@ -68,7 +61,14 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
     a.path.join("|") === b.path.join("|") &&
     a.inspector.open === b.inspector.open &&
     a.inspector.label === b.inspector.label &&
-    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    a.visibleIds.join("|") === b.visibleIds.join("|")
+  );
+}
+
+function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
+  return (
+    sameSelectionContext(a, b) &&
+    a !== null &&
     a.navigation.canBack === b.navigation.canBack &&
     a.navigation.canUp === b.navigation.canUp &&
     a.navigation.canForward === b.navigation.canForward &&
@@ -83,6 +83,7 @@ export function FloatingJack() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceState, setVoiceState] = useState<JackVoiceState>("idle");
   const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const submissionInFlightRef = useRef(false);
@@ -90,14 +91,12 @@ export function FloatingJack() {
   const contextEpochRef = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
-  const speechRequestRef = useRef(0);
-  const speechWaitCleanupRef = useRef<(() => void) | null>(null);
-
+  const speechPlayerRef = useRef<JackSpeechPlayer | null>(null);
+  if (!speechPlayerRef.current)
+    speechPlayerRef.current = new JackSpeechPlayer(setVoiceState);
   const cancelSpeech = useCallback(() => {
-    speechRequestRef.current += 1;
-    speechWaitCleanupRef.current?.();
-    speechWaitCleanupRef.current = null;
-    window.speechSynthesis?.cancel();
+    speechPlayerRef.current?.cancel();
+    setVoiceState("idle");
   }, []);
 
   useEffect(() => {
@@ -123,20 +122,26 @@ export function FloatingJack() {
   const refreshContext = useCallback(() => {
     const next = collectJackUiContext();
     if (!sameUiContext(currentContextRef.current, next)) {
-      const interruptedVoice = recognitionRef.current !== null;
-      contextEpochRef.current += 1;
-      requestRef.current?.abort();
-      requestRef.current = null;
-      submissionInFlightRef.current = false;
-      recognitionRef.current?.abort();
-      recognitionRef.current = null;
-      cancelSpeech();
-      setPending(false);
-      setListening(false);
-      setAnswer(null);
-      setError(
-        interruptedVoice ? "Page changed. Tap the mic to continue here." : null,
-      );
+      // Controls can appear during a page fade without changing the selected
+      // content. Refresh their availability without discarding that answer.
+      if (!sameSelectionContext(currentContextRef.current, next)) {
+        const interruptedVoice = recognitionRef.current !== null;
+        contextEpochRef.current += 1;
+        requestRef.current?.abort();
+        requestRef.current = null;
+        submissionInFlightRef.current = false;
+        recognitionRef.current?.abort();
+        recognitionRef.current = null;
+        cancelSpeech();
+        setPending(false);
+        setListening(false);
+        setAnswer(null);
+        setError(
+          interruptedVoice
+            ? "Page changed. Tap the mic to continue here."
+            : null,
+        );
+      }
       currentContextRef.current = next;
       setUiContext(next);
     }
@@ -226,73 +231,7 @@ export function FloatingJack() {
   }, [cancelSpeech]);
 
   const speak = (text: string) => {
-    const synthesis = window.speechSynthesis;
-    if (!synthesis || typeof SpeechSynthesisUtterance === "undefined") return;
-
-    speechRequestRef.current += 1;
-    const request = speechRequestRef.current;
-    speechWaitCleanupRef.current?.();
-    speechWaitCleanupRef.current = null;
-    synthesis.cancel();
-    const voiceHint = getJackVoiceHint();
-
-    const speakNow = () => {
-      if (speechRequestRef.current !== request) return;
-      speechWaitCleanupRef.current = null;
-      const utterance = new SpeechSynthesisUtterance(plainSpeech(text));
-      const voices =
-        typeof synthesis.getVoices === "function" ? synthesis.getVoices() : [];
-      const voice = selectJackVoice(
-        voices,
-        navigator.language || "en-US",
-        voiceHint,
-      );
-      if (voice) utterance.voice = voice;
-      // Android Chrome exposes locale voices without gender metadata. Use a
-      // materially lower pitch in that case; a mild 0.88 adjustment still
-      // sounded like the device's default feminine voice on Pixel hardware.
-      utterance.rate = 0.96;
-      utterance.pitch = isExplicitlyMasculineJackVoice(voice) ? 0.92 : 0.64;
-      synthesis.speak(utterance);
-    };
-
-    const readVoices = () =>
-      typeof synthesis.getVoices === "function"
-        ? synthesis.getVoices()
-        : ([] as SpeechSynthesisVoice[]);
-    const voices = readVoices();
-    const isPreferredVoice = (voice: SpeechSynthesisVoice) =>
-      isExplicitlyMasculineJackVoice(voice) ||
-      isJackVoiceHintMatch(voice, voiceHint);
-    const hasPreferredVoice = voices.some(isPreferredVoice);
-    if (
-      hasPreferredVoice ||
-      typeof synthesis.addEventListener !== "function" ||
-      typeof synthesis.getVoices !== "function"
-    ) {
-      speakNow();
-      return;
-    }
-
-    let timeoutId: number | undefined;
-    const onVoicesChanged = () => {
-      if (readVoices().some(isPreferredVoice)) {
-        cleanupWait();
-        speakNow();
-      }
-    };
-    const cleanupWait = () => {
-      synthesis.removeEventListener?.("voiceschanged", onVoicesChanged);
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-      if (speechWaitCleanupRef.current === cleanupWait)
-        speechWaitCleanupRef.current = null;
-    };
-    speechWaitCleanupRef.current = cleanupWait;
-    synthesis.addEventListener("voiceschanged", onVoicesChanged);
-    timeoutId = window.setTimeout(() => {
-      cleanupWait();
-      speakNow();
-    }, JACK_VOICE_DISCOVERY_GRACE_MS);
+    void speechPlayerRef.current?.speak(plainSpeech(text));
   };
 
   const submit = async (message: string) => {
@@ -376,6 +315,7 @@ export function FloatingJack() {
       return;
     }
 
+    cancelSpeech();
     const recognition = new Recognition();
     refreshContext();
     const epoch = contextEpochRef.current;
@@ -469,6 +409,21 @@ export function FloatingJack() {
               </button>
             </div>
           </div>
+        )}
+
+        {answer && voiceState !== "idle" && (
+          <p
+            role="status"
+            className="mb-2 rounded-xl bg-card/95 px-4 py-2 text-xs text-muted-foreground"
+          >
+            {voiceState === "loading"
+              ? "Preparing Jack's voice..."
+              : voiceState === "playing"
+                ? "Jack is speaking."
+                : voiceState === "blocked"
+                  ? "Audio playback was blocked. Tap Read Jack's answer aloud to retry."
+                  : "Jack's voice is unavailable. You can still read the answer; tap Read Jack's answer aloud to retry."}
+          </p>
         )}
 
         {uiContext && (

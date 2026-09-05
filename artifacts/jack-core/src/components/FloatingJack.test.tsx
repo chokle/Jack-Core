@@ -60,6 +60,64 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("refreshes revealed navigation controls without cancelling the current answer", async () => {
+    let resolve!: (value: { answer: string }) => void;
+    api.askJack.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+    render(
+      <>
+        <section
+          data-jack-surface="Video"
+          data-jack-path='["Library","Root Pass Demo"]'
+          data-video-id="v1"
+        >
+          <button data-jack-action="back" style={{ opacity: 0 }}>
+            Back
+          </button>
+        </section>
+        <FloatingJack />
+      </>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Jack" }), {
+      target: { value: "Where am I?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Jack" }));
+    const signal = api.askJack.mock.calls[0][1].signal;
+    await act(async () => {
+      screen.getByRole("button", { name: "Back" }).style.opacity = "1";
+    });
+    expect(signal.aborted).toBe(false);
+    await act(async () => {
+      resolve({ answer: "Root Pass Demo" });
+    });
+    expect(screen.getByText("Root Pass Demo")).toBeTruthy();
+    expect(screen.getAllByText("Back")).toHaveLength(2);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Jack" }), {
+      target: { value: "Explain this page" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Jack" }));
+    const nextContext = JSON.parse(
+      decodeURIComponent(
+        api.askJack.mock.calls[1][1].headers["X-Jack-Context"],
+      ),
+    );
+    expect(nextContext.navigation.canBack).toBe(true);
+    await act(async () => {
+      resolve({ answer: "Root Pass Demo" });
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Back" }).style.opacity = "0";
+    });
+    expect(screen.getByText("Root Pass Demo")).toBeTruthy();
+  });
+
   it.each(["What's this?", "What is this?", "Where am I?"])(
     "sends %s to the backend with the current selection",
     async (message) => {

@@ -1,177 +1,126 @@
-const MASCULINE_VOICE_MARKERS =
-  /(?:^|[\s_#()\-/])(?:male|man|guy|david|daniel|james|george|alex|mark|tom|john|richard|michael|william|arthur|russell|oliver|liam)(?:$|[\s_#()\-/])/i;
+export type JackVoiceState =
+  | "idle"
+  | "loading"
+  | "playing"
+  | "unavailable"
+  | "blocked";
 
-const FEMININE_VOICE_MARKERS =
-  /(?:^|[\s_#()\-/])(?:female|woman|girl|aria|ava|catherine|emma|jenny|karen|moira|samantha|susan|victoria|zira)(?:$|[\s_#()\-/])/i;
-
-const JACK_CUSTOM_VOICE_MARKERS =
-  /(?:^|[\s_#()\-/])(?:jack|custom|clone|personal|user|my\s+voice|voice\s+clone|wavenet|neural2|journey|studio)(?:$|[\s_#()\-/])/i;
-
-const JACK_VOICE_HINT_STORAGE_KEY = "jack.voice.hint";
-
-function normalizedLanguage(language: string | undefined) {
-  return language?.trim().toLowerCase().replace(/_/g, "-") || "";
-}
-
-function languageScore(voiceLanguage: string, preferredLanguage: string) {
-  const voice = normalizedLanguage(voiceLanguage);
-  const preferred = normalizedLanguage(preferredLanguage);
-  if (!voice || !preferred) return voice.startsWith("en") ? 1_500 : 0;
-
-  const voiceBase = voice.split("-")[0];
-  const preferredBase = preferred.split("-")[0];
-  if (voice === preferred) return 3_000;
-  if (voiceBase === preferredBase) return 2_500;
-  if (voiceBase === "en") return 1_500;
-  return 0;
-}
-
-function languageTier(voiceLanguage: string, preferredLanguage: string) {
-  const voice = normalizedLanguage(voiceLanguage);
-  const preferred = normalizedLanguage(preferredLanguage);
-  if (!voice || !preferred) return voice.startsWith("en") ? 1 : 0;
-
-  if (voice === preferred) return 3;
-  if (voice.split("-")[0] === preferred.split("-")[0]) return 2;
-  // English is Jack's safe fallback when the device has no voice for the
-  // requested locale. Other languages are considered only when no English
-  // fallback is available.
-  return voice.split("-")[0] === "en" ? 1 : 0;
-}
-
-function voiceDescriptor(voice: SpeechSynthesisVoice) {
-  return `${voice.name} ${voice.voiceURI}`.trim();
-}
-
-function normalizedHint(hint: string | undefined) {
-  return hint?.trim().toLocaleLowerCase() || "";
-}
-
-function hasVoiceHint(voice: SpeechSynthesisVoice, hint: string) {
-  const normalized = normalizedHint(hint);
-  if (!normalized) return false;
+function isPlaybackBlocked(error: unknown): boolean {
+  // Browser DOMExceptions can cross realms and need not inherit this realm's Error.
   return (
-    voice.name.trim().toLocaleLowerCase() === normalized ||
-    voice.voiceURI.trim().toLocaleLowerCase() === normalized
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "NotAllowedError"
   );
 }
 
-/**
- * Resolve an optional exact voice name/URI configured for a deployment or a
- * local device. The environment value wins over a stale device preference.
- */
-export function getJackVoiceHint(
-  envHint = typeof import.meta.env?.VITE_JACK_VOICE_HINT === "string"
-    ? import.meta.env.VITE_JACK_VOICE_HINT
-    : undefined,
-  storage?: Pick<Storage, "getItem">,
-) {
-  const configured = envHint?.trim();
-  if (configured) return configured;
-  try {
-    const deviceStorage =
-      storage ??
-      (typeof globalThis.localStorage === "undefined"
-        ? undefined
-        : globalThis.localStorage);
-    return (
-      deviceStorage?.getItem(JACK_VOICE_HINT_STORAGE_KEY)?.trim() || undefined
-    );
-  } catch {
-    return undefined;
+/** Authenticated canonical audio only; never falls back to device TTS. */
+export class JackSpeechPlayer {
+  private generation = 0;
+  private timeout: ReturnType<typeof setTimeout> | null = null;
+  private controller: AbortController | null = null;
+  private audio: HTMLAudioElement | null = null;
+  private url: string | null = null;
+  private blockedText: string | null = null;
+
+  constructor(private readonly onState: (state: JackVoiceState) => void) {}
+
+  private clearDeadline() {
+    if (this.timeout !== null) clearTimeout(this.timeout);
+    this.timeout = null;
   }
-}
 
-export function isJackVoiceHintMatch(
-  voice: SpeechSynthesisVoice,
-  hint: string | undefined,
-) {
-  return hasVoiceHint(voice, hint ?? "");
-}
+  cancel() {
+    this.clearDeadline();
+    this.blockedText = null;
+    this.generation += 1;
+    this.controller?.abort();
+    this.controller = null;
+    if (this.audio) {
+      this.audio.onended = null;
+      this.audio.onerror = null;
+      this.audio.pause();
+      this.audio.removeAttribute("src");
+      this.audio = null;
+    }
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = null;
+  }
 
-/** The Web Speech API has no gender field; only trust explicit voice markers. */
-export function isExplicitlyMasculineJackVoice(
-  voice: SpeechSynthesisVoice | undefined,
-) {
-  if (!voice) return false;
-  const descriptor = voiceDescriptor(voice);
-  const gender = (voice as SpeechSynthesisVoice & { gender?: string }).gender;
-  if (gender?.toLowerCase() === "female") return false;
-  return (
-    (gender?.toLowerCase() === "male" ||
-      MASCULINE_VOICE_MARKERS.test(descriptor) ||
-      JACK_CUSTOM_VOICE_MARKERS.test(descriptor)) &&
-    !FEMININE_VOICE_MARKERS.test(descriptor)
-  );
-}
-
-function isFeminineVoice(voice: SpeechSynthesisVoice) {
-  const gender = (voice as SpeechSynthesisVoice & { gender?: string }).gender;
-  return (
-    gender?.toLowerCase() === "female" ||
-    FEMININE_VOICE_MARKERS.test(voiceDescriptor(voice))
-  );
-}
-
-/**
- * Pick Jack's speech voice deterministically.
- *
- * The Web Speech API does not expose a voice-gender field. Some browser voice
- * names/URIs do identify a male voice, so prefer those markers whenever they
- * exist. Chromium's Android bridge commonly exposes only generic locale names
- * with no gender metadata; the caller handles that case with a pitch fallback.
- * This function never guesses from array order.
- */
-export function selectJackVoice(
-  voices: readonly SpeechSynthesisVoice[],
-  preferredLanguage = "en-US",
-  hint?: string,
-) {
-  if (!voices.length) return undefined;
-
-  const scored = voices.map((voice, index) => {
-    const descriptor = voiceDescriptor(voice);
-    const masculine = isExplicitlyMasculineJackVoice(voice);
-    const feminine = isFeminineVoice(voice);
-    const custom =
-      masculine && !feminine && JACK_CUSTOM_VOICE_MARKERS.test(descriptor);
-    // An exact configured name/URI is the only intentional cross-language
-    // override. For all other voices, language tier is selected first;
-    // identity preference is applied only inside that tier.
-    const identityScore = custom
-      ? 20_000
-      : masculine
-        ? 10_000
-        : feminine
-          ? -1_000
-          : 0;
-    const localScore = voice.localService ? 10 : 0;
-    return {
-      voice,
-      index,
-      hinted: isJackVoiceHintMatch(voice, hint),
-      languageTier: languageTier(voice.lang, preferredLanguage),
-      score:
-        languageScore(voice.lang, preferredLanguage) +
-        identityScore +
-        localScore,
-      descriptor: descriptor.toLowerCase(),
-    };
-  });
-
-  const hinted = scored.filter((candidate) => candidate.hinted);
-  const candidates = hinted.length
-    ? hinted
-    : scored.filter(
-        (candidate) =>
-          candidate.languageTier ===
-          Math.max(...scored.map((item) => item.languageTier)),
-      );
-
-  return candidates.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    if (a.descriptor !== b.descriptor)
-      return a.descriptor.localeCompare(b.descriptor);
-    return a.index - b.index;
-  })[0]?.voice;
+  async speak(text: string) {
+    if (this.blockedText === text && this.audio) {
+      const generation = this.generation;
+      try {
+        // Run play synchronously in the retry tap, preserving mobile user activation.
+        await this.audio.play();
+        if (generation === this.generation) {
+          this.blockedText = null;
+          this.onState("playing");
+        }
+      } catch (error) {
+        if (generation !== this.generation) return;
+        if (isPlaybackBlocked(error)) {
+          this.onState("blocked");
+        } else {
+          this.cancel();
+          this.onState("unavailable");
+        }
+      }
+      return;
+    }
+    this.cancel();
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.controller = controller;
+    this.onState("loading");
+    this.timeout = setTimeout(() => {
+      if (generation !== this.generation) return;
+      this.cancel();
+      this.onState("unavailable");
+    }, 40_000);
+    try {
+      const response = await fetch("/api/jack/speech", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
+      });
+      if (
+        !response.ok ||
+        !response.headers.get("content-type")?.startsWith("audio/mpeg")
+      ) {
+        throw new Error("Canonical voice unavailable");
+      }
+      const blob = await response.blob();
+      if (generation !== this.generation) return;
+      this.clearDeadline();
+      if (!blob.size) throw new Error("Empty voice response");
+      this.url = URL.createObjectURL(blob);
+      const audio = new Audio(this.url);
+      this.audio = audio;
+      audio.onended = () => {
+        if (generation !== this.generation) return;
+        this.cancel();
+        this.onState("idle");
+      };
+      audio.onerror = () => {
+        if (generation !== this.generation) return;
+        this.cancel();
+        this.onState("unavailable");
+      };
+      await audio.play();
+      if (generation === this.generation) this.onState("playing");
+    } catch (error) {
+      if (generation !== this.generation) return;
+      if (isPlaybackBlocked(error) && this.audio) {
+        this.blockedText = text;
+        this.onState("blocked");
+      } else {
+        this.cancel();
+        this.onState("unavailable");
+      }
+    }
+  }
 }
