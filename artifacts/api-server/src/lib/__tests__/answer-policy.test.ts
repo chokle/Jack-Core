@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it.each([
+    "Pretty deadly. What’s crackin’?",
+    "Pretty deadly. What’s crackin’? How can I help you?",
+  ])("keeps requestless greeting history neutral: %s", (raw) => {
+    expect(sanitizeJackAnswer(raw)).toBe("Hey.");
+    expect(sanitizeJackAnswer(raw, "Check this joint")).toBe(
+      "Give me the operation, setup, and what changed.",
+    );
+  });
+
+  it("preserves useful field content when sanitizing greeting history", () => {
+    expect(sanitizeJackAnswer("Pretty deadly. Check the fit-up.")).toBe(
+      "Check the fit-up.",
+    );
+  });
+
   it("replaces the physical greeting failure with a natural brief greeting", () => {
     expect(
       sanitizeJackAnswer(

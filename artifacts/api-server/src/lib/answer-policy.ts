@@ -37,12 +37,12 @@ export function sanitizeJackAnswer(raw: string, request = "") {
   // guard removes known filler; it should not rewrite field answers just to
   // normalize their presentation.
   let answer = raw.trim();
+  const retiredGreetingOpening =
+    /^(?:(?:pretty deadly|what['’]s crackin['’]?)\s*[.!?]+\s*)+/i;
+  const hadRetiredGreeting = retiredGreetingOpening.test(answer);
   // Older conversation turns can reintroduce the retired greeting examples.
   // Remove only standalone opening catchphrases, leaving trade content intact.
-  answer = answer.replace(
-    /^(?:(?:pretty deadly|what['’]s crackin['’]?)\s*[.!?]+\s*)+/i,
-    "",
-  );
+  answer = answer.replace(retiredGreetingOpening, "");
 
   if (LOCATION_REQUEST_PATTERN.test(request.trim())) {
     // Location replies are spoken as well as rendered in a plain-text bubble.
@@ -80,5 +80,9 @@ export function sanitizeJackAnswer(raw: string, request = "") {
     /^(?:(?:hey|hi|hello|morning|good morning)(?:[, ]+jack)?|jack)[.!?\s]*$/i.test(
       request.trim(),
     );
-  return answer || (greetingOnly ? "Hey." : FIELD_CONTEXT_RECOVERY);
+  const greetingHistory = !request.trim() && hadRetiredGreeting;
+  return (
+    answer ||
+    (greetingOnly || greetingHistory ? "Hey." : FIELD_CONTEXT_RECOVERY)
+  );
 }
