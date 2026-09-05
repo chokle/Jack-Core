@@ -936,6 +936,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         lastUpdatedLabel={graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"}
         userLabel={userLabel}
         userSubLabel={userSubLabel}
+        siteHudUserId={isSignedIn ? me?.userId : undefined}
         onOpenSettings={() => {
           if (isSignedIn) {
             setAccountSettingsOpen(true);

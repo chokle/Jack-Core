@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import { SystemHealthWidget } from "./SystemHealthWidget";
+import { SiteHudDemo } from "./SiteHudDemo";
 
 export type JackView = "graph" | "library" | "interview" | "review" | "reports" | "closeout";
 
@@ -29,6 +30,8 @@ interface JackShellProps {
   lastUpdatedLabel: string;
   userLabel?: string;
   userSubLabel?: string;
+  /** Resolved account identity; the demo also requires its build flag and site opt-in. */
+  siteHudUserId?: string;
   /** Opens Clerk's secure account profile for password, sessions, and deletion. */
   onOpenSettings?: () => void;
   onSignOut?: () => void;
@@ -53,6 +56,7 @@ export function JackShell({
   lastUpdatedLabel,
   userLabel,
   userSubLabel,
+  siteHudUserId,
   onOpenSettings,
   onSignOut,
   onStartUserTest,
@@ -279,7 +283,14 @@ export function JackShell({
         </div>
       </aside>
 
-      <main className="relative flex flex-1 overflow-hidden">{children}</main>
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" && siteHudUserId && (
+          <div className="relative z-20 shrink-0 p-2">
+            <SiteHudDemo key={siteHudUserId} />
+          </div>
+        )}
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      </main>
     </div>
   );
 }
