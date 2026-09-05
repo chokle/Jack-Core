@@ -133,7 +133,17 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
   }, [clock]);
 
   useEffect(() => {
-    if (panel) panelRef.current?.focus();
+    if (!panel) return;
+    panelRef.current?.focus();
+    // A simulation action can disable the focused button and move focus to body.
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      panelButtons.current[panel]?.focus();
+      setPanel(null);
+    };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
   }, [panel]);
 
   const view = projectSiteHud(site, workers, {
@@ -159,12 +169,6 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
       className="site-hud"
       data-mode={connectivity.mode}
       aria-label="Site HUD simulation"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && panel) {
-          event.stopPropagation();
-          closePanel();
-        }
-      }}
     >
       <div className="site-hud__instrument">
         <div className="site-hud__heading">
@@ -308,6 +312,7 @@ export function SiteHud({ site, workers, clock = clockNow }: SiteHudProps) {
                   <button
                     type="button"
                     key={item.id}
+                    aria-label={`${item.label} ${item.elevationMeters} m`}
                     aria-pressed={floor?.id === item.id}
                     onClick={() => setSelectedFloor(item.id)}
                   >

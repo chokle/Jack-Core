@@ -14,7 +14,7 @@ import { SiteHud } from "./SiteHud";
 const NOW = Date.parse("2026-09-05T12:00:00Z");
 let online: ReturnType<typeof vi.spyOn>;
 const openPanel = (name: string) =>
-  fireEvent.click(screen.getByRole("button", { name, exact: true }));
+  fireEvent.click(screen.getByRole("button", { name }));
 const mode = () => screen.getByRole("status").textContent;
 
 beforeEach(() => {
@@ -149,6 +149,13 @@ describe("Site HUD demo", () => {
     expect(mode()).toBe("ONLINE");
     expect(screen.getByText(/Demo queue:/).textContent).toContain("0 pending");
     expect(screen.getByText(/Reconciliation transmits nothing/)).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("region", { name: "Signal / simulation" }),
+    ).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Signal / simulation" }),
+    );
   });
 
   it("honors browser offline state and reconnect loss during reconciliation", () => {
