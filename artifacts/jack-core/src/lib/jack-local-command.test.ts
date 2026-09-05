@@ -46,10 +46,10 @@ describe("Jack local commands", () => {
     ["go forward to Root Pass", "Root Pass"],
     ["forward to node Root Pass", "Root Pass"],
     ["navigate to the Root Pass node", "Root Pass"],
-    ["open Fit Up concept", "Fit Up"],
+    ["go to Fit Up concept", "Fit Up"],
     ["go to node Root Pass", "Root Pass"],
     ["open concept Fit Up", "Fit Up"],
-    ["show me Root Pass branch", "Root Pass"],
+    ["show me branch Root Pass", "Root Pass"],
     ["go to How to Weld node", "How to Weld"],
     ["show me node How to Weld", "How to Weld"],
     ["go to Rules of Welding branch", "Rules of Welding"],
@@ -94,6 +94,8 @@ describe("Jack local commands", () => {
     "find the right amperage for root pass",
     "open the procedure for root pass",
     "view root pass settings",
+    "show me Root Pass branch",
+    "open Fit Up concept",
     "show me how to weld a branch",
     "show me how to explain this concept",
     "show me what's wrong with this branch",
@@ -105,7 +107,12 @@ describe("Jack local commands", () => {
     "show me the amperage in this branch",
     "show me the voltage of that concept",
     "show me the travel speed at this node",
-  ])("leaves content questions for the API: %s", (message) => {
+    "show me defects beneath this branch",
+    "find hazards around this node",
+    "show me everything under this topic",
+    "view details within this concept",
+    "show me guidance regarding this branch",
+  ])("leaves content or ambiguous suffix requests for the API: %s", (message) => {
     expect(resolveJackLocalCommand(message)).toBeNull();
   });
 
