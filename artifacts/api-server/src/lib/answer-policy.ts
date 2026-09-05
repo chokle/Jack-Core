@@ -79,6 +79,9 @@ export function sanitizeJackAnswer(raw: string, request = "") {
   const greetingOnly =
     /^(?:(?:hey|hi|hello|morning|good morning)(?:[, ]+jack)?|jack)[.!?\s]*$/i.test(
       request.trim(),
+    ) ||
+    /^(?:(?:pretty deadly|what['’]s crackin['’]?)[.!?\s]*)+$/i.test(
+      request.trim(),
     );
   const greetingHistory = !request.trim() && hadRetiredGreeting;
   return (

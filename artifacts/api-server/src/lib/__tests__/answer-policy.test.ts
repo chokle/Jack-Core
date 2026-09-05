@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it.each(["What's crackin'?", "Pretty deadly.", "What’s crackin’?"])(
+    "keeps a user's casual greeting casual: %s",
+    (greeting) => {
+      expect(
+        sanitizeJackAnswer("Pretty deadly. What’s crackin’?", greeting),
+      ).toBe("Hey.");
+    },
+  );
   it.each([
     "Pretty deadly. What’s crackin’?",
     "Pretty deadly. What’s crackin’? How can I help you?",
