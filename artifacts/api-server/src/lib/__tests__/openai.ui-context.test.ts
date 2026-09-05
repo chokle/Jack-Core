@@ -8,7 +8,7 @@ function freshHeader(overrides: Record<string, unknown> = {}) {
   return encodeURIComponent(
     JSON.stringify({
       version: 1,
-      route: "/app?view=memory",
+      route: "/app",
       surface: "Living Memory",
       path: ["Jack", "Welding", "FCAW"],
       inspector: { open: true, label: "Wire feed" },
