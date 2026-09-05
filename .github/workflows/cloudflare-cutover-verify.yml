@@ -60,7 +60,9 @@ jobs:
       - name: Cloudflare Worker dry run
         run: timeout --kill-after=5s 5m npx --yes wrangler@4.127.1 deploy --dry-run --config cloudflare/wrangler.generated.json --outdir .wrangler-dry-run
       - name: Build production container image
-        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:verify .
+        env:
+          VITE_JACK_VOICE_HINT: ""
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_JACK_VOICE_HINT="$VITE_JACK_VOICE_HINT" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:verify .
       - name: Production container CSP smoke test
         shell: bash
         run: |

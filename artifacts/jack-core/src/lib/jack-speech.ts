@@ -26,6 +26,19 @@ function languageScore(voiceLanguage: string, preferredLanguage: string) {
   return 0;
 }
 
+function languageTier(voiceLanguage: string, preferredLanguage: string) {
+  const voice = normalizedLanguage(voiceLanguage);
+  const preferred = normalizedLanguage(preferredLanguage);
+  if (!voice || !preferred) return voice.startsWith("en") ? 1 : 0;
+
+  if (voice === preferred) return 3;
+  if (voice.split("-")[0] === preferred.split("-")[0]) return 2;
+  // English is Jack's safe fallback when the device has no voice for the
+  // requested locale. Other languages are considered only when no English
+  // fallback is available.
+  return voice.split("-")[0] === "en" ? 1 : 0;
+}
+
 function voiceDescriptor(voice: SpeechSynthesisVoice) {
   return `${voice.name} ${voice.voiceURI}`.trim();
 }
@@ -116,40 +129,49 @@ export function selectJackVoice(
 ) {
   if (!voices.length) return undefined;
 
-  return voices
-    .map((voice, index) => {
-      const descriptor = voiceDescriptor(voice);
-      const masculine = isExplicitlyMasculineJackVoice(voice);
-      const feminine = isFeminineVoice(voice);
-      const custom = JACK_CUSTOM_VOICE_MARKERS.test(descriptor);
-      // Exact deployment/device configuration wins. A named custom/clone or
-      // explicitly masculine voice then outranks locale; Android's generic
-      // locale voice must not beat Jack's intended voice. Feminine candidates
-      // rank below an otherwise generic matching-language voice.
-      const identityScore = isJackVoiceHintMatch(voice, hint)
-        ? 40_000
-        : custom
-          ? 20_000
-          : masculine
-            ? 10_000
-            : feminine
-              ? -1_000
-              : 0;
-      const localScore = voice.localService ? 10 : 0;
-      return {
-        voice,
-        index,
-        score:
-          languageScore(voice.lang, preferredLanguage) +
-          identityScore +
-          localScore,
-        descriptor: descriptor.toLowerCase(),
-      };
-    })
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.descriptor !== b.descriptor)
-        return a.descriptor.localeCompare(b.descriptor);
-      return a.index - b.index;
-    })[0]?.voice;
+  const scored = voices.map((voice, index) => {
+    const descriptor = voiceDescriptor(voice);
+    const masculine = isExplicitlyMasculineJackVoice(voice);
+    const feminine = isFeminineVoice(voice);
+    const custom =
+      masculine && !feminine && JACK_CUSTOM_VOICE_MARKERS.test(descriptor);
+    // An exact configured name/URI is the only intentional cross-language
+    // override. For all other voices, language tier is selected first;
+    // identity preference is applied only inside that tier.
+    const identityScore = custom
+      ? 20_000
+      : masculine
+        ? 10_000
+        : feminine
+          ? -1_000
+          : 0;
+    const localScore = voice.localService ? 10 : 0;
+    return {
+      voice,
+      index,
+      hinted: isJackVoiceHintMatch(voice, hint),
+      languageTier: languageTier(voice.lang, preferredLanguage),
+      score:
+        languageScore(voice.lang, preferredLanguage) +
+        identityScore +
+        localScore,
+      descriptor: descriptor.toLowerCase(),
+    };
+  });
+
+  const hinted = scored.filter((candidate) => candidate.hinted);
+  const candidates = hinted.length
+    ? hinted
+    : scored.filter(
+        (candidate) =>
+          candidate.languageTier ===
+          Math.max(...scored.map((item) => item.languageTier)),
+      );
+
+  return candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.descriptor !== b.descriptor)
+      return a.descriptor.localeCompare(b.descriptor);
+    return a.index - b.index;
+  })[0]?.voice;
 }

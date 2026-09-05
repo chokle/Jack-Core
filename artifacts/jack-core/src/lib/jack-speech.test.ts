@@ -38,12 +38,12 @@ describe("selectJackVoice", () => {
     expect(selectJackVoice([female, male], "en-US")).toBe(male);
   });
 
-  it("keeps an explicit masculine voice ahead of locale when available", () => {
+  it("keeps a matching-language voice ahead of an unrelated masculine voice", () => {
     const englishFemale = voice("Google US English Female", "en-US");
     const frenchMale = voice("Google français Male", "fr-FR");
 
     expect(selectJackVoice([frenchMale, englishFemale], "de-DE")).toBe(
-      frenchMale,
+      englishFemale,
     );
   });
 
