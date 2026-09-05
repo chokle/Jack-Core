@@ -30,7 +30,7 @@ const jobsiteFriendlyPatterns = [
 ];
 
 const responseFamilyAnchors = {
-  greeting: ["Alright.", "Pretty deadly.", "What’s crackin’?"],
+  greeting: ["Alright.", "Hey."],
   stress: [
     "Uh-oh . What happened?",
     "Ah shit. What happened?",

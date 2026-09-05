@@ -93,6 +93,8 @@ jobs:
           grep -i -F "content-security-policy:" /tmp/jack-root-headers.txt
           grep -i -F "default-src 'self'" /tmp/jack-root-headers.txt
           grep -i -F "object-src 'none'" /tmp/jack-root-headers.txt
+          grep -i -F "media-src 'self' blob:" /tmp/jack-root-headers.txt
+          grep -i -F "media-src 'self' blob:" /tmp/jack-root-body.html
       - name: API full tests
         run: pnpm --filter @workspace/api-server test
       - name: Jack full tests

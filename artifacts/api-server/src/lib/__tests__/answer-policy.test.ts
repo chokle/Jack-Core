@@ -2,6 +2,34 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it("replaces the physical greeting failure with a natural brief greeting", () => {
+    expect(
+      sanitizeJackAnswer(
+        "Pretty deadly. What’s crackin’? How can I help you?",
+        "Hey Jack",
+      ),
+    ).toBe("Hey.");
+  });
+
+  it.each([
+    "How can I help you?",
+    "How can I help today?",
+    "What can I help you with?",
+  ])("removes a generic service offer: %s", (offer) => {
+    expect(
+      sanitizeJackAnswer(`Check the fit-up. ${offer}`, "Check this joint"),
+    ).toBe("Check the fit-up.");
+  });
+
+  it("keeps useful trade instructions after retired greeting catchphrases", () => {
+    expect(
+      sanitizeJackAnswer(
+        "Pretty deadly. What’s crackin’? Check the fit-up.",
+        "Check this joint",
+      ),
+    ).toBe("Check the fit-up.");
+  });
+
   it("removes the observed location reply's help offer and literal bold markers", () => {
     const raw =
       "It looks like you're in the **Living Memory** section related to **Welding Machine Parameter Setup**. This area is for accessing information or procedures about setting up welding machines. If you need explanations on specific parameters or how to set something up, which aspect you're interested in, and I can help clarify!";

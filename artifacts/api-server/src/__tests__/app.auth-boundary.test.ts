@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import { readFileSync } from "node:fs";
 
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
@@ -147,6 +148,32 @@ describe("app-wide authentication composition", () => {
     expect(policy).not.toContain("https://*.torchlabs.ca");
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("base-uri 'self'");
+  });
+
+  it("permits cloned audio in every enforced HTTP and HTML media policy", async () => {
+    const response = await request(app).get("/api/healthz");
+    const html = readFileSync(
+      new URL("../../../jack-core/index.html", import.meta.url),
+      "utf8",
+    );
+    const metaPolicies = [
+      ...html.matchAll(
+        /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/gi,
+      ),
+    ].map((match) => match[1]);
+    expect(metaPolicies.length).toBeGreaterThan(0);
+    // Browsers enforce the intersection: an allowing header cannot override
+    // an HTML policy that falls back to default-src and blocks blob audio.
+    for (const policy of [
+      response.headers["content-security-policy"],
+      ...metaPolicies,
+    ]) {
+      const media = policy
+        .split(";")
+        .map((part: string) => part.trim())
+        .find((part: string) => part.startsWith("media-src "));
+      expect(media?.split(/\s+/).slice(1).sort()).toEqual(["'self'", "blob:"]);
+    }
   });
 
   it("keeps a CSP header on the root path when the frontend build is absent", async () => {

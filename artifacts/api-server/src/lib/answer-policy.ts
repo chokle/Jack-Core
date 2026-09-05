@@ -10,6 +10,7 @@ const OFFICE_FILLER_PATTERNS = [
   /\b(?:i['’]m|i am)\s+(?:(?:here and ready to\s+)?(?:help|assist)|(?:happy|glad|pleased)\s+to\s+(?:help|assist))(?:\s+you)?[.!?]*/gi,
   /\b(?:i['’]d|i would) be happy to\b[.!?]*/gi,
   /\bhow may i assist(?: you)?[.!?]*/gi,
+  /\b(?:how can i help(?: you)?|what can i help you with)(?: today)?\s*(?:[.!?]+|$)/gi,
   /\bplease\s+provide\s+more\s+details?[.!?]*/gi,
   /\bfeel free to ask(?:\s+(?:me|any questions|a follow[- ]up))?[.!?]*/gi,
 ];
@@ -36,6 +37,12 @@ export function sanitizeJackAnswer(raw: string, request = "") {
   // guard removes known filler; it should not rewrite field answers just to
   // normalize their presentation.
   let answer = raw.trim();
+  // Older conversation turns can reintroduce the retired greeting examples.
+  // Remove only standalone opening catchphrases, leaving trade content intact.
+  answer = answer.replace(
+    /^(?:(?:pretty deadly|what['’]s crackin['’]?)\s*[.!?]+\s*)+/i,
+    "",
+  );
 
   if (LOCATION_REQUEST_PATTERN.test(request.trim())) {
     // Location replies are spoken as well as rendered in a plain-text bubble.
@@ -69,5 +76,9 @@ export function sanitizeJackAnswer(raw: string, request = "") {
     .replace(/[,:;]\s*$/, "")
     .trim();
 
-  return answer || FIELD_CONTEXT_RECOVERY;
+  const greetingOnly =
+    /^(?:(?:hey|hi|hello|morning|good morning)(?:[, ]+jack)?|jack)[.!?\s]*$/i.test(
+      request.trim(),
+    );
+  return answer || (greetingOnly ? "Hey." : FIELD_CONTEXT_RECOVERY);
 }
