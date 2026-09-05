@@ -55,11 +55,14 @@ describe("Jack UI request context", () => {
     ).toBeNull();
   });
 
-  it("rejects client-supplied query, fragment, and absolute route values", () => {
+  it("rejects client-supplied query, fragment, absolute, and network-path route values", () => {
     expect(parseJackUiContextHeader(encoded({ route: "/app?token=secret" }), NOW)).toBeNull();
     expect(parseJackUiContextHeader(encoded({ route: "/app#access_token=secret" }), NOW)).toBeNull();
     expect(
       parseJackUiContextHeader(encoded({ route: "https://jack.torchlabs.ca/app" }), NOW),
+    ).toBeNull();
+    expect(
+      parseJackUiContextHeader(encoded({ route: "//external.example/path" }), NOW),
     ).toBeNull();
   });
 
