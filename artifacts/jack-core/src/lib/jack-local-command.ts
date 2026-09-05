@@ -145,26 +145,12 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   };
 }
 
-const DIRECTIONAL_NODE_VERB =
-  /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)$/i;
-
-function looksLikeContentClauseTarget(target: string) {
-  // Suffix qualification is intentionally conservative for ambiguous verbs.
-  // Sentence-like targets stay on the API path; explicit prefix qualification
-  // or a directional verb remains available for legitimate labels containing
-  // question words or relation words (for example, "How to Weld").
-  return (
-    /^(?:what(?:s| is| are| was| were)?|how|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
-      target,
-    ) ||
-    /\b(?:for|with|about|in|of|at|on|to)\b/i.test(target) ||
-    /\b(?:wrong|right|correct|proper|recommended|best|required|needed)\b/i.test(
-      target,
-    )
-  );
-}
-
 function parseNodeCommand(intent: string): JackLocalCommand | null {
+  // Ambiguous verbs (open/show/view/find/locate/visit) only become node
+  // navigation when the qualifier is explicit and precedes the label. This
+  // prevents arbitrary content clauses ending in words such as branch/topic
+  // from bypassing Ask Jack. Directional verbs remain unambiguous and may use
+  // either a suffix qualifier or a bare visible-node label.
   const prefixQualifiedMatch = intent.match(
     /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:node|concept|topic|branch)\s+(.+)$/i,
   );
@@ -173,19 +159,13 @@ function parseNodeCommand(intent: string): JackLocalCommand | null {
     return target ? { kind: "node", target, label: `node ${target}` } : null;
   }
 
-  const suffixQualifiedMatch = intent.match(
-    /^(go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)\s+(?:node|concept|topic|branch)$/i,
+  const directionalSuffixMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)\s+(?:node|concept|topic|branch)$/i,
   );
-  if (suffixQualifiedMatch) {
-    const verb = suffixQualifiedMatch[1];
-    const rawTarget = suffixQualifiedMatch[2];
-    if (
-      !DIRECTIONAL_NODE_VERB.test(verb) &&
-      looksLikeContentClauseTarget(rawTarget)
-    ) {
-      return null;
-    }
-    const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
+  if (directionalSuffixMatch) {
+    const target = directionalSuffixMatch[1]
+      .replace(/^['"]|['"]$/g, "")
+      .trim();
     return target ? { kind: "node", target, label: `node ${target}` } : null;
   }
 
