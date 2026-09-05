@@ -134,7 +134,7 @@ export function collectJackUiContext(): JackUiContext {
   if (path.length === 0 && surface) path.push(surface);
   return {
     version: 1,
-    route: `${window.location.pathname}${window.location.search}${window.location.hash}`.slice(0, 500),
+    route: window.location.pathname.slice(0, 500),
     surface,
     path,
     inspector: inspectorState(),
