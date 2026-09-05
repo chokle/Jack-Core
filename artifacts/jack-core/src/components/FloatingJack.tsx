@@ -5,9 +5,14 @@ import {
   collectJackUiContext,
   encodeJackUiContextHeader,
   jackUiContextLabel,
-  jackUiAction,
   type JackUiContext,
 } from "../lib/jack-ui-context";
+import {
+  resolveJackLocalAction,
+  resolveJackLocalCommand,
+  unavailableJackLocalCommand,
+} from "../lib/jack-local-command";
+import { selectJackVoice } from "../lib/jack-speech";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -77,6 +82,15 @@ export function FloatingJack() {
   const contextEpochRef = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
+  const speechRequestRef = useRef(0);
+  const speechWaitCleanupRef = useRef<(() => void) | null>(null);
+
+  const cancelSpeech = useCallback(() => {
+    speechRequestRef.current += 1;
+    speechWaitCleanupRef.current?.();
+    speechWaitCleanupRef.current = null;
+    window.speechSynthesis?.cancel();
+  }, []);
 
   useEffect(() => {
     const pill = pillRef.current;
@@ -96,7 +110,7 @@ export function FloatingJack() {
       observer?.disconnect();
       document.documentElement.style.removeProperty("--jack-pill-height");
     };
-  }, [authorized]);
+  }, [authorized, cancelSpeech]);
 
   const refreshContext = useCallback(() => {
     const next = collectJackUiContext();
@@ -108,7 +122,7 @@ export function FloatingJack() {
       submissionInFlightRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
-      window.speechSynthesis?.cancel();
+      cancelSpeech();
       setPending(false);
       setListening(false);
       setAnswer(null);
@@ -119,7 +133,7 @@ export function FloatingJack() {
       setUiContext(next);
     }
     return next;
-  }, []);
+  }, [cancelSpeech]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +199,7 @@ export function FloatingJack() {
       submissionInFlightRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
-      window.speechSynthesis?.cancel();
+      cancelSpeech();
       setAnswer(null);
       setError(null);
       setInput("");
@@ -199,16 +213,61 @@ export function FloatingJack() {
       contextEpochRef.current += 1;
       requestRef.current?.abort();
       recognitionRef.current?.abort();
-      window.speechSynthesis?.cancel();
+      cancelSpeech();
     };
-  }, []);
+  }, [cancelSpeech]);
 
   const speak = (text: string) => {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(plainSpeech(text));
-    utterance.rate = 1;
-    window.speechSynthesis.speak(utterance);
+    const synthesis = window.speechSynthesis;
+    if (!synthesis || typeof SpeechSynthesisUtterance === "undefined") return;
+
+    speechRequestRef.current += 1;
+    const request = speechRequestRef.current;
+    speechWaitCleanupRef.current?.();
+    speechWaitCleanupRef.current = null;
+    synthesis.cancel();
+
+    const speakNow = () => {
+      if (speechRequestRef.current !== request) return;
+      speechWaitCleanupRef.current = null;
+      const utterance = new SpeechSynthesisUtterance(plainSpeech(text));
+      const voices =
+        typeof synthesis.getVoices === "function" ? synthesis.getVoices() : [];
+      const voice = selectJackVoice(voices, navigator.language || "en-US");
+      if (voice) utterance.voice = voice;
+      // A browser without explicit voice-gender metadata still gets a lower,
+      // steadier fallback register for Jack's field voice.
+      utterance.rate = 0.96;
+      utterance.pitch = 0.88;
+      synthesis.speak(utterance);
+    };
+
+    const voices =
+      typeof synthesis.getVoices === "function" ? synthesis.getVoices() : [];
+    if (voices.length || typeof synthesis.addEventListener !== "function") {
+      speakNow();
+      return;
+    }
+
+    let timeoutId: number | undefined;
+    const onVoicesChanged = () => {
+      speechWaitCleanupRef.current?.();
+      speakNow();
+    };
+    const cleanupWait = () => {
+      synthesis.removeEventListener?.("voiceschanged", onVoicesChanged);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      if (speechWaitCleanupRef.current === cleanupWait)
+        speechWaitCleanupRef.current = null;
+    };
+    speechWaitCleanupRef.current = cleanupWait;
+    synthesis.addEventListener("voiceschanged", onVoicesChanged, {
+      once: true,
+    });
+    timeoutId = window.setTimeout(() => {
+      cleanupWait();
+      speakNow();
+    }, 1_500);
   };
 
   const submit = async (message: string) => {
@@ -229,34 +288,17 @@ export function FloatingJack() {
     recognitionRef.current = null;
     recognition?.abort();
     setListening(false);
-    window.speechSynthesis?.cancel();
+    cancelSpeech();
 
     try {
-      const intent = trimmed
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/[?.!]+$/g, "")
-        .trim();
-      const wantsBack = intent === "go back" || intent === "take me back";
-      const wantsSource = [
-        "show me the source",
-        "show the source",
-        "show me the source for that",
-        "show me the source for this",
-        "show the source for that",
-        "show the source for this",
-      ].includes(intent);
-      if (wantsBack || wantsSource) {
-        const action = wantsBack
-          ? jackUiAction("back") || jackUiAction("up")
-          : jackUiAction("source");
+      const localCommand = resolveJackLocalCommand(trimmed);
+      if (localCommand) {
+        const action = resolveJackLocalAction(localCommand);
         if (action) {
           action.click();
           return;
         }
-        const localAnswer = wantsBack
-          ? "There isn’t a previous view to return to here."
-          : "There isn’t a source available for the current selection.";
+        const localAnswer = unavailableJackLocalCommand(localCommand);
         setAnswer(localAnswer);
         speak(localAnswer);
         return;
@@ -389,7 +431,7 @@ export function FloatingJack() {
                 onClick={() => {
                   setAnswer(null);
                   setError(null);
-                  window.speechSynthesis?.cancel();
+                  cancelSpeech();
                 }}
                 className="rounded-full p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
                 aria-label="Dismiss Jack's answer"

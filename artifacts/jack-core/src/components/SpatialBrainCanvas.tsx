@@ -329,6 +329,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     const hoverRef = useRef<string | null>(null);
     const pinnedRef = useRef<Set<string>>(EMPTY_PINNED);
     const onHoverRef = useRef(onHover);
+    const onSelectRef = useRef(onSelect);
     const onTogglePinRef = useRef(onTogglePin);
     const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>(
       [],
@@ -349,6 +350,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
     activeMatchRef.current = activeMatchId ?? null;
     pinnedRef.current = pinnedIds ?? EMPTY_PINNED;
     onHoverRef.current = onHover;
+    onSelectRef.current = onSelect;
     onTogglePinRef.current = onTogglePin;
 
     // Dev-only: reveal an on-screen FPS meter when the perf stress harness is
@@ -929,7 +931,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
           // Anchor a tap to the node hit at pointer-down. Child nodes keep
           // easing after a trade expands, so re-picking only at pointer-up can
           // otherwise miss the node even though the user's finger was correct.
-          if (targetId) onSelect(targetId);
+          if (targetId) onSelectRef.current(targetId);
         }
         dragging = false;
         pressHitId = null;
