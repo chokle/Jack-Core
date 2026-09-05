@@ -378,6 +378,17 @@ describe("Jack Everywhere rendered component acceptance", () => {
     expect(api.askJack.mock.calls[0][0].message).toBe("Where am I?");
   });
 
+  it.each(["open the video library", "retrieve from library"])(
+    "executes a rendered Library navigation command locally for %s",
+    async (message) => {
+      await renderApp();
+      await selectNode("Root Pass");
+      await submit(message);
+      expect(awareness()).toContain("Library");
+      expect(api.askJack).not.toHaveBeenCalled();
+    },
+  );
+
   it("closes the real inspector and then goes up the selected node's breadcrumb", async () => {
     await renderApp();
     await selectNode("Root Pass");

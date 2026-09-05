@@ -16,6 +16,23 @@ export interface JackUiContext {
   capturedAt: string;
 }
 
+/**
+ * Names of actions that the application owns. Jack may identify these controls
+ * from the rendered page, but model prose never gets to select an arbitrary DOM
+ * element. The action names are intentionally small and allowlisted.
+ */
+export type JackUiActionName =
+  | "back"
+  | "up"
+  | "source"
+  | "library"
+  | "graph"
+  | "interview"
+  | "review"
+  | "reports"
+  | "closeout"
+  | "video";
+
 const MAX_LABEL = 120;
 const MAX_PATH_ITEMS = 8;
 const MAX_VISIBLE_IDS = 12;
@@ -156,23 +173,65 @@ function inspectorState() {
   };
 }
 
-export function jackUiAction(action: "back" | "up" | "source") {
+function normalizeActionTarget(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\u2018\u2019']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function actionTargetValues(node: HTMLElement) {
+  return [
+    node.dataset.videoTitle,
+    node.dataset.jackLabel,
+    node.getAttribute("aria-label"),
+    elementText(node),
+  ].filter((value): value is string => Boolean(value));
+}
+
+/**
+ * Find a visible application-owned action. An optional target is only used for
+ * explicitly named video actions; exact title matches win over partial matches.
+ */
+export function jackUiAction(
+  action: JackUiActionName,
+  target?: string,
+): HTMLElement | null {
   // Only application-owned controls may execute navigation. Never infer an
   // action from model output or click an arbitrary matching piece of text.
-  return (
-    Array.from(
-      document.querySelectorAll<HTMLElement>(`[data-jack-action='${action}']`),
+  const nodes = Array.from(
+    document.querySelectorAll<HTMLElement>(`[data-jack-action='${action}']`),
+  )
+    .filter(
+      (node) =>
+        isElementVisible(node) &&
+        !node.matches(':disabled, [aria-disabled="true"]'),
     )
-      .filter(
-        (node) =>
-          isElementVisible(node) &&
-          !node.matches(':disabled, [aria-disabled="true"]'),
-      )
-      .sort(
-        (a, b) =>
-          Number(Boolean(b.closest("[data-jack-inspector]"))) -
-          Number(Boolean(a.closest("[data-jack-inspector]"))),
-      )[0] ?? null
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.closest("[data-jack-inspector]"))) -
+        Number(Boolean(a.closest("[data-jack-inspector]"))),
+    );
+
+  if (!target || action !== "video") return nodes[0] ?? null;
+
+  const wanted = normalizeActionTarget(target);
+  if (!wanted) return null;
+  const exact = nodes.find((node) =>
+    actionTargetValues(node).some(
+      (value) => normalizeActionTarget(value) === wanted,
+    ),
+  );
+  if (exact) return exact;
+  return (
+    nodes.find((node) => {
+      return actionTargetValues(node).some((value) => {
+        const actual = normalizeActionTarget(value);
+        return actual.includes(wanted) || wanted.includes(actual);
+      });
+    }) ?? null
   );
 }
 

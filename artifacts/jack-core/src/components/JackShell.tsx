@@ -16,6 +16,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
+import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 
 export type JackView =
@@ -179,24 +180,28 @@ export function JackShell({
           <NavItem
             icon={<Network className="h-4 w-4" />}
             label="Memory Graph"
+            action="graph"
             active={active === "graph"}
             onClick={() => go("graph")}
           />
           <NavItem
             icon={<LayoutGrid className="h-4 w-4" />}
             label="Library"
+            action="library"
             active={active === "library"}
             onClick={() => go("library")}
           />
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
+            action="interview"
             active={active === "interview"}
             onClick={() => go("interview")}
           />
           <NavItem
             icon={<ShieldCheck className="h-4 w-4" />}
             label="Review"
+            action="review"
             active={active === "review"}
             onClick={() => go("review")}
           />
@@ -204,6 +209,7 @@ export function JackShell({
             <NavItem
               icon={<LayoutDashboard className="h-4 w-4" />}
               label="Pilot Reports"
+              action="reports"
               active={active === "reports"}
               onClick={() => go("reports")}
             />
@@ -212,6 +218,7 @@ export function JackShell({
             <NavItem
               icon={<ClipboardList className="h-4 w-4" />}
               label="Closeout"
+              action="closeout"
               active={active === "closeout"}
               onClick={() => go("closeout")}
             />
@@ -331,6 +338,7 @@ function NavItem({
   label,
   active,
   soon,
+  action,
   onClick,
   testId,
 }: {
@@ -338,6 +346,7 @@ function NavItem({
   label: string;
   active?: boolean;
   soon?: boolean;
+  action?: JackUiActionName;
   onClick?: () => void;
   testId?: string;
 }) {
@@ -361,6 +370,7 @@ function NavItem({
     <button
       onClick={onClick}
       data-testid={testId}
+      data-jack-action={action}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
         active
