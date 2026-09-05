@@ -71,6 +71,7 @@ export function FloatingJack() {
   const [listening, setListening] = useState(false);
   const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const submissionInFlightRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,8 +127,9 @@ export function FloatingJack() {
 
   const submit = async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || submissionInFlightRef.current) return;
 
+    submissionInFlightRef.current = true;
     setPending(true);
     setError(null);
     setAnswer(null);
@@ -152,6 +154,7 @@ export function FloatingJack() {
       setInput(trimmed);
       setError("Couldn’t reach Jack. Try that again.");
     } finally {
+      submissionInFlightRef.current = false;
       setPending(false);
     }
   };
