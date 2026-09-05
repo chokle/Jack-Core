@@ -70,7 +70,16 @@ export function parseJackUiContextHeader(
   const path = boundedStrings(record["path"], MAX_PATH, MAX_LABEL);
   const visibleIds = boundedStrings(record["visibleIds"], MAX_IDS, MAX_ID);
   const capturedAt = boundedString(record["capturedAt"], 40);
-  if (route === null || surface === null || path === null || visibleIds === null || !capturedAt) {
+  if (
+    route === null ||
+    !route.startsWith("/") ||
+    route.includes("?") ||
+    route.includes("#") ||
+    surface === null ||
+    path === null ||
+    visibleIds === null ||
+    !capturedAt
+  ) {
     return null;
   }
 
