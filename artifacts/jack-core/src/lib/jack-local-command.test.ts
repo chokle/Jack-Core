@@ -97,6 +97,9 @@ describe("Jack local commands", () => {
     "show me what's wrong with this branch",
     "show me the procedure for preparing this branch",
     "open the instructions for setting this branch",
+    "show me the right amperage for this branch",
+    "show me the correct voltage for that concept",
+    "find the recommended settings for this topic",
   ])("leaves content questions for the API: %s", (message) => {
     expect(resolveJackLocalCommand(message)).toBeNull();
   });
