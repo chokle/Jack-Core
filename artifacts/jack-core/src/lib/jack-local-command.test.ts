@@ -82,9 +82,15 @@ describe("Jack local commands", () => {
     });
   });
 
-  it("leaves content questions for the API", () => {
-    expect(resolveJackLocalCommand("What is a root pass?")).toBeNull();
-    expect(resolveJackLocalCommand("Where am I?")).toBeNull();
+  it.each([
+    "What is a root pass?",
+    "Where am I?",
+    "show me how to weld a root pass",
+    "find the right amperage for root pass",
+    "open the procedure for root pass",
+    "view root pass settings",
+  ])("leaves content questions for the API: %s", (message) => {
+    expect(resolveJackLocalCommand(message)).toBeNull();
   });
 
   it("targets a visible video by its explicit title", () => {
