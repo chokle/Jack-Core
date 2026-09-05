@@ -30,6 +30,7 @@ function elementText(node: HTMLElement | null | undefined, max = MAX_LABEL) {
 }
 
 function isElementVisible(node: HTMLElement | null | undefined) {
+  if (node?.closest("[data-floating-jack]")) return false;
   let current = node ?? null;
   while (current) {
     if (
@@ -63,6 +64,12 @@ function firstVisible(selectors: string[]): HTMLElement | null {
 }
 
 function activeSurface() {
+  const surface = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-jack-surface]"),
+  )
+    .filter(isElementVisible)
+    .at(-1);
+  if (surface) return cleanText(surface.dataset.jackSurface);
   const active = firstVisible([
     "aside [aria-current='page']",
     "[role='navigation'] [aria-current='page']",
@@ -72,11 +79,28 @@ function activeSurface() {
 }
 
 function breadcrumbPath() {
-  const breadcrumb = document.querySelector<HTMLElement>("nav[aria-label='breadcrumb']");
+  const state = firstVisible(["[data-jack-path]"]);
+  if (state) {
+    try {
+      const path: unknown = JSON.parse(state.dataset.jackPath ?? "[]");
+      if (Array.isArray(path)) {
+        return path
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => cleanText(item))
+          .filter(Boolean)
+          .slice(-MAX_PATH_ITEMS);
+      }
+    } catch {
+      /* Fall back to the visible breadcrumb. */
+    }
+  }
+  const breadcrumb = document.querySelector<HTMLElement>(
+    "nav[aria-label='breadcrumb']",
+  );
   if (!breadcrumb || !isElementVisible(breadcrumb)) return [] as string[];
   const items = Array.from(
     breadcrumb.querySelectorAll<HTMLElement>(
-      "a, [aria-current='page'], [role='link']:not([aria-hidden='true'])",
+      "a, button, [aria-current='page'], [role='link']:not([aria-hidden='true'])",
     ),
   )
     .filter((node) => isElementVisible(node))
@@ -89,12 +113,21 @@ function visibleRecordIds() {
   const values = new Set<string>();
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>(
-      "[data-node-id], [data-entry-id], [data-video-id], [data-record-id], [data-id]",
+      "[data-node-id], [data-branch-id], [data-topic-id], [data-graph-id], [data-entry-id], [data-video-id], [data-record-id], [data-id]",
     ),
   );
   for (const node of nodes) {
     if (!isElementVisible(node)) continue;
-    for (const key of ["nodeId", "entryId", "videoId", "recordId", "id"] as const) {
+    for (const key of [
+      "nodeId",
+      "branchId",
+      "topicId",
+      "graphId",
+      "entryId",
+      "videoId",
+      "recordId",
+      "id",
+    ] as const) {
       const value = cleanText(node.dataset[key], 160);
       if (value) values.add(value);
       if (values.size >= MAX_VISIBLE_IDS) return Array.from(values);
@@ -110,22 +143,41 @@ function inspectorState() {
     "[role='dialog']",
   ]);
   if (!inspector) return { open: false, label: null };
-  const heading = inspector.querySelector<HTMLElement>("h1, h2, h3, [role='heading']");
+  const heading = inspector.querySelector<HTMLElement>(
+    "h1, h2, h3, [role='heading']",
+  );
   return {
     open: true,
-    label: elementText(heading) || cleanText(inspector.getAttribute("aria-label")) || null,
+    label:
+      cleanText(inspector.dataset.jackLabel) ||
+      elementText(heading) ||
+      cleanText(inspector.getAttribute("aria-label")) ||
+      null,
   };
 }
 
+export function jackUiAction(action: "back" | "up" | "source") {
+  // Only application-owned controls may execute navigation. Never infer an
+  // action from model output or click an arbitrary matching piece of text.
+  return (
+    Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-jack-action='${action}']`),
+    )
+      .filter(
+        (node) =>
+          isElementVisible(node) &&
+          !node.matches(':disabled, [aria-disabled="true"]'),
+      )
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.closest("[data-jack-inspector]"))) -
+          Number(Boolean(a.closest("[data-jack-inspector]"))),
+      )[0] ?? null
+  );
+}
+
 function hasSourceAction() {
-  const actions = Array.from(
-    document.querySelectorAll<HTMLElement>("a, button, [role='button']"),
-  );
-  return actions.some(
-    (node) =>
-      isElementVisible(node) &&
-      /\b(source|citation|evidence)\b/i.test(elementText(node, 80)),
-  );
+  return Boolean(jackUiAction("source"));
 }
 
 export function collectJackUiContext(): JackUiContext {
@@ -140,8 +192,8 @@ export function collectJackUiContext(): JackUiContext {
     inspector: inspectorState(),
     visibleIds: visibleRecordIds(),
     navigation: {
-      canBack: window.history.length > 1,
-      canUp: path.length > 1,
+      canBack: Boolean(jackUiAction("back") || jackUiAction("up")),
+      canUp: Boolean(jackUiAction("up")),
       hasSourceAction: hasSourceAction(),
     },
     capturedAt: new Date().toISOString(),

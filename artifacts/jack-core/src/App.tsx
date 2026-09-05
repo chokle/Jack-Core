@@ -920,6 +920,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // participation is optional and must never determine access to Closeout.
   // The Closeout API resolves and enforces active pilot membership server-side.
   const canViewCloseout = me?.isAdmin === false;
+  const videoOriginLabel = {
+    graph: "Living Memory",
+    library: "Library",
+    interview: "Interview",
+    review: "Review",
+    reports: "Pilot Reports",
+    closeout: canViewCloseout ? "Closeout" : "Library",
+  }[view];
 
   return (
     <>
@@ -958,6 +966,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <VideoDetail
             videoId={selectedVideoId}
             onBack={() => setSelectedVideoId(null)}
+            originLabel={videoOriginLabel}
             onOpenChat={handleOpenChat}
             seek={seek}
           />

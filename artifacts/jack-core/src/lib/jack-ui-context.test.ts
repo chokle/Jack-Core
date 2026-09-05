@@ -18,11 +18,11 @@ describe("Jack UI context", () => {
     document.body.innerHTML = `
       <aside><a aria-current="page">Living Memory</a></aside>
       <nav aria-label="breadcrumb">
-        <a>Jack</a><a>Welding</a><span aria-current="page">FCAW</span>
+        <a>Jack</a><a data-jack-action="up">Welding</a><span aria-current="page">FCAW</span>
       </nav>
       <section role="dialog" aria-label="Node inspector">
         <h2>Wire feed</h2>
-        <button>Show source</button>
+        <button data-jack-action="source">Show source</button>
         <div data-node-id="node-42"></div>
       </section>
     `;
@@ -47,7 +47,9 @@ describe("Jack UI context", () => {
     );
 
     const context = collectJackUiContext();
-    const decodedHeader = decodeURIComponent(encodeJackUiContextHeader(context));
+    const decodedHeader = decodeURIComponent(
+      encodeJackUiContextHeader(context),
+    );
 
     expect(context.route).toBe("/app");
     expect(decodedHeader).not.toContain("secret-query");
@@ -61,7 +63,7 @@ describe("Jack UI context", () => {
       <div style="display:none">
         <nav aria-label="breadcrumb"><a>Old branch</a></nav>
         <section role="dialog" aria-label="Old inspector">
-          <button>Show source</button>
+          <button data-jack-action="source">Show source</button>
           <div data-node-id="old-node"></div>
         </section>
       </div>
@@ -81,7 +83,7 @@ describe("Jack UI context", () => {
   it("replaces stale navigation state when the rendered surface changes", () => {
     document.body.innerHTML = `
       <aside><a aria-current="page">Living Memory</a></aside>
-      <section><button>Show source</button><div data-node-id="node-old"></div></section>
+      <section><button data-jack-action="source">Show source</button><div data-node-id="node-old"></div></section>
     `;
     const before = collectJackUiContext();
     expect(before.visibleIds).toContain("node-old");
@@ -89,7 +91,7 @@ describe("Jack UI context", () => {
 
     document.body.innerHTML = `
       <aside><a aria-current="page">Library</a></aside>
-      <section style="display:none"><button>Show source</button><div data-node-id="node-old"></div></section>
+      <section style="display:none"><button data-jack-action="source">Show source</button><div data-node-id="node-old"></div></section>
       <section><div data-entry-id="entry-new"></div></section>
     `;
     const after = collectJackUiContext();

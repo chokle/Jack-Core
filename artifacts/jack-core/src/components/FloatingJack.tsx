@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
 import { askJack, getMe } from "@workspace/api-client-react";
 import {
   collectJackUiContext,
   encodeJackUiContextHeader,
   jackUiContextLabel,
+  jackUiAction,
   type JackUiContext,
 } from "../lib/jack-ui-context";
 
@@ -72,6 +73,53 @@ export function FloatingJack() {
   const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const submissionInFlightRef = useRef(false);
+  const currentContextRef = useRef<JackUiContext | null>(null);
+  const contextEpochRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
+  const pillRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const pill = pillRef.current;
+    if (!authorized || !pill) return;
+    const reserveSpace = () =>
+      document.documentElement.style.setProperty(
+        "--jack-pill-height",
+        `${Math.ceil(pill.getBoundingClientRect().height) + 12}px`,
+      );
+    reserveSpace();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(reserveSpace);
+    observer?.observe(pill);
+    return () => {
+      observer?.disconnect();
+      document.documentElement.style.removeProperty("--jack-pill-height");
+    };
+  }, [authorized]);
+
+  const refreshContext = useCallback(() => {
+    const next = collectJackUiContext();
+    if (!sameUiContext(currentContextRef.current, next)) {
+      const interruptedVoice = recognitionRef.current !== null;
+      contextEpochRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
+      submissionInFlightRef.current = false;
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+      window.speechSynthesis?.cancel();
+      setPending(false);
+      setListening(false);
+      setAnswer(null);
+      setError(
+        interruptedVoice ? "Page changed. Tap the mic to continue here." : null,
+      );
+      currentContextRef.current = next;
+      setUiContext(next);
+    }
+    return next;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,23 +143,61 @@ export function FloatingJack() {
   }, []);
 
   useEffect(() => {
-    const refreshContext = () => {
-      const next = collectJackUiContext();
-      setUiContext((current) => (sameUiContext(current, next) ? current : next));
-    };
     refreshContext();
-    const interval = window.setInterval(refreshContext, 750);
+    const observer = new MutationObserver((mutations) => {
+      if (
+        mutations.some((mutation) => {
+          const target =
+            mutation.target instanceof Element
+              ? mutation.target
+              : mutation.target.parentElement;
+          return !target?.closest("[data-floating-jack]");
+        })
+      )
+        refreshContext();
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
     window.addEventListener("popstate", refreshContext);
     window.addEventListener("hashchange", refreshContext);
+    window.addEventListener("resize", refreshContext);
+    window.addEventListener("animationend", refreshContext);
+    window.addEventListener("transitionend", refreshContext);
     return () => {
-      window.clearInterval(interval);
+      observer.disconnect();
       window.removeEventListener("popstate", refreshContext);
       window.removeEventListener("hashchange", refreshContext);
+      window.removeEventListener("resize", refreshContext);
+      window.removeEventListener("animationend", refreshContext);
+      window.removeEventListener("transitionend", refreshContext);
     };
-  }, []);
+  }, [refreshContext]);
+
+  useEffect(() => {
+    if (!authorized) {
+      contextEpochRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
+      submissionInFlightRef.current = false;
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+      window.speechSynthesis?.cancel();
+      setAnswer(null);
+      setError(null);
+      setInput("");
+      setPending(false);
+      setListening(false);
+    }
+  }, [authorized]);
 
   useEffect(() => {
     return () => {
+      contextEpochRef.current += 1;
+      requestRef.current?.abort();
       recognitionRef.current?.abort();
       window.speechSynthesis?.cancel();
     };
@@ -127,35 +213,82 @@ export function FloatingJack() {
 
   const submit = async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || submissionInFlightRef.current) return;
+    if (!authorized || !trimmed || submissionInFlightRef.current) return;
+
+    const context = refreshContext();
+    const epoch = contextEpochRef.current;
+    const controller = new AbortController();
+    requestRef.current = controller;
 
     submissionInFlightRef.current = true;
     setPending(true);
     setError(null);
     setAnswer(null);
     setInput("");
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    recognition?.abort();
+    setListening(false);
+    window.speechSynthesis?.cancel();
 
     try {
-      const context = collectJackUiContext();
-      setUiContext(context);
+      const intent = trimmed
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[?.!]+$/g, "")
+        .trim();
+      const wantsBack = intent === "go back" || intent === "take me back";
+      const wantsSource = [
+        "show me the source",
+        "show the source",
+        "show me the source for that",
+        "show me the source for this",
+        "show the source for that",
+        "show the source for this",
+      ].includes(intent);
+      if (wantsBack || wantsSource) {
+        const action = wantsBack
+          ? jackUiAction("back") || jackUiAction("up")
+          : jackUiAction("source");
+        if (action) {
+          action.click();
+          return;
+        }
+        const localAnswer = wantsBack
+          ? "There isn’t a previous view to return to here."
+          : "There isn’t a source available for the current selection.";
+        setAnswer(localAnswer);
+        speak(localAnswer);
+        return;
+      }
       const response = await askJack(
         { message: trimmed },
         {
           credentials: "include",
+          signal: controller.signal,
           headers: {
-            "X-Jack-Surface": context.surface,
+            "X-Jack-Surface": encodeURIComponent(context.surface),
             "X-Jack-Context": encodeJackUiContextHeader(context),
           },
         },
       );
+      refreshContext();
+      if (controller.signal.aborted || contextEpochRef.current !== epoch)
+        return;
       setAnswer(response.answer);
       speak(response.answer);
     } catch {
+      refreshContext();
+      if (controller.signal.aborted || contextEpochRef.current !== epoch)
+        return;
       setInput(trimmed);
       setError("Couldn’t reach Jack. Try that again.");
     } finally {
-      submissionInFlightRef.current = false;
-      setPending(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        submissionInFlightRef.current = false;
+        setPending(false);
+      }
     }
   };
 
@@ -165,17 +298,26 @@ export function FloatingJack() {
       return;
     }
 
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const Recognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) {
       setError("Voice input isn’t supported in this browser yet.");
       return;
     }
 
     const recognition = new Recognition();
+    refreshContext();
+    const epoch = contextEpochRef.current;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = navigator.language || "en-CA";
     recognition.onresult = (event) => {
+      refreshContext();
+      if (
+        recognitionRef.current !== recognition ||
+        contextEpochRef.current !== epoch
+      )
+        return;
       let transcript = "";
       let finalTranscript = "";
       for (let index = 0; index < event.results.length; index += 1) {
@@ -184,26 +326,50 @@ export function FloatingJack() {
         if (result.isFinal) finalTranscript += result[0]?.transcript ?? "";
       }
       setInput(transcript.trim());
-      if (finalTranscript.trim()) void submit(finalTranscript);
+      if (finalTranscript.trim()) {
+        recognition.onresult = null;
+        recognition.stop();
+        setListening(false);
+        void submit(finalTranscript);
+      }
     };
     recognition.onerror = () => {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
       setListening(false);
       setError("I didn’t catch that. Tap the mic and try again.");
     };
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+        setListening(false);
+      }
+    };
     recognitionRef.current = recognition;
     setError(null);
     setListening(true);
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+      setError(
+        "Couldn’t start the microphone. Check microphone access and try again.",
+      );
+    }
   };
 
   if (!authorized) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3">
+    <div
+      ref={pillRef}
+      data-floating-jack
+      className="pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3"
+    >
       <div className="pointer-events-auto w-full max-w-2xl">
         {(answer || error) && (
-          <div className="mb-2 rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-xl">
+          <div className="mb-2 max-h-[min(40dvh,18rem)] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-xl">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
                 {answer || error}
@@ -235,9 +401,45 @@ export function FloatingJack() {
         )}
 
         {uiContext && (
-          <div className="mb-1.5 px-4 font-mono text-[11px] text-muted-foreground">
-            Jack is with you: {jackUiContextLabel(uiContext)}
-          </div>
+          <details className="mb-1.5 rounded-xl bg-card/95 px-4 py-1 text-xs text-muted-foreground">
+            <summary
+              title={jackUiContextLabel(uiContext)}
+              className="cursor-pointer truncate font-mono text-[11px]"
+            >
+              Jack is with you: {jackUiContextLabel(uiContext)}
+            </summary>
+            <div className="max-h-[25dvh] overflow-y-auto py-2">
+              <p className="mb-2">
+                Jack follows your activity inside Jack only.
+              </p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 break-words">
+                <dt>Page</dt>
+                <dd>{uiContext.route}</dd>
+                <dt>Surface</dt>
+                <dd>{uiContext.surface}</dd>
+                <dt>Path</dt>
+                <dd>{jackUiContextLabel(uiContext)}</dd>
+                <dt>Inspector</dt>
+                <dd>
+                  {uiContext.inspector.open
+                    ? uiContext.inspector.label || "Open"
+                    : "Closed"}
+                </dd>
+                <dt>Visible records</dt>
+                <dd>{uiContext.visibleIds.join(", ") || "None"}</dd>
+                <dt>Navigation</dt>
+                <dd>
+                  {[
+                    uiContext.navigation.canBack && "Back",
+                    uiContext.navigation.canUp && "Up",
+                    uiContext.navigation.hasSourceAction && "Source",
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "None"}
+                </dd>
+              </dl>
+            </div>
+          </details>
         )}
 
         <form
@@ -272,7 +474,11 @@ export function FloatingJack() {
             className="rounded-full bg-primary p-2.5 text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send to Jack"
           >
-            {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+            {pending ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Send className="h-5 w-5" />
+            )}
           </button>
         </form>
       </div>
