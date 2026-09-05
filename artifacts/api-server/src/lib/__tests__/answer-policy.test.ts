@@ -2,6 +2,30 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it.each([
+    "How's it going?",
+    "How’s it going?",
+    "How are you?",
+    "What's up?",
+    "You good?",
+    "Good day",
+    "Good morning",
+    "Hey Jack",
+    "Jack, you good?",
+  ])(
+    "preserves conversational-policy greetings when a service offer is removed: %s",
+    (greeting) => {
+      expect(sanitizeJackAnswer("How can I help you?", greeting)).toBe("Hey.");
+    },
+  );
+  it("does not classify a compound trade question as only a greeting", () => {
+    expect(
+      sanitizeJackAnswer(
+        "How can I help you?",
+        "How are you setting the current?",
+      ),
+    ).toBe("Give me the operation, setup, and what changed.");
+  });
   it.each(["What's crackin'?", "Pretty deadly.", "What’s crackin’?"])(
     "keeps a user's casual greeting casual: %s",
     (greeting) => {
