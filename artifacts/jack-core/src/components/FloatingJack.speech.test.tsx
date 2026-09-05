@@ -8,13 +8,15 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FloatingJack } from "./FloatingJack";
+import { setAuthTokenGetter } from "@workspace/api-client-react";
 
 const api = vi.hoisted(() => ({
   askJack: vi.fn(),
   getMe: vi.fn(),
 }));
 
-vi.mock("@workspace/api-client-react", () => ({
+vi.mock("@workspace/api-client-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@workspace/api-client-react")>()),
   askJack: api.askJack,
   getMe: api.getMe,
 }));
@@ -26,11 +28,20 @@ beforeEach(() => {
   api.askJack.mockResolvedValue({ answer: "A direct field answer." });
   window.history.replaceState({}, "", "/app");
   document.title = "Jack";
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+  setAuthTokenGetter(() => "rendered-speech-token");
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockImplementation(
+        async () => new Response("Unavailable", { status: 503 }),
+      ),
+  );
 });
 
 afterEach(() => {
   cleanup();
+  setAuthTokenGetter(null);
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -91,11 +102,16 @@ describe("FloatingJack canonical speech output", () => {
         static revokeObjectURL = vi.fn();
       },
     );
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      headers: new Headers({ "content-type": "audio/mpeg" }),
-      blob: async () => new Blob(["audio"]),
-    } as Response);
+    vi.mocked(fetch).mockImplementation(async (_url, options) => {
+      if (
+        new Headers(options?.headers).get("authorization") !==
+        "Bearer rendered-speech-token"
+      )
+        return new Response("Unauthorized", { status: 401 });
+      return new Response("audio", {
+        headers: { "content-type": "audio/mpeg" },
+      });
+    });
     await renderJack();
     await submit("What is this?");
     expect(screen.getByRole("status").textContent).toContain(
@@ -109,6 +125,11 @@ describe("FloatingJack canonical speech output", () => {
     });
     expect(play).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(
+      new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers).get(
+        "authorization",
+      ),
+    ).toBe("Bearer rendered-speech-token");
     expect(screen.getByRole("status").textContent).toBe("Jack is speaking.");
   });
   it("aborts voice on navigation and ignores its late response", async () => {
@@ -127,7 +148,7 @@ describe("FloatingJack canonical speech output", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await act(async () => {
-      resolve({ ok: false });
+      resolve(new Response("Unavailable", { status: 503 }));
     });
     expect(signal?.aborted).toBe(true);
     expect(screen.queryByRole("status")).toBeNull();

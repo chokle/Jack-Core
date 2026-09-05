@@ -23,6 +23,9 @@ const NAVIGATION_RECOVERY =
 const FIELD_CONTEXT_RECOVERY =
   "Give me the operation, setup, and what changed.";
 
+const LOCATION_REQUEST_PATTERN =
+  /^(?:jack[, ]+)?(?:where am i|where are we|what (?:page|section|node|branch) am i (?:on|in))[?!.\s]*$/i;
+
 /**
  * Keep model output inside Jack's field voice contract at the response
  * boundary. Prompt rules still guide the model, but this last guard prevents a
@@ -33,6 +36,18 @@ export function sanitizeJackAnswer(raw: string, request = "") {
   // guard removes known filler; it should not rewrite field answers just to
   // normalize their presentation.
   let answer = raw.trim();
+
+  if (LOCATION_REQUEST_PATTERN.test(request.trim())) {
+    // Location replies are spoken as well as rendered in a plain-text bubble.
+    // Drop service offers, not useful location facts or substantive field advice.
+    answer = answer
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(
+        /\bIf you need\b[^.!?]*(?:I can help|I can clarify|let me know)[^.!?]*[.!?]?/gi,
+        "",
+      );
+    answer = answer.charAt(0).toUpperCase() + answer.slice(1);
+  }
 
   // This failure mode was especially damaging for navigation: stripping the
   // final filler would leave a false claim that Jack cannot use its own app.

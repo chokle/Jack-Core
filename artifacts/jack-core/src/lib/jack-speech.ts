@@ -1,3 +1,5 @@
+import { customFetch } from "@workspace/api-client-react";
+
 export type JackVoiceState =
   | "idle"
   | "loading"
@@ -80,20 +82,17 @@ export class JackSpeechPlayer {
       this.onState("unavailable");
     }, 40_000);
     try {
-      const response = await fetch("/api/jack/speech", {
+      const blob = await customFetch<Blob>("/api/jack/speech", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
         signal: controller.signal,
+        responseType: "blob",
       });
-      if (
-        !response.ok ||
-        !response.headers.get("content-type")?.startsWith("audio/mpeg")
-      ) {
+      if (blob.type.split(";")[0]?.trim().toLowerCase() !== "audio/mpeg") {
         throw new Error("Canonical voice unavailable");
       }
-      const blob = await response.blob();
       if (generation !== this.generation) return;
       this.clearDeadline();
       if (!blob.size) throw new Error("Empty voice response");
