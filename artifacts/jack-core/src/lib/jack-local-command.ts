@@ -146,16 +146,18 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
 }
 
 function parseNodeCommand(intent: string): JackLocalCommand | null {
-  const match = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  const explicitNodeMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:(?:node|concept|topic|branch)\s+(.+)|(.+)\s+(?:node|concept|topic|branch))$/i,
   );
-  if (!match) return null;
+  const directionalMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  const rawTarget = explicitNodeMatch
+    ? explicitNodeMatch[1] ?? explicitNodeMatch[2]
+    : directionalMatch?.[1];
+  if (!rawTarget) return null;
 
-  const target = match[1]
-    .replace(/^(?:node|concept|topic|branch)\s+/i, "")
-    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+  const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
 
   return { kind: "node", target, label: `node ${target}` };
