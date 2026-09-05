@@ -50,6 +50,8 @@ describe("Jack local commands", () => {
     ["go to node Root Pass", "Root Pass"],
     ["open concept Fit Up", "Fit Up"],
     ["show me Root Pass branch", "Root Pass"],
+    ["go to How to Weld node", "How to Weld"],
+    ["show me node How to Weld", "How to Weld"],
   ])("resolves a named graph node: %s", (message, target) => {
     expect(resolveJackLocalCommand(message)).toEqual({
       kind: "node",
@@ -92,6 +94,9 @@ describe("Jack local commands", () => {
     "view root pass settings",
     "show me how to weld a branch",
     "show me how to explain this concept",
+    "show me what's wrong with this branch",
+    "show me the procedure for preparing this branch",
+    "open the instructions for setting this branch",
   ])("leaves content questions for the API: %s", (message) => {
     expect(resolveJackLocalCommand(message)).toBeNull();
   });
