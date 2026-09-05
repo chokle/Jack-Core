@@ -3,6 +3,26 @@ import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
   it.each([
+    "How's it going today Jack?",
+    "How’s it going Jack today?",
+    "Jack, how are you doing today?",
+    "Yes I know. I asked how you are doing?",
+    "I asked how you are doing?",
+  ])(
+    "keeps supported suffixed and corrective check-ins conversational: %s",
+    (greeting) => {
+      expect(sanitizeJackAnswer("How can I help you?", greeting)).toBe("Hey.");
+    },
+  );
+  it.each([
+    "How's it going today Jack, can I increase the current?",
+    "I asked how you are doing the root pass?",
+  ])("does not mistake trade compounds for check-ins: %s", (question) => {
+    expect(sanitizeJackAnswer("How can I help you?", question)).toBe(
+      "Give me the operation, setup, and what changed.",
+    );
+  });
+  it.each([
     "How's it going?",
     "How’s it going?",
     "How are you?",

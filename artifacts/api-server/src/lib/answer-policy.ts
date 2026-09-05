@@ -77,7 +77,10 @@ export function sanitizeJackAnswer(raw: string, request = "") {
     .trim();
 
   const greetingOnly =
-    /^(?:jack[, ]+)?(?:(?:hey|hi|hello|howdy|morning|good (?:morning|afternoon|evening|day)|how['’]?s it going|how are you|what['’]?s up|you good)(?:[, ]+jack)?|jack)[.!?\s]*$/i.test(
+    /^(?:jack[, ]+)?(?:(?:hey|hi|hello|howdy|morning|good (?:morning|afternoon|evening|day)|how['’]?s it going|how are you(?: doing)?|what['’]?s up|you good)(?: today)?(?:[, ]+jack)?(?: today)?|jack)[.!?\s]*$/i.test(
+      request.trim().replace(/\s+/g, " "),
+    ) ||
+    /^(?:yes i know[.!?]?\s+)?i asked how you are doing[.!?\s]*$/i.test(
       request.trim(),
     ) ||
     /^(?:(?:pretty deadly|what['’]s crackin['’]?)[.!?\s]*)+$/i.test(
