@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { Request, Response } from "express";
 import {
+  currentJackUiRequestContext,
   formatJackUiContextForModel,
+  jackUiRequestContextMiddleware,
   parseJackUiContextHeader,
 } from "../jack-ui-request-context.js";
 
@@ -52,14 +55,44 @@ describe("Jack UI request context", () => {
     ).toBeNull();
   });
 
-  it("frames context as UI-only and preserves no-invented-context boundaries", () => {
+  it("serializes validated context as delimited untrusted data", () => {
     const context = parseJackUiContextHeader(encoded(), NOW);
     expect(context).not.toBeNull();
     const prompt = formatJackUiContextForModel(context!);
-    expect(prompt).toContain("CURRENT JACK APPLICATION UI CONTEXT");
-    expect(prompt).toContain("path: Jack > Welding > FCAW");
-    expect(prompt).toContain("go back");
-    expect(prompt).toContain("Do NOT treat UI state as evidence of welding process");
-    expect(prompt).toContain("no-invented-context rules outrank this UI context");
+    expect(prompt).toContain("UNTRUSTED JACK APPLICATION UI STATE DATA");
+    expect(prompt).toContain("BEGIN_JACK_UI_CONTEXT_DATA");
+    expect(prompt).toContain('"path":["Jack","Welding","FCAW"]');
+    expect(prompt).toContain('"visibleIds":["node-42"]');
+    expect(prompt).toContain("END_JACK_UI_CONTEXT_DATA");
+  });
+
+  it("isolates concurrent request-local packets", async () => {
+    const run = (surface: string, delayMs: number) =>
+      new Promise<string | null>((resolve) => {
+        const req = {
+          get: () =>
+            encodeURIComponent(
+              JSON.stringify({
+                version: 1,
+                route: "/app",
+                surface,
+                path: [surface],
+                inspector: { open: false, label: null },
+                visibleIds: [],
+                navigation: { canBack: false, canUp: false, hasSourceAction: false },
+                capturedAt: new Date().toISOString(),
+              }),
+            ),
+        } as unknown as Request;
+
+        jackUiRequestContextMiddleware(req, {} as Response, () => {
+          setTimeout(() => resolve(currentJackUiRequestContext()?.surface ?? null), delayMs);
+        });
+      });
+
+    await expect(Promise.all([run("Living Memory", 5), run("Library", 0)])).resolves.toEqual([
+      "Living Memory",
+      "Library",
+    ]);
   });
 });

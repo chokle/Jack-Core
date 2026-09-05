@@ -5,6 +5,7 @@ import {
   currentJackUiRequestContext,
   formatJackUiContextForModel,
 } from "./jack-ui-request-context.js";
+import { ASK_JACK_UI_CONTEXT_SENTINEL } from "./jurisdiction.js";
 
 let cachedOpenAI: OpenAI | null = null;
 
@@ -27,24 +28,58 @@ export const openai = new Proxy({} as OpenAI, {
   },
 });
 
+function foregroundJackMessages(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+): {
+  enabled: boolean;
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+} {
+  const first = messages[0];
+  if (
+    !first ||
+    first.role !== "system" ||
+    typeof first.content !== "string" ||
+    !first.content.startsWith(ASK_JACK_UI_CONTEXT_SENTINEL)
+  ) {
+    return { enabled: false, messages };
+  }
+
+  const cleaned = first.content
+    .slice(ASK_JACK_UI_CONTEXT_SENTINEL.length)
+    .replace(/^\n/, "");
+  return {
+    enabled: true,
+    messages: [{ ...first, content: cleaned }, ...messages.slice(1)],
+  };
+}
+
 /**
- * Add request-local Jack application context to Ask Jack model input without
- * mutating the user's question, retrieval query, persisted conversation, or
- * non-chat background inference. The request middleware populates the context
- * only for /chat, so jobs/interviews/distillation keep their existing prompts.
+ * Add request-local Jack application context only when the server-owned Ask Jack
+ * foreground system prompt explicitly opts in. General-purpose/background model
+ * calls do not carry the opt-in marker and therefore never inherit ambient UI
+ * state, even when they execute concurrently inside the same request scope.
  */
 export function withJackUiRequestContext(
   params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 ): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
-  const context = currentJackUiRequestContext();
-  if (!context) return params;
+  const foreground = foregroundJackMessages([...params.messages]);
+  if (!foreground.enabled) return params;
 
-  const uiMessage: OpenAI.Chat.Completions.ChatCompletionSystemMessageParam = {
-    role: "system",
+  const context = currentJackUiRequestContext();
+  if (!context) return { ...params, messages: foreground.messages };
+
+  const uiMessage: OpenAI.Chat.Completions.ChatCompletionUserMessageParam = {
+    role: "user",
     content: formatJackUiContextForModel(context),
   };
-  const messages = [...params.messages];
-  const insertAt = messages[0]?.role === "system" ? 1 : 0;
+  const messages = [...foreground.messages];
+  let insertAt = messages.length;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      insertAt = index;
+      break;
+    }
+  }
   messages.splice(insertAt, 0, uiMessage);
   return { ...params, messages };
 }

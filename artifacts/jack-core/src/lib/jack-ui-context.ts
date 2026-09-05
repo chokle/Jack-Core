@@ -29,13 +29,34 @@ function elementText(node: HTMLElement | null | undefined, max = MAX_LABEL) {
   return cleanText(node?.innerText || node?.textContent, max);
 }
 
+function isElementVisible(node: HTMLElement | null | undefined) {
+  let current = node ?? null;
+  while (current) {
+    if (
+      current.hidden ||
+      current.getAttribute("aria-hidden") === "true" ||
+      current.hasAttribute("inert")
+    ) {
+      return false;
+    }
+    const style = window.getComputedStyle(current);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse" ||
+      style.opacity === "0"
+    ) {
+      return false;
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
 function firstVisible(selectors: string[]): HTMLElement | null {
   for (const selector of selectors) {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector));
-    const visible = nodes.find((node) => {
-      const style = window.getComputedStyle(node);
-      return style.display !== "none" && style.visibility !== "hidden";
-    });
+    const visible = nodes.find((node) => isElementVisible(node));
     if (visible) return visible;
   }
   return null;
@@ -52,12 +73,13 @@ function activeSurface() {
 
 function breadcrumbPath() {
   const breadcrumb = document.querySelector<HTMLElement>("nav[aria-label='breadcrumb']");
-  if (!breadcrumb) return [] as string[];
+  if (!breadcrumb || !isElementVisible(breadcrumb)) return [] as string[];
   const items = Array.from(
     breadcrumb.querySelectorAll<HTMLElement>(
       "a, [aria-current='page'], [role='link']:not([aria-hidden='true'])",
     ),
   )
+    .filter((node) => isElementVisible(node))
     .map((node) => elementText(node))
     .filter(Boolean);
   return Array.from(new Set(items)).slice(0, MAX_PATH_ITEMS);
@@ -71,6 +93,7 @@ function visibleRecordIds() {
     ),
   );
   for (const node of nodes) {
+    if (!isElementVisible(node)) continue;
     for (const key of ["nodeId", "entryId", "videoId", "recordId", "id"] as const) {
       const value = cleanText(node.dataset[key], 160);
       if (value) values.add(value);
@@ -98,7 +121,11 @@ function hasSourceAction() {
   const actions = Array.from(
     document.querySelectorAll<HTMLElement>("a, button, [role='button']"),
   );
-  return actions.some((node) => /\b(source|citation|evidence)\b/i.test(elementText(node, 80)));
+  return actions.some(
+    (node) =>
+      isElementVisible(node) &&
+      /\b(source|citation|evidence)\b/i.test(elementText(node, 80)),
+  );
 }
 
 export function collectJackUiContext(): JackUiContext {

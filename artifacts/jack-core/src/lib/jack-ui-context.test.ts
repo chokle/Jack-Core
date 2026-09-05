@@ -39,6 +39,49 @@ describe("Jack UI context", () => {
     expect(jackUiContextLabel(context)).toBe("Jack › Welding › FCAW");
   });
 
+  it("drops hidden prior-surface ids, source actions, breadcrumbs and inspectors", () => {
+    document.body.innerHTML = `
+      <aside><a aria-current="page">Living Memory</a></aside>
+      <div style="display:none">
+        <nav aria-label="breadcrumb"><a>Old branch</a></nav>
+        <section role="dialog" aria-label="Old inspector">
+          <button>Show source</button>
+          <div data-node-id="old-node"></div>
+        </section>
+      </div>
+      <div aria-hidden="true"><div data-entry-id="hidden-entry"></div></div>
+      <section><div data-node-id="current-node"></div><button>Inspect</button></section>
+    `;
+
+    const context = collectJackUiContext();
+    expect(context.visibleIds).toEqual(["current-node"]);
+    expect(context.visibleIds).not.toContain("old-node");
+    expect(context.visibleIds).not.toContain("hidden-entry");
+    expect(context.inspector).toEqual({ open: false, label: null });
+    expect(context.navigation.hasSourceAction).toBe(false);
+    expect(context.path).toEqual(["Living Memory"]);
+  });
+
+  it("replaces stale navigation state when the rendered surface changes", () => {
+    document.body.innerHTML = `
+      <aside><a aria-current="page">Living Memory</a></aside>
+      <section><button>Show source</button><div data-node-id="node-old"></div></section>
+    `;
+    const before = collectJackUiContext();
+    expect(before.visibleIds).toContain("node-old");
+    expect(before.navigation.hasSourceAction).toBe(true);
+
+    document.body.innerHTML = `
+      <aside><a aria-current="page">Library</a></aside>
+      <section style="display:none"><button>Show source</button><div data-node-id="node-old"></div></section>
+      <section><div data-entry-id="entry-new"></div></section>
+    `;
+    const after = collectJackUiContext();
+    expect(after.surface).toBe("Library");
+    expect(after.visibleIds).toEqual(["entry-new"]);
+    expect(after.navigation.hasSourceAction).toBe(false);
+  });
+
   it("bounds the encoded header even with many visible ids", () => {
     document.body.innerHTML = Array.from(
       { length: 80 },
