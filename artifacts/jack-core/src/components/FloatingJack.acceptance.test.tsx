@@ -404,6 +404,17 @@ describe("Jack Everywhere rendered component acceptance", () => {
     expect(api.askJack).not.toHaveBeenCalled();
   });
 
+  it("executes the exact forward voice wording for a named node", async () => {
+    await renderApp();
+    await submit("Go forward to the Root Pass node");
+
+    await waitFor(() =>
+      expect(collectJackUiContext().path).toContain("Root Pass"),
+    );
+    expect(collectJackUiContext().inspector.open).toBe(true);
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
   it("navigates between named app pages locally in both directions", async () => {
     await renderApp();
     await submit("Go to the Library");

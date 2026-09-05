@@ -13,6 +13,7 @@ describe("Jack local commands", () => {
   it.each([
     ["Library", "library"],
     ["open the video library", "library"],
+    ["go forward to Library", "library"],
     ["Jack, can you open the Library?", "library"],
     ["Living Memory", "graph"],
     ["navigate to the memory graph", "graph"],
@@ -27,6 +28,7 @@ describe("Jack local commands", () => {
 
   it.each([
     ["go to Root Pass", "Root Pass"],
+    ["go forward to Root Pass", "Root Pass"],
     ["navigate to the Root Pass node", "Root Pass"],
     ["open Fit Up concept", "Fit Up"],
   ])("resolves a named graph node: %s", (message, target) => {

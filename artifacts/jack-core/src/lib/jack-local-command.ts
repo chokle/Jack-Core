@@ -92,7 +92,7 @@ function parseSectionCommand(intent: string): JackLocalCommand | null {
     };
   }
   const match = intent.match(
-    /^(?:go to|navigate to|open|show|switch to|take me to|bring me to|view|visit)(?: me)?\s+(?:the\s+)?(.+)$/i,
+    /^(?:go to|go forward to|navigate to|open|show|switch to|take me to|bring me to|view|visit)(?: me)?\s+(?:the\s+)?(.+)$/i,
   );
   if (!match) return null;
   const candidate = match[1]
@@ -130,7 +130,7 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   }
 
   const match = intent.match(
-    /^(?:open|show|view|play|watch|go to|navigate to|take me to)(?: me)?\s+(?:the\s+)?(?:video|clip)\b(?:\s+(?:called|named|titled)\s+)?(.*)$/i,
+    /^(?:open|show|view|play|watch|go to|go forward to|navigate to|take me to)(?: me)?\s+(?:the\s+)?(?:video|clip)\b(?:\s+(?:called|named|titled)\s+)?(.*)$/i,
   );
   if (!match) return null;
   const target = stripTarget(match[1]);
@@ -146,7 +146,7 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
 
 function parseNodeCommand(intent: string): JackLocalCommand | null {
   const match = intent.match(
-    /^(?:go to|navigate to|open|show|view|visit|find|locate|take me to|bring me to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+    /^(?:go to|go forward to|navigate to|open|show|view|visit|find|locate|take me to|bring me to)(?: me)?\s+(?:the\s+)?(.+)$/i,
   );
   if (!match) return null;
 
@@ -161,7 +161,9 @@ function parseNodeCommand(intent: string): JackLocalCommand | null {
 
 /**
  * Resolve only the small set of imperative commands that Jack can execute in
- * the rendered app. Everything else remains a content question for the API.
+ * the rendered app. Forward movement is explicit (`go forward to <target>`)
+ * because this SPA has no browser-history stack for a bare `go forward` to use.
+ * Everything else remains a content question for the API.
  */
 export function resolveJackLocalCommand(
   message: string,
