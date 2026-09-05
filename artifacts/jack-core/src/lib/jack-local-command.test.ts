@@ -52,6 +52,8 @@ describe("Jack local commands", () => {
     ["show me Root Pass branch", "Root Pass"],
     ["go to How to Weld node", "How to Weld"],
     ["show me node How to Weld", "How to Weld"],
+    ["go to Rules of Welding branch", "Rules of Welding"],
+    ["show me node Rules of Welding", "Rules of Welding"],
   ])("resolves a named graph node: %s", (message, target) => {
     expect(resolveJackLocalCommand(message)).toEqual({
       kind: "node",
@@ -100,6 +102,9 @@ describe("Jack local commands", () => {
     "show me the right amperage for this branch",
     "show me the correct voltage for that concept",
     "find the recommended settings for this topic",
+    "show me the amperage in this branch",
+    "show me the voltage of that concept",
+    "show me the travel speed at this node",
   ])("leaves content questions for the API: %s", (message) => {
     expect(resolveJackLocalCommand(message)).toBeNull();
   });
