@@ -10,6 +10,7 @@ const OFFICE_FILLER_PATTERNS = [
   /\b(?:i['’]m|i am)\s+(?:(?:here and ready to\s+)?(?:help|assist)|(?:happy|glad|pleased)\s+to\s+(?:help|assist))(?:\s+you)?[.!?]*/gi,
   /\b(?:i['’]d|i would) be happy to\b[.!?]*/gi,
   /\bhow may i assist(?: you)?[.!?]*/gi,
+  /\b(?:how can i help(?: you)?|what can i help you with)(?: today)?\s*(?:[.!?]+|$)/gi,
   /\bplease\s+provide\s+more\s+details?[.!?]*/gi,
   /\bfeel free to ask(?:\s+(?:me|any questions|a follow[- ]up))?[.!?]*/gi,
 ];
@@ -36,6 +37,12 @@ export function sanitizeJackAnswer(raw: string, request = "") {
   // guard removes known filler; it should not rewrite field answers just to
   // normalize their presentation.
   let answer = raw.trim();
+  const retiredGreetingOpening =
+    /^(?:(?:pretty deadly|what['’]s crackin['’]?)\s*[.!?]+\s*)+/i;
+  const hadRetiredGreeting = retiredGreetingOpening.test(answer);
+  // Older conversation turns can reintroduce the retired greeting examples.
+  // Remove only standalone opening catchphrases, leaving trade content intact.
+  answer = answer.replace(retiredGreetingOpening, "");
 
   if (LOCATION_REQUEST_PATTERN.test(request.trim())) {
     // Location replies are spoken as well as rendered in a plain-text bubble.
@@ -69,5 +76,19 @@ export function sanitizeJackAnswer(raw: string, request = "") {
     .replace(/[,:;]\s*$/, "")
     .trim();
 
-  return answer || FIELD_CONTEXT_RECOVERY;
+  const greetingOnly =
+    /^(?:jack[, ]+)?(?:(?:hey|hi|hello|howdy|morning|good (?:morning|afternoon|evening|day)|how['’]?s it going|how are you(?: doing)?|what['’]?s up|you good)(?: today)?(?:[, ]+jack)?(?: today)?|jack)[.!?\s]*$/i.test(
+      request.trim().replace(/\s+/g, " "),
+    ) ||
+    /^(?:yes i know[.!?]?\s+)?i asked how you are doing[.!?\s]*$/i.test(
+      request.trim(),
+    ) ||
+    /^(?:(?:pretty deadly|what['’]s crackin['’]?)[.!?\s]*)+$/i.test(
+      request.trim(),
+    );
+  const greetingHistory = !request.trim() && hadRetiredGreeting;
+  return (
+    answer ||
+    (greetingOnly || greetingHistory ? "Hey." : FIELD_CONTEXT_RECOVERY)
+  );
 }

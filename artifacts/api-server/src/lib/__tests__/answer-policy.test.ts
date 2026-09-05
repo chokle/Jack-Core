@@ -2,6 +2,102 @@ import { describe, expect, it } from "vitest";
 import { sanitizeJackAnswer } from "../answer-policy.js";
 
 describe("sanitizeJackAnswer", () => {
+  it.each([
+    "How's it going today Jack?",
+    "How’s it going Jack today?",
+    "Jack, how are you doing today?",
+    "Yes I know. I asked how you are doing?",
+    "I asked how you are doing?",
+  ])(
+    "keeps supported suffixed and corrective check-ins conversational: %s",
+    (greeting) => {
+      expect(sanitizeJackAnswer("How can I help you?", greeting)).toBe("Hey.");
+    },
+  );
+  it.each([
+    "How's it going today Jack, can I increase the current?",
+    "I asked how you are doing the root pass?",
+  ])("does not mistake trade compounds for check-ins: %s", (question) => {
+    expect(sanitizeJackAnswer("How can I help you?", question)).toBe(
+      "Give me the operation, setup, and what changed.",
+    );
+  });
+  it.each([
+    "How's it going?",
+    "How’s it going?",
+    "How are you?",
+    "What's up?",
+    "You good?",
+    "Good day",
+    "Good morning",
+    "Hey Jack",
+    "Jack, you good?",
+  ])(
+    "preserves conversational-policy greetings when a service offer is removed: %s",
+    (greeting) => {
+      expect(sanitizeJackAnswer("How can I help you?", greeting)).toBe("Hey.");
+    },
+  );
+  it("does not classify a compound trade question as only a greeting", () => {
+    expect(
+      sanitizeJackAnswer(
+        "How can I help you?",
+        "How are you setting the current?",
+      ),
+    ).toBe("Give me the operation, setup, and what changed.");
+  });
+  it.each(["What's crackin'?", "Pretty deadly.", "What’s crackin’?"])(
+    "keeps a user's casual greeting casual: %s",
+    (greeting) => {
+      expect(
+        sanitizeJackAnswer("Pretty deadly. What’s crackin’?", greeting),
+      ).toBe("Hey.");
+    },
+  );
+  it.each([
+    "Pretty deadly. What’s crackin’?",
+    "Pretty deadly. What’s crackin’? How can I help you?",
+  ])("keeps requestless greeting history neutral: %s", (raw) => {
+    expect(sanitizeJackAnswer(raw)).toBe("Hey.");
+    expect(sanitizeJackAnswer(raw, "Check this joint")).toBe(
+      "Give me the operation, setup, and what changed.",
+    );
+  });
+
+  it("preserves useful field content when sanitizing greeting history", () => {
+    expect(sanitizeJackAnswer("Pretty deadly. Check the fit-up.")).toBe(
+      "Check the fit-up.",
+    );
+  });
+
+  it("replaces the physical greeting failure with a natural brief greeting", () => {
+    expect(
+      sanitizeJackAnswer(
+        "Pretty deadly. What’s crackin’? How can I help you?",
+        "Hey Jack",
+      ),
+    ).toBe("Hey.");
+  });
+
+  it.each([
+    "How can I help you?",
+    "How can I help today?",
+    "What can I help you with?",
+  ])("removes a generic service offer: %s", (offer) => {
+    expect(
+      sanitizeJackAnswer(`Check the fit-up. ${offer}`, "Check this joint"),
+    ).toBe("Check the fit-up.");
+  });
+
+  it("keeps useful trade instructions after retired greeting catchphrases", () => {
+    expect(
+      sanitizeJackAnswer(
+        "Pretty deadly. What’s crackin’? Check the fit-up.",
+        "Check this joint",
+      ),
+    ).toBe("Check the fit-up.");
+  });
+
   it("removes the observed location reply's help offer and literal bold markers", () => {
     const raw =
       "It looks like you're in the **Living Memory** section related to **Welding Machine Parameter Setup**. This area is for accessing information or procedures about setting up welding machines. If you need explanations on specific parameters or how to set something up, which aspect you're interested in, and I can help clarify!";
