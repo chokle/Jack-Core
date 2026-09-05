@@ -29,7 +29,7 @@ describe("Jack UI context", () => {
 
     const context = collectJackUiContext();
 
-    expect(context.route).toBe("/app?view=memory#node");
+    expect(context.route).toBe("/app");
     expect(context.surface).toBe("Living Memory");
     expect(context.path).toEqual(["Jack", "Welding", "FCAW"]);
     expect(context.inspector).toEqual({ open: true, label: "Wire feed" });
@@ -37,6 +37,22 @@ describe("Jack UI context", () => {
     expect(context.navigation.canUp).toBe(true);
     expect(context.navigation.hasSourceAction).toBe(true);
     expect(jackUiContextLabel(context)).toBe("Jack › Welding › FCAW");
+  });
+
+  it("never forwards raw query or fragment values in the route payload", () => {
+    window.history.pushState(
+      {},
+      "",
+      "/app?token=secret-query&view=memory#access_token=secret-fragment",
+    );
+
+    const context = collectJackUiContext();
+    const decodedHeader = decodeURIComponent(encodeJackUiContextHeader(context));
+
+    expect(context.route).toBe("/app");
+    expect(decodedHeader).not.toContain("secret-query");
+    expect(decodedHeader).not.toContain("secret-fragment");
+    expect(decodedHeader).not.toContain("access_token");
   });
 
   it("drops hidden prior-surface ids, source actions, breadcrumbs and inspectors", () => {
