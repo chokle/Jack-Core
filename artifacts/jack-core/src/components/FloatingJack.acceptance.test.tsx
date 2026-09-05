@@ -33,8 +33,7 @@ const api = vi.hoisted(() => ({
   getMe: vi.fn(),
   jumpToSource: vi.fn(),
   openVideo: vi.fn(),
-  speak: vi.fn(),
-  cancelSpeech: vi.fn(),
+  speechFetch: vi.fn(),
   knowledgeStats: { byTrade: {} },
   onboarding: { preference: { version: 1, status: "completed" } },
 }));
@@ -346,17 +345,7 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  vi.stubGlobal("speechSynthesis", {
-    speak: api.speak,
-    cancel: api.cancelSpeech,
-  });
-  vi.stubGlobal(
-    "SpeechSynthesisUtterance",
-    class {
-      rate = 1;
-      constructor(public text: string) {}
-    },
-  );
+  vi.stubGlobal("fetch", api.speechFetch.mockResolvedValue({ ok: false }));
 });
 
 afterEach(() => {
@@ -571,7 +560,7 @@ describe("Jack Everywhere rendered component acceptance", () => {
       resolveOld({ answer: "Obsolete answer for Root Pass" });
     });
     expect(screen.queryByText("Obsolete answer for Root Pass")).toBeNull();
-    expect(api.speak).not.toHaveBeenCalled();
+    expect(api.speechFetch).not.toHaveBeenCalled();
     expect(awareness()).toContain("Fit Up");
     await submit("What's this?");
     await waitFor(() => expect(answerText()).toContain("Fit Up"));

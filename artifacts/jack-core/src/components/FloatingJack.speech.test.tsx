@@ -19,55 +19,6 @@ vi.mock("@workspace/api-client-react", () => ({
   getMe: api.getMe,
 }));
 
-class FakeUtterance {
-  rate = 1;
-  pitch = 1;
-  voice: SpeechSynthesisVoice | null = null;
-
-  constructor(readonly text: string) {}
-}
-
-function voice(
-  name: string,
-  lang: string,
-  voiceURI = name,
-): SpeechSynthesisVoice {
-  return {
-    default: false,
-    lang,
-    localService: true,
-    name,
-    voiceURI,
-  } as SpeechSynthesisVoice;
-}
-
-function makeSpeechSynthesis() {
-  let voices: SpeechSynthesisVoice[] = [];
-  const listeners = new Set<() => void>();
-  const synthesis = {
-    cancel: vi.fn(),
-    speak: vi.fn(),
-    getVoices: vi.fn(() => voices),
-    addEventListener: vi.fn(
-      (event: string, listener: EventListenerOrEventListenerObject) => {
-        if (event === "voiceschanged") listeners.add(listener as () => void);
-      },
-    ),
-    removeEventListener: vi.fn(
-      (event: string, listener: EventListenerOrEventListenerObject) => {
-        if (event === "voiceschanged") listeners.delete(listener as () => void);
-      },
-    ),
-    setVoices(next: SpeechSynthesisVoice[]) {
-      voices = next;
-    },
-    emitVoicesChanged() {
-      for (const listener of listeners) listener();
-    },
-  };
-  return synthesis;
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
   api.askJack.mockReset();
@@ -75,7 +26,7 @@ beforeEach(() => {
   api.askJack.mockResolvedValue({ answer: "A direct field answer." });
   window.history.replaceState({}, "", "/app");
   document.title = "Jack";
-  vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
 });
 
 afterEach(() => {
@@ -84,12 +35,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function renderJack(synthesis: ReturnType<typeof makeSpeechSynthesis>) {
-  vi.stubGlobal("speechSynthesis", synthesis);
-  render(<FloatingJack />);
+async function renderJack() {
+  const view = render(<FloatingJack />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(500);
   });
+  return view;
 }
 
 async function submit(message: string) {
@@ -102,74 +53,103 @@ async function submit(message: string) {
   });
 }
 
-describe("FloatingJack speech output", () => {
-  it("speaks with the selected masculine voice and a steady field register", async () => {
-    const synthesis = makeSpeechSynthesis();
-    const female = voice("Google US English Female", "en-US");
-    const male = voice("Google US English Male", "en-US");
-    synthesis.setVoices([female, male]);
-    await renderJack(synthesis);
-
+describe("FloatingJack canonical speech output", () => {
+  it("keeps the answer readable and shows degraded state if voice is unavailable", async () => {
+    await renderJack();
     await submit("What is this?");
-
-    expect(synthesis.speak).toHaveBeenCalledOnce();
-    const utterance = synthesis.speak.mock.calls[0][0] as FakeUtterance;
-    expect(utterance.voice).toBe(male);
-    expect(utterance.rate).toBe(0.96);
-    expect(utterance.pitch).toBe(0.92);
-  });
-
-  it("uses the lower Android fallback register when Chrome exposes no gender", async () => {
-    const synthesis = makeSpeechSynthesis();
-    synthesis.setVoices([voice("English United States", "en-US")]);
-    await renderJack(synthesis);
-
-    await submit("What is this?");
+    expect(screen.getByText("A direct field answer.")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain(
+      "voice is unavailable",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Read Jack's answer aloud" }),
+    );
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
     });
-
-    const utterance = synthesis.speak.mock.calls[0][0] as FakeUtterance;
-    expect(utterance.voice?.name).toBe("English United States");
-    expect(utterance.pitch).toBe(0.64);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
-
-  it("waits for Chrome's delayed voice list before speaking", async () => {
-    const synthesis = makeSpeechSynthesis();
-    await renderJack(synthesis);
-
-    await submit("Where am I?");
-    expect(synthesis.speak).not.toHaveBeenCalled();
-    expect(synthesis.addEventListener).toHaveBeenCalledWith(
-      "voiceschanged",
-      expect.any(Function),
+  it("shows blocked playback and retries the same cloned audio on a tap", async () => {
+    const play = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"))
+      .mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "Audio",
+      class {
+        play = play;
+        pause = vi.fn();
+        removeAttribute = vi.fn();
+        onended = null;
+        onerror = null;
+      },
     );
-
-    const male = voice("Google UK English Male", "en-GB");
-    synthesis.setVoices([male]);
-    act(() => synthesis.emitVoicesChanged());
-
-    expect(synthesis.speak).toHaveBeenCalledOnce();
-    expect((synthesis.speak.mock.calls[0][0] as FakeUtterance).voice).toBe(
-      male,
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = vi.fn(() => "blob:canonical");
+        static revokeObjectURL = vi.fn();
+      },
     );
-    expect(synthesis.removeEventListener).toHaveBeenCalledOnce();
-  });
-
-  it("cancels a delayed utterance when page context changes", async () => {
-    const synthesis = makeSpeechSynthesis();
-    await renderJack(synthesis);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ "content-type": "audio/mpeg" }),
+      blob: async () => new Blob(["audio"]),
+    } as Response);
+    await renderJack();
     await submit("What is this?");
-    expect(synthesis.speak).not.toHaveBeenCalled();
-
+    expect(screen.getByRole("status").textContent).toContain(
+      "playback was blocked",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Read Jack's answer aloud" }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).toBe("Jack is speaking.");
+  });
+  it("aborts voice on navigation and ignores its late response", async () => {
+    let resolve!: (value: unknown) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }) as Promise<Response>,
+    );
+    await renderJack();
+    await submit("What is this?");
+    const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
     act(() => {
       window.history.pushState({}, "", "/library");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-
-    expect(synthesis.cancel).toHaveBeenCalled();
-    synthesis.setVoices([voice("Google UK English Male", "en-GB")]);
-    act(() => synthesis.emitVoicesChanged());
-    expect(synthesis.speak).not.toHaveBeenCalled();
+    await act(async () => {
+      resolve({ ok: false });
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("aborts voice after authentication expires", async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    await renderJack();
+    await submit("What is this?");
+    const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
+    api.getMe.mockRejectedValue(new Error("signed out"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+  it("aborts voice when unmounted", async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    const view = await renderJack();
+    await submit("What is this?");
+    const signal = vi.mocked(fetch).mock.calls[0][1]?.signal;
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
   });
 });

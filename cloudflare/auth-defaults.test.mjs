@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -84,8 +85,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
   assert.doesNotMatch(generator, /PILOT_AUTH_BYPASS !== "false"/);
   assert.match(dockerfile, /ARG VITE_PILOT_AUTH_BYPASS=false/);
-  assert.match(dockerfile, /ARG VITE_JACK_VOICE_HINT/);
-  assert.match(dockerfile, /ENV VITE_JACK_VOICE_HINT=\$VITE_JACK_VOICE_HINT/);
+  assert.doesNotMatch(dockerfile, /VITE_JACK_VOICE_HINT/);
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
   assert.match(workflow, /--secrets-file/);
@@ -100,14 +100,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     3,
     "Clerk publishable key must be bound to preflight, config generation, and container build",
   );
-  assert.match(
-    workflow,
-    /VITE_JACK_VOICE_HINT: \$\{\{ vars\.VITE_JACK_VOICE_HINT \}\}/,
-  );
-  assert.match(
-    workflow,
-    /--build-arg VITE_JACK_VOICE_HINT=\"\$VITE_JACK_VOICE_HINT\"/,
-  );
+  assert.doesNotMatch(workflow, /VITE_JACK_VOICE_HINT/);
   assert.match(workflow, /- name: Resolve deployed container digest/);
   assert.match(
     workflow,
@@ -422,4 +415,44 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
     () => bareDashSteps.slice(0, bareDashRolloutIndex).map(stepTimeoutMinutes),
     /Bare-dash unbounded pre-gate work must declare exactly one integer timeout-minutes cap/,
   );
+});
+
+test("cloned voice secrets reach only server runtime and remain optional", async () => {
+  const [worker, workflow, dockerfile, baseText, verification] =
+    await Promise.all([
+      read("cloudflare/worker.mjs"),
+      read(".github/workflows/cloudflare-production-deploy.yml"),
+      read("Dockerfile.cloudflare"),
+      read("cloudflare/wrangler.base.json"),
+      read(".github/workflows/cloudflare-cutover-verify.yml"),
+    ]);
+  const runtimeSource = worker.slice(
+    worker.indexOf("const CONTAINER_PORT"),
+    worker.indexOf("/**"),
+  );
+  const resolve = runInNewContext(`${runtimeSource}; containerEnv`);
+  const configured = resolve({
+    ELEVENLABS_API_KEY: "test-provider-key",
+    JACK_VOICE_ID: "approved-clone",
+  });
+  const missing = resolve({});
+  const blank = resolve({ ELEVENLABS_API_KEY: "", JACK_VOICE_ID: "" });
+  for (const name of ["ELEVENLABS_API_KEY", "JACK_VOICE_ID"]) {
+    assert.equal(missing[name], undefined);
+    assert.equal(blank[name], undefined);
+    assert.equal(JSON.parse(baseText).secrets.required.includes(name), false);
+    assert.doesNotMatch(dockerfile, new RegExp(name));
+    assert.doesNotMatch(
+      stepBody(workflow, "Build production container"),
+      new RegExp(name),
+    );
+    assert.match(
+      stepBody(workflow, "Prepare Worker secret handoff"),
+      new RegExp(`secrets\\.${name}`),
+    );
+    assert.equal(workflow.split(`secrets.${name}`).length - 1, 1);
+  }
+  assert.equal(configured.ELEVENLABS_API_KEY, "test-provider-key");
+  assert.equal(configured.JACK_VOICE_ID, "approved-clone");
+  assert.doesNotMatch(verification, /VITE_JACK_VOICE_HINT/);
 });

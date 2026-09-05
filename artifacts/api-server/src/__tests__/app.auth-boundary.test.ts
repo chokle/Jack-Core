@@ -7,13 +7,16 @@ const resolveIdentity = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   getAuth,
-  clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) =>
+    next(),
 }));
 vi.mock("../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
 vi.mock("../lib/admin-auth.js", () => ({ resolveIdentity }));
 vi.mock("../middlewares/clerkProxyMiddleware.js", () => ({
   CLERK_PROXY_PATH: "/api/__clerk",
-  clerkProxyMiddleware: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  clerkProxyMiddleware:
+    () => (_req: unknown, _res: unknown, next: () => void) =>
+      next(),
 }));
 vi.mock("pino-http", () => ({
   default: () => (req: { log?: unknown }, _res: unknown, next: () => void) => {
@@ -31,7 +34,12 @@ vi.mock("../routes/index.js", async () => {
 });
 vi.mock("../lib/logger.js", () => ({
   logger: {
-    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+    child: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -56,6 +64,26 @@ beforeEach(() => {
 });
 
 describe("app-wide authentication composition", () => {
+  it("protects paid Jack speech with authentication and pilot membership", async () => {
+    getAuth.mockReturnValue({ userId: null });
+    expect(
+      (await request(app).post("/api/jack/speech").send({ text: "Hi" })).status,
+    ).toBe(401);
+    getAuth.mockReturnValue({ userId: "user_unapproved" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
+    resolveIdentity.mockResolvedValue({
+      userId: "user_unapproved",
+      isAdmin: false,
+      isPresentation: false,
+      classification: "resolved",
+    });
+    expect(
+      (await request(app).post("/api/jack/speech").send({ text: "Hi" })).status,
+    ).toBe(403);
+  });
   it("rejects an anonymous direct request to a real /api route", async () => {
     getAuth.mockReturnValue({ userId: null });
 
@@ -67,7 +95,10 @@ describe("app-wide authentication composition", () => {
 
   it("allows identity-only /me for former users but denies unrelated pilot APIs", async () => {
     getAuth.mockReturnValue({ userId: "user_unapproved" });
-    resolveActiveTesterScope.mockResolvedValue({ scope: null, reason: "not_enrolled" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
     resolveIdentity.mockResolvedValue({
       userId: "user_unapproved",
       email: "visitor@example.com",
@@ -107,6 +138,7 @@ describe("app-wide authentication composition", () => {
     const policy = response.headers["content-security-policy"];
 
     expect(policy).toContain("default-src 'self'");
+    expect(policy).toContain("media-src 'self' blob:");
     expect(policy).toContain("https://challenges.cloudflare.com");
     expect(policy).toContain("https://*.supabase.co");
     expect(policy).toContain("https://clerk.torchlabs.ca");
