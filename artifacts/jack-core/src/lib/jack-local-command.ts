@@ -145,28 +145,51 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   };
 }
 
+const DIRECTIONAL_NODE_VERB =
+  /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)$/i;
+
 function looksLikeContentClauseTarget(target: string) {
-  return /^(?:how|what|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
-    target,
+  return (
+    /^(?:what(?:s| is| are| was| were)?|how|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
+      target,
+    ) ||
+    /\b(?:procedure|instructions?|steps?|settings?|parameters?)\s+(?:for|to|on|about)\b/i.test(
+      target,
+    ) ||
+    /\b(?:wrong with|right for|need(?:ed)? for)\b/i.test(target)
   );
 }
 
 function parseNodeCommand(intent: string): JackLocalCommand | null {
-  const explicitNodeMatch = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:(?:node|concept|topic|branch)\s+(.+)|(.+)\s+(?:node|concept|topic|branch))$/i,
+  const prefixQualifiedMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:node|concept|topic|branch)\s+(.+)$/i,
   );
+  if (prefixQualifiedMatch) {
+    const target = prefixQualifiedMatch[1].replace(/^['"]|['"]$/g, "").trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
+
+  const suffixQualifiedMatch = intent.match(
+    /^(go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)\s+(?:node|concept|topic|branch)$/i,
+  );
+  if (suffixQualifiedMatch) {
+    const verb = suffixQualifiedMatch[1];
+    const rawTarget = suffixQualifiedMatch[2];
+    if (
+      !DIRECTIONAL_NODE_VERB.test(verb) &&
+      looksLikeContentClauseTarget(rawTarget)
+    ) {
+      return null;
+    }
+    const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
+
   const directionalMatch = intent.match(
     /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
   );
-  const suffixQualifiedTarget = explicitNodeMatch?.[2];
-  const rawTarget = explicitNodeMatch
-    ? explicitNodeMatch[1] ?? suffixQualifiedTarget
-    : directionalMatch?.[1];
+  const rawTarget = directionalMatch?.[1];
   if (!rawTarget) return null;
-
-  if (suffixQualifiedTarget && looksLikeContentClauseTarget(rawTarget)) {
-    return null;
-  }
 
   const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
