@@ -145,17 +145,30 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
   };
 }
 
-function parseNodeCommand(intent: string): JackLocalCommand | null {
-  const match = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+function looksLikeContentClauseTarget(target: string) {
+  return /^(?:how|what|why|when|where|who|which|whether|tell|explain|help|walk|guide)\b/i.test(
+    target,
   );
-  if (!match) return null;
+}
 
-  const target = match[1]
-    .replace(/^(?:node|concept|topic|branch)\s+/i, "")
-    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+function parseNodeCommand(intent: string): JackLocalCommand | null {
+  const explicitNodeMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:(?:node|concept|topic|branch)\s+(.+)|(.+)\s+(?:node|concept|topic|branch))$/i,
+  );
+  const directionalMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  const suffixQualifiedTarget = explicitNodeMatch?.[2];
+  const rawTarget = explicitNodeMatch
+    ? explicitNodeMatch[1] ?? suffixQualifiedTarget
+    : directionalMatch?.[1];
+  if (!rawTarget) return null;
+
+  if (suffixQualifiedTarget && looksLikeContentClauseTarget(rawTarget)) {
+    return null;
+  }
+
+  const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
 
   return { kind: "node", target, label: `node ${target}` };
