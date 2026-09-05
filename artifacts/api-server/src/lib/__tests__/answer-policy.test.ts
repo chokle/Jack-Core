@@ -25,6 +25,15 @@ describe("sanitizeJackAnswer", () => {
     );
   });
 
+  it.each(["retrieval from the video library", "failed on retrieval from library"])(
+    "treats library retrieval wording as navigation: %s",
+    (request) => {
+      const raw =
+        "I cant navigate to video libraries or specific sections, but I can help answer questions.";
+      expect(sanitizeJackAnswer(raw, request)).toMatch(/^Open Library from Jack/);
+    },
+  );
+
   it("removes office filler while preserving the useful field answer", () => {
     const answer = sanitizeJackAnswer(
       "Check the root gap and travel angle. Let me know what you need.",
@@ -38,6 +47,8 @@ describe("sanitizeJackAnswer", () => {
     "I'm here and ready to help. Please let me know.",
     "I’m happy to help you. How may I assist you?",
     "I'm here to provide information on welding topics. Let me know what you need.",
+    "Sure. I can help with that. Please provide more details. Feel free to ask.",
+    "Certainly, I can help with that. Let me know what you need.",
   ])("removes office-intern filler: %s", (raw) => {
     expect(sanitizeJackAnswer(raw)).toBe(
       "Give me the operation, setup, and what changed.",
@@ -60,5 +71,11 @@ describe("sanitizeJackAnswer", () => {
     const raw =
       "A source video shows the root pass at low travel speed. I can't navigate the puddle by sight alone.";
     expect(sanitizeJackAnswer(raw, "What is a source video?")).toBe(raw);
+  });
+
+  it("preserves useful content around a generic opening", () => {
+    expect(sanitizeJackAnswer("Sure, set 90 amps and check the root gap.")).toBe(
+      "set 90 amps and check the root gap.",
+    );
   });
 });
