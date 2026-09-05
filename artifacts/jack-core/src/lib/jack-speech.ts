@@ -4,6 +4,11 @@ const MASCULINE_VOICE_MARKERS =
 const FEMININE_VOICE_MARKERS =
   /(?:^|[\s_#()\-/])(?:female|woman|girl|aria|ava|catherine|emma|jenny|karen|moira|samantha|susan|victoria|zira)(?:$|[\s_#()\-/])/i;
 
+const JACK_CUSTOM_VOICE_MARKERS =
+  /(?:^|[\s_#()\-/])(?:jack|custom|clone|personal|user|my\s+voice|voice\s+clone|wavenet|neural2|journey|studio)(?:$|[\s_#()\-/])/i;
+
+const JACK_VOICE_HINT_STORAGE_KEY = "jack.voice.hint";
+
 function normalizedLanguage(language: string | undefined) {
   return language?.trim().toLowerCase().replace(/_/g, "-") || "";
 }
@@ -25,37 +30,118 @@ function voiceDescriptor(voice: SpeechSynthesisVoice) {
   return `${voice.name} ${voice.voiceURI}`.trim();
 }
 
+function normalizedHint(hint: string | undefined) {
+  return hint?.trim().toLocaleLowerCase() || "";
+}
+
+function hasVoiceHint(voice: SpeechSynthesisVoice, hint: string) {
+  const normalized = normalizedHint(hint);
+  if (!normalized) return false;
+  return (
+    voice.name.trim().toLocaleLowerCase() === normalized ||
+    voice.voiceURI.trim().toLocaleLowerCase() === normalized
+  );
+}
+
+/**
+ * Resolve an optional exact voice name/URI configured for a deployment or a
+ * local device. The environment value wins over a stale device preference.
+ */
+export function getJackVoiceHint(
+  envHint = typeof import.meta.env?.VITE_JACK_VOICE_HINT === "string"
+    ? import.meta.env.VITE_JACK_VOICE_HINT
+    : undefined,
+  storage?: Pick<Storage, "getItem">,
+) {
+  const configured = envHint?.trim();
+  if (configured) return configured;
+  try {
+    const deviceStorage =
+      storage ??
+      (typeof globalThis.localStorage === "undefined"
+        ? undefined
+        : globalThis.localStorage);
+    return (
+      deviceStorage?.getItem(JACK_VOICE_HINT_STORAGE_KEY)?.trim() || undefined
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+export function isJackVoiceHintMatch(
+  voice: SpeechSynthesisVoice,
+  hint: string | undefined,
+) {
+  return hasVoiceHint(voice, hint ?? "");
+}
+
+/** The Web Speech API has no gender field; only trust explicit voice markers. */
+export function isExplicitlyMasculineJackVoice(
+  voice: SpeechSynthesisVoice | undefined,
+) {
+  if (!voice) return false;
+  const descriptor = voiceDescriptor(voice);
+  const gender = (voice as SpeechSynthesisVoice & { gender?: string }).gender;
+  if (gender?.toLowerCase() === "female") return false;
+  return (
+    (gender?.toLowerCase() === "male" ||
+      MASCULINE_VOICE_MARKERS.test(descriptor) ||
+      JACK_CUSTOM_VOICE_MARKERS.test(descriptor)) &&
+    !FEMININE_VOICE_MARKERS.test(descriptor)
+  );
+}
+
+function isFeminineVoice(voice: SpeechSynthesisVoice) {
+  const gender = (voice as SpeechSynthesisVoice & { gender?: string }).gender;
+  return (
+    gender?.toLowerCase() === "female" ||
+    FEMININE_VOICE_MARKERS.test(voiceDescriptor(voice))
+  );
+}
+
 /**
  * Pick Jack's speech voice deterministically.
  *
- * The Web Speech API does not expose a voice-gender field. Some browser and
- * Android voice names/URIs do identify a male voice, so prefer those markers
- * while keeping the requested language as the stronger constraint. If a
- * browser gives us no gender metadata, the caller can still use Jack's lower
- * pitch fallback; this function never guesses from array order.
+ * The Web Speech API does not expose a voice-gender field. Some browser voice
+ * names/URIs do identify a male voice, so prefer those markers whenever they
+ * exist. Chromium's Android bridge commonly exposes only generic locale names
+ * with no gender metadata; the caller handles that case with a pitch fallback.
+ * This function never guesses from array order.
  */
 export function selectJackVoice(
   voices: readonly SpeechSynthesisVoice[],
   preferredLanguage = "en-US",
+  hint?: string,
 ) {
   if (!voices.length) return undefined;
 
   return voices
     .map((voice, index) => {
       const descriptor = voiceDescriptor(voice);
-      const masculine = MASCULINE_VOICE_MARKERS.test(descriptor);
-      const feminine = FEMININE_VOICE_MARKERS.test(descriptor);
-      // Locale is deliberately weighted more heavily than voice-gender
-      // metadata. A clearly masculine voice in an unrelated language is a
-      // worse fallback for Jack than a matching-language voice.
-      const genderScore = masculine ? 400 : feminine ? -200 : 0;
+      const masculine = isExplicitlyMasculineJackVoice(voice);
+      const feminine = isFeminineVoice(voice);
+      const custom = JACK_CUSTOM_VOICE_MARKERS.test(descriptor);
+      // Exact deployment/device configuration wins. A named custom/clone or
+      // explicitly masculine voice then outranks locale; Android's generic
+      // locale voice must not beat Jack's intended voice. Feminine candidates
+      // rank below an otherwise generic matching-language voice.
+      const identityScore = isJackVoiceHintMatch(voice, hint)
+        ? 40_000
+        : custom
+          ? 20_000
+          : masculine
+            ? 10_000
+            : feminine
+              ? -1_000
+              : 0;
       const localScore = voice.localService ? 10 : 0;
       return {
         voice,
         index,
         score:
           languageScore(voice.lang, preferredLanguage) +
-          genderScore +
+          identityScore +
           localScore,
         descriptor: descriptor.toLowerCase(),
       };
