@@ -1,6 +1,20 @@
 # Library context and retrieval repair
 
-Status: implementation committed; live acceptance NOT COMPLETE. No merge or deployment performed.
+## Approved video explanation plan — current implementation
+
+Status: implementation and focused checks complete; final review, CI, release, and live acceptance pending. Older uploader-only disposition below is superseded by Derek's explicit "Match Library access" decision and subsequent "Implement the proposed plan" dispatch.
+
+- Sole integration owner: Dex task `01a06ffb-7a31-7ff1-92ea-fddf07a3a308`; original owner transferred clean PR144 head `4eb6af35f0f70e2edc2ad518a0640d9554437873` and stopped writes. Existing isolated checkout retained; root dirty checkout and PR145 untouched.
+- Read policy: the same authenticated shared Library reads used by the Library now resolve Jack's named/selected videos. Client IDs and titles do not authorize reads. Existing uploader checks on mutations remain intact; no schema or sharing grants were changed.
+- Named videos and selected videos now share saved-analysis, key-points, transcript retrieval and rejection filtering. Missing explicitly named titles do not silently select another video. Ambiguous visible cards ask which title; general questions do not inherit a video accidentally.
+- Transcript pages include later recording content; overview samples span the recording, specific questions rank relevant passages, and timestamp questions select the actual interval. Reads are bounded at 20,000 rows with explicit degraded state. Review lookup errors fail closed for this path.
+- Retrieved source text is a separate untrusted data message, not system authority. The actual user question remains last. Jack's prompt requires practical video explanations from saved evidence and forbids describing UI metadata as the requested content.
+- Both chat interfaces invalidate late answers/citations on page/video/tab changes. Analysis-only sources open the video without a fabricated timestamp; timed clips retain actual seeking.
+- Focused verification: 97 backend tests across 6 files; 37 frontend tests across 3 files. Fixtures/stubbed generation prove data flow and UI behavior, not real production/model/Pixel acceptance.
+- Real authenticated E-3 and 3gdemo explanations, citation seeking, repeated cloned audio, and Pixel acceptance remain unverified. No accessible authenticated browser/device connection was found; Derek was asked about availability for after-deployment testing. No completion claim is authorized by these local results.
+- Release coordination belongs to mission task `01a078e5-5250-7d00-9f5e-f2884f604542`; serialize main integration and production deployment with PR147. Rollback is the preceding production main commit through the existing exact Cloudflare workflow.
+
+## Historical receipts (superseded where noted above)
 
 ## Mission review update (2026-09-06)
 

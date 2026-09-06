@@ -6,6 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { supabase } from "../lib/supabase.js";
+import { readableVideos } from "../lib/library-read-policy.js";
 import {
   claimStage,
   enqueuePipeline,
@@ -96,8 +97,7 @@ router.get("/videos", async (req, res) => {
     const trade = query.success ? query.data.trade : undefined;
     const status = query.success ? query.data.status : undefined;
 
-    let dbQuery = supabase
-      .from("videos")
+    let dbQuery = readableVideos(req.userId)
       .select("*", { count: "exact" })
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -388,8 +388,7 @@ router.post("/videos", requireAdmin, aiPipelineLimiter, async (req, res) => {
 
 router.get("/videos/stats", async (req, res) => {
   try {
-    const { data: videos, error } = await supabase
-      .from("videos")
+    const { data: videos, error } = await readableVideos(req.userId)
       .select("status, trade, duration");
     if (error) throw error;
 
@@ -412,8 +411,7 @@ router.get("/videos/stats", async (req, res) => {
 
 router.get("/videos/recent", async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("videos")
+    const { data, error } = await readableVideos(req.userId)
       .select("*")
       .order("created_at", { ascending: false })
       .limit(6);
@@ -430,8 +428,7 @@ router.get("/videos/:id/play", async (req, res) => {
     const parsed = GetVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
 
-    const { data, error } = await supabase
-      .from("videos")
+    const { data, error } = await readableVideos(req.userId)
       .select("video_url")
       .eq("id", parsed.data.id)
       .maybeSingle();
@@ -480,8 +477,7 @@ router.get("/videos/:id", async (req, res) => {
     const parsed = GetVideoParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
 
-    const { data, error } = await supabase
-      .from("videos")
+    const { data, error } = await readableVideos(req.userId)
       .select("*, transcript_segments(*)")
       .eq("id", parsed.data.id)
       .single();
@@ -745,15 +741,13 @@ router.get("/videos/:id/related", async (req, res) => {
     const parsed = FetchRelatedVideosParams.safeParse(req.params);
     if (!parsed.success) return res.status(400).json({ error: "Invalid id" });
 
-    const { data: video } = await supabase
-      .from("videos")
+    const { data: video } = await readableVideos(req.userId)
       .select("embedding, trade, competency_codes")
       .eq("id", parsed.data.id)
       .single();
 
     if (!video?.embedding) {
-      const { data: fallback } = await supabase
-        .from("videos")
+      const { data: fallback } = await readableVideos(req.userId)
         .select("*")
         .neq("id", parsed.data.id)
         .eq("status", "completed")
@@ -770,8 +764,7 @@ router.get("/videos/:id/related", async (req, res) => {
     });
 
     if (error || !similar?.length) {
-      const { data: fallback } = await supabase
-        .from("videos")
+      const { data: fallback } = await readableVideos(req.userId)
         .select("*")
         .neq("id", parsed.data.id)
         .eq("status", "completed")

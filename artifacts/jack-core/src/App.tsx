@@ -618,8 +618,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
   };
 
-  const handleCitationClick = (videoId: string, startTime: number) => {
-    setSeek({ time: startTime, token: Date.now() });
+  const handleCitationClick = (videoId: string, startTime?: number) => {
+    setSeek(startTime === undefined ? undefined : { time: startTime, token: Date.now() });
     navigateToLocation({ view, selectedVideoId: videoId });
   };
 
@@ -631,8 +631,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         typeof detail.videoId !== "string" ||
         !detail.videoId ||
         detail.videoId.length > 160 ||
-        !Number.isFinite(detail.startTime) ||
-        detail.startTime < 0
+        (detail.startTime !== undefined &&
+          (!Number.isFinite(detail.startTime) || detail.startTime < 0))
       )
         return;
       handleCitationClick(detail.videoId, detail.startTime);

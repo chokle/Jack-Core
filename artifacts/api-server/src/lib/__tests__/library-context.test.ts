@@ -51,11 +51,144 @@ describe("Library contextual retrieval", () => {
     });
     expect(JSON.stringify(result)).not.toContain("untrusted title");
   });
-  it("does not expose another uploader's media through a forged resource ID", async () => {
+  it("matches Library read access for another uploader's shared video", async () => {
     const result = await loadLibraryContext("Explain this video", "other-user");
+    expect(result.failure).toBeNull();
+    expect(result.videos[0].id).toBe("e3");
+  });
+  it("denies unauthenticated callers and nonexistent resource IDs", async () => {
+    expect(
+      (await loadLibraryContext("Explain this video", "")).failure,
+    ).toContain("Sign in");
+    state.context.resources[0].id = "missing";
+    const result = await loadLibraryContext("Explain this video", "owner");
     expect(result.videos).toEqual([]);
     expect(result.failure).toContain("account's access");
-    expect(JSON.stringify(result)).not.toContain("shrink");
+  });
+  it("spans the full recording for a natural overview", async () => {
+    const result = await loadLibraryContext("Describe it", "owner");
+    const segments = result.videos[0].transcript_segments as any[];
+    expect(segments).toHaveLength(6);
+    expect(segments[0].start_time).toBe(0);
+    expect(segments.at(-1).start_time).toBe(80);
+  });
+  it("uses an explicitly named other video ahead of the selected video", async () => {
+    fake.tables.videos.push({
+      id: "3g",
+      title: "3gdemo",
+      analysis: "Vertical welding demonstration.",
+      uploader_user_id: "other",
+    });
+    const result = await loadLibraryContext("Summarize 3gdemo", "owner", [
+      "3gdemo",
+    ]);
+    expect(result.videos.map((video) => video.id)).toEqual(["3g"]);
+  });
+  it("resolves a natural named title on the Library", async () => {
+    state.context = { surface: "Library", resources: [] };
+    const result = await loadLibraryContext(
+      "Summarize E-3: Bend a 30� EMT Offset",
+      "owner",
+    );
+    expect(result.videos[0].id).toBe("e3");
+  });
+  it("asks which entry for ambiguous Library referents", async () => {
+    fake.tables.videos.push({
+      id: "3g",
+      title: "3gdemo",
+      analysis: "Welding.",
+    });
+    state.context = {
+      surface: "Library",
+      resources: [{ id: "e3" }, { id: "3g" }],
+    };
+    const result = await loadLibraryContext("Describe it", "owner");
+    expect(result.videos).toEqual([]);
+    expect(result.failure).toContain("Which one");
+  });
+  it("retrieves relevant evidence beyond the first database page", async () => {
+    fake.tables.transcript_segments = Array.from(
+      { length: 1002 },
+      (_, index) => ({
+        id: String(index),
+        video_id: "e3",
+        start_time: index * 10,
+        end_time: index * 10 + 9,
+        text:
+          index === 1001 ? "Check the shrink allowance." : "Set up the bender.",
+      }),
+    );
+    const result = await loadLibraryContext(
+      "What shrink allowance does this video show?",
+      "owner",
+    );
+    expect((result.videos[0].transcript_segments as any[])[0].start_time).toBe(
+      10010,
+    );
+  });
+  it("matches the short E-3 tutorial title and does not fall back to selected on an explicit missing title", async () => {
+    fake.tables.videos[0].title = "E-3 Tutorial: Bend a 30 EMT Offset";
+    state.context = { surface: "Library", resources: [] };
+    expect(
+      (await loadLibraryContext("Summarize the E-3 tutorial", "owner"))
+        .videos[0].id,
+    ).toBe("e3");
+    state.context = {
+      surface: "Video",
+      resources: [{ id: "e3", selected: true }],
+    };
+    const missing = await loadLibraryContext(
+      "Explain the video titled Missing",
+      "owner",
+      ["Missing"],
+    );
+    expect(missing.videos).toEqual([]);
+    expect(missing.failure).toContain("named video");
+  });
+  it("filters rejected evidence and whole-video summaries for a named video", async () => {
+    fake.tables.videos[0].analysis = "Unsafe rejected summary";
+    fake.tables.knowledge_edges = [
+      { source_id: "video:e3", target_id: "rejected", kind: "knowledge" },
+    ];
+    fake.tables.knowledge_nodes = [
+      {
+        id: "rejected",
+        verification_status: "rejected",
+        meta: { sources: [{ videoId: "e3", timestamps: [80] }] },
+      },
+    ];
+    const result = await loadLibraryContext("Summarize E-3", "owner", ["E-3"]);
+    expect(result.videos[0].analysis).toBeNull();
+    expect(JSON.stringify(result)).not.toContain("shrink allowance");
+    expect(JSON.stringify(result)).not.toContain("Unsafe rejected summary");
+  });
+  it("distinguishes processing from completed material with no content", async () => {
+    fake.tables.transcript_segments = [];
+    fake.tables.videos[0].status = "analyzing";
+    expect(
+      (await loadLibraryContext("Describe it", "owner")).failure,
+    ).toContain("processing is analyzing");
+  });
+  it("keeps general explanations separate from the selected video", async () => {
+    expect(await loadLibraryContext("Explain Ohms law", "owner")).toEqual({
+      videos: [],
+      failure: null,
+    });
+  });
+  it("does not answer when reviewed evidence cannot be checked", async () => {
+    fake.failNext("knowledge_edges", "select", { message: "unavailable" });
+    const result = await loadLibraryContext("Explain this video", "owner");
+    expect(result.videos).toEqual([]);
+    expect(result.failure).toContain("reviewed evidence");
+  });
+  it("grounds a timestamp question and analysis request in the selected video", async () => {
+    const result = await loadLibraryContext("What happens at 1:20?", "owner");
+    expect((result.videos[0].transcript_segments as any[])[0].start_time).toBe(
+      80,
+    );
+    expect(
+      (await loadLibraryContext("Explain the analysis", "owner")).videos[0].id,
+    ).toBe("e3");
   });
   it("identifies the authorized entry when transcript retrieval fails", async () => {
     fake.failNext("transcript_segments", "select", { message: "unavailable" });

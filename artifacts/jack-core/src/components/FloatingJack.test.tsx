@@ -124,6 +124,87 @@ describe("FloatingJack submission lifecycle", () => {
     });
     window.removeEventListener("jack:open-video-source", opened);
   });
+  it("opens analysis-only evidence without an invented timestamp", async () => {
+    api.askJack.mockResolvedValue({
+      answer: "Saved analysis.",
+      citations: [
+        {
+          sourceType: "video",
+          videoId: "e3",
+          videoTitle: "EMT Offset",
+          startTime: 0,
+          endTime: 0,
+        },
+      ],
+    });
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const input = screen.getByRole("textbox", { name: "Ask Jack" });
+    fireEvent.change(input, { target: { value: "Describe the video" } });
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+    fireEvent.click(
+      screen.getByRole("button", { name: /EMT Offset.*Open video/ }),
+    );
+    expect(opened.mock.calls[0][0].detail).toEqual({
+      videoId: "e3",
+      startTime: undefined,
+    });
+    expect(screen.queryByText(/0:00/)).toBeNull();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("discards an answer and its sources when the selected video tab changes during retrieval", async () => {
+    let resolve!: (value: unknown) => void;
+    api.askJack.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    render(
+      <>
+        <section
+          data-jack-surface="Video"
+          data-video-id="e3"
+          data-jack-path='["Library","E3","Analysis"]'
+        />
+        <FloatingJack />
+      </>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const input = screen.getByRole("textbox", { name: "Ask Jack" });
+    fireEvent.change(input, { target: { value: "Describe this video" } });
+    fireEvent.submit(input.closest("form")!);
+    await act(async () => {
+      document
+        .querySelector("section")!
+        .setAttribute("data-jack-path", '["Library","E3","Transcript"]');
+      resolve({
+        answer: "Old analysis answer",
+        citations: [
+          {
+            sourceType: "video",
+            videoId: "e3",
+            videoTitle: "Old source",
+            startTime: 80,
+            endTime: 90,
+          },
+        ],
+      });
+    });
+    expect(api.askJack.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(screen.queryByText("Old analysis answer")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Old source/ })).toBeNull();
+  });
+
   it("keeps Jack usable inside an account dialog and restores him after it closes", async () => {
     const view = render(<FloatingJack />);
     await act(async () => {

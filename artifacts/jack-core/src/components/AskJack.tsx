@@ -40,6 +40,7 @@ import { timeAgo } from "@/lib/memory-graph";
 import { getCachedTestSession } from "@/lib/user-testing/test-session-service";
 import {
   collectJackUiContext,
+  sameJackSelectionContext,
   encodeJackUiContextHeader,
 } from "@/lib/jack-ui-context";
 import {
@@ -60,7 +61,7 @@ interface AskJackProps {
   isOpen: boolean;
   onClose: () => void;
   initialContext?: string;
-  onCitationClick: (videoId: string, startTime: number) => void;
+  onCitationClick: (videoId: string, startTime?: number) => void;
   onFieldNoteClick: (citation: Citation) => void;
   /** Set when the drawer was opened via "Resume" on a parked thought. */
   resumedThought?: ParkedThought;
@@ -84,6 +85,7 @@ export function AskJack({
 
   // No sessionId parameter — the server resolves the session from the cookie.
   const { data: history } = useGetChatHistory();
+  const requestControllerRef = useRef<AbortController | null>(null);
   const askJack = useAskJack({
     mutation: {
       mutationFn: ({ data }) => {
@@ -91,7 +93,11 @@ export function AskJack({
         // queued turns whose selection may have changed while Jack responded.
         const context = collectJackUiContext();
         const telemetrySession = getCachedTestSession();
+        requestControllerRef.current?.abort();
+        const controller = new AbortController();
+        requestControllerRef.current = controller;
         return sendAskJack(data, {
+          signal: controller.signal,
           headers: {
             "X-Jack-Surface": encodeURIComponent(context.surface),
             "X-Jack-Context": encodeJackUiContextHeader(context),
@@ -120,6 +126,41 @@ export function AskJack({
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
+  const currentContextRef = useRef<ReturnType<
+    typeof collectJackUiContext
+  > | null>(null);
+
+  useEffect(() => {
+    currentContextRef.current = collectJackUiContext();
+    const refresh = () => {
+      const next = collectJackUiContext();
+      if (sameJackSelectionContext(currentContextRef.current, next)) return;
+      currentContextRef.current = next;
+      activeRequestIdRef.current += 1;
+      requestControllerRef.current?.abort();
+      askJack.reset?.();
+      queuedMessageRef.current = null;
+      setQueuedMessage(null);
+      setSteerChoiceMessage(null);
+      setErrorMessage(null);
+    };
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      childList: true,
+      characterData: true,
+    });
+    window.addEventListener("popstate", refresh);
+    window.addEventListener("hashchange", refresh);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("popstate", refresh);
+      window.removeEventListener("hashchange", refresh);
+      activeRequestIdRef.current += 1;
+      requestControllerRef.current?.abort();
+    };
+  }, []);
 
   function formatMessageTime(createdAt?: string): string | null {
     if (!createdAt) return null;
@@ -271,6 +312,8 @@ export function AskJack({
     submittedMessageRef.current = message;
 
     const requestId = activeRequestIdRef.current;
+    const requestContext = collectJackUiContext();
+    currentContextRef.current = requestContext;
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
 
@@ -278,7 +321,11 @@ export function AskJack({
       { data: { message: userMessage.content } },
       {
         onSuccess: (data) => {
-          if (requestId !== activeRequestIdRef.current) return;
+          if (
+            requestId !== activeRequestIdRef.current ||
+            !sameJackSelectionContext(requestContext, collectJackUiContext())
+          )
+            return;
 
           const assistantMessage: DisplayMessage = {
             id: `${requestId}-${Date.now()}`,
@@ -301,7 +348,11 @@ export function AskJack({
           }
         },
         onError: (error: unknown) => {
-          if (requestId !== activeRequestIdRef.current) return;
+          if (
+            requestId !== activeRequestIdRef.current ||
+            !sameJackSelectionContext(requestContext, collectJackUiContext())
+          )
+            return;
 
           const waitingMessage = queuedMessageRef.current;
           setMessages((prev) => prev.slice(0, -1));
@@ -400,6 +451,7 @@ export function AskJack({
               ? { duration: 0 }
               : { type: "spring", damping: 30, stiffness: 320 }
           }
+          data-ask-jack
           className="fixed top-0 right-0 h-dvh w-full sm:w-[450px] bg-sidebar border-l border-sidebar-border shadow-2xl flex flex-col z-50"
         >
           <div className="flex items-center justify-between p-4 border-b border-sidebar-border bg-sidebar-primary/5">

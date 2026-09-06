@@ -433,3 +433,19 @@ export function encodeJackUiContextHeader(context: JackUiContext) {
     } satisfies JackUiContext),
   );
 }
+
+export function sameJackSelectionContext(
+  a: JackUiContext | null,
+  b: JackUiContext,
+) {
+  if (!a) return false;
+  return (
+    a.route === b.route &&
+    a.surface === b.surface &&
+    a.path.join("|") === b.path.join("|") &&
+    a.inspector.open === b.inspector.open &&
+    a.inspector.label === b.inspector.label &&
+    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    JSON.stringify(a.resources ?? []) === JSON.stringify(b.resources ?? [])
+  );
+}

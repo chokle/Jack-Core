@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -208,7 +209,7 @@ describe("AskJack UX", () => {
       await waitFor(() => {
         expect(askJackState.request).toHaveBeenLastCalledWith(
           { message: `Explain ${selection}` },
-          { headers: expect.any(Object) },
+          { headers: expect.any(Object), signal: expect.any(AbortSignal) },
         );
         expect(screen.getAllByTestId("assistant-message")).toHaveLength(
           index + 1,
@@ -268,6 +269,36 @@ describe("AskJack UX", () => {
       },
     ]);
   });
+
+  it.each(["video", "tab", "route"])(
+    "rejects a late answer after a %s change",
+    async (change) => {
+      configureAskJackPending();
+      const surface = document.createElement("section");
+      surface.dataset.jackSurface = "Video";
+      surface.dataset.videoId = "e3";
+      surface.dataset.jackPath = '["Library","E3","Analysis"]';
+      document.body.append(surface);
+      renderAskJack();
+      const input = screen.getByTestId("chat-input");
+      fireEvent.change(input, { target: { value: "Describe this video" } });
+      fireEvent.click(screen.getByTestId("send-button"));
+      await act(async () => {
+        if (change === "video") surface.dataset.videoId = "3gdemo";
+        if (change === "tab")
+          surface.dataset.jackPath = '["Library","E3","Transcript"]';
+        if (change === "route") window.history.pushState({}, "", "/other-page");
+        resolveSuccess({
+          answer: "Stale video explanation",
+          citations: [{ videoId: "e3", startTime: 80 }],
+          usedInternalKnowledge: false,
+        });
+      });
+      expect(screen.queryByTestId("assistant-message")).toBeNull();
+      surface.remove();
+      window.history.replaceState({}, "", "/");
+    },
+  );
 
   it("restores input focus after a successful send when input was focused", async () => {
     configureAskJackSuccess();
