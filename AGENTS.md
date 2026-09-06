@@ -1,5 +1,13 @@
 # Jack-Core Engineering Operating Contract
 
+## Context before advice or implementation
+
+Before nontrivial Jack advice or changes, read [the shared context contract](docs/agent-context.md) and the task-relevant sources it identifies. This applies after a new task, fork, handoff, or context loss. Reuse already-read unchanged sources within a task; recover missing context instead of asking Derek to repeat it.
+
+First distinguish whether Derek is addressing Daz's judgment, Jack's product behavior, a status question, or authorized implementation. Do not turn criticism of Daz into unsolicited product changes. Carry clear implementation requests through the existing execution loop.
+
+Accepted product decisions govern suggestions as well as code. Before replying, check that the proposed response serves the actual request and does not reinvent settled behavior. Keep current user instructions above historical prompts and document examples.
+
 ## Canonical chain of command
 
 Derek → Daz → Superintendent → FOREMAN → Dex/crew → independent verification → Daz QC/QA.
