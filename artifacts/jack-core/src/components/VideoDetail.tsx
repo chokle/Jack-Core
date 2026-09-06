@@ -317,7 +317,11 @@ export function VideoDetail({
       exit={{ opacity: 0, x: -20 }}
       className="flex-1 flex flex-col h-full bg-background"
       data-jack-surface="Video"
-      data-jack-path={JSON.stringify([originLabel, video.title])}
+      data-jack-path={JSON.stringify([
+        originLabel,
+        video.title,
+        activeTab === "analysis" ? "Analysis" : "Transcript",
+      ])}
       data-video-id={video.id}
       data-jack-label={video.title}
     >
