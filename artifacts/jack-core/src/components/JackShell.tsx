@@ -249,6 +249,7 @@ export function JackShell({
           <NavItem
             icon={<Settings className="h-4 w-4" />}
             label="Account Settings"
+            action="account"
             onClick={() => {
               onOpenSettings?.();
               setIsPanelOpen(false);
@@ -344,6 +345,17 @@ export function JackShell({
           data-jack-command-index
           className="sr-only"
         >
+          <button
+            type="button"
+            data-jack-action="account"
+            disabled={!onOpenSettings}
+            onClick={() => {
+              onOpenSettings?.();
+              setIsPanelOpen(false);
+            }}
+          >
+            Account Settings
+          </button>
           <button
             type="button"
             data-jack-action="back"

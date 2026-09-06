@@ -34,6 +34,7 @@ export type JackUiActionName =
   | "review"
   | "reports"
   | "closeout"
+  | "account"
   | "video";
 
 const MAX_LABEL = 120;
@@ -58,6 +59,7 @@ function isElementVisible(
   while (current) {
     if (
       current.hidden ||
+      current.getAttribute("data-state") === "closed" ||
       current.getAttribute("aria-hidden") === "true" ||
       current.hasAttribute("inert")
     ) {
@@ -80,21 +82,26 @@ function isElementVisible(
 function firstVisible(
   selectors: string[],
   options: { allowTransparent?: boolean } = {},
+  root: ParentNode = document,
 ): HTMLElement | null {
   for (const selector of selectors) {
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>(selector));
     const visible = nodes.find((node) => isElementVisible(node, options));
     if (visible) return visible;
   }
   return null;
 }
 
+function activeSurfaceElement() {
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>("[data-jack-surface]"))
+      .filter((node) => isElementVisible(node, { allowTransparent: true }))
+      .at(-1) ?? null
+  );
+}
+
 function activeSurface() {
-  const surface = Array.from(
-    document.querySelectorAll<HTMLElement>("[data-jack-surface]"),
-  )
-    .filter((node) => isElementVisible(node, { allowTransparent: true }))
-    .at(-1);
+  const surface = activeSurfaceElement();
   if (surface) return cleanText(surface.dataset.jackSurface);
   const active = firstVisible([
     "aside [aria-current='page']",
@@ -105,9 +112,14 @@ function activeSurface() {
 }
 
 function breadcrumbPath() {
-  const state = firstVisible(["[data-jack-path]"], {
-    allowTransparent: true,
-  });
+  const surface = activeSurfaceElement();
+  const state = surface
+    ? surface.matches("[data-jack-path]")
+      ? surface
+      : Array.from(
+          surface.querySelectorAll<HTMLElement>("[data-jack-path]"),
+        ).find((node) => isElementVisible(node, { allowTransparent: true }))
+    : firstVisible(["[data-jack-path]"], { allowTransparent: true });
   if (state) {
     try {
       const path: unknown = JSON.parse(state.dataset.jackPath ?? "[]");
@@ -122,7 +134,7 @@ function breadcrumbPath() {
       /* Fall back to the visible breadcrumb. */
     }
   }
-  const breadcrumb = document.querySelector<HTMLElement>(
+  const breadcrumb = (surface ?? document).querySelector<HTMLElement>(
     "nav[aria-label='breadcrumb']",
   );
   if (!breadcrumb || !isElementVisible(breadcrumb)) return [] as string[];
@@ -140,10 +152,12 @@ function breadcrumbPath() {
 function visibleRecordIds() {
   const values = new Set<string>();
   const nodes = Array.from(
-    document.querySelectorAll<HTMLElement>(
+    (activeSurfaceElement() ?? document).querySelectorAll<HTMLElement>(
       "[data-node-id], [data-branch-id], [data-topic-id], [data-graph-id], [data-entry-id], [data-video-id], [data-record-id], [data-id]",
     ),
   );
+  const surface = activeSurfaceElement();
+  if (surface) nodes.unshift(surface);
   for (const node of nodes) {
     if (
       !isElementVisible(node, {
@@ -171,11 +185,21 @@ function visibleRecordIds() {
 }
 
 function inspectorState() {
-  const inspector = firstVisible([
-    "[data-jack-inspector]",
-    "[aria-label*='inspector' i]",
-    "[role='dialog']",
-  ]);
+  const surface = activeSurfaceElement();
+  const inspector = surface?.matches(
+    "[role='dialog'], [role='alertdialog'], [data-jack-inspector]",
+  )
+    ? surface
+    : firstVisible(
+        [
+          "[data-jack-inspector]",
+          "[aria-label*='inspector' i]",
+          "[role='dialog']",
+          "[role='alertdialog']",
+        ],
+        {},
+        surface ?? document,
+      );
   if (!inspector) return { open: false, label: null };
   const heading = inspector.querySelector<HTMLElement>(
     "h1, h2, h3, [role='heading']",
@@ -263,11 +287,19 @@ export function collectJackUiContext(): JackUiContext {
   const path = breadcrumbPath();
   const surface = activeSurface();
   if (path.length === 0 && surface) path.push(surface);
+  // Only semantic tab labels are captured, never form values or page prose.
+  const selectedTab = Array.from(
+    (activeSurfaceElement() ?? document).querySelectorAll<HTMLElement>(
+      "[role='tab'][aria-selected='true']",
+    ),
+  ).find((node) => isElementVisible(node));
+  const tabLabel = elementText(selectedTab);
+  if (tabLabel && path.at(-1) !== tabLabel) path.push(tabLabel);
   return {
     version: 1,
     route: window.location.pathname.slice(0, 500),
     surface,
-    path,
+    path: path.slice(-MAX_PATH_ITEMS),
     inspector: inspectorState(),
     visibleIds: visibleRecordIds(),
     navigation: {

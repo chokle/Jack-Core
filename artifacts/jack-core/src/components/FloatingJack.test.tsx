@@ -70,6 +70,33 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("keeps Jack usable inside an account dialog and restores him after it closes", async () => {
+    const view = render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const dialog = document.createElement("section");
+    dialog.setAttribute("role", "alertdialog");
+    dialog.dataset.jackSurface = "Account settings";
+    dialog.dataset.jackPath = '["Account settings", "Account & privacy"]';
+    dialog.innerHTML =
+      "<h2>Account & privacy</h2><div data-jack-assistant-host></div>";
+    await act(async () => {
+      document.body.append(dialog);
+    });
+    const input = screen.getByRole("textbox");
+    expect(dialog.contains(input)).toBe(true);
+    expect(document.querySelectorAll("[data-floating-jack]")).toHaveLength(1);
+    fireEvent.change(input, { target: { value: "Explain this screen" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(api.askJack).toHaveBeenCalledOnce();
+    await act(async () => {
+      dialog.remove();
+    });
+    expect(view.container.querySelector("[data-floating-jack]")).not.toBeNull();
+    expect(document.querySelectorAll("[data-floating-jack]")).toHaveLength(1);
+  });
+
   it("refreshes revealed navigation controls without cancelling the current answer", async () => {
     let resolve!: (value: { answer: string }) => void;
     api.askJack.mockImplementation(

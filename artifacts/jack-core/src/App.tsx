@@ -1218,7 +1218,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         open={accountSettingsOpen}
         onOpenChange={setAccountSettingsOpen}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          data-jack-surface="Account settings"
+          data-jack-path='["Account settings", "Account & privacy"]'
+          className="max-h-[90dvh] overflow-y-auto"
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Account & privacy</AlertDialogTitle>
             <AlertDialogDescription>
@@ -1325,15 +1329,54 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             </Button>
           </div>
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setAccountSettingsOpen(false)}>
+            <AlertDialogAction
+              data-jack-action="back"
+              onClick={() => setAccountSettingsOpen(false)}
+            >
               Done
             </AlertDialogAction>
           </AlertDialogFooter>
+          <div
+            data-jack-assistant-host
+            className="sticky bottom-0 z-20 bg-background pt-3"
+          />
+          {/* Modal-owned actions remain reachable while Radix hides the shell. */}
+          <div data-jack-command-index className="sr-only">
+            {(
+              [
+                ["graph", "Living Memory"],
+                ["library", "Library"],
+                ["interview", "Interview"],
+                ["review", "Review"],
+                ...(me?.canViewPilotReports === true
+                  ? [["reports", "Pilot Reports"]]
+                  : []),
+                ...(canViewCloseout ? [["closeout", "Closeout"]] : []),
+              ] as [JackView, string][]
+            ).map(([destination, label]) => (
+              <button
+                key={destination}
+                type="button"
+                tabIndex={-1}
+                data-jack-action={destination}
+                onClick={() => {
+                  setAccountSettingsOpen(false);
+                  handleNavigate(destination);
+                }}
+              >
+                Open {label}
+              </button>
+            ))}
+          </div>
         </AlertDialogContent>
       </AlertDialog>
 
       <AlertDialog open={accountDeleteOpen} onOpenChange={setAccountDeleteOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          data-jack-surface="Account settings"
+          data-jack-path='["Account settings", "Delete account confirmation"]'
+          className="max-h-[90dvh] overflow-y-auto"
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>
               Permanently delete your account?
@@ -1353,7 +1396,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             <p className="text-sm text-destructive">{accountDeleteError}</p>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingAccount}>
+            <AlertDialogCancel
+              data-jack-action="back"
+              disabled={deletingAccount}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
@@ -1367,6 +1413,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               {deletingAccount ? "Deleting..." : "Delete account"}
             </AlertDialogAction>
           </AlertDialogFooter>
+          <div
+            data-jack-assistant-host
+            className="sticky bottom-0 z-20 bg-background pt-3"
+          />
         </AlertDialogContent>
       </AlertDialog>
     </>

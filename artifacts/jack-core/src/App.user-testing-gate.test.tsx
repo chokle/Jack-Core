@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
+import { jackUiAction } from "./lib/jack-ui-context";
 import * as testSessionService from "@/lib/user-testing/test-session-service";
 
 interface MeProfile {
@@ -449,6 +450,33 @@ function resetServiceState() {
 }
 
 describe("user-testing gate transition", () => {
+  it.each([
+    ["library", "library-page"],
+    ["interview", "interview-page"],
+    ["graph", "memory-graph-view"],
+  ] as const)("lets Jack leave account settings for %s", async (destination, page) => {
+    await renderAuthenticatedApp("/app");
+    fireEvent.click(screen.getByTestId("account-settings"));
+    const dialog = await screen.findByRole("alertdialog");
+    const action = jackUiAction(destination);
+    expect(action).not.toBeNull();
+    expect(dialog.contains(action)).toBe(true);
+    expect(dialog.querySelector('[data-jack-action="reports"]')).toBeNull();
+    fireEvent.click(action!);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByTestId(page)).toBeTruthy();
+  });
+
+  it("does not offer page navigation from the destructive confirmation", async () => {
+    await renderAuthenticatedApp("/app");
+    fireEvent.click(screen.getByTestId("account-settings"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Permanently delete your account?" });
+    expect(dialog.querySelector('[data-jack-action="library"]')).toBeNull();
+    expect(jackUiAction("library")).toBeNull();
+    expect(jackUiAction("back")?.textContent).toBe("Cancel");
+  });
+
   afterEach(() => {
     cleanup();
     vi.useRealTimers();

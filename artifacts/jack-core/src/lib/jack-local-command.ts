@@ -8,6 +8,16 @@ export type JackLocalCommand =
   | { kind: "video"; target: string | null; label: string };
 
 const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
+  settings: "account",
+  "account settings": "account",
+  "account settings page": "account",
+  "account settings tab": "account",
+  "my account settings": "account",
+  account: "account",
+  "my account": "account",
+  "account and privacy": "account",
+  "account & privacy": "account",
+  "privacy settings": "account",
   library: "library",
   "video library": "library",
   "video libraries": "library",
@@ -33,6 +43,7 @@ const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
 };
 
 const ACTION_LABELS: Record<JackLocalAppAction, string> = {
+  account: "Account Settings",
   back: "the previous view",
   forward: "the next view",
   up: "the parent view",
@@ -146,16 +157,34 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
 }
 
 function parseNodeCommand(intent: string): JackLocalCommand | null {
-  const match = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  // Ambiguous verbs (open/show/view/find/locate/visit) only become node
+  // navigation when the qualifier is explicit and precedes the label. This
+  // prevents arbitrary content clauses ending in words such as branch/topic
+  // from bypassing Ask Jack. Directional verbs remain unambiguous and may use
+  // either a suffix qualifier or a bare visible-node label.
+  const prefixQualifiedMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:node|concept|topic|branch)\s+(.+)$/i,
   );
-  if (!match) return null;
+  if (prefixQualifiedMatch) {
+    const target = prefixQualifiedMatch[1].replace(/^['"]|['"]$/g, "").trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
 
-  const target = match[1]
-    .replace(/^(?:node|concept|topic|branch)\s+/i, "")
-    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+  const directionalSuffixMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)\s+(?:node|concept|topic|branch)$/i,
+  );
+  if (directionalSuffixMatch) {
+    const target = directionalSuffixMatch[1].replace(/^['"]|['"]$/g, "").trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
+
+  const directionalMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  const rawTarget = directionalMatch?.[1];
+  if (!rawTarget) return null;
+
+  const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
 
   return { kind: "node", target, label: `node ${target}` };
@@ -234,7 +263,7 @@ export function resolveJackLocalAction(
 
 export function unavailableJackLocalCommand(command: JackLocalCommand) {
   if (command.kind === "node") {
-    return `I don’t see “${command.target}” in the visible Living Memory graph.`;
+    return `I can’t find an available destination named “${command.target}” from this screen.`;
   }
   if (command.kind === "video") {
     return command.target
