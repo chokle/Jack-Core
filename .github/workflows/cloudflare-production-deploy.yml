@@ -347,5 +347,5 @@ jobs:
             echo "- /api/healthz: PASS"
             echo "- anonymous /api/me rejected: PASS (401)"
             echo "- approved Clerk sign-in: REQUIRES LIVE ACCEPTANCE"
-            echo "- production DNS: unchanged (Railway rollback preserved)"
+            echo "- production DNS at deploy stage: unchanged; subsequent Cloudflare Production Route Handoff records final route ownership (Railway rollback preserved)"
           } >> "$GITHUB_STEP_SUMMARY"
