@@ -13,6 +13,35 @@ beforeEach(() => {
 });
 
 describe("Jack UI context", () => {
+  it("uses the active screen path instead of an earlier mounted graph", () => {
+    document.body.innerHTML = `
+      <section data-jack-surface="Living Memory" data-jack-path='["Jack","Welder"]'><i data-node-id="old-node"></i></section>
+      <section data-jack-surface="Interview" data-jack-path='["Interview","Interview setup"]'><input value="Private name"></section>`;
+    const context = collectJackUiContext();
+    expect(context.path).toEqual(["Interview", "Interview setup"]);
+    expect(context.visibleIds).toEqual([]);
+    expect(JSON.stringify(context)).not.toContain("Private name");
+  });
+
+  it("tracks account dialogs and selected tabs then restores the underlying screen", () => {
+    document.body.innerHTML = `<main data-jack-surface="Interview" data-jack-path='["Interview","Interview setup"]'></main>
+      <section role="alertdialog" data-jack-surface="Account settings" data-jack-path='["Account settings","Account & privacy"]'>
+        <h2>Account & privacy</h2><button role="tab" aria-selected="true">Security</button><input value="secret"></section>`;
+    expect(collectJackUiContext()).toMatchObject({
+      surface: "Account settings",
+      path: ["Account settings", "Account & privacy", "Security"],
+      inspector: { open: true, label: "Account & privacy" },
+    });
+    document.querySelector("[role=tab]")!.textContent = "Sessions";
+    expect(collectJackUiContext().path.at(-1)).toBe("Sessions");
+    document.querySelector("[role=alertdialog]")!.remove();
+    expect(collectJackUiContext().path).toEqual([
+      "Interview",
+      "Interview setup",
+    ]);
+    expect(collectJackUiContext().inspector.open).toBe(false);
+  });
+
   it("captures route, active surface, breadcrumb path, inspector and visible ids", () => {
     window.history.pushState({}, "", "/app?view=memory#node");
     document.body.innerHTML = `
@@ -98,6 +127,23 @@ describe("Jack UI context", () => {
     expect(after.surface).toBe("Library");
     expect(after.visibleIds).toEqual(["entry-new"]);
     expect(after.navigation.hasSourceAction).toBe(false);
+  });
+
+  it("keeps the current semantic video visible while its entry animation fades in", () => {
+    document.body.innerHTML = `
+      <main
+        style="opacity: 0"
+        data-jack-surface="Video"
+        data-jack-path='["Library","Root Pass Demo"]'
+        data-video-id="v1"
+      ></main>
+    `;
+
+    const context = collectJackUiContext();
+
+    expect(context.surface).toBe("Video");
+    expect(context.path).toEqual(["Library", "Root Pass Demo"]);
+    expect(context.visibleIds).toContain("v1");
   });
 
   it("bounds the encoded header even with many visible ids", () => {

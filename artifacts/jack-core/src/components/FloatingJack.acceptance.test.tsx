@@ -33,8 +33,7 @@ const api = vi.hoisted(() => ({
   getMe: vi.fn(),
   jumpToSource: vi.fn(),
   openVideo: vi.fn(),
-  speak: vi.fn(),
-  cancelSpeech: vi.fn(),
+  speechFetch: vi.fn(),
   knowledgeStats: { byTrade: {} },
   onboarding: { preference: { version: 1, status: "completed" } },
 }));
@@ -201,6 +200,53 @@ function Harness() {
   );
 }
 
+function HistoryHarness() {
+  const [navigation, setNavigation] = useState<{
+    entries: JackView[];
+    index: number;
+  }>({ entries: ["graph"], index: 0 });
+  const active = navigation.entries[navigation.index];
+
+  const navigate = (next: JackView) => {
+    setNavigation((current) => ({
+      entries: [...current.entries.slice(0, current.index + 1), next],
+      index: current.index + 1,
+    }));
+  };
+
+  return (
+    <>
+      <JackShell
+        active={active}
+        onNavigate={navigate}
+        onOpenChat={() => {}}
+        model={model}
+        readyCount={2}
+        lastUpdatedLabel="now"
+        canHistoryBack={navigation.index > 0}
+        canHistoryForward={navigation.index < navigation.entries.length - 1}
+        onHistoryBack={() =>
+          setNavigation((current) => ({
+            ...current,
+            index: Math.max(0, current.index - 1),
+          }))
+        }
+        onHistoryForward={() =>
+          setNavigation((current) => ({
+            ...current,
+            index: Math.min(current.entries.length - 1, current.index + 1),
+          }))
+        }
+      >
+        <section data-testid="history-page">
+          <h1>{active}</h1>
+        </section>
+      </JackShell>
+      <FloatingJack />
+    </>
+  );
+}
+
 let queryClient: QueryClient;
 
 async function renderApp() {
@@ -213,6 +259,21 @@ async function renderApp() {
   render(
     <QueryClientProvider client={queryClient}>
       <Harness />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("textbox", { name: "Ask Jack" });
+}
+
+async function renderHistoryApp() {
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity },
+      mutations: { retry: false },
+    },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <HistoryHarness />
     </QueryClientProvider>,
   );
   await screen.findByRole("textbox", { name: "Ask Jack" });
@@ -284,17 +345,7 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  vi.stubGlobal("speechSynthesis", {
-    speak: api.speak,
-    cancel: api.cancelSpeech,
-  });
-  vi.stubGlobal(
-    "SpeechSynthesisUtterance",
-    class {
-      rate = 1;
-      constructor(public text: string) {}
-    },
-  );
+  vi.stubGlobal("fetch", api.speechFetch.mockResolvedValue({ ok: false }));
 });
 
 afterEach(() => {
@@ -378,6 +429,71 @@ describe("Jack Everywhere rendered component acceptance", () => {
     expect(api.askJack.mock.calls[0][0].message).toBe("Where am I?");
   });
 
+  it.each(["open the video library", "retrieve from library"])(
+    "executes a rendered Library navigation command locally for %s",
+    async (message) => {
+      await renderApp();
+      await selectNode("Root Pass");
+      await submit(message);
+      expect(awareness()).toContain("Library");
+      expect(api.askJack).not.toHaveBeenCalled();
+    },
+  );
+
+  it("navigates to a named Living Memory node through an app-owned action", async () => {
+    await renderApp();
+    await submit("Go to the Root Pass node");
+
+    await waitFor(() =>
+      expect(collectJackUiContext().path).toContain("Root Pass"),
+    );
+    const context = collectJackUiContext();
+    expect(context.surface).toBe("Living Memory");
+    expect(context.path).toContain("Root Pass");
+    expect(context.inspector.open).toBe(true);
+    expect(context.visibleIds).toContain("concept:root-pass");
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
+  it("executes the exact forward voice wording for a named node", async () => {
+    await renderApp();
+    await submit("Go forward to the Root Pass node");
+
+    await waitFor(() =>
+      expect(collectJackUiContext().path).toContain("Root Pass"),
+    );
+    expect(collectJackUiContext().inspector.open).toBe(true);
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
+  it("navigates between named app pages locally in both directions", async () => {
+    await renderApp();
+    await submit("Go to the Library");
+    expect(awareness()).toContain("Library");
+    await submit("Go to Living Memory");
+    await waitFor(() =>
+      expect(collectJackUiContext().surface).toBe("Living Memory"),
+    );
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
+  it("uses the rendered bounded history target for bare voice forward", async () => {
+    await renderHistoryApp();
+    await submit("Go to Library");
+    expect(collectJackUiContext().surface).toBe("Library");
+    await submit("Go to Living Memory");
+    expect(collectJackUiContext().surface).toBe("Living Memory");
+
+    await submit("Go back");
+    expect(collectJackUiContext().surface).toBe("Library");
+    expect(collectJackUiContext().navigation.canForward).toBe(true);
+
+    await submit("Go forward");
+    expect(collectJackUiContext().surface).toBe("Living Memory");
+    expect(collectJackUiContext().navigation.canForward).toBe(false);
+    expect(api.askJack).not.toHaveBeenCalled();
+  });
+
   it("closes the real inspector and then goes up the selected node's breadcrumb", async () => {
     await renderApp();
     await selectNode("Root Pass");
@@ -444,7 +560,7 @@ describe("Jack Everywhere rendered component acceptance", () => {
       resolveOld({ answer: "Obsolete answer for Root Pass" });
     });
     expect(screen.queryByText("Obsolete answer for Root Pass")).toBeNull();
-    expect(api.speak).not.toHaveBeenCalled();
+    expect(api.speechFetch).not.toHaveBeenCalled();
     expect(awareness()).toContain("Fit Up");
     await submit("What's this?");
     await waitFor(() => expect(answerText()).toContain("Fit Up"));

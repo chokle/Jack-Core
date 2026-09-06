@@ -16,6 +16,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
+import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudDemo } from "./SiteHudDemo";
 
@@ -46,6 +47,10 @@ interface JackShellProps {
   userTestStarting?: boolean;
   canViewPilotReports?: boolean;
   canUseParticipantCloseout?: boolean;
+  canHistoryBack?: boolean;
+  canHistoryForward?: boolean;
+  onHistoryBack?: () => void;
+  onHistoryForward?: () => void;
   children: ReactNode;
 }
 
@@ -69,6 +74,10 @@ export function JackShell({
   userTestStarting,
   canViewPilotReports,
   canUseParticipantCloseout,
+  canHistoryBack = false,
+  canHistoryForward = false,
+  onHistoryBack,
+  onHistoryForward,
   children,
 }: JackShellProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -183,24 +192,28 @@ export function JackShell({
           <NavItem
             icon={<Network className="h-4 w-4" />}
             label="Memory Graph"
+            action="graph"
             active={active === "graph"}
             onClick={() => go("graph")}
           />
           <NavItem
             icon={<LayoutGrid className="h-4 w-4" />}
             label="Library"
+            action="library"
             active={active === "library"}
             onClick={() => go("library")}
           />
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
+            action="interview"
             active={active === "interview"}
             onClick={() => go("interview")}
           />
           <NavItem
             icon={<ShieldCheck className="h-4 w-4" />}
             label="Review"
+            action="review"
             active={active === "review"}
             onClick={() => go("review")}
           />
@@ -208,6 +221,7 @@ export function JackShell({
             <NavItem
               icon={<LayoutDashboard className="h-4 w-4" />}
               label="Pilot Reports"
+              action="reports"
               active={active === "reports"}
               onClick={() => go("reports")}
             />
@@ -216,6 +230,7 @@ export function JackShell({
             <NavItem
               icon={<ClipboardList className="h-4 w-4" />}
               label="Closeout"
+              action="closeout"
               active={active === "closeout"}
               onClick={() => go("closeout")}
             />
@@ -238,6 +253,7 @@ export function JackShell({
           <NavItem
             icon={<Settings className="h-4 w-4" />}
             label="Account Settings"
+            action="account"
             onClick={() => {
               onOpenSettings?.();
               setIsPanelOpen(false);
@@ -320,6 +336,7 @@ export function JackShell({
         </div>
       </aside>
 
+<<<<<<< HEAD
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" &&
           siteHudUserId && (
@@ -333,6 +350,45 @@ export function JackShell({
         >
           {children}
         </div>
+        {/* These app-owned targets give Jack a bounded page/video history. The
+            controls stay out of the visual layout; graph and video surfaces
+            retain precedence for their own rendered Back actions. */}
+        <nav
+          aria-label="Jack navigation history"
+          data-jack-command-index
+          className="sr-only"
+        >
+          <button
+            type="button"
+            data-jack-action="account"
+            disabled={!onOpenSettings}
+            onClick={() => {
+              onOpenSettings?.();
+              setIsPanelOpen(false);
+            }}
+          >
+            Account Settings
+          </button>
+          <button
+            type="button"
+            data-jack-action="back"
+            disabled={!canHistoryBack}
+            aria-disabled={!canHistoryBack}
+            onClick={onHistoryBack}
+          >
+            Back to previous Jack view
+          </button>
+          <button
+            type="button"
+            data-jack-action="forward"
+            disabled={!canHistoryForward}
+            aria-disabled={!canHistoryForward}
+            onClick={onHistoryForward}
+          >
+            Forward to next Jack view
+          </button>
+        </nav>
+>>>>>>> origin/main
       </main>
     </div>
   );
@@ -343,6 +399,7 @@ function NavItem({
   label,
   active,
   soon,
+  action,
   onClick,
   testId,
 }: {
@@ -350,6 +407,7 @@ function NavItem({
   label: string;
   active?: boolean;
   soon?: boolean;
+  action?: JackUiActionName;
   onClick?: () => void;
   testId?: string;
 }) {
@@ -373,6 +431,7 @@ function NavItem({
     <button
       onClick={onClick}
       data-testid={testId}
+      data-jack-action={action}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
         active

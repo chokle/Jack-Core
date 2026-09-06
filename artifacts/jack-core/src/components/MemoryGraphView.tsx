@@ -779,6 +779,31 @@ export function MemoryGraphView({
           viewMode="branches"
         />
 
+        {/* Keep graph nodes addressable by Jack's explicit voice commands. The
+            canvas is the visual control, while these lightweight controls give
+            the command layer a real app-owned target to click. They are
+            intentionally available only with the current hydrated graph, so a
+            stale node cannot be selected after polling removes it. */}
+        <nav
+          aria-label="Living Memory nodes"
+          data-jack-command-index
+          className="sr-only"
+        >
+          {model.nodes.map((node) => (
+            <button
+              key={node.id}
+              type="button"
+              data-jack-action="node"
+              data-node-id={node.id}
+              data-node-label={node.label}
+              aria-label={`Open ${node.label}`}
+              onClick={() => openGraphNode(node.id)}
+            >
+              {node.label}
+            </button>
+          ))}
+        </nav>
+
         {/* Semantic walkthrough anchor only. It never receives input and does
             not participate in graph rendering, layout, or simulation. */}
         <div

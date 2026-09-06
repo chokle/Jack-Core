@@ -498,7 +498,20 @@ export function InterviewMode({
   const failedCount = transcript.filter((t) => t.distillationStatus === "failed").length;
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden">
+    <div
+      className="relative flex h-full w-full flex-col overflow-hidden"
+      data-jack-surface="Interview"
+      data-jack-path={JSON.stringify([
+        "Interview",
+        resuming
+          ? "Resuming interview"
+          : stage === "intake"
+            ? "Interview setup"
+            : stage === "interviewing"
+              ? "Current question"
+              : "Interview complete",
+      ])}
+    >
       {/* Header */}
       <div className="shrink-0 border-b border-border/70 bg-background/60 px-5 py-4 backdrop-blur-md md:px-8">
         <div className="flex items-center gap-3">

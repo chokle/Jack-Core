@@ -42,6 +42,11 @@ import {
   collectJackUiContext,
   encodeJackUiContextHeader,
 } from "@/lib/jack-ui-context";
+import {
+  resolveJackLocalAction,
+  resolveJackLocalCommand,
+  unavailableJackLocalCommand,
+} from "@/lib/jack-local-command";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
 
@@ -206,6 +211,36 @@ export function AskJack({
     queueFocusIntentRef.current = false;
   };
 
+  const submitLocalCommand = (message: string) => {
+    const command = resolveJackLocalCommand(message);
+    if (!command) return false;
+
+    // A local action owns the rendered app state. Invalidate any late API
+    // callback before closing the drawer so it cannot append stale content.
+    activeRequestIdRef.current += 1;
+    clearQueuedMessage();
+    setSteerChoiceMessage(null);
+    setInput("");
+    setErrorMessage(null);
+
+    const action = resolveJackLocalAction(command);
+    if (action) {
+      close();
+      action.click();
+      return true;
+    }
+
+    const localMessage: DisplayMessage = {
+      id: `local-${Date.now()}`,
+      role: "assistant",
+      content: unavailableJackLocalCommand(command),
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, localMessage]);
+    requestInputFocusAfterResponse();
+    return true;
+  };
+
   const updateQueuedMessageDraft = (next: string) => {
     if (queuedMessageRef.current !== null) {
       setQueuedMessageWithRef(next);
@@ -312,6 +347,8 @@ export function AskJack({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
+
+    if (submitLocalCommand(input)) return;
 
     if (askJack.isPending) {
       openSteerChoice(input);

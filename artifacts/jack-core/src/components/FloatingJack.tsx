@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
 import { askJack, getMe } from "@workspace/api-client-react";
 import {
   collectJackUiContext,
   encodeJackUiContextHeader,
   jackUiContextLabel,
-  jackUiAction,
   type JackUiContext,
 } from "../lib/jack-ui-context";
+import {
+  resolveJackLocalAction,
+  resolveJackLocalCommand,
+  unavailableJackLocalCommand,
+} from "../lib/jack-local-command";
+import { JackSpeechPlayer, type JackVoiceState } from "../lib/jack-speech";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -48,7 +54,7 @@ function plainSpeech(text: string) {
     .trim();
 }
 
-function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
+function sameSelectionContext(a: JackUiContext | null, b: JackUiContext) {
   if (!a) return false;
   return (
     a.route === b.route &&
@@ -56,9 +62,17 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
     a.path.join("|") === b.path.join("|") &&
     a.inspector.open === b.inspector.open &&
     a.inspector.label === b.inspector.label &&
-    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    a.visibleIds.join("|") === b.visibleIds.join("|")
+  );
+}
+
+function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
+  return (
+    sameSelectionContext(a, b) &&
+    a !== null &&
     a.navigation.canBack === b.navigation.canBack &&
     a.navigation.canUp === b.navigation.canUp &&
+    a.navigation.canForward === b.navigation.canForward &&
     a.navigation.hasSourceAction === b.navigation.hasSourceAction
   );
 }
@@ -70,13 +84,22 @@ export function FloatingJack() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceState, setVoiceState] = useState<JackVoiceState>("idle");
   const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
+  const [dialogHost, setDialogHost] = useState<HTMLElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const submissionInFlightRef = useRef(false);
   const currentContextRef = useRef<JackUiContext | null>(null);
   const contextEpochRef = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
+  const speechPlayerRef = useRef<JackSpeechPlayer | null>(null);
+  if (!speechPlayerRef.current)
+    speechPlayerRef.current = new JackSpeechPlayer(setVoiceState);
+  const cancelSpeech = useCallback(() => {
+    speechPlayerRef.current?.cancel();
+    setVoiceState("idle");
+  }, []);
 
   useEffect(() => {
     const pill = pillRef.current;
@@ -96,30 +119,49 @@ export function FloatingJack() {
       observer?.disconnect();
       document.documentElement.style.removeProperty("--jack-pill-height");
     };
-  }, [authorized]);
+  }, [authorized, cancelSpeech, dialogHost]);
 
   const refreshContext = useCallback(() => {
+    const hosts = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-jack-assistant-host]"),
+    );
+    setDialogHost(
+      hosts
+        .filter(
+          (host) =>
+            !host.closest(
+              '[aria-hidden="true"], [hidden], [data-state="closed"]',
+            ),
+        )
+        .at(-1) ?? null,
+    );
     const next = collectJackUiContext();
     if (!sameUiContext(currentContextRef.current, next)) {
-      const interruptedVoice = recognitionRef.current !== null;
-      contextEpochRef.current += 1;
-      requestRef.current?.abort();
-      requestRef.current = null;
-      submissionInFlightRef.current = false;
-      recognitionRef.current?.abort();
-      recognitionRef.current = null;
-      window.speechSynthesis?.cancel();
-      setPending(false);
-      setListening(false);
-      setAnswer(null);
-      setError(
-        interruptedVoice ? "Page changed. Tap the mic to continue here." : null,
-      );
+      // Controls can appear during a page fade without changing the selected
+      // content. Refresh their availability without discarding that answer.
+      if (!sameSelectionContext(currentContextRef.current, next)) {
+        const interruptedVoice = recognitionRef.current !== null;
+        contextEpochRef.current += 1;
+        requestRef.current?.abort();
+        requestRef.current = null;
+        submissionInFlightRef.current = false;
+        recognitionRef.current?.abort();
+        recognitionRef.current = null;
+        cancelSpeech();
+        setPending(false);
+        setListening(false);
+        setAnswer(null);
+        setError(
+          interruptedVoice
+            ? "Page changed. Tap the mic to continue here."
+            : null,
+        );
+      }
       currentContextRef.current = next;
       setUiContext(next);
     }
     return next;
-  }, []);
+  }, [cancelSpeech]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,30 +227,26 @@ export function FloatingJack() {
       submissionInFlightRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
-      window.speechSynthesis?.cancel();
+      cancelSpeech();
       setAnswer(null);
       setError(null);
       setInput("");
       setPending(false);
       setListening(false);
     }
-  }, [authorized]);
+  }, [authorized, cancelSpeech]);
 
   useEffect(() => {
     return () => {
       contextEpochRef.current += 1;
       requestRef.current?.abort();
       recognitionRef.current?.abort();
-      window.speechSynthesis?.cancel();
+      cancelSpeech();
     };
-  }, []);
+  }, [cancelSpeech]);
 
   const speak = (text: string) => {
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(plainSpeech(text));
-    utterance.rate = 1;
-    window.speechSynthesis.speak(utterance);
+    void speechPlayerRef.current?.speak(plainSpeech(text));
   };
 
   const submit = async (message: string) => {
@@ -229,34 +267,21 @@ export function FloatingJack() {
     recognitionRef.current = null;
     recognition?.abort();
     setListening(false);
-    window.speechSynthesis?.cancel();
+    cancelSpeech();
 
     try {
-      const intent = trimmed
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/[?.!]+$/g, "")
-        .trim();
-      const wantsBack = intent === "go back" || intent === "take me back";
-      const wantsSource = [
-        "show me the source",
-        "show the source",
-        "show me the source for that",
-        "show me the source for this",
-        "show the source for that",
-        "show the source for this",
-      ].includes(intent);
-      if (wantsBack || wantsSource) {
-        const action = wantsBack
-          ? jackUiAction("back") || jackUiAction("up")
-          : jackUiAction("source");
+      const localCommand = resolveJackLocalCommand(trimmed);
+      if (localCommand) {
+        const action = resolveJackLocalAction(localCommand);
         if (action) {
           action.click();
+          // React may commit a shell/graph navigation after the click returns.
+          // Refresh once on the next task as well as through the DOM observer so
+          // the pill never keeps the pre-navigation surface as stale context.
+          window.setTimeout(refreshContext, 0);
           return;
         }
-        const localAnswer = wantsBack
-          ? "There isn’t a previous view to return to here."
-          : "There isn’t a source available for the current selection.";
+        const localAnswer = unavailableJackLocalCommand(localCommand);
         setAnswer(localAnswer);
         speak(localAnswer);
         return;
@@ -305,6 +330,7 @@ export function FloatingJack() {
       return;
     }
 
+    cancelSpeech();
     const recognition = new Recognition();
     refreshContext();
     const epoch = contextEpochRef.current;
@@ -361,11 +387,15 @@ export function FloatingJack() {
 
   if (!authorized) return null;
 
-  return (
+  const content = (
     <div
       ref={pillRef}
       data-floating-jack
-      className="pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3"
+      className={
+        dialogHost
+          ? "relative z-[70] flex justify-center"
+          : "pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3"
+      }
     >
       <div className="pointer-events-auto w-full max-w-2xl">
         {(answer || error) && (
@@ -389,7 +419,7 @@ export function FloatingJack() {
                 onClick={() => {
                   setAnswer(null);
                   setError(null);
-                  window.speechSynthesis?.cancel();
+                  cancelSpeech();
                 }}
                 className="rounded-full p-2 text-muted-foreground transition hover:bg-muted hover:text-foreground"
                 aria-label="Dismiss Jack's answer"
@@ -398,6 +428,21 @@ export function FloatingJack() {
               </button>
             </div>
           </div>
+        )}
+
+        {answer && voiceState !== "idle" && (
+          <p
+            role="status"
+            className="mb-2 rounded-xl bg-card/95 px-4 py-2 text-xs text-muted-foreground"
+          >
+            {voiceState === "loading"
+              ? "Preparing Jack's voice..."
+              : voiceState === "playing"
+                ? "Jack is speaking."
+                : voiceState === "blocked"
+                  ? "Audio playback was blocked. Tap Read Jack's answer aloud to retry."
+                  : "Jack's voice is unavailable. You can still read the answer; tap Read Jack's answer aloud to retry."}
+          </p>
         )}
 
         {uiContext && (
@@ -432,6 +477,7 @@ export function FloatingJack() {
                   {[
                     uiContext.navigation.canBack && "Back",
                     uiContext.navigation.canUp && "Up",
+                    uiContext.navigation.canForward && "Forward",
                     uiContext.navigation.hasSourceAction && "Source",
                   ]
                     .filter(Boolean)
@@ -484,4 +530,5 @@ export function FloatingJack() {
       </div>
     </div>
   );
+  return dialogHost ? createPortal(content, dialogHost) : content;
 }

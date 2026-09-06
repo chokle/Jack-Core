@@ -7,6 +7,7 @@ import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
+import { sanitizeJackAnswer } from "../lib/answer-policy.js";
 import {
   fetchVerificationCoverage,
   rerankByVerification,
@@ -514,10 +515,18 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       content: string;
     }> = [
       { role: "system", content: systemPrompt },
-      ...((history ?? []) as Array<{
-        role: "user" | "assistant";
-        content: string;
-      }>),
+      ...(
+        (history ?? []) as Array<{
+          role: "user" | "assistant";
+          content: string;
+        }>
+      ).map((item) => ({
+        ...item,
+        content:
+          item.role === "assistant"
+            ? sanitizeJackAnswer(item.content)
+            : item.content,
+      })),
       { role: "user", content: message },
     ];
 
@@ -570,9 +579,10 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       trackedLearningPromise,
     ]);
 
-    const answer =
+    const rawAnswer =
       completion.choices[0]?.message?.content ??
       "I wasn't able to generate a response.";
+    const answer = sanitizeJackAnswer(rawAnswer, message);
 
     const { error: assistantMessageError } = await supabase
       .from("chat_messages")
