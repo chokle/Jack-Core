@@ -130,7 +130,8 @@ jobs:
         timeout-minutes: 10
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
-        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
+          VITE_SITE_HUD_DEMO_ENABLED: ${{ vars.VITE_SITE_HUD_DEMO_ENABLED || 'false' }}
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false --build-arg VITE_SITE_HUD_DEMO_ENABLED="$VITE_SITE_HUD_DEMO_ENABLED" -t jack-core-cloudflare:deploy .
 
       - name: API full tests
         timeout-minutes: 5
