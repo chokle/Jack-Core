@@ -309,3 +309,12 @@
     min-height: 44px;
   }
 }
+@media (max-width: 1023px) and (max-height: 500px) {
+  .site-hud__panel {
+    position: fixed;
+    top: 76px;
+    bottom: 140px;
+    left: 16px;
+    max-height: none;
+  }
+}
