@@ -92,6 +92,28 @@ beforeEach(() => {
   ];
 });
 describe("Ask Jack Library request path", () => {
+  it("does not reintroduce semantic evidence if its later review lookup fails", async () => {
+    fake.tables.transcript_segments[0].similarity = 0.95;
+    const from = fake.from.bind(fake);
+    let edgeReads = 0;
+    const spy = vi.spyOn(fake, "from").mockImplementation((table) => {
+      if (table === "knowledge_edges" && ++edgeReads === 2) {
+        fake.failNext(table, "select", { message: "review unavailable" });
+      }
+      return from(table);
+    });
+    try {
+      const result = await request(app)
+        .post("/api/chat")
+        .set("X-Jack-Context", header())
+        .send({ message: "Explain this video" });
+      expect(edgeReads).toBe(2);
+      expect(result.status).toBe(500);
+      expect(chatCompletion).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it.each(['Summarize "MissingClip"', "Describe the video MissingClip"])(
     "does not substitute selected content for an explicit missing title: %s",
     async (message) => {
@@ -237,6 +259,58 @@ describe("Ask Jack Library request path", () => {
     expect(result.body.answer).not.toContain("tell me");
     expect(result.body.citations).toEqual([]);
     expect(chatCompletion).not.toHaveBeenCalled();
+    expect(result.body.learning.status).toBe("discarded");
+    const history = await request(app).get("/api/chat/history");
+    expect(history.body).toHaveLength(2);
+    expect(history.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: "What is this video showing me?",
+        }),
+        expect.objectContaining({
+          role: "assistant",
+          content: result.body.answer,
+          citations: [],
+        }),
+      ]),
+    );
+    const otherHistory = await request(app)
+      .get("/api/chat/history")
+      .set("x-test-user", "other");
+    expect(otherHistory.body).toEqual([]);
+  });
+  it("prioritizes the requested timestamp and deduplicates sources before the pill cap", async () => {
+    fake.tables.transcript_segments = Array.from({ length: 8 }, (_, index) => ({
+      id: `semantic-${index}`,
+      video_id: "e3",
+      text: `Preparation step ${index}`,
+      start_time: index * 10,
+      end_time: index * 10 + 9,
+      similarity: 0.95,
+    }));
+    fake.tables.transcript_segments.push({
+      id: "later",
+      video_id: "e3",
+      text: "Finish the final bend",
+      start_time: 200,
+      end_time: 210,
+    });
+    const result = await request(app)
+      .post("/api/chat")
+      .set("X-Jack-Context", header())
+      .send({ message: "What happens in this video at 3:25?" });
+    expect(result.status).toBe(200);
+    expect(result.body.citations[0]).toMatchObject({
+      videoId: "e3",
+      startTime: 200,
+      endTime: 210,
+    });
+    const keys = result.body.citations.map(
+      (source: { videoId: string; startTime: number; endTime: number }) =>
+        `${source.videoId}:${source.startTime}:${source.endTime}`,
+    );
+    expect(new Set(keys).size).toBe(keys.length);
   });
   it("uses the same shared read access as Library for another uploader's video", async () => {
     const result = await request(app)

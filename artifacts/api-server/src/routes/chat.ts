@@ -212,6 +212,20 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       extractReferencedVideoTitles(message),
     );
     if (libraryContext.failure) {
+      // A retrieval failure is still a completed conversation turn. Keep it
+      // account-scoped like ordinary answers, without submitting it to learning.
+      for (const turn of [
+        { role: "user", content: message },
+        { role: "assistant", content: libraryContext.failure },
+      ]) {
+        const { error } = await supabase.from("chat_messages").insert({
+          session_id: session,
+          user_id: userId,
+          ...turn,
+          citations: [],
+        });
+        if (error) throw error;
+      }
       await recordServerAskJackEvent({
         req,
         actorIdentity: await resolveIdentity(req),
@@ -291,6 +305,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       rawSegments
         .map((s) => s["video_id"])
         .filter((v): v is string => typeof v === "string"),
+      { failClosed: libraryContext.videos.length > 0 },
     );
     // Keep the full rerank result (not just the item) so we can both order the
     // context by trust and annotate each segment with its trust signal, letting
@@ -475,6 +490,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
+    const directCitationStart = citations.length;
     const matchedVideos = libraryContext.videos;
     for (const video of matchedVideos) {
       contextText += formatReferencedVideoContext(video);
@@ -486,9 +502,6 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
           (s) =>
             typeof s["text"] === "string" &&
             (s["text"] as string).trim().length > 0,
-        )
-        .sort(
-          (a, b) => Number(a["start_time"] ?? 0) - Number(b["start_time"] ?? 0),
         )
         .slice(0, MAX_VIDEO_CONTEXT_SEGMENTS);
       if (citedSegments.length === 0) {
@@ -524,6 +537,25 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       }
     }
 
+    // Selected/named evidence (especially an explicitly requested moment) must
+    // survive the pill's six-source cap ahead of incidental semantic matches.
+    const seenCitations = new Set<string>();
+    const orderedCitations = [
+      ...citations.slice(directCitationStart),
+      ...citations.slice(0, directCitationStart),
+    ].filter((citation) => {
+      const key = JSON.stringify([
+        citation.sourceType,
+        citation.videoId,
+        citation.entryId,
+        citation.startTime,
+        citation.endTime,
+      ]);
+      if (seenCitations.has(key)) return false;
+      seenCitations.add(key);
+      return true;
+    });
+    citations.splice(0, citations.length, ...orderedCitations);
     const usedInternalKnowledge = citations.length > 0;
 
     const systemPrompt = buildChatSystemPrompt({
