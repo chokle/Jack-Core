@@ -4,6 +4,7 @@ import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
 import { askJack, getMe } from "@workspace/api-client-react";
 import {
   collectJackUiContext,
+  sameJackSelectionContext,
   encodeJackUiContextHeader,
   jackUiContextLabel,
   type JackUiContext,
@@ -54,21 +55,9 @@ function plainSpeech(text: string) {
     .trim();
 }
 
-function sameSelectionContext(a: JackUiContext | null, b: JackUiContext) {
-  if (!a) return false;
-  return (
-    a.route === b.route &&
-    a.surface === b.surface &&
-    a.path.join("|") === b.path.join("|") &&
-    a.inspector.open === b.inspector.open &&
-    a.inspector.label === b.inspector.label &&
-    a.visibleIds.join("|") === b.visibleIds.join("|")
-  );
-}
-
 function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
   return (
-    sameSelectionContext(a, b) &&
+    sameJackSelectionContext(a, b) &&
     a !== null &&
     a.navigation.canBack === b.navigation.canBack &&
     a.navigation.canUp === b.navigation.canUp &&
@@ -81,6 +70,14 @@ export function FloatingJack() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
+  const [sources, setSources] = useState<
+    Array<{
+      videoId: string;
+      videoTitle: string;
+      startTime: number;
+      endTime: number;
+    }>
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [listening, setListening] = useState(false);
@@ -139,7 +136,7 @@ export function FloatingJack() {
     if (!sameUiContext(currentContextRef.current, next)) {
       // Controls can appear during a page fade without changing the selected
       // content. Refresh their availability without discarding that answer.
-      if (!sameSelectionContext(currentContextRef.current, next)) {
+      if (!sameJackSelectionContext(currentContextRef.current, next)) {
         const interruptedVoice = recognitionRef.current !== null;
         contextEpochRef.current += 1;
         requestRef.current?.abort();
@@ -151,6 +148,7 @@ export function FloatingJack() {
         setPending(false);
         setListening(false);
         setAnswer(null);
+        setSources([]);
         setError(
           interruptedVoice
             ? "Page changed. Tap the mic to continue here."
@@ -229,6 +227,7 @@ export function FloatingJack() {
       recognitionRef.current = null;
       cancelSpeech();
       setAnswer(null);
+      setSources([]);
       setError(null);
       setInput("");
       setPending(false);
@@ -260,8 +259,10 @@ export function FloatingJack() {
 
     submissionInFlightRef.current = true;
     setPending(true);
+    setSources([]);
     setError(null);
     setAnswer(null);
+    setSources([]);
     setInput("");
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
@@ -301,6 +302,13 @@ export function FloatingJack() {
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
       setAnswer(response.answer);
+      setSources(
+        (response.citations ?? [])
+          .filter(
+            (item) => item.sourceType === "video" && Boolean(item.videoId),
+          )
+          .slice(0, 6),
+      );
       speak(response.answer);
     } catch {
       refreshContext();
@@ -418,6 +426,7 @@ export function FloatingJack() {
                 type="button"
                 onClick={() => {
                   setAnswer(null);
+                  setSources([]);
                   setError(null);
                   cancelSpeech();
                 }}
@@ -427,6 +436,32 @@ export function FloatingJack() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {answer &&
+              sources.map((source, index) => (
+                <button
+                  key={`${source.videoId}-${source.startTime}-${index}`}
+                  type="button"
+                  className="mt-2 block text-left text-xs text-primary underline"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("jack:open-video-source", {
+                        detail: {
+                          videoId: source.videoId,
+                          startTime:
+                            source.endTime > source.startTime
+                              ? source.startTime
+                              : undefined,
+                        },
+                      }),
+                    )
+                  }
+                >
+                  {source.videoTitle}
+                  {source.endTime > source.startTime
+                    ? ` · ${Math.floor(source.startTime / 60)}:${String(Math.floor(source.startTime % 60)).padStart(2, "0")}`
+                    : " · Open video"}
+                </button>
+              ))}
           </div>
         )}
 

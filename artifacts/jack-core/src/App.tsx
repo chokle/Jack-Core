@@ -618,10 +618,29 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
   };
 
-  const handleCitationClick = (videoId: string, startTime: number) => {
-    setSeek({ time: startTime, token: Date.now() });
+  const handleCitationClick = (videoId: string, startTime?: number) => {
+    setSeek(startTime === undefined ? undefined : { time: startTime, token: Date.now() });
     navigateToLocation({ view, selectedVideoId: videoId });
   };
+
+  useEffect(() => {
+    const openSource = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (
+        !detail ||
+        typeof detail.videoId !== "string" ||
+        !detail.videoId ||
+        detail.videoId.length > 160 ||
+        (detail.startTime !== undefined &&
+          (!Number.isFinite(detail.startTime) || detail.startTime < 0))
+      )
+        return;
+      handleCitationClick(detail.videoId, detail.startTime);
+    };
+    window.addEventListener("jack:open-video-source", openSource);
+    return () =>
+      window.removeEventListener("jack:open-video-source", openSource);
+  }, [handleCitationClick]);
 
   const launchTestSession = async (pilotId?: string) => {
     const requestUserId = me?.userId;

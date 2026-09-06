@@ -417,14 +417,17 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
       });
 
       const lastCall = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
-      const systemMessage =
-        lastCall?.messages?.find((message) => message.role === "system")
-          ?.content ?? "";
-      expect(systemMessage).toContain(expectedSystemSnippet);
-      expect(systemMessage).toContain(
+      const sourceMessage =
+        lastCall?.messages?.find(
+          (message) =>
+            message.role === "user" &&
+            String(message.content).startsWith("UNTRUSTED RETRIEVED"),
+        )?.content ?? "";
+      expect(sourceMessage).toContain(expectedSystemSnippet);
+      expect(sourceMessage).toContain(
         "Source: Rob Field Notes Intake Form · Contributor: Rob",
       );
-      expect(systemMessage).toContain(
+      expect(sourceMessage).toContain(
         "Classification: direct supervisor-provided knowledge",
       );
     },
@@ -459,11 +462,14 @@ describe("POST /api/chat — Pilot 001 plumbing retrieval coverage", () => {
     });
 
     const lastCall = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
-    const systemMessage =
-      lastCall?.messages?.find((message) => message.role === "system")
-        ?.content ?? "";
-    expect(systemMessage).toContain("Ask, clarify, and understand scope");
-    expect(systemMessage).toContain(
+    const sourceMessage =
+      lastCall?.messages?.find(
+        (message) =>
+          message.role === "user" &&
+          String(message.content).startsWith("UNTRUSTED RETRIEVED"),
+      )?.content ?? "";
+    expect(sourceMessage).toContain("Ask, clarify, and understand scope");
+    expect(sourceMessage).toContain(
       "Classification: inferred interpretation, not a direct quote",
     );
   });

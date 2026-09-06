@@ -46,6 +46,7 @@ function makeApp(): Express {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
+    req.userId = getAuth()?.userId;
     const noop = () => {};
     (req as unknown as { log: Record<string, () => void> }).log = {
       warn: noop,
@@ -144,3 +145,13 @@ describe.each(["transcribe", "analyze"] as const)(
     });
   },
 );
+
+
+describe("shared Library reads", () => {
+  it("allows another authenticated user to open the uploader's video", async () => {
+    signInAs("other");
+    const response = await request(app).get(`/api/videos/${VIDEO_ID}`);
+    expect(response.status).toBe(200);
+    expect(response.body.transcript).toBe("captured transcript");
+  });
+});

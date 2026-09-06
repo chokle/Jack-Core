@@ -31,6 +31,40 @@ function encoded(overrides: Record<string, unknown> = {}) {
 const NOW = Date.parse("2026-09-04T22:00:05.000Z");
 
 describe("Jack UI request context", () => {
+  it("validates resource metadata and retains it as untrusted model data", () => {
+    const resources = [
+      {
+        id: "e3",
+        title: "EMT Offset",
+        trade: "electrician",
+        status: "completed",
+        selected: true,
+      },
+    ];
+    const parsed = parseJackUiContextHeader(encoded({ resources }), NOW);
+    expect(parsed?.resources).toEqual(resources);
+    expect(formatJackUiContextForModel(parsed!)).toContain('"resources"');
+    expect(
+      parseJackUiContextHeader(
+        encoded({ resources: [{ ...resources[0], selected: "yes" }] }),
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      parseJackUiContextHeader(
+        encoded({ resources: Array(4).fill(resources[0]) }),
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      parseJackUiContextHeader(
+        encoded({
+          resources: [resources[0], { ...resources[0], id: "other" }],
+        }),
+        NOW,
+      ),
+    ).toBeNull();
+  });
   it("accepts a fresh bounded Jack-app packet", () => {
     const context = parseJackUiContextHeader(encoded(), NOW);
     expect(context).toMatchObject({

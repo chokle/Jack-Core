@@ -992,6 +992,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   private singleMode: "none" | "maybe" | "single" = "none";
   private orderBy: Array<{ col: string; ascending: boolean }> = [];
   private limitCount: number | null = null;
+  private offsetCount = 0;
 
   constructor(
     private db: FakeSupabase,
@@ -1089,6 +1090,12 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
   // history/search read paths in chat.ts and search.ts.
   limit(n: number): this {
     this.limitCount = n;
+    return this;
+  }
+
+  range(from: number, to: number): this {
+    this.offsetCount = from;
+    this.limitCount = to - from + 1;
     return this;
   }
 
@@ -1268,7 +1275,7 @@ class QueryBuilder implements PromiseLike<Result<unknown>> {
         return 0;
       });
     }
-    if (this.limitCount != null) matched = matched.slice(0, this.limitCount);
+    if (this.limitCount != null) matched = matched.slice(this.offsetCount, this.offsetCount + this.limitCount);
     if (this.singleMode !== "none") {
       return { data: matched[0] ?? null, error: null };
     }

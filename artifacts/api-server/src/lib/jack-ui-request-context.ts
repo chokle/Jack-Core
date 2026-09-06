@@ -11,6 +11,13 @@ export interface JackUiRequestContext {
     label: string | null;
   };
   visibleIds: string[];
+  resources?: Array<{
+    id: string;
+    title: string;
+    trade: string;
+    status: string;
+    selected: boolean;
+  }>;
   navigation: {
     canBack: boolean;
     canUp: boolean;
@@ -130,6 +137,28 @@ export function parseJackUiContextHeader(
   }
 
   const capturedMs = Date.parse(capturedAt);
+  const resources: NonNullable<JackUiRequestContext["resources"]> = [];
+  if (record["resources"] !== undefined) {
+    if (!Array.isArray(record["resources"]) || record["resources"].length > 3)
+      return null;
+    for (const item of record["resources"]) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const id = boundedString(item.id, MAX_ID);
+      const title = boundedString(item.title, MAX_LABEL);
+      const trade = boundedString(item.trade, MAX_LABEL);
+      const status = boundedString(item.status, 40);
+      if (
+        !id ||
+        !title ||
+        trade === null ||
+        status === null ||
+        typeof item.selected !== "boolean"
+      )
+        return null;
+      resources.push({ id, title, trade, status, selected: item.selected });
+    }
+    if (resources.filter((item) => item.selected).length > 1) return null;
+  }
   if (!Number.isFinite(capturedMs)) return null;
   const ageMs = nowMs - capturedMs;
   if (ageMs > MAX_CONTEXT_AGE_MS || ageMs < -MAX_FUTURE_SKEW_MS) return null;
@@ -141,6 +170,7 @@ export function parseJackUiContextHeader(
     path,
     inspector: { open: inspector["open"], label: inspectorLabel },
     visibleIds,
+    ...(record["resources"] !== undefined ? { resources } : {}),
     navigation: {
       canBack: navigation["canBack"],
       canUp: navigation["canUp"],
@@ -169,6 +199,7 @@ export function formatJackUiContextForModel(
       path: context.path,
       inspector: context.inspector,
       visibleIds: context.visibleIds,
+      resources: context.resources,
       navigation: context.navigation,
       capturedAt: context.capturedAt,
     }),
