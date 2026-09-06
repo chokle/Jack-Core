@@ -1,9 +1,59 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("Site HUD flag reaches the actual Wrangler container build and defaults off", async () => {
+  const workflow = await read(
+    ".github/workflows/cloudflare-production-deploy.yml",
+  );
+  assert.match(
+    stepBody(workflow, "Generate Cloudflare deploy config"),
+    /VITE_SITE_HUD_DEMO_ENABLED: \$\{\{ vars\.VITE_SITE_HUD_DEMO_ENABLED \|\| 'false' \}\}/,
+  );
+  const directory = await mkdtemp(path.join(tmpdir(), "jack-hud-config-"));
+  try {
+    for (const file of ["generate-deploy-config.mjs", "wrangler.base.json"]) {
+      await writeFile(
+        path.join(directory, file),
+        await read(`cloudflare/${file}`),
+      );
+    }
+    for (const value of [undefined, "false", "true", "TRUE"]) {
+      const env = {
+        ...process.env,
+        VITE_CLERK_PUBLISHABLE_KEY: "pk_test_fixture",
+        PILOT_AUTH_BYPASS: "false",
+      };
+      delete env.VITE_SITE_HUD_DEMO_ENABLED;
+      if (value !== undefined) env.VITE_SITE_HUD_DEMO_ENABLED = value;
+      const result = spawnSync(
+        process.execPath,
+        [path.join(directory, "generate-deploy-config.mjs")],
+        { env, encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const generated = JSON.parse(
+        await readFile(path.join(directory, "wrangler.generated.json"), "utf8"),
+      );
+      assert.ok(generated.containers.length > 0);
+      for (const container of generated.containers) {
+        assert.equal(
+          container.image_vars.VITE_SITE_HUD_DEMO_ENABLED,
+          value === "true" ? "true" : "false",
+        );
+        assert.equal(container.image_vars.VITE_PILOT_AUTH_BYPASS, "false");
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 function stepBody(workflow, name) {
   const start = workflow.indexOf(`- name: ${name}`);
