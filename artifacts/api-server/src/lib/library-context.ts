@@ -116,6 +116,12 @@ export async function loadLibraryContext(
     if (
       /\bvideo\s+(?:called|named|titled)\b|\bbased on\s+(?:the\s+)?video\s+/i.test(
         message,
+      ) ||
+      /^(?:please\s+)?(?:describe|explain|summari[sz]e|tell me about)\s+(?:the\s+)?["“][^"”]+["”][?.!\s]*$/i.test(
+        message,
+      ) ||
+      /^(?:please\s+)?(?:describe|explain|summari[sz]e)\s+(?:the\s+)?video\s+\S/i.test(
+        message,
       )
     )
       return {

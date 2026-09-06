@@ -92,6 +92,19 @@ beforeEach(() => {
   ];
 });
 describe("Ask Jack Library request path", () => {
+  it.each(['Summarize "MissingClip"', "Describe the video MissingClip"])(
+    "does not substitute selected content for an explicit missing title: %s",
+    async (message) => {
+      const result = await request(app)
+        .post("/api/chat")
+        .set("X-Jack-Context", header())
+        .send({ message });
+      expect(result.status).toBe(200);
+      expect(result.body.answer).toContain("couldn't find that named video");
+      expect(result.body.citations).toEqual([]);
+      expect(chatCompletion).not.toHaveBeenCalled();
+    },
+  );
   it("keeps quoted technical terms attached to the selected video", async () => {
     const result = await request(app)
       .post("/api/chat")
