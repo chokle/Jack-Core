@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { VideoDetail as VideoDetailData } from "@workspace/api-client-react";
 import { VideoDetail } from "./VideoDetail";
+import { collectJackUiContext } from "../lib/jack-ui-context";
 
 /**
  * Closes the timestamp-jump loop the concept inspector starts. The inspector
@@ -32,8 +33,7 @@ const videoState = vi.hoisted(() => ({
 // admin delete flow's cache invalidation). Without a QueryClientProvider that
 // throws on render, so stub it to an inert client — the seek path never uses it.
 vi.mock("@tanstack/react-query", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@tanstack/react-query")>();
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
     ...actual,
     useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -45,7 +45,10 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
     await importOriginal<typeof import("@workspace/api-client-react")>();
   return {
     ...actual,
-    useGetVideo: () => ({ data: videoState.data, isLoading: videoState.isLoading }),
+    useGetVideo: () => ({
+      data: videoState.data,
+      isLoading: videoState.isLoading,
+    }),
     // Related-video fetch and the processing mutations are inert here — the seek
     // path never touches them, but they must exist so the component renders.
     useFetchRelatedVideos: () => ({ data: [] }),
@@ -103,10 +106,75 @@ function makeVideo(overrides: Partial<VideoDetailData> = {}): VideoDetailData {
 const noop = () => {};
 
 describe("VideoDetail — timestamp seek", () => {
+  it("updates Jack's selected tab while retaining the video source", () => {
+    videoState.data = makeVideo();
+    render(<VideoDetail videoId="v1" onBack={noop} onOpenChat={noop} />);
+    expect(collectJackUiContext()).toMatchObject({
+      surface: "Video",
+      path: ["Library", "Root Pass Demo", "Analysis"],
+      visibleIds: ["v1"],
+    });
+    const transcript = screen.getByRole("button", { name: "Transcript" });
+    fireEvent.click(transcript);
+    expect(collectJackUiContext()).toMatchObject({
+      surface: "Video",
+      path: ["Library", "Root Pass Demo", "Transcript"],
+      visibleIds: ["v1"],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analysis" }));
+    expect(collectJackUiContext().path).toEqual([
+      "Library",
+      "Root Pass Demo",
+      "Analysis",
+    ]);
+  });
+
   it("shows the unavailable state while a selected video has no response instead of crashing", () => {
     render(<VideoDetail videoId="missing" onBack={noop} onOpenChat={noop} />);
 
     expect(screen.getByText("This video couldn't be opened")).toBeTruthy();
+  });
+
+  it("exposes the selected source and routes its marked back control to the existing callback", () => {
+    videoState.data = makeVideo();
+    const onBack = vi.fn();
+    render(<VideoDetail videoId="v1" onBack={onBack} onOpenChat={noop} />);
+
+    const source = document.querySelector('[data-jack-surface="Video"]');
+    expect(source?.getAttribute("data-jack-path")).toBe(
+      JSON.stringify(["Library", "Root Pass Demo", "Analysis"]),
+    );
+    expect(source?.getAttribute("data-video-id")).toBe("v1");
+    expect(source?.getAttribute("data-jack-label")).toBe("Root Pass Demo");
+    const back = document.querySelector('[data-jack-action="back"]');
+    expect(back).toBeTruthy();
+    fireEvent.click(back!);
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("clears the previous source identity while a new source loads or cannot be opened", () => {
+    videoState.data = makeVideo();
+    const { rerender } = render(
+      <VideoDetail videoId="v1" onBack={noop} onOpenChat={noop} />,
+    );
+
+    // A previous query response must not become the new selected source.
+    rerender(<VideoDetail videoId="v2" onBack={noop} onOpenChat={noop} />);
+    expect(document.querySelector("[data-video-id]")).toBeNull();
+    expect(screen.queryByText("Root Pass Demo")).toBeNull();
+    expect(
+      document
+        .querySelector('[data-jack-surface="Video"]')
+        ?.getAttribute("data-jack-path"),
+    ).toBe(JSON.stringify(["Library"]));
+
+    videoState.data = undefined;
+    rerender(<VideoDetail videoId="v2" onBack={noop} onOpenChat={noop} />);
+    expect(screen.getByText("This video couldn't be opened")).toBeTruthy();
+    expect(document.querySelector("[data-video-id]")).toBeNull();
+    expect(document.querySelectorAll('[data-jack-action="back"]')).toHaveLength(
+      2,
+    );
   });
 
   it("seeks the player to the cited second when a seek is requested and media is ready", () => {

@@ -21,6 +21,7 @@ const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
+  "media-src 'self' blob:",
   "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://clerk.torchlabs.ca https://clerk.jack.torchlabs.ca https://clerk.staging.jack.torchlabs.ca https://*.clerk.accounts.dev https://*.clerk.com https://frontend-api.clerk.dev https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
@@ -93,14 +94,21 @@ app.use(express.urlencoded({ extended: true }));
 // key is resolved from the request host to support multiple Clerk custom
 // domains, falling back to CLERK_PUBLISHABLE_KEY.
 if (!pilotAuthBypass) {
-  app.use(clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }));
+  app.use(
+    clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }),
+  );
 }
 
 // Recovery for a browser holding a session for a Clerk user that was deleted.
 // This must remain outside the /api auth gate because the stale token cannot
 // authenticate. Clear both JS storage and HttpOnly cookies, then start fresh.
 app.get("/api/auth/reset-session", (_req, res) => {
-  const cookieNames = ["__session", "__client", "__client_uat", "__clerk_db_jwt"];
+  const cookieNames = [
+    "__session",
+    "__client",
+    "__client_uat",
+    "__clerk_db_jwt",
+  ];
   for (const name of cookieNames) {
     res.clearCookie(name, { path: "/" });
     res.clearCookie(name, { path: "/", domain: ".torchlabs.ca" });
@@ -133,7 +141,11 @@ app.use("/api", requirePilotAccess);
 // polling — including the widget's own poll — and CORS preflight) are excluded
 // so idle traffic never registers as "busy".
 app.use((req, res, next) => {
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+  if (
+    req.method === "GET" ||
+    req.method === "HEAD" ||
+    req.method === "OPTIONS"
+  ) {
     return next();
   }
   publish({ type: "request:start" });

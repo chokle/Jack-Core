@@ -209,6 +209,13 @@ describe("Canadian jurisdiction policy", () => {
       expect(prompt).toContain("I’m designed to...");
       expect(prompt).toContain('Do not say "How may I assist you?"');
       expect(prompt).toContain("Avoid shotgun lists such as");
+      expect(prompt).toMatch(/field-native shop and jobsite language/i);
+      expect(prompt).toContain("let me know what you need");
+      expect(prompt).toMatch(
+        /rendered Library,\s+Living Memory,\s+Interview,\s+and Review surfaces/i,
+      );
+      expect(prompt).toMatch(/application-owned capability/i);
+      expect(prompt).toMatch(/generic help-desk refusal/i);
     });
 
     it("gives Ask Jack one authoritative map of Jack Core", () => {

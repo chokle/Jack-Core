@@ -104,6 +104,7 @@ jobs:
         timeout-minutes: 1
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_SITE_HUD_DEMO_ENABLED: ${{ vars.VITE_SITE_HUD_DEMO_ENABLED || 'false' }}
         run: node cloudflare/generate-deploy-config.mjs
 
       - name: Validate Cloudflare helper syntax
@@ -130,7 +131,8 @@ jobs:
         timeout-minutes: 10
         env:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
-        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false -t jack-core-cloudflare:deploy .
+          VITE_SITE_HUD_DEMO_ENABLED: ${{ vars.VITE_SITE_HUD_DEMO_ENABLED || 'false' }}
+        run: docker build -f Dockerfile.cloudflare --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" --build-arg VITE_PILOT_AUTH_BYPASS=false --build-arg VITE_SITE_HUD_DEMO_ENABLED="$VITE_SITE_HUD_DEMO_ENABLED" -t jack-core-cloudflare:deploy .
 
       - name: API full tests
         timeout-minutes: 5
@@ -160,6 +162,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          JACK_VOICE_ID: ${{ secrets.JACK_VOICE_ID }}
           ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
         run: |
           node <<'NODE'
@@ -170,6 +174,8 @@ jobs:
             "SUPABASE_SERVICE_ROLE_KEY",
             "CLERK_SECRET_KEY",
             "OPENAI_API_KEY",
+            "ELEVENLABS_API_KEY",
+            "JACK_VOICE_ID",
             "ADMIN_EMAILS",
           ];
           const secrets = Object.fromEntries(

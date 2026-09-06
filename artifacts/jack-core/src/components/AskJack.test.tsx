@@ -27,6 +27,9 @@ const askJackState = vi.hoisted(() => ({
   isPending: false,
   mutate: vi.fn(),
   pendingCalls: [] as PendingCall[],
+  useRealHook: false,
+  request: vi.fn(),
+  telemetrySession: null as { id: string } | null,
 }));
 
 const askJackHistory = vi.hoisted(() => ({
@@ -39,15 +42,23 @@ const askJackHistory = vi.hoisted(() => ({
   }[],
 }));
 
-vi.mock("@workspace/api-client-react", () => ({
-  useAskJack: () => ({
-    isPending: askJackState.isPending,
-    mutate: askJackState.mutate,
-  }),
-  useGetChatHistory: () => ({ data: askJackHistory.data }),
-  useClearChatHistory: () => ({ mutate: vi.fn(), isPending: false }),
-  getGetChatHistoryQueryKey: () => ["chat-history"],
-}));
+vi.mock("@workspace/api-client-react", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@workspace/api-client-react")>();
+  return {
+    askJack: askJackState.request,
+    useAskJack: (...args: Parameters<typeof actual.useAskJack>) =>
+      askJackState.useRealHook
+        ? actual.useAskJack(...args)
+        : {
+            isPending: askJackState.isPending,
+            mutate: askJackState.mutate,
+          },
+    useGetChatHistory: () => ({ data: askJackHistory.data }),
+    useClearChatHistory: () => ({ mutate: vi.fn(), isPending: false }),
+    getGetChatHistoryQueryKey: () => ["chat-history"],
+  };
+});
 
 vi.mock("@/components/StructuredAnswer", () => ({
   StructuredAnswer: ({ content }: { content: string }) => (
@@ -60,7 +71,7 @@ vi.mock("@/components/ParkedThoughts", () => ({
 }));
 
 vi.mock("@/lib/user-testing/test-session-service", () => ({
-  getCachedTestSession: () => null,
+  getCachedTestSession: () => askJackState.telemetrySession,
 }));
 
 function resolveSuccess(response: AskJackResponse, index = 0): void {
@@ -159,6 +170,9 @@ describe("AskJack UX", () => {
   beforeEach(() => {
     askJackState.isPending = false;
     askJackState.pendingCalls = [];
+    askJackState.useRealHook = false;
+    askJackState.telemetrySession = null;
+    askJackState.request.mockReset();
     configureAskJackSuccess();
     askJackHistory.data = [];
   });
@@ -166,6 +180,54 @@ describe("AskJack UX", () => {
   afterEach(() => {
     cleanup();
     askJackState.mutate.mockReset();
+  });
+
+  it("sends fresh bounded UI context and the current telemetry session on each submission", async () => {
+    askJackState.useRealHook = true;
+    askJackState.request.mockResolvedValue({
+      answer: "Current selection received.",
+      citations: [],
+      usedInternalKnowledge: true,
+    });
+    const { container } = renderAskJack();
+    const surface = document.createElement("div");
+    surface.dataset.jackSurface = "Memory 🧠";
+    surface.dataset.jackPath = JSON.stringify(["Memory", "Old selection"]);
+    surface.dataset.nodeId = "old-selection";
+    container.appendChild(surface);
+
+    const input = screen.getByTestId("chat-input") as HTMLInputElement;
+    for (const [index, selection] of ["Root pass", "Fill pass"].entries()) {
+      fireEvent.change(input, { target: { value: `Explain ${selection}` } });
+      // Update the page after the last React render, immediately before submit.
+      surface.dataset.jackPath = JSON.stringify(["Memory", selection]);
+      surface.dataset.nodeId = selection;
+      askJackState.telemetrySession = { id: `session-${selection}` };
+      fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+      await waitFor(() => {
+        expect(askJackState.request).toHaveBeenLastCalledWith(
+          { message: `Explain ${selection}` },
+          { headers: expect.any(Object) },
+        );
+        expect(screen.getAllByTestId("assistant-message")).toHaveLength(
+          index + 1,
+        );
+        expect(screen.queryByText("Lemme think for a sec...")).toBeNull();
+      });
+      const headers = askJackState.request.mock.lastCall?.[1].headers;
+      const contextHeader = headers["X-Jack-Context"];
+      expect(contextHeader.length).toBeLessThanOrEqual(3500);
+      expect(JSON.parse(decodeURIComponent(contextHeader))).toMatchObject({
+        version: 1,
+        surface: "Memory 🧠",
+        path: ["Memory", selection],
+        visibleIds: [selection],
+      });
+      expect(headers["X-Jack-Surface"]).toBe(encodeURIComponent("Memory 🧠"));
+      expect(headers["X-Jack-Test-Session-Id"]).toBe(`session-${selection}`);
+    }
+    expect(askJackState.request).toHaveBeenCalledTimes(2);
   });
 
   it("restores input focus after a successful send when input was focused", async () => {

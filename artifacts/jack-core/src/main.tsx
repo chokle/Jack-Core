@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { FloatingJack } from "./components/FloatingJack";
 import { prepareBrowserUpgrade } from "./lib/bootstrap-recovery";
 import { initializeActivityHeartbeat } from "./lib/user-testing/activity-heartbeat";
 
@@ -75,6 +76,7 @@ async function start(): Promise<void> {
   createRoot(document.getElementById("root")!).render(
     <StartupErrorBoundary>
       <App />
+      <FloatingJack />
     </StartupErrorBoundary>,
   );
 }

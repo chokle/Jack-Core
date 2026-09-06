@@ -24,6 +24,8 @@ interface FloatingPanelProps {
   /** Panel body. Scrolls independently of the graph. */
   children: ReactNode;
   onClose: () => void;
+  /** Exposes this existing close action to contextual navigation. */
+  closeAction?: "back";
   /** Expanded/minimized presentation; closed panels are unmounted by the owner. */
   state?: "expanded" | "minimized";
   onMinimize?: () => void;
@@ -126,6 +128,7 @@ export function FloatingPanel({
   headerActions,
   children,
   onClose,
+  closeAction,
   state = "expanded",
   onMinimize,
   onRestore,
@@ -307,6 +310,7 @@ export function FloatingPanel({
         headerContent={headerContent}
         headerActions={headerActions}
         onClose={onClose}
+        closeAction={closeAction}
         onMinimize={onMinimize}
         maxHeight={maxHeight}
         bodyKey={bodyKey}
@@ -348,6 +352,7 @@ export function FloatingPanel({
           )}
           <button
             onClick={onClose}
+            data-jack-action={closeAction}
             title="Close"
             aria-label="Close"
             className="-mr-1 -mt-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
@@ -377,6 +382,7 @@ function MobileSheet({
   headerActions,
   children,
   onClose,
+  closeAction,
   onMinimize,
   maxHeight,
   bodyKey,
@@ -386,6 +392,7 @@ function MobileSheet({
   headerActions?: ReactNode;
   children: ReactNode;
   onClose: () => void;
+  closeAction?: "back";
   onMinimize?: () => void;
   maxHeight?: string;
   bodyKey?: string;
@@ -440,7 +447,10 @@ function MobileSheet({
       ref={sheetRef}
       role="dialog"
       aria-label={ariaLabel}
-      style={{ maxHeight: maxHeight ?? "80dvh" }}
+      style={{
+        maxHeight: `min(${maxHeight ?? "80dvh"}, calc(100dvh - var(--jack-pill-height, 0px) - 6rem))`,
+        bottom: "var(--jack-pill-height, 0px)",
+      }}
       className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-white/10 bg-card/95 shadow-2xl shadow-black/70 ring-1 ring-white/5 backdrop-blur-xl duration-200 ease-out animate-in slide-in-from-bottom-4 fade-in-0"
     >
       <div
@@ -471,6 +481,7 @@ function MobileSheet({
             )}
             <button
               onClick={onClose}
+              data-jack-action={closeAction}
               title="Close"
               aria-label="Close"
               className="-mr-1 -mt-1 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors active:bg-white/10 active:text-foreground"
@@ -633,7 +644,9 @@ function MinimizedPill({
       style={{
         visibility: ready ? "visible" : "hidden",
         touchAction: "none",
-        bottom: isDesktop ? PAD : "max(0.75rem, env(safe-area-inset-bottom))",
+        bottom: isDesktop
+          ? PAD
+          : "calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
       }}
       className="pointer-events-auto absolute left-0 z-30 flex h-11 max-w-[calc(100%_-_1.5rem)] cursor-grab items-center gap-2 rounded-full border border-white/10 bg-card/95 px-3 text-sm font-medium shadow-xl shadow-black/60 ring-1 ring-white/5 backdrop-blur-xl active:cursor-grabbing md:max-w-72"
     >

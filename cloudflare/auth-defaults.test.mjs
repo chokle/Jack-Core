@@ -1,8 +1,59 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("Site HUD flag reaches the actual Wrangler container build and defaults off", async () => {
+  const workflow = await read(
+    ".github/workflows/cloudflare-production-deploy.yml",
+  );
+  assert.match(
+    stepBody(workflow, "Generate Cloudflare deploy config"),
+    /VITE_SITE_HUD_DEMO_ENABLED: \$\{\{ vars\.VITE_SITE_HUD_DEMO_ENABLED \|\| 'false' \}\}/,
+  );
+  const directory = await mkdtemp(path.join(tmpdir(), "jack-hud-config-"));
+  try {
+    for (const file of ["generate-deploy-config.mjs", "wrangler.base.json"]) {
+      await writeFile(
+        path.join(directory, file),
+        await read(`cloudflare/${file}`),
+      );
+    }
+    for (const value of [undefined, "false", "true", "TRUE"]) {
+      const env = {
+        ...process.env,
+        VITE_CLERK_PUBLISHABLE_KEY: "pk_test_fixture",
+        PILOT_AUTH_BYPASS: "false",
+      };
+      delete env.VITE_SITE_HUD_DEMO_ENABLED;
+      if (value !== undefined) env.VITE_SITE_HUD_DEMO_ENABLED = value;
+      const result = spawnSync(
+        process.execPath,
+        [path.join(directory, "generate-deploy-config.mjs")],
+        { env, encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const generated = JSON.parse(
+        await readFile(path.join(directory, "wrangler.generated.json"), "utf8"),
+      );
+      assert.ok(generated.containers.length > 0);
+      for (const container of generated.containers) {
+        assert.equal(
+          container.image_vars.VITE_SITE_HUD_DEMO_ENABLED,
+          value === "true" ? "true" : "false",
+        );
+        assert.equal(container.image_vars.VITE_PILOT_AUTH_BYPASS, "false");
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 function stepBody(workflow, name) {
   const start = workflow.indexOf(`- name: ${name}`);
@@ -84,6 +135,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
   assert.doesNotMatch(generator, /PILOT_AUTH_BYPASS !== "false"/);
   assert.match(dockerfile, /ARG VITE_PILOT_AUTH_BYPASS=false/);
+  assert.doesNotMatch(dockerfile, /VITE_JACK_VOICE_HINT/);
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
   assert.match(workflow, /--secrets-file/);
@@ -98,6 +150,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     3,
     "Clerk publishable key must be bound to preflight, config generation, and container build",
   );
+  assert.doesNotMatch(workflow, /VITE_JACK_VOICE_HINT/);
   assert.match(workflow, /- name: Resolve deployed container digest/);
   assert.match(
     workflow,
@@ -412,4 +465,44 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
     () => bareDashSteps.slice(0, bareDashRolloutIndex).map(stepTimeoutMinutes),
     /Bare-dash unbounded pre-gate work must declare exactly one integer timeout-minutes cap/,
   );
+});
+
+test("cloned voice secrets reach only server runtime and remain optional", async () => {
+  const [worker, workflow, dockerfile, baseText, verification] =
+    await Promise.all([
+      read("cloudflare/worker.mjs"),
+      read(".github/workflows/cloudflare-production-deploy.yml"),
+      read("Dockerfile.cloudflare"),
+      read("cloudflare/wrangler.base.json"),
+      read(".github/workflows/cloudflare-cutover-verify.yml"),
+    ]);
+  const runtimeSource = worker.slice(
+    worker.indexOf("const CONTAINER_PORT"),
+    worker.indexOf("/**"),
+  );
+  const resolve = runInNewContext(`${runtimeSource}; containerEnv`);
+  const configured = resolve({
+    ELEVENLABS_API_KEY: "test-provider-key",
+    JACK_VOICE_ID: "approved-clone",
+  });
+  const missing = resolve({});
+  const blank = resolve({ ELEVENLABS_API_KEY: "", JACK_VOICE_ID: "" });
+  for (const name of ["ELEVENLABS_API_KEY", "JACK_VOICE_ID"]) {
+    assert.equal(missing[name], undefined);
+    assert.equal(blank[name], undefined);
+    assert.equal(JSON.parse(baseText).secrets.required.includes(name), false);
+    assert.doesNotMatch(dockerfile, new RegExp(name));
+    assert.doesNotMatch(
+      stepBody(workflow, "Build production container"),
+      new RegExp(name),
+    );
+    assert.match(
+      stepBody(workflow, "Prepare Worker secret handoff"),
+      new RegExp(`secrets\\.${name}`),
+    );
+    assert.equal(workflow.split(`secrets.${name}`).length - 1, 1);
+  }
+  assert.equal(configured.ELEVENLABS_API_KEY, "test-provider-key");
+  assert.equal(configured.JACK_VOICE_ID, "approved-clone");
+  assert.doesNotMatch(verification, /VITE_JACK_VOICE_HINT/);
 });

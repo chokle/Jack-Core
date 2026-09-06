@@ -4,6 +4,7 @@ import meRouter from "./me.js";
 import videosRouter from "./videos.js";
 import searchRouter from "./search.js";
 import chatRouter from "./chat.js";
+import jackSpeechRouter from "./jack-speech.js";
 import competenciesRouter from "./competencies.js";
 import knowledgeRouter from "./knowledge.js";
 import graphRouter from "./graph.js";
@@ -19,6 +20,8 @@ import activityHeartbeatRouter from "./activity-heartbeat.js";
 import endOfShiftCloseoutRouter from "./end-of-shift-closeout.js";
 import accountRouter from "./account.js";
 import pilotEnrollmentsRouter from "./pilot-enrollments.js";
+import { jackUiRequestContextMiddleware } from "../lib/jack-ui-request-context.js";
+import { askJackTelemetrySessionMiddleware } from "../lib/ask-jack-telemetry-session.js";
 
 const router: IRouter = Router();
 
@@ -26,7 +29,10 @@ router.use(healthRouter);
 router.use(meRouter);
 router.use(videosRouter);
 router.use(searchRouter);
+router.use(askJackTelemetrySessionMiddleware);
+router.use("/chat", jackUiRequestContextMiddleware);
 router.use(chatRouter);
+router.use(jackSpeechRouter);
 router.use(competenciesRouter);
 router.use(knowledgeRouter);
 router.use(graphRouter);

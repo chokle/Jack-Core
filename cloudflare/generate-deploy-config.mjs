@@ -49,6 +49,8 @@ config.containers = config.containers.map((container) => ({
       : {}),
     VITE_DISABLE_CLERK_PROXY: "true",
     VITE_ENABLE_CLERK_PROXY: "false",
+    VITE_SITE_HUD_DEMO_ENABLED:
+      process.env.VITE_SITE_HUD_DEMO_ENABLED === "true" ? "true" : "false",
   },
 }));
 
