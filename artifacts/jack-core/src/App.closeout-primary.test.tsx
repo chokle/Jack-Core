@@ -136,7 +136,10 @@ describe("participant Closeout navigation without telemetry", () => {
       const { default: App } = await import("./App");
       render(<App />);
       await waitFor(() => expect(loadTelemetryContext).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
       expect(screen.getByText("Participant library")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
       fireEvent.click(screen.getByRole("button", { name: /^Closeout$/ }));
       await waitFor(() =>
         expect(screen.getByLabelText("Organization")).toHaveProperty(
