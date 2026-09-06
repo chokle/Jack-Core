@@ -11,6 +11,8 @@ const DEFAULT_EXPIRY_SECONDS = 15 * 60;
 const MIN_EXPIRY_SECONDS = 60;
 const MAX_EXPIRY_SECONDS = 60 * 60;
 const DEFAULT_REDIRECT_URL = "https://jack.torchlabs.ca/app";
+const MEMBERSHIP_PAGE_SIZE = 100;
+const PARTICIPANT_BATCH_SIZE = 10;
 const QR_LIBRARY_URL =
   "https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs@04f46c6a0708418cb7b96fc563eacae0fbf77674/qrcode.min.js";
 
@@ -101,95 +103,140 @@ async function loadActiveMembership(pilotId: string, userId: string): Promise<Pi
   );
 }
 
-router.get("/pilot-enrollments", requireAdmin, async (req: Request, res: Response) => {
-  const pilotId = typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
-  if (!UUID_RE.test(pilotId)) {
-    return res.status(400).json({ error: "A valid pilotId is required." });
-  }
-
-  try {
-    const pilot = await loadActivePilot(pilotId);
-    if (!pilot) return res.status(404).json({ error: "Active pilot not found." });
-
-    const membershipsResult = await db
+async function listActiveMemberships(
+  pilotId: string,
+): Promise<PilotMembershipRow[]> {
+  const memberships: PilotMembershipRow[] = [];
+  const now = Date.now();
+  let afterId: string | undefined;
+  for (;;) {
+    let query = db
       .from("pilot_memberships")
-      .select("organization_id,pilot_id,user_id,role,active,valid_from,valid_until")
+      .select(
+        "id,organization_id,pilot_id,user_id,role,active,valid_from,valid_until",
+      )
       .eq("pilot_id", pilotId)
       .eq("role", "tester")
       .eq("active", true)
-      .limit(100);
-    if (membershipsResult.error) throw membershipsResult.error;
-    const memberships = ((membershipsResult.data ?? []) as PilotMembershipRow[]).filter((row) =>
-      isActiveMembership(row),
-    );
-
-    const [sessionsResult, eventsResult] = await Promise.all([
-      db.from("test_sessions").select("actor_user_id").eq("pilot_id", pilotId).limit(10_000),
-      db.from("test_events").select("actor_user_id").eq("pilot_id", pilotId).limit(50_000),
-    ]);
-    if (sessionsResult.error) throw sessionsResult.error;
-    if (eventsResult.error) throw eventsResult.error;
-
-    const sessionCounts = new Map<string, number>();
-    for (const row of sessionsResult.data ?? []) {
-      const userId = String(row.actor_user_id ?? "");
-      if (userId) sessionCounts.set(userId, (sessionCounts.get(userId) ?? 0) + 1);
+      .order("id", { ascending: true })
+      .limit(MEMBERSHIP_PAGE_SIZE);
+    if (afterId) query = query.gt("id", afterId);
+    const result = await query;
+    if (result.error) throw result.error;
+    const page = (result.data ?? []) as Array<
+      PilotMembershipRow & { id: string }
+    >;
+    if (page.length === 0) return memberships;
+    const lastId = page[page.length - 1]!.id;
+    if (!lastId || (afterId && lastId <= afterId)) {
+      throw new Error("Pilot membership pagination did not advance.");
     }
-    const eventCounts = new Map<string, number>();
-    for (const row of eventsResult.data ?? []) {
-      const userId = String(row.actor_user_id ?? "");
-      if (userId) eventCounts.set(userId, (eventCounts.get(userId) ?? 0) + 1);
-    }
-
-    const participants = await Promise.all(
-      memberships.map(async (membership) => {
-        try {
-          const user = await clerkClient.users.getUser(membership.user_id);
-          return {
-            userId: membership.user_id,
-            name: displayName(user),
-            email: primaryEmail(user),
-            validUntil: membership.valid_until,
-            activity: {
-              sessions: sessionCounts.get(membership.user_id) ?? 0,
-              events: eventCounts.get(membership.user_id) ?? 0,
-            },
-          };
-        } catch (error) {
-          req.log?.warn(
-            { error, userId: membership.user_id },
-            "failed to resolve Clerk user for pilot enrollment list",
-          );
-          return {
-            userId: membership.user_id,
-            name: null,
-            email: null,
-            validUntil: membership.valid_until,
-            activity: {
-              sessions: sessionCounts.get(membership.user_id) ?? 0,
-              events: eventCounts.get(membership.user_id) ?? 0,
-            },
-          };
-        }
-      }),
-    );
-
-    res.setHeader("Cache-Control", "no-store, max-age=0");
-    return res.json({
-      pilot: {
-        id: pilot.id,
-        organizationId: pilot.organization_id,
-        name: pilot.name,
-        startsAt: pilot.starts_at,
-        endsAt: pilot.ends_at,
-      },
-      participants,
-    });
-  } catch (error) {
-    req.log?.error({ error, pilotId }, "failed to list pilot enrollment participants");
-    return res.status(503).json({ error: "Pilot enrollment list is temporarily unavailable." });
+    memberships.push(...page.filter((row) => isActiveMembership(row, now)));
+    afterId = lastId;
+    // Continue even after a short page: the provider may impose a lower row cap.
   }
-});
+}
+
+async function loadActivityCount(
+  table: "test_sessions" | "test_events",
+  pilotId: string,
+  userId: string,
+) {
+  const result = await db
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("pilot_id", pilotId)
+    .eq("actor_user_id", userId);
+  if (result.error) throw result.error;
+  const count = result.count;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+    throw new Error("Pilot activity count is unavailable.");
+  }
+  return count;
+}
+
+router.get(
+  "/pilot-enrollments",
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    const pilotId =
+      typeof req.query["pilotId"] === "string" ? req.query["pilotId"] : "";
+    if (!UUID_RE.test(pilotId)) {
+      return res.status(400).json({ error: "A valid pilotId is required." });
+    }
+
+    try {
+      const pilot = await loadActivePilot(pilotId);
+      if (!pilot)
+        return res.status(404).json({ error: "Active pilot not found." });
+
+      const memberships = await listActiveMemberships(pilotId);
+      const participants = [];
+      for (
+        let offset = 0;
+        offset < memberships.length;
+        offset += PARTICIPANT_BATCH_SIZE
+      ) {
+        const batch = await Promise.all(
+          memberships
+            .slice(offset, offset + PARTICIPANT_BATCH_SIZE)
+            .map(async (membership) => {
+              const [sessions, events] = await Promise.all([
+                loadActivityCount("test_sessions", pilotId, membership.user_id),
+                loadActivityCount("test_events", pilotId, membership.user_id),
+              ]);
+              const activity = { sessions, events };
+              try {
+                const user = await clerkClient.users.getUser(
+                  membership.user_id,
+                );
+                return {
+                  userId: membership.user_id,
+                  name: displayName(user),
+                  email: primaryEmail(user),
+                  validUntil: membership.valid_until,
+                  activity,
+                };
+              } catch (error) {
+                req.log?.warn(
+                  { error, userId: membership.user_id },
+                  "failed to resolve Clerk user for pilot enrollment list",
+                );
+                return {
+                  userId: membership.user_id,
+                  name: null,
+                  email: null,
+                  validUntil: membership.valid_until,
+                  activity,
+                };
+              }
+            }),
+        );
+        participants.push(...batch);
+      }
+
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        pilot: {
+          id: pilot.id,
+          organizationId: pilot.organization_id,
+          name: pilot.name,
+          startsAt: pilot.starts_at,
+          endsAt: pilot.ends_at,
+        },
+        participants,
+      });
+    } catch (error) {
+      req.log?.error(
+        { error, pilotId },
+        "failed to list pilot enrollment participants",
+      );
+      return res
+        .status(503)
+        .json({ error: "Pilot enrollment list is temporarily unavailable." });
+    }
+  },
+);
 
 router.post("/pilot-enrollments", requireAdmin, async (req: Request, res: Response) => {
   const pilotId = typeof req.body?.pilotId === "string" ? req.body.pilotId.trim() : "";
