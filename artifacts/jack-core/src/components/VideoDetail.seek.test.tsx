@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { VideoDetail as VideoDetailData } from "@workspace/api-client-react";
 import { VideoDetail } from "./VideoDetail";
+import { collectJackUiContext } from "../lib/jack-ui-context";
 
 /**
  * Closes the timestamp-jump loop the concept inspector starts. The inspector
@@ -105,6 +106,29 @@ function makeVideo(overrides: Partial<VideoDetailData> = {}): VideoDetailData {
 const noop = () => {};
 
 describe("VideoDetail — timestamp seek", () => {
+  it("updates Jack's selected tab while retaining the video source", () => {
+    videoState.data = makeVideo();
+    render(<VideoDetail videoId="v1" onBack={noop} onOpenChat={noop} />);
+    expect(collectJackUiContext()).toMatchObject({
+      surface: "Video",
+      path: ["Library", "Root Pass Demo", "Analysis"],
+      visibleIds: ["v1"],
+    });
+    const transcript = screen.getByRole("button", { name: "Transcript" });
+    fireEvent.click(transcript);
+    expect(collectJackUiContext()).toMatchObject({
+      surface: "Video",
+      path: ["Library", "Root Pass Demo", "Transcript"],
+      visibleIds: ["v1"],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analysis" }));
+    expect(collectJackUiContext().path).toEqual([
+      "Library",
+      "Root Pass Demo",
+      "Analysis",
+    ]);
+  });
+
   it("shows the unavailable state while a selected video has no response instead of crashing", () => {
     render(<VideoDetail videoId="missing" onBack={noop} onOpenChat={noop} />);
 
@@ -118,7 +142,7 @@ describe("VideoDetail — timestamp seek", () => {
 
     const source = document.querySelector('[data-jack-surface="Video"]');
     expect(source?.getAttribute("data-jack-path")).toBe(
-      JSON.stringify(["Library", "Root Pass Demo"]),
+      JSON.stringify(["Library", "Root Pass Demo", "Analysis"]),
     );
     expect(source?.getAttribute("data-video-id")).toBe("v1");
     expect(source?.getAttribute("data-jack-label")).toBe("Root Pass Demo");
