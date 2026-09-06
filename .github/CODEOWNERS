@@ -1,0 +1,7 @@
+# Founder-locked Jack identity core.
+# Changes to these paths require Derek/Dee (@chokle) approval.
+/artifacts/api-server/src/lib/constitution.ts @chokle
+/artifacts/api-server/src/lib/jack-identity.ts @chokle
+/docs/jack-identity/ @chokle
+/.github/CODEOWNERS @chokle
+/.github/workflows/jack-identity-founder-lock.yml @chokle
