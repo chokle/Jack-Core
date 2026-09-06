@@ -230,6 +230,38 @@ describe("end-of-shift closeout", () => {
     expect(denied.status).toBe(403);
   });
 
+  it.each(["missing", "inactive", "expired"])(
+    "denies load, draft save, and submit with zero active memberships (%s)",
+    async (membershipState) => {
+      if (membershipState !== "missing") {
+        seedMemberships();
+        Object.assign(
+          fake.tables.pilot_memberships[0],
+          membershipState === "inactive"
+            ? { active: false }
+            : { valid_until: "2026-01-02T00:00:00.000Z" },
+        );
+      }
+      const server = app();
+      const responses = [
+        await request(server).get(
+          `/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`,
+        ),
+        await request(server).post("/api/testing/closeouts").send(validDraft()),
+        await request(server)
+          .post("/api/testing/closeouts")
+          .send(validSubmit()),
+      ];
+      for (const response of responses) {
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({
+          error: "No active tester membership was found.",
+        });
+      }
+      expect(fake.tables.end_of_shift_closeouts ?? []).toHaveLength(0);
+    },
+  );
+
   it("requires an active tester scope and rejects ambiguous memberships", async () => {
     fake.tables.pilot_memberships = [
       {
