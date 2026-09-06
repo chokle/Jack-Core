@@ -336,7 +336,6 @@ export function JackShell({
         </div>
       </aside>
 
-<<<<<<< HEAD
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" &&
           siteHudUserId && (
@@ -388,7 +387,6 @@ export function JackShell({
             Forward to next Jack view
           </button>
         </nav>
->>>>>>> origin/main
       </main>
     </div>
   );
