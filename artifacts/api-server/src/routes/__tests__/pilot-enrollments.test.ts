@@ -81,7 +81,12 @@ const from = vi.hoisted(() =>
     }
     const query = {
       select: vi.fn(
-        (_columns: string, options?: { count?: string; head?: boolean }) => {
+        (columns: string, options?: { count?: string; head?: boolean }) => {
+          // The event primary key is event_id, unlike test_sessions.id. Model
+          // PostgREST column validation even for HEAD/count-only queries.
+          if (table === "test_events" && columns.split(",").includes("id")) {
+            throw new Error("column test_events.id does not exist");
+          }
           exactCount = options?.count === "exact";
           head = options?.head === true;
           return query;

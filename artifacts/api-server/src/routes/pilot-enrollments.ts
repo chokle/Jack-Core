@@ -144,7 +144,7 @@ async function loadActivityCount(
 ) {
   const result = await db
     .from(table)
-    .select("id", { count: "exact", head: true })
+    .select("*", { count: "exact", head: true })
     .eq("pilot_id", pilotId)
     .eq("actor_user_id", userId);
   if (result.error) throw result.error;
