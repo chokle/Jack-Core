@@ -70,6 +70,60 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("sends the selected Library resource and opens returned timestamp sources", async () => {
+    api.askJack.mockResolvedValue({
+      answer: "The video shows an EMT offset.",
+      citations: [
+        {
+          sourceType: "video",
+          videoId: "e3",
+          videoTitle: "EMT Offset",
+          startTime: 80,
+          endTime: 89,
+        },
+      ],
+    });
+    render(
+      <>
+        <section
+          data-jack-surface="Video"
+          data-video-id="e3"
+          data-video-title="EMT Offset"
+          data-video-trade="electrician"
+          data-video-status="completed"
+        />
+        <FloatingJack />
+      </>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const input = screen.getByRole("textbox", { name: "Ask Jack" });
+    fireEvent.change(input, {
+      target: { value: "What is this video showing me?" },
+    });
+    await act(async () => {
+      fireEvent.submit(input.closest("form")!);
+    });
+    const context = JSON.parse(
+      decodeURIComponent(
+        api.askJack.mock.calls[0][1].headers["X-Jack-Context"],
+      ),
+    );
+    expect(context.resources[0]).toMatchObject({
+      id: "e3",
+      title: "EMT Offset",
+      selected: true,
+    });
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+    fireEvent.click(screen.getByRole("button", { name: "EMT Offset · 1:20" }));
+    expect(opened.mock.calls[0][0].detail).toEqual({
+      videoId: "e3",
+      startTime: 80,
+    });
+    window.removeEventListener("jack:open-video-source", opened);
+  });
   it("keeps Jack usable inside an account dialog and restores him after it closes", async () => {
     const view = render(<FloatingJack />);
     await act(async () => {

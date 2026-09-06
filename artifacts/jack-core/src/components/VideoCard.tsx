@@ -79,6 +79,8 @@ export function VideoCard({
       data-jack-action="video"
       data-video-id={video.id}
       data-video-title={video.title}
+      data-video-trade={video.trade}
+      data-video-status={video.status}
       className="group cursor-pointer flex flex-col bg-card rounded-xl border border-card-border overflow-hidden hover:border-primary/50 hover:shadow-[0_0_20px_rgba(255,100,0,0.1)] transition-all duration-300 relative"
     >
       <div className="relative aspect-video bg-muted overflow-hidden">

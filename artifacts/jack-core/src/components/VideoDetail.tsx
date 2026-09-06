@@ -323,6 +323,9 @@ export function VideoDetail({
         activeTab === "analysis" ? "Analysis" : "Transcript",
       ])}
       data-video-id={video.id}
+      data-video-title={video.title}
+      data-video-trade={video.trade}
+      data-video-status={video.status}
       data-jack-label={video.title}
     >
       <div className="flex-none p-4 border-b border-border flex items-center justify-between bg-card/50 backdrop-blur">

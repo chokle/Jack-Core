@@ -13,6 +13,43 @@ beforeEach(() => {
 });
 
 describe("Jack UI context", () => {
+  it("captures a selected video's structured metadata and drops it under a dialog", () => {
+    document.body.innerHTML = `<section data-jack-surface="Video" data-video-id="e3" data-video-title="EMT Offset" data-video-trade="electrician" data-video-status="completed"></section>`;
+    expect(collectJackUiContext().resources).toEqual([
+      {
+        id: "e3",
+        title: "EMT Offset",
+        trade: "electrician",
+        status: "completed",
+        selected: true,
+      },
+    ]);
+    const header = JSON.parse(
+      decodeURIComponent(encodeJackUiContextHeader(collectJackUiContext())),
+    );
+    expect(header.resources[0].id).toBe("e3");
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<section data-jack-surface="Account settings"></section>',
+    );
+    expect(collectJackUiContext().resources).toEqual([]);
+  });
+
+  it("includes only viewport-visible Library cards without treating them as selected", () => {
+    document.body.innerHTML = `<main data-jack-surface="Library"><div data-video-id="e3" data-video-title="EMT Offset"></div><div data-video-id="offscreen" data-video-title="Hidden video"></div></main>`;
+    const card = document.querySelector<HTMLElement>('[data-video-id="e3"]')!;
+    card.getBoundingClientRect = () =>
+      ({ left: 0, right: 300, top: 100, bottom: 400 }) as DOMRect;
+    const offscreen = document.querySelector<HTMLElement>(
+      '[data-video-id="offscreen"]',
+    )!;
+    offscreen.getBoundingClientRect = () =>
+      ({ left: 2000, right: 2300, top: 100, bottom: 400 }) as DOMRect;
+    expect(collectJackUiContext().resources).toEqual([
+      { id: "e3", title: "EMT Offset", trade: "", status: "", selected: false },
+    ]);
+  });
+
   it("uses the active screen path instead of an earlier mounted graph", () => {
     document.body.innerHTML = `
       <section data-jack-surface="Living Memory" data-jack-path='["Jack","Welder"]'><i data-node-id="old-node"></i></section>

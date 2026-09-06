@@ -62,7 +62,8 @@ function sameSelectionContext(a: JackUiContext | null, b: JackUiContext) {
     a.path.join("|") === b.path.join("|") &&
     a.inspector.open === b.inspector.open &&
     a.inspector.label === b.inspector.label &&
-    a.visibleIds.join("|") === b.visibleIds.join("|")
+    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    JSON.stringify(a.resources ?? []) === JSON.stringify(b.resources ?? [])
   );
 }
 
@@ -81,6 +82,9 @@ export function FloatingJack() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
+  const [sources, setSources] = useState<
+    Array<{ videoId: string; videoTitle: string; startTime: number }>
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [listening, setListening] = useState(false);
@@ -260,6 +264,7 @@ export function FloatingJack() {
 
     submissionInFlightRef.current = true;
     setPending(true);
+    setSources([]);
     setError(null);
     setAnswer(null);
     setInput("");
@@ -301,6 +306,13 @@ export function FloatingJack() {
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
       setAnswer(response.answer);
+      setSources(
+        (response.citations ?? [])
+          .filter(
+            (item) => item.sourceType === "video" && Boolean(item.videoId),
+          )
+          .slice(0, 6),
+      );
       speak(response.answer);
     } catch {
       refreshContext();
@@ -427,6 +439,27 @@ export function FloatingJack() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {answer &&
+              sources.map((source, index) => (
+                <button
+                  key={`${source.videoId}-${source.startTime}-${index}`}
+                  type="button"
+                  className="mt-2 block text-left text-xs text-primary underline"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent("jack:open-video-source", {
+                        detail: {
+                          videoId: source.videoId,
+                          startTime: source.startTime,
+                        },
+                      }),
+                    )
+                  }
+                >
+                  {source.videoTitle} · {Math.floor(source.startTime / 60)}:
+                  {String(Math.floor(source.startTime % 60)).padStart(2, "0")}
+                </button>
+              ))}
           </div>
         )}
 

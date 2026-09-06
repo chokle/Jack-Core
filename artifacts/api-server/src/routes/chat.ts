@@ -40,6 +40,7 @@ import {
   type JurisdictionResolution,
 } from "../lib/code-authority.js";
 import { createRevisionFeedFingerprintObserver } from "../lib/revision-feed-observer.js";
+import { loadLibraryContext } from "../lib/library-context.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_MATCHES = 2;
@@ -206,6 +207,22 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
+    const libraryContext = await loadLibraryContext(message, userId);
+    if (libraryContext.failure) {
+      await recordServerAskJackEvent({
+        req,
+        actorIdentity: await resolveIdentity(req),
+        eventType: "ask_jack_completed",
+        correlationId: session,
+        citationCount: 0,
+      });
+      return res.json({
+        answer: libraryContext.failure,
+        citations: [],
+        usedInternalKnowledge: false,
+        learning: { status: "discarded", extractedCount: 0 },
+      });
+    }
     const embedding = await createEmbedding(message);
 
     const { data: segments, error: rpcError } = await supabase.rpc(
@@ -258,7 +275,15 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
     // Steer the retrieved transcript context by reviewer decisions: verified
     // concepts' segments are boosted, rejected concepts' segments are suppressed.
     // This reorders the context Jack reasons over and the citations it returns.
-    const rawSegments = (segments ?? []) as Array<Record<string, unknown>>;
+    const rawSegments = (
+      (segments ?? []) as Array<Record<string, unknown>>
+    ).filter(
+      (segment) =>
+        !libraryContext.videos.length ||
+        libraryContext.videos.some(
+          (video) => video["id"] === segment["video_id"],
+        ),
+    );
     const coverage = await fetchVerificationCoverage(
       rawSegments
         .map((s) => s["video_id"])
@@ -447,7 +472,9 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
-    const matchedVideos = await findReferencedVideos(message);
+    const matchedVideos = libraryContext.videos.length
+      ? libraryContext.videos
+      : await findReferencedVideos(message);
     for (const video of matchedVideos) {
       contextText += formatReferencedVideoContext(video);
       const segments = Array.isArray(video["transcript_segments"])

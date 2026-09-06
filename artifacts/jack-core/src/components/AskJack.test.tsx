@@ -230,6 +230,45 @@ describe("AskJack UX", () => {
     expect(askJackState.request).toHaveBeenCalledTimes(2);
   });
 
+  it("uses the same selected-video context as the floating pill", async () => {
+    askJackState.useRealHook = true;
+    askJackState.request.mockResolvedValue({
+      answer: "An EMT offset.",
+      citations: [],
+      usedInternalKnowledge: true,
+    });
+    const { container } = renderAskJack();
+    const surface = document.createElement("section");
+    Object.assign(surface.dataset, {
+      jackSurface: "Video",
+      videoId: "e3",
+      videoTitle: "EMT Offset",
+      videoTrade: "electrician",
+      videoStatus: "completed",
+    });
+    container.append(surface);
+    const input = screen.getByTestId("chat-input");
+    fireEvent.change(input, {
+      target: { value: "What is this video showing me?" },
+    });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(askJackState.request).toHaveBeenCalled());
+    const context = JSON.parse(
+      decodeURIComponent(
+        askJackState.request.mock.lastCall?.[1].headers["X-Jack-Context"],
+      ),
+    );
+    expect(context.resources).toEqual([
+      {
+        id: "e3",
+        title: "EMT Offset",
+        trade: "electrician",
+        status: "completed",
+        selected: true,
+      },
+    ]);
+  });
+
   it("restores input focus after a successful send when input was focused", async () => {
     configureAskJackSuccess();
     renderAskJack();
