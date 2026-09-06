@@ -5,3 +5,6 @@
 /docs/jack-identity/ @chokle
 /.github/CODEOWNERS @chokle
 /.github/workflows/jack-identity-founder-lock.yml @chokle
+/.github/workflows/founder-lock-review-signal.yml @chokle
+/.github/workflows/founder-lock-tests.yml @chokle
+/.github/tests/jack-identity-founder-lock.test.mjs @chokle
