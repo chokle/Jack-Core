@@ -1103,6 +1103,10 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         userLabel={userLabel}
         userSubLabel={userSubLabel}
         siteHudUserId={isSignedIn ? me?.userId : undefined}
+        operationalUserId={
+          isSignedIn && typeof me?.isAdmin === "boolean" ? me.userId : undefined
+        }
+        isAdmin={isSignedIn && me?.isAdmin === true}
         onOpenSettings={() => {
           if (isSignedIn) {
             setAccountSettingsOpen(true);

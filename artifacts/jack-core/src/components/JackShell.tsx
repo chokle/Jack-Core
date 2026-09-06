@@ -18,6 +18,8 @@ import {
 import type { GraphModel } from "../lib/memory-graph";
 import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
+import { OperationalHud } from "./OperationalHud";
+import { AgentCommandCentre } from "./AgentCommandCentre";
 import { SiteHudDemo } from "./SiteHudDemo";
 
 export type JackView =
@@ -39,6 +41,8 @@ interface JackShellProps {
   userSubLabel?: string;
   /** Resolved account identity; the demo also requires its build flag and site opt-in. */
   siteHudUserId?: string;
+  operationalUserId?: string;
+  isAdmin?: boolean;
   /** Opens Clerk's secure account profile for password, sessions, and deletion. */
   onOpenSettings?: () => void;
   onSignOut?: () => void;
@@ -68,6 +72,8 @@ export function JackShell({
   userLabel,
   userSubLabel,
   siteHudUserId,
+  operationalUserId,
+  isAdmin = false,
   onOpenSettings,
   onSignOut,
   onStartUserTest,
@@ -337,6 +343,16 @@ export function JackShell({
       </aside>
 
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {operationalUserId && (
+          <OperationalHud key={operationalUserId} userId={operationalUserId} />
+        )}
+        {operationalUserId && isAdmin && (
+          <AgentCommandCentre
+            key={operationalUserId}
+            userId={operationalUserId}
+            isAdmin={isAdmin}
+          />
+        )}
         {import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" &&
           siteHudUserId && (
             <div className="relative z-20 shrink-0 p-2">

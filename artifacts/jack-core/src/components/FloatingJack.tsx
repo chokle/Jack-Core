@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
-import { askJack, getMe } from "@workspace/api-client-react";
+import { askJack, getMe, customFetch } from "@workspace/api-client-react";
 import {
   collectJackUiContext,
   encodeJackUiContextHeader,
@@ -79,6 +79,44 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
 
 export function FloatingJack() {
   const [authorized, setAuthorized] = useState(false);
+  const identityRef = useRef<{ userId: string; isAdmin: boolean } | null>(null);
+  const voiceActiveRef = useRef(false);
+  const voiceQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const voiceRequestsRef = useRef(new Set<AbortController>());
+  const reportListening = useCallback((active: boolean) => {
+    if (!identityRef.current || voiceActiveRef.current === active)
+      return voiceQueueRef.current;
+    voiceActiveRef.current = active;
+    const identity = identityRef.current;
+    const controller = new AbortController();
+    voiceRequestsRef.current.add(controller);
+    voiceQueueRef.current = voiceQueueRef.current.then(async () => {
+      if (
+        controller.signal.aborted ||
+        identityRef.current?.userId !== identity.userId
+      )
+        return;
+      const timeout = window.setTimeout(() => controller.abort(), 2000);
+      try {
+        await customFetch("/api/operational/voice", {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: active
+              ? "voice.listening.started"
+              : "voice.listening.stopped",
+          }),
+        });
+      } catch {
+        /* Operational availability never blocks asking Jack. */
+      } finally {
+        window.clearTimeout(timeout);
+        voiceRequestsRef.current.delete(controller);
+      }
+    });
+    return voiceQueueRef.current;
+  }, []);
   const [input, setInput] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +188,7 @@ export function FloatingJack() {
         cancelSpeech();
         setPending(false);
         setListening(false);
+        void reportListening(false);
         setAnswer(null);
         setError(
           interruptedVoice
@@ -161,17 +200,43 @@ export function FloatingJack() {
       setUiContext(next);
     }
     return next;
-  }, [cancelSpeech]);
+  }, [cancelSpeech, reportListening]);
 
   useEffect(() => {
     let cancelled = false;
 
     const checkIdentity = async () => {
       try {
-        await getMe({ credentials: "include" });
-        if (!cancelled) setAuthorized(true);
+        const me = await getMe({ credentials: "include" });
+        if (!cancelled) {
+          const previous = identityRef.current;
+          if (
+            previous &&
+            (previous.userId !== me.userId || previous.isAdmin !== me.isAdmin)
+          ) {
+            voiceRequestsRef.current.forEach((request) => request.abort());
+            voiceRequestsRef.current.clear();
+            voiceActiveRef.current = false;
+            contextEpochRef.current += 1;
+            requestRef.current?.abort();
+            recognitionRef.current?.abort();
+            recognitionRef.current = null;
+            cancelSpeech();
+            setListening(false);
+            setAnswer(null);
+            setInput("");
+          }
+          identityRef.current =
+            me.userId && typeof me.isAdmin === "boolean"
+              ? { userId: me.userId, isAdmin: me.isAdmin }
+              : null;
+          setAuthorized(true);
+        }
       } catch {
-        if (!cancelled) setAuthorized(false);
+        if (!cancelled) {
+          identityRef.current = null;
+          setAuthorized(false);
+        }
       }
     };
 
@@ -182,7 +247,7 @@ export function FloatingJack() {
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, []);
+  }, [cancelSpeech]);
 
   useEffect(() => {
     refreshContext();
@@ -221,6 +286,9 @@ export function FloatingJack() {
 
   useEffect(() => {
     if (!authorized) {
+      voiceRequestsRef.current.forEach((request) => request.abort());
+      voiceRequestsRef.current.clear();
+      voiceActiveRef.current = false;
       contextEpochRef.current += 1;
       requestRef.current?.abort();
       requestRef.current = null;
@@ -238,6 +306,8 @@ export function FloatingJack() {
 
   useEffect(() => {
     return () => {
+      voiceRequestsRef.current.forEach((request) => request.abort());
+      voiceRequestsRef.current.clear();
       contextEpochRef.current += 1;
       requestRef.current?.abort();
       recognitionRef.current?.abort();
@@ -249,7 +319,7 @@ export function FloatingJack() {
     void speechPlayerRef.current?.speak(plainSpeech(text));
   };
 
-  const submit = async (message: string) => {
+  const submit = async (message: string, voice = false) => {
     const trimmed = message.trim();
     if (!authorized || !trimmed || submissionInFlightRef.current) return;
 
@@ -270,6 +340,48 @@ export function FloatingJack() {
     cancelSpeech();
 
     try {
+      if (identityRef.current) await reportListening(false);
+      if (controller.signal.aborted || contextEpochRef.current !== epoch)
+        return;
+      const internalCommand =
+        voice && identityRef.current?.isAdmin
+          ? trimmed.match(
+              /^(?:jack[, ]+)?(run|dispatch|interrupt|reprioritize)\s+agent\s+([a-z][a-z0-9_-]{0,79})$/i,
+            )
+          : null;
+      if (internalCommand) {
+        const action = internalCommand[1].toLowerCase();
+        const permission =
+          action === "dispatch"
+            ? "agent.dispatch.run"
+            : action === "interrupt"
+              ? "agent.interrupt.stop"
+              : `agent.command.${action}`;
+        try {
+          await customFetch("/api/admin/agents/commands", {
+            method: "POST",
+            signal: controller.signal,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              permission,
+              agentId: internalCommand[2].trim(),
+              channel: "voice",
+            }),
+          });
+          if (!controller.signal.aborted) setAnswer("Command accepted.");
+        } catch (error) {
+          if (!controller.signal.aborted)
+            setAnswer(
+              typeof error === "object" &&
+                error !== null &&
+                "status" in error &&
+                error.status === 501
+                ? "No internal agent executor is configured. Command was not executed."
+                : "Internal command was not accepted.",
+            );
+        }
+        return;
+      }
       const localCommand = resolveJackLocalCommand(trimmed);
       if (localCommand) {
         const action = resolveJackLocalAction(localCommand);
@@ -356,11 +468,12 @@ export function FloatingJack() {
         recognition.onresult = null;
         recognition.stop();
         setListening(false);
-        void submit(finalTranscript);
+        void submit(finalTranscript, true);
       }
     };
     recognition.onerror = () => {
       if (recognitionRef.current !== recognition) return;
+      void reportListening(false);
       recognitionRef.current = null;
       setListening(false);
       setError("I didn’t catch that. Tap the mic and try again.");
@@ -369,6 +482,7 @@ export function FloatingJack() {
       if (recognitionRef.current === recognition) {
         recognitionRef.current = null;
         setListening(false);
+        void reportListening(false);
       }
     };
     recognitionRef.current = recognition;
@@ -376,6 +490,7 @@ export function FloatingJack() {
     setListening(true);
     try {
       recognition.start();
+      void reportListening(true);
     } catch {
       recognitionRef.current = null;
       setListening(false);

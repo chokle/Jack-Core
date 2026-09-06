@@ -22,11 +22,13 @@ import accountRouter from "./account.js";
 import pilotEnrollmentsRouter from "./pilot-enrollments.js";
 import { jackUiRequestContextMiddleware } from "../lib/jack-ui-request-context.js";
 import { askJackTelemetrySessionMiddleware } from "../lib/ask-jack-telemetry-session.js";
+import operationalRouter from "./operational-state.js";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(meRouter);
+router.use(operationalRouter);
 router.use(videosRouter);
 router.use(searchRouter);
 router.use(askJackTelemetrySessionMiddleware);

@@ -357,3 +357,59 @@ describe("FloatingJack submission lifecycle", () => {
     );
   });
 });
+
+describe("operational voice boundary", () => {
+  it.each([false, true])(
+    "routes internal voice commands only for resolved admins (%s)",
+    async (isAdmin) => {
+      api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin });
+      vi.mocked(fetch).mockImplementation(async (input) => {
+        if (String(input).includes("/api/admin/agents/commands"))
+          return new Response(
+            JSON.stringify({
+              error: "No internal agent executor is configured.",
+            }),
+            { status: 501, headers: { "Content-Type": "application/json" } },
+          );
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      render(<FloatingJack />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      await act(async () => {
+        FakeSpeechRecognition.latest!.onresult?.({
+          results: [
+            { 0: { transcript: "Jack interrupt agent Dex" }, isFinal: true },
+          ],
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const requests = vi.mocked(fetch).mock.calls;
+      expect(
+        requests.filter(([url]) =>
+          String(url).includes("/api/admin/agents/commands"),
+        ),
+      ).toHaveLength(isAdmin ? 1 : 0);
+      const voiceRequests = requests.filter(([url]) =>
+        String(url).includes("/api/operational/voice"),
+      );
+      expect(
+        voiceRequests.map(
+          ([, options]) => JSON.parse(String(options?.body)).type,
+        ),
+      ).toEqual(["voice.listening.started", "voice.listening.stopped"]);
+      if (isAdmin) {
+        expect(api.askJack).not.toHaveBeenCalled();
+        expect(
+          screen.getByText(
+            "No internal agent executor is configured. Command was not executed.",
+          ),
+        ).toBeTruthy();
+      } else expect(api.askJack).toHaveBeenCalledOnce();
+    },
+  );
+});
