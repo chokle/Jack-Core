@@ -2,13 +2,24 @@
 
 Status: implementation committed; live acceptance NOT COMPLETE. No merge or deployment performed.
 
+## Mission review update (2026-09-06)
+
+- Reviewed implementation: `27d17a51bd62e5764e0a6acb579d68dd6439c3ed`.
+- Direct transcript lookup now applies existing reviewer verification rules even when vector search returns no matches. Rejected windows are excluded, and untimed transcript/analysis/key-point/description fallbacks are suppressed when they could reintroduce rejected material. Citation trust metadata is retained.
+- Media context is used for media questions and bare contextual requests. General questions and "this button" do not trigger Library access failures. Explicitly named other videos retain title lookup; quoted technical terms still use the selected video.
+- Independent read-only review cleared these changes. CodeRabbit's green draft status is not a completed review; Aikido was skipped for the draft.
+- Latest focused run: 3 files / 16 tests PASS, 118.82 seconds wall time (238ms test execution). An earlier run recorded 15 passes and one 5-second timeout during severe shared-machine contention; the successful rerun supersedes that failure without hiding it.
+- Exact-code-head CI: https://github.com/chokle/Jack-Core/actions/runs/34065883543 completed SUCCESS at 2026-09-06 23:07:52 UTC. Actual full API tests (65 files / 865 tests), full frontend tests (53 files / 477 tests), workspace typecheck, workspace build, container smoke, and diff-check steps passed. Semgrep passed. Existing bundle-size and tooltip sourcemap warnings remained nonfatal.
+- Local simulated browser fixture: first navigation timed out after 30 seconds; a bounded retry produced no acceptance evidence and was cancelled. Vite and browser runner sessions were stopped and the local heavy-job slot released to the coordinator. No browser, production, video playback, or physical audio PASS is claimed.
+- Current disposition: DRAFT / RELEASE HOLD. Next actor is coordinator/Daz for access-policy reconciliation and legitimate authenticated real-asset/Pixel acceptance. No merge or deployment occurred in this task.
+
 - Repository: `chokle/Jack-Core`
 - Isolated checkout: `D:/Code/worktrees/Jack-library-retrieval-20260906`
 - Branch: `codex/fix-library-retrieval-20260906`
 - Base: `99cf82ae92bf59ed6382b49d230a664a2ec29d44`
 - Implementation commit: `9279b53c3d6377c3a02d152a9015d5fdbff6f5fb`
 - PR: https://github.com/chokle/Jack-Core/pull/144 (draft).
-- Handoff delivery: committed repository artifact attached to PR #144; no message sent to another task or person.
+- Handoff delivery: committed repository artifact attached to PR #144; current remediation receipts delivered to the mission coordinator through Codex task messages.
 
 ## Verified cause and data path
 
@@ -16,7 +27,7 @@ Status: implementation committed; live acceptance NOT COMPLETE. No merge or depl
 
 Before: VideoCard had an ID/title in the DOM, but the UI packet carried only untyped visible IDs. `/chat` embedded only the question and its secondary direct-video path required an explicitly named/quoted title. Current UI resource IDs never selected the saved media. The floating pill also discarded the API's citations.
 
-After: both chat interfaces use the same bounded resource packet (ID, title, trade, processing status, selected versus visible). The backend validates the packet and uses the server-authenticated user plus exact video IDs to resolve saved video content. Up to six relevant timestamped transcript segments from a bounded 1,000-segment read supplement the existing semantic retrieval; active-video context takes precedence over named-title fallback. Metadata used for evidence comes from the database, not the client's title. Missing content returns an explicit failure without calling the model. Multiple visible cards do not silently become one selected asset.
+After: both chat interfaces use the same bounded resource packet (ID, title, trade, processing status, selected versus visible). The backend validates the packet and uses the server-authenticated user plus exact video IDs to resolve saved video content. Up to six relevant timestamped transcript segments from a bounded 1,000-segment read supplement the existing semantic retrieval; active-video context is used for contextual media questions while explicit video titles retain named-title lookup. Metadata used for evidence comes from the database, not the client's title. Missing content returns an explicit failure without calling the model. Multiple visible cards do not silently become one selected asset.
 
 The floating pill renders returned video source buttons; the app routes a clicked source through existing video navigation and timestamp seek behavior. No arbitrary model-authored URL or DOM selector is executed.
 
@@ -45,7 +56,7 @@ The floating pill renders returned video source buttons; the app routes a clicke
 
 ## Limits and next actor
 
-1. The existing Library reads are shared among authenticated users; video rows have uploader identity but no explicit organization-sharing grant. The new direct-ID path conservatively requires `uploader_user_id = req.userId`. Another uploader's media and unowned legacy rows are not retrieved by this new path. An optional user question about uploader-only versus existing shared-library access is pending. Preserve uploader-only until that decision is resolved; do not invent tenant membership from a UI ID. Existing broad Library read policy is outside this patch and is not certified as tenant-isolated.
+1. Existing Library list/detail handlers perform broad authenticated reads; that implementation alone does not establish intended sharing authorization. The schema and audited documentation did not provide a positive shared-library grant. The new direct-ID path conservatively requires `uploader_user_id = req.userId`. Another uploader's media and unowned legacy rows are not retrieved by this new path. This preserves a conservative boundary, not a newly selected founder policy. Preserve it until existing permission evidence or a policy decision resolves the mismatch. Existing broad reads are outside this patch and are not certified as tenant-isolated.
 2. Local route tests use FakeSupabase and a stubbed model. They prove structured context, indexed-record loading, source metadata, failure behavior, and ownership filtering; they do not prove production retrieval, real model no-repeat behavior, or physical audio.
 3. Authenticated real-asset acceptance is still required: use the legitimate uploader account, open/select E-3, ask what the video shows and a question answered in a later segment, open its timestamp source, repeat in normal Ask Jack, then confirm actual voice output on the Pixel. No usable authenticated production session was available in this task. No new code was deployed.
 4. Daz/reviewer: inspect the draft PR and resolve the access-model choice, then sequence an authorized release and record exact-head authenticated acceptance. Keep #112 acceptance open; this is not a completion claim for #112, telemetry, or #126.
