@@ -1,0 +1,110 @@
+name: Jack Identity Founder Lock
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  founder-lock:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify founder approval for Jack identity-core changes
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request?.number ?? context.payload.issue?.number;
+
+            if (!prNumber) {
+              core.setFailed('Unable to resolve pull request number.');
+              return;
+            }
+
+            const pr = (await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            })).data;
+            const headSha = pr.head.sha;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const lockedExact = new Set([
+              'artifacts/api-server/src/lib/constitution.ts',
+              'artifacts/api-server/src/lib/jack-identity.ts',
+              '.github/CODEOWNERS',
+              '.github/workflows/jack-identity-founder-lock.yml',
+            ]);
+            const lockedPrefixes = ['docs/jack-identity/'];
+
+            const lockedFiles = files
+              .map((file) => file.filename)
+              .filter(
+                (filename) =>
+                  lockedExact.has(filename) ||
+                  lockedPrefixes.some((prefix) => filename.startsWith(prefix)),
+              );
+
+            if (lockedFiles.length === 0) {
+              core.info('No founder-locked Jack identity-core files changed.');
+              return;
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const exactHeadApproval = reviews.some(
+              (review) =>
+                review.user?.login?.toLowerCase() === 'chokle' &&
+                review.state === 'APPROVED' &&
+                review.commit_id === headSha,
+            );
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const approvalMarker = `FOUNDER-APPROVED-JACK-IDENTITY ${headSha}`;
+            const exactHeadCommentApproval = comments.some(
+              (comment) =>
+                comment.user?.login?.toLowerCase() === 'chokle' &&
+                comment.body?.includes(approvalMarker),
+            );
+
+            if (!exactHeadApproval && !exactHeadCommentApproval) {
+              core.setFailed(
+                [
+                  'Founder approval is required for Jack identity-core changes.',
+                  `Locked files changed: ${lockedFiles.join(', ')}`,
+                  `Exact head requiring approval: ${headSha}`,
+                  `Derek/Dee (@chokle) must either APPROVE this exact head or comment: ${approvalMarker}`,
+                ].join('\n'),
+              );
+              return;
+            }
+
+            core.info(`Founder approval verified for exact head ${headSha}.`);
