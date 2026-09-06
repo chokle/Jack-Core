@@ -146,16 +146,36 @@ function parseVideoCommand(intent: string): JackLocalCommand | null {
 }
 
 function parseNodeCommand(intent: string): JackLocalCommand | null {
-  const match = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  // Ambiguous verbs (open/show/view/find/locate/visit) only become node
+  // navigation when the qualifier is explicit and precedes the label. This
+  // prevents arbitrary content clauses ending in words such as branch/topic
+  // from bypassing Ask Jack. Directional verbs remain unambiguous and may use
+  // either a suffix qualifier or a bare visible-node label.
+  const prefixQualifiedMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|open|show|view|visit|find|locate|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(?:node|concept|topic|branch)\s+(.+)$/i,
   );
-  if (!match) return null;
+  if (prefixQualifiedMatch) {
+    const target = prefixQualifiedMatch[1].replace(/^['"]|['"]$/g, "").trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
 
-  const target = match[1]
-    .replace(/^(?:node|concept|topic|branch)\s+/i, "")
-    .replace(/\s+(?:node|concept|topic|branch)$/i, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+  const directionalSuffixMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)\s+(?:node|concept|topic|branch)$/i,
+  );
+  if (directionalSuffixMatch) {
+    const target = directionalSuffixMatch[1]
+      .replace(/^['"]|['"]$/g, "")
+      .trim();
+    return target ? { kind: "node", target, label: `node ${target}` } : null;
+  }
+
+  const directionalMatch = intent.match(
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+  );
+  const rawTarget = directionalMatch?.[1];
+  if (!rawTarget) return null;
+
+  const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
 
   return { kind: "node", target, label: `node ${target}` };
