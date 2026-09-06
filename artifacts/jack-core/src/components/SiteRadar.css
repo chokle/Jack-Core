@@ -1,0 +1,145 @@
+.site-radar {
+  color: #a5f3fc;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  background: transparent;
+  font-family: inherit;
+}
+.site-radar__readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+}
+.site-radar__readout strong {
+  font-size: 24px;
+  color: #ecfeff;
+  font-variant-numeric: tabular-nums;
+}
+.site-radar__scope {
+  width: 100%;
+  max-height: 65dvh;
+  min-height: 260px;
+  display: block;
+  overflow: visible;
+}
+.site-radar__grid {
+  stroke: #22d3ee;
+  stroke-opacity: 0.2;
+  fill: none;
+  stroke-width: 0.75;
+}
+.site-radar__tick {
+  stroke: #67e8f9;
+  stroke-opacity: 0.4;
+  fill: none;
+}
+.site-radar__north {
+  fill: #fff;
+  font-size: 17px;
+  font-weight: 800;
+}
+.site-radar__cardinal {
+  fill: #67e8f9;
+  font-size: 13px;
+}
+.site-radar__contact {
+  fill: #67e8f9;
+}
+.site-radar__contact text {
+  fill: #cffafe;
+  font-size: 10px;
+  text-anchor: middle;
+}
+.site-radar__contact--stale circle {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+}
+.site-radar__ping {
+  fill: none;
+  stroke: #67e8f9;
+  stroke-width: 1;
+}
+.site-radar__landmark {
+  fill: none;
+  stroke: #fbbf24;
+  stroke-width: 1.5;
+}
+.site-radar__viewer {
+  fill: white;
+  stroke: #22d3ee;
+  stroke-width: 1;
+}
+.site-radar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+  font-size: 12px;
+}
+.site-radar__controls {
+  margin: 20px auto 0;
+  max-width: 420px;
+  display: grid;
+  gap: 10px;
+}
+.site-radar__controls label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.site-radar__controls input {
+  width: 100%;
+  min-height: 28px;
+  accent-color: #22d3ee;
+}
+.site-radar__controls button {
+  justify-self: center;
+  padding: 9px 16px;
+  border: 1px solid #22d3ee66;
+  border-radius: 8px;
+  background: transparent;
+  color: #a5f3fc;
+  font: inherit;
+  font-size: 13px;
+  min-height: 44px;
+}
+.site-radar__controls button:focus-visible,
+.site-radar__controls input:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 3px;
+}
+.site-radar__controls p,
+.site-radar__notice {
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #94a3b8;
+}
+.site-radar__notice {
+  margin: 12px auto;
+  max-width: 460px;
+}
+@media (max-width: 480px) {
+  .site-radar__readout {
+    font-size: 9px;
+    gap: 8px;
+  }
+  .site-radar__scope {
+    min-height: 250px;
+    max-height: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-radar *,
+  .site-radar *::before,
+  .site-radar *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

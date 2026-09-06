@@ -26,6 +26,7 @@ export type JackView =
   | "interview"
   | "review"
   | "reports"
+  | "radar"
   | "closeout";
 
 interface JackShellProps {
@@ -89,7 +90,10 @@ export function JackShell({
     review: "Review",
     reports: "Pilot Reports",
     closeout: "Closeout",
+    radar: "Site radar demo",
   };
+  const hudEnabled =
+    import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" && !!siteHudUserId;
 
   const go = (v: JackView) => {
     onNavigate(v);
@@ -203,6 +207,14 @@ export function JackShell({
             active={active === "library"}
             onClick={() => go("library")}
           />
+          {hudEnabled && (
+            <NavItem
+              icon={<Radio className="h-4 w-4" />}
+              label="Site radar"
+              active={active === "radar"}
+              onClick={() => go("radar")}
+            />
+          )}
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
@@ -337,17 +349,31 @@ export function JackShell({
       </aside>
 
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" &&
-          siteHudUserId && (
-            <div className="relative z-20 shrink-0 p-2">
-              <SiteHudDemo key={siteHudUserId} />
-            </div>
-          )}
+        {hudEnabled && (
+          <div
+            className={
+              active === "radar"
+                ? "relative flex min-h-0 flex-1 flex-col bg-background"
+                : "relative shrink-0 bg-background"
+            }
+          >
+            <SiteHudDemo
+              key={siteHudUserId}
+              expanded={active === "radar"}
+              onOpenRadar={() => go("radar")}
+              onExitRadar={() => go("graph")}
+            />
+          </div>
+        )}
         <div
-          className="relative flex min-h-0 flex-1 overflow-hidden"
+          className={
+            active === "radar"
+              ? "sr-only"
+              : "relative flex min-h-0 flex-1 overflow-hidden"
+          }
           data-jack-surface={surfaceLabel[active]}
         >
-          {children}
+          {active !== "radar" && children}
         </div>
         {/* These app-owned targets give Jack a bounded page/video history. The
             controls stay out of the visual layout; graph and video surfaces

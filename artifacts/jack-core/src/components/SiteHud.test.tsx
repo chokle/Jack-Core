@@ -15,7 +15,8 @@ const NOW = Date.parse("2026-09-05T12:00:00Z");
 let online: ReturnType<typeof vi.spyOn>;
 const openPanel = (name: string) =>
   fireEvent.click(screen.getByRole("button", { name }));
-const mode = () => screen.getByRole("status").textContent;
+const mode = () =>
+  screen.getByRole("status", { name: "Demo connectivity" }).textContent;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -30,7 +31,7 @@ afterEach(() => {
 });
 
 describe("Site HUD demo", () => {
-  it("starts collapsed with explicit simulation and navigation limits", () => {
+  it("opens a full radar page with explicit simulation and navigation limits", () => {
     render(<SiteHud {...createSiteHudFixture(NOW)} />);
 
     expect(mode()).toBe("ONLINE");
@@ -38,8 +39,10 @@ describe("Site HUD demo", () => {
     expect(
       screen.getByText("Simulated data · Not for navigation"),
     ).toBeTruthy();
-    expect(screen.queryByRole("heading")).toBeNull();
-    for (const button of screen.getAllByRole("button"))
+    expect(screen.getByRole("heading", { name: "Site radar" })).toBeTruthy();
+    for (const button of screen
+      .getAllByRole("button")
+      .filter((button) => button.hasAttribute("aria-expanded")))
       expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(
       screen.getByRole("group", { name: /Schematic radar: Ground/ }),
@@ -263,7 +266,7 @@ describe("Site HUD demo", () => {
     const added = vi.spyOn(window, "addEventListener");
     const removed = vi.spyOn(window, "removeEventListener");
     const { unmount } = render(<SiteHud {...createSiteHudFixture(NOW)} />);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2); // Aging timer and the radar animation frame.
     unmount();
     expect(vi.getTimerCount()).toBe(0);
     for (const event of ["online", "offline"]) {
