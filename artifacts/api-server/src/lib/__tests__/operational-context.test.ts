@@ -204,6 +204,128 @@ describe("operational scope and journal boundary", () => {
       subjectId: null,
     });
   });
+  it("persists a content-free gap with journal retention and exact tenant predicates", async () => {
+    const journal = new SupabaseOperationalJournal();
+    const started = Date.now();
+    await journal.markGap(context);
+    const inserted = calls.find(
+      ([method]) => method === "insert",
+    )?.[1] as Record<string, unknown>;
+    expect(inserted).toEqual({
+      id: expect.any(String),
+      actor_user_id: "u",
+      organization_id: org,
+      pilot_id: pilot,
+      test_session_id: session,
+      reason_code: "operational_event_gap",
+      outcome: "dropped",
+      event_count: 1,
+      retained_until: expect.any(String),
+    });
+    expect(Date.parse(String(inserted.retained_until))).toBeGreaterThanOrEqual(
+      started + 90 * 24 * 60 * 60_000,
+    );
+    expect(await journal.hasGap(context)).toBe(true);
+    for (const [key, value] of [
+      ["actor_user_id", "u"],
+      ["organization_id", org],
+      ["pilot_id", pilot],
+      ["test_session_id", session],
+      ["reason_code", "operational_event_gap"],
+    ])
+      expect(calls).toContainEqual(["eq", key, value]);
+    expect(calls).toContainEqual(["from", "activity_ingest_failures"]);
+    expect(mocks.consent).toHaveBeenCalledTimes(4);
+  });
+  it("keeps a persisted gap visible after bus restart without contaminating another tenant", async () => {
+    const gaps = new Set<string>();
+    const key = (value: typeof context) =>
+      JSON.stringify([value.scope, value.pilotId, value.sessionId]);
+    const journal = {
+      append: async () => {
+        throw new Error("append failed");
+      },
+      load: async () => [],
+      markGap: async (value: typeof context) => {
+        gaps.add(key(value));
+      },
+      hasGap: async (value: typeof context) => gaps.has(key(value)),
+    };
+    await expect(
+      new OperationalBus(journal).publish(context, {
+        type: "safety.alert",
+        audience: "field",
+        payload: {},
+      }),
+    ).rejects.toThrow("append failed");
+    const restarted = new OperationalBus(journal);
+    expect((await restarted.read(context)).durability).toBe("unavailable");
+    expect(
+      (
+        await restarted.read({
+          ...context,
+          scope: { ...scope, organizationId: "other" },
+        })
+      ).durability,
+    ).toBe("durable");
+    expect(
+      (
+        await restarted.read({
+          ...context,
+          sessionId: "44444444-4444-4444-8444-444444444444",
+          consent: { ...consent, id: "renewed-grant" },
+        })
+      ).durability,
+    ).toBe("durable");
+  });
+  it("fails closed on diagnostic query failure and preserves local gaps when diagnostic writes fail", async () => {
+    mocks.from.mockReturnValue({
+      select: () => {
+        throw new Error("diagnostics unavailable");
+      },
+    });
+    await expect(
+      new SupabaseOperationalJournal().hasGap(context),
+    ).rejects.toThrow("diagnostics unavailable");
+    const markGap = vi
+      .fn()
+      .mockRejectedValue(new Error("diagnostics unavailable"));
+    const journal = {
+      append: async () => {
+        throw new Error("append failed");
+      },
+      load: async () => [],
+      markGap,
+      hasGap: async () => false,
+    };
+    const bus = new OperationalBus(journal);
+    await expect(
+      bus.publish(context, {
+        type: "safety.alert",
+        audience: "field",
+        payload: {},
+      }),
+    ).rejects.toThrow("append failed");
+    expect(markGap).toHaveBeenCalledWith(context);
+    expect((await bus.read(context)).durability).toBe("unavailable");
+    const failedRead = new OperationalBus({
+      ...journal,
+      hasGap: async () => {
+        throw new Error("diagnostic read failed");
+      },
+    });
+    await expect(failedRead.read(context)).rejects.toThrow(
+      "diagnostic read failed",
+    );
+  });
+  it("denies diagnostic access when consent changes before or after the query", async () => {
+    const journal = new SupabaseOperationalJournal();
+    mocks.consent.mockResolvedValue(null);
+    await expect(journal.markGap(context)).rejects.toThrow("Consent changed");
+    expect(mocks.from).not.toHaveBeenCalled();
+    mocks.consent.mockResolvedValueOnce(consent).mockResolvedValueOnce(null);
+    await expect(journal.hasGap(context)).rejects.toThrow("Consent changed");
+  });
 });
 
 describe("shared Command Centre diagnostics", () => {

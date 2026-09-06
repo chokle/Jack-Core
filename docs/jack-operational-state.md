@@ -144,11 +144,19 @@ at read time, so restarting the API does not reset durable task ages.
 Durable replay paginates in 500-event batches and fails closed above 10,000 events
 per session until checkpointing is introduced. The history response includes the
 latest 200 matching events and marks truncation; filters never truncate replay.
-The journal is shared across API instances. Ingestion-error diagnostics are local
-to the serving process when the database cannot record them; no failed write is
-invented in durable history. A failed context lookup or journal read returns 503.
-Detected ingestion gaps remain flagged for the serving process's session even if
-a later append succeeds; field reads fail closed while that gap is known.
+The journal is shared across API instances. Failed appends record a fixed
+`operational_event_gap` marker in the existing `activity_ingest_failures` table,
+scoped to actor, organization, pilot and session and retained for 90 days. Reads
+check those diagnostics with current consent so recorded gaps survive restart
+and failover. A later successful append cannot clear an earlier missing transition.
+Diagnostic read failures fail closed. Existing session resume requires the same
+consent; renewed consent uses a new session.
+
+If the database also rejects the diagnostic write, a bounded process-local
+marker remains. That fallback cannot survive process loss, and an unrecorded gap
+cannot be reconstructed after restart. No failed transition is invented in event
+history. A failed context lookup or journal read returns 503; field reads fail
+closed while a gap is known.
 
 No internal worker executor is connected. Authorized command requests return
 `501` explicitly rather than fabricating dispatch or success. This boundary
@@ -165,7 +173,12 @@ Apply `20260906205400_jack_operational_events.sql` before deploying this code.
 Local PGlite tests execute the actual migration and existing privacy fence
 functions, test reopen/replay, scope rejection, SQL access denial and withdrawal.
 They do not certify the full production migration chain or live acceptance.
-No production migration, merge or deployment is part of this implementation run.
+Release tracking and remaining production gates are recorded in
+`docs/jack-operational-state-release.md`. The tested schema rollback is
+`supabase/rollback/jack_operational_events.sql`; it deletes operational history
+and is for isolated verification or an explicitly approved restore procedure.
+Prefer rolling back application code while retaining the additive schema and
+history. Never run the destructive schema rollback automatically in production.
 
 Tests cover strict contract validation, transitions, scope isolation, projection,
 field/foreman/superintendent denial, spoofed admin input, admin-positive access,

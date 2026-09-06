@@ -30,6 +30,13 @@ const existing = readFileSync(
   ),
   "utf8",
 );
+const rollback = readFileSync(
+  resolve(
+    import.meta.dirname,
+    "../../../../../supabase/rollback/jack_operational_events.sql",
+  ),
+  "utf8",
+);
 function existingFunction(name: string) {
   const start = existing.indexOf(`create or replace function public.${name}(`);
   return existing.slice(start, existing.indexOf("$$;", start) + 3);
@@ -106,6 +113,62 @@ afterAll(async () => {
 });
 
 describe.sequential("durable operational journal and database fences", () => {
+  it("rolls back atomically and reapplies the real migration without changing existing telemetry data", async () => {
+    const existingData = () =>
+      pg.query(`select
+        (select jsonb_agg(t) from telemetry_consents t) as consents,
+        (select jsonb_agg(t) from test_sessions t) as sessions,
+        (select jsonb_agg(t) from pilot_memberships t) as memberships,
+        (select jsonb_agg(t) from organizations t) as organizations,
+        (select jsonb_agg(t) from pilots t) as pilots`);
+    const before = (await existingData()).rows;
+    await new OperationalBus(journal).publish(context, {
+      type: "voice.listening.started",
+      audience: "field",
+      payload: {},
+    });
+    await pg.exec(
+      "create view operational_rollback_dependency as select event_id from jack_operational_events",
+    );
+    await expect(pg.exec(rollback)).rejects.toThrow(/depend/);
+    await pg.exec("rollback");
+    expect(await journal.load(context)).toHaveLength(1);
+    expect(
+      (
+        await pg.query(`select tgname from pg_trigger where tgname in
+        ('jack_operational_consent_purge','jack_operational_account_purge')`)
+      ).rows,
+    ).toHaveLength(2);
+    await pg.exec("drop view operational_rollback_dependency");
+    await pg.exec(rollback);
+    expect(
+      (
+        await pg.query(`select to_regclass('public.jack_operational_events') as journal,
+        to_regclass('public.jack_operational_event_sequence') as sequence,
+        to_regprocedure('public.validate_jack_operational_event()') as validation,
+        to_regprocedure('public.purge_jack_operational_consent()') as consent_purge,
+        to_regprocedure('public.purge_jack_operational_account()') as account_purge`)
+      ).rows,
+    ).toEqual([
+      {
+        journal: null,
+        sequence: null,
+        validation: null,
+        consent_purge: null,
+        account_purge: null,
+      },
+    ]);
+    expect((await existingData()).rows).toEqual(before);
+    expect(
+      (
+        await pg.query(`select proname from pg_proc where proname in
+        ('telemetry_consent_is_current','enforce_telemetry_account_deletion_fence')`)
+      ).rows,
+    ).toHaveLength(2);
+    await pg.exec(migration);
+    expect(await journal.load(context)).toEqual([]);
+    expect((await existingData()).rows).toEqual(before);
+  });
   it("persists one transition stream and reconstructs HUD/admin state after process restart", async () => {
     const bus = new OperationalBus(journal);
     await bus.publish(context, {
@@ -174,6 +237,16 @@ describe.sequential("durable operational journal and database fences", () => {
         scope: { ...context.scope, userId: "other" },
       }),
     ).toEqual([]);
+  });
+  it("rejects a duplicate event ID without changing replayed state or history", async () => {
+    const before = await new OperationalBus(journal).read(context);
+    await expect(journal.append(context, before.history[0])).rejects.toThrow(
+      /duplicate key/,
+    );
+    expect(await new OperationalBus(journal).read(context)).toEqual(before);
+    expect(new Set(before.history.map((event) => event.id)).size).toBe(
+      before.history.length,
+    );
   });
   it("denies direct client reads and writes and prevents service-role updates", async () => {
     for (const role of ["anon", "authenticated"]) {

@@ -143,9 +143,50 @@ export async function resolveOperationalContext(
 export interface OperationalJournal {
   append(context: OperationalContext, event: OperationalEvent): Promise<void>;
   load(context: OperationalContext): Promise<OperationalEvent[]>;
+  markGap?(context: OperationalContext): Promise<void>;
+  hasGap?(context: OperationalContext): Promise<boolean>;
 }
 
 export class SupabaseOperationalJournal implements OperationalJournal {
+  /** Reuse scoped ingestion diagnostics, not a second operational event stream.
+   * Retain this fixed, content-free marker for the journal's 90-day window. */
+  async markGap(context: OperationalContext) {
+    await this.consentCurrent(context);
+    const result = await db.from("activity_ingest_failures").insert({
+      id: randomUUID(),
+      actor_user_id: context.scope.userId,
+      organization_id: context.scope.organizationId,
+      pilot_id: context.pilotId,
+      test_session_id: context.sessionId,
+      reason_code: "operational_event_gap",
+      outcome: "dropped",
+      event_count: 1,
+      retained_until: new Date(
+        Date.now() + 90 * 24 * 60 * 60_000,
+      ).toISOString(),
+    });
+    if (result.error) throw result.error;
+    await this.consentCurrent(context);
+  }
+  async hasGap(context: OperationalContext) {
+    await this.consentCurrent(context);
+    // Session resume requires the exact original telemetry consent; a renewed
+    // grant creates a new session (test-sessions.ts). Session is the diagnostic
+    // lineage key because the existing failure table has no consent_id column.
+    const result = await db
+      .from("activity_ingest_failures")
+      .select("id")
+      .eq("actor_user_id", context.scope.userId)
+      .eq("organization_id", context.scope.organizationId)
+      .eq("pilot_id", context.pilotId)
+      .eq("test_session_id", context.sessionId)
+      .eq("reason_code", "operational_event_gap")
+      .gt("retained_until", new Date().toISOString())
+      .limit(1);
+    if (result.error) throw result.error;
+    await this.consentCurrent(context);
+    return Boolean(result.data?.length);
+  }
   private async consentCurrent(context: OperationalContext) {
     if (!context.pilotId || !context.consent || !context.sessionId)
       throw new OperationalAccessError("Durable session required.");
@@ -224,6 +265,16 @@ export class SupabaseOperationalJournal implements OperationalJournal {
  * same ordered journal. The memory adapter is used only without optional consent. */
 export class OperationalBus {
   private failures = new Set<string>();
+  private failureKey(context: OperationalContext) {
+    return JSON.stringify([
+      context.scope.userId,
+      context.scope.organizationId,
+      context.scope.siteId,
+      context.pilotId,
+      context.sessionId,
+      context.consent?.id,
+    ]);
+  }
   constructor(
     private readonly journal: OperationalJournal = new SupabaseOperationalJournal(),
   ) {}
@@ -235,6 +286,8 @@ export class OperationalBus {
         durability: "not_consented" as const,
       };
     const history = await this.journal.load(context);
+    // A failed diagnostic read is not evidence of a complete journal.
+    const durableGap = await this.journal.hasGap?.(context);
     let state = createOperationalState(context.scope);
     const seen = new Set<string>();
     for (const event of history) {
@@ -253,9 +306,10 @@ export class OperationalBus {
     return {
       state,
       history,
-      durability: this.failures.has(context.sessionId)
-        ? ("unavailable" as const)
-        : ("durable" as const),
+      durability:
+        durableGap || this.failures.has(this.failureKey(context))
+          ? ("unavailable" as const)
+          : ("durable" as const),
     };
   }
   async publish(context: OperationalContext, input: EventInput) {
@@ -278,7 +332,13 @@ export class OperationalBus {
     } catch (error) {
       if (this.failures.size >= 1000)
         this.failures.delete(this.failures.values().next().value!);
-      this.failures.add(context.sessionId);
+      this.failures.add(this.failureKey(context));
+      try {
+        await this.journal.markGap?.(context);
+      } catch {
+        // A total database outage can also prevent diagnostics. The local marker
+        // remains sticky, but cannot survive process loss in that case.
+      }
       throw error;
     }
   }
