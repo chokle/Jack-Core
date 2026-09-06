@@ -94,6 +94,12 @@ Typed and transcribed Ask Jack requests share the same server guard. Recognized
 internal agent addressing is refused for field users and directed to the admin
 surface for admins. Natural-language detection is a UX guard, not a security
 boundary: ordinary chat exposes no agent executor or model-routing tool.
+The guard requires addressing or command context; technical terms such as Android
+DEX files and incidental coworker-name mentions remain ordinary Jack questions.
+Optional listening observations never delay submitting a question. Submission
+cancels queued listening starts; the server stamps voice receipt before async
+authorization, and the shared reducer ignores voice observations older than the
+current task update so late persistence cannot replace its lifecycle.
 
 The HUD is a read-only subscriber, backed by one per-user frontend subscription
 store. It renders server snapshots; it never reduces workflow events or receives

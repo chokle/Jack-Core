@@ -293,6 +293,13 @@ export function reduceOperationalEvent(
     return state;
   if (e.type === "task.recovered" && !state.taskRecoverable) return state;
   if (e.type === "task.dispatched" && e.taskId === state.taskId) return state;
+  if (e.type.startsWith("voice.listening.") && state.taskId) {
+    const taskTime = state.tasks[state.taskId]?.updatedAt;
+    // An observation received before the current task must not replace its
+    // lifecycle merely because authorization or persistence completed later.
+    if (taskTime && Date.parse(e.occurredAt) <= Date.parse(taskTime))
+      return state;
+  }
   if (e.type === "voice.listening.stopped" && state.lifecycle !== "listening")
     return state;
   if (

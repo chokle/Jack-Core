@@ -88,6 +88,8 @@ router.get("/operational/state", async (req, res) => {
 });
 
 router.post("/operational/voice", async (req, res) => {
+  // Preserve receipt order across asynchronous identity/consent/database work.
+  const occurredAt = new Date().toISOString();
   const identity = await caller(req, res);
   if (!identity) return;
   const body = req.body;
@@ -107,6 +109,7 @@ router.post("/operational/voice", async (req, res) => {
       audience: "field",
       payload: {},
       source: "voice",
+      occurredAt,
     });
     const snapshot = await operationalBus.read(resolved.context);
     if (snapshot.durability === "unavailable") {

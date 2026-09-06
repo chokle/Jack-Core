@@ -26,6 +26,43 @@ const makeEvent = (
   });
 
 describe("canonical operational state", () => {
+  it("ignores delayed voice observations but accepts a new listening turn after task completion", () => {
+    let state = createOperationalState(scope);
+    for (const [index, type] of [
+      "task.dispatched",
+      "task.progress",
+      "task.completed",
+    ].entries()) {
+      state = reduceOperationalEvent(
+        state,
+        makeEvent(type as OperationalEvent["type"], index + 1, {
+          taskId: "field-task",
+          occurredAt: `2026-09-06T12:00:0${index + 1}.000Z`,
+        }),
+      );
+      for (const voiceType of [
+        "voice.listening.started",
+        "voice.listening.stopped",
+      ] as const) {
+        expect(
+          reduceOperationalEvent(
+            state,
+            makeEvent(voiceType, 10, {
+              occurredAt: "2026-09-06T12:00:00.000Z",
+            }),
+          ),
+        ).toBe(state);
+      }
+    }
+    expect(
+      reduceOperationalEvent(
+        state,
+        makeEvent("voice.listening.started", 11, {
+          occurredAt: "2026-09-06T12:00:04.000Z",
+        }),
+      ).lifecycle,
+    ).toBe("listening");
+  });
   it("starts without claiming measured connectivity or crew presence", () => {
     expect(createOperationalState(scope)).toMatchObject({
       lifecycle: "idle",

@@ -359,6 +359,71 @@ describe("FloatingJack submission lifecycle", () => {
 });
 
 describe("operational voice boundary", () => {
+  it("drops a queued listening start before submitting the actual question", async () => {
+    api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin: false });
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      FakeSpeechRecognition.latest!.onresult?.({
+        results: [{ 0: { transcript: "Explain this page" }, isFinal: true }],
+      });
+    });
+    expect(api.askJack).toHaveBeenCalledOnce();
+    const observations = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) =>
+        String(url).includes("/api/operational/voice"),
+      )
+      .map(([, options]) => JSON.parse(String(options?.body)).type);
+    expect(observations).toEqual(["voice.listening.stopped"]);
+  });
+
+  it.each(["started", "stopped"])(
+    "submits immediately while a listening %s observation is unresolved",
+    async (unresolvedType) => {
+      api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin: false });
+      vi.mocked(fetch).mockImplementation(async (_input, options) => {
+        const type = JSON.parse(String(options?.body)).type;
+        if (type === `voice.listening.${unresolvedType}`)
+          return new Promise<Response>(() => {});
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      render(<FloatingJack />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      });
+      const submittedAt = Date.now();
+      await act(async () => {
+        FakeSpeechRecognition.latest!.onresult?.({
+          results: [{ 0: { transcript: "Explain this page" }, isFinal: true }],
+        });
+      });
+      expect(Date.now()).toBe(submittedAt);
+      expect(api.askJack).toHaveBeenCalledOnce();
+      expect(api.askJack.mock.calls[0][0]).toEqual({
+        message: "Explain this page",
+      });
+      const startRequest = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([, options]) =>
+            JSON.parse(String(options?.body)).type ===
+            "voice.listening.started",
+        );
+      expect(startRequest).toBeDefined();
+      if (unresolvedType === "started")
+        expect(startRequest![1]?.signal?.aborted).toBe(true);
+    },
+  );
+
   it.each([false, true])(
     "routes internal voice commands only for resolved admins (%s)",
     async (isAdmin) => {
@@ -379,7 +444,9 @@ describe("operational voice boundary", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(500);
       });
-      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      });
       await act(async () => {
         FakeSpeechRecognition.latest!.onresult?.({
           results: [

@@ -1,4 +1,5 @@
-import express from "express";
+import express, { type Response } from "express";
+import { EventEmitter } from "node:events";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const { getAuth, getUser } = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ import {
   personalOperationalScope,
   OperationalStateStore,
   observeJackTask,
+  type EventInput,
 } from "../../lib/operational-state.js";
 import { authorizeAgentPermission } from "../../lib/agent-authorization.js";
 import { projectFieldState } from "@workspace/api-zod";
@@ -70,6 +72,43 @@ const permissions = [
   "agent.status.internal",
 ];
 describe("internal agent boundary", () => {
+  it("timestamps task observations before waiting for earlier journal writes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-06T12:00:00.000Z"));
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const events: EventInput[] = [];
+      const response = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        writableFinished: true,
+      });
+      observeJackTask(
+        "field",
+        response as unknown as Response,
+        async (event) => {
+          events.push(event);
+          if (events.length === 1) await blocked;
+        },
+      );
+      await Promise.resolve();
+      vi.setSystemTime(new Date("2026-09-06T12:00:02.000Z"));
+      response.emit("finish");
+      vi.setSystemTime(new Date("2026-09-06T12:00:10.000Z"));
+      release();
+      await vi.waitFor(() => expect(events).toHaveLength(4));
+      expect(events.map((event) => event.occurredAt)).toEqual([
+        "2026-09-06T12:00:00.000Z",
+        "2026-09-06T12:00:00.000Z",
+        "2026-09-06T12:00:00.000Z",
+        "2026-09-06T12:00:02.000Z",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   for (const humanRole of ["field", "foreman", "superintendent"]) {
     it.each(permissions)(
       `${humanRole} cannot invoke %s, including voice or spoofed admin fields`,
@@ -163,6 +202,32 @@ describe("internal agent boundary", () => {
     expect(
       (await request(app).post("/chat").send({ message: "Dex start" })).status,
     ).toBe(409);
+  });
+  it.each([
+    "What is an Android DEX file?",
+    "My coworker Dex found a damaged ladder. What should we do?",
+    "Dex is my coworker. Can you explain this citation?",
+    "How do I safely use a floor sweeper?",
+    "What are internal AI agents?",
+  ])(
+    "allows ordinary field questions mentioning names: %s",
+    async (message) => {
+      expect((await request(app).post("/chat").send({ message })).status).toBe(
+        200,
+      );
+    },
+  );
+  it.each([
+    "Dex, start the task",
+    "Hey Dex please stop",
+    "Jack interrupt agent Dex",
+    "Jack run agent Dex",
+    "Tell the Foreman Agent to dispatch Sweeper",
+    "Ask Journeyman Agent to report status",
+  ])("still denies explicit internal addressing: %s", async (message) => {
+    expect((await request(app).post("/chat").send({ message })).status).toBe(
+      403,
+    );
   });
 });
 

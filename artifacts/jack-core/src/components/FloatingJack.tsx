@@ -82,20 +82,22 @@ export function FloatingJack() {
   const identityRef = useRef<{ userId: string; isAdmin: boolean } | null>(null);
   const voiceActiveRef = useRef(false);
   const voiceQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const voiceRequestsRef = useRef(new Set<AbortController>());
+  const voiceRequestsRef = useRef(new Map<AbortController, boolean>());
   const reportListening = useCallback((active: boolean) => {
     if (!identityRef.current || voiceActiveRef.current === active)
       return voiceQueueRef.current;
     voiceActiveRef.current = active;
     const identity = identityRef.current;
     const controller = new AbortController();
-    voiceRequestsRef.current.add(controller);
+    voiceRequestsRef.current.set(controller, active);
     voiceQueueRef.current = voiceQueueRef.current.then(async () => {
       if (
         controller.signal.aborted ||
         identityRef.current?.userId !== identity.userId
-      )
+      ) {
+        voiceRequestsRef.current.delete(controller);
         return;
+      }
       const timeout = window.setTimeout(() => controller.abort(), 2000);
       try {
         await customFetch("/api/operational/voice", {
@@ -214,7 +216,9 @@ export function FloatingJack() {
             previous &&
             (previous.userId !== me.userId || previous.isAdmin !== me.isAdmin)
           ) {
-            voiceRequestsRef.current.forEach((request) => request.abort());
+            voiceRequestsRef.current.forEach((_active, request) =>
+              request.abort(),
+            );
             voiceRequestsRef.current.clear();
             voiceActiveRef.current = false;
             contextEpochRef.current += 1;
@@ -286,7 +290,7 @@ export function FloatingJack() {
 
   useEffect(() => {
     if (!authorized) {
-      voiceRequestsRef.current.forEach((request) => request.abort());
+      voiceRequestsRef.current.forEach((_active, request) => request.abort());
       voiceRequestsRef.current.clear();
       voiceActiveRef.current = false;
       contextEpochRef.current += 1;
@@ -306,7 +310,7 @@ export function FloatingJack() {
 
   useEffect(() => {
     return () => {
-      voiceRequestsRef.current.forEach((request) => request.abort());
+      voiceRequestsRef.current.forEach((_active, request) => request.abort());
       voiceRequestsRef.current.clear();
       contextEpochRef.current += 1;
       requestRef.current?.abort();
@@ -340,7 +344,17 @@ export function FloatingJack() {
     cancelSpeech();
 
     try {
-      if (identityRef.current) await reportListening(false);
+      // Voice observations are best effort; asking Jack must not wait for them.
+      // Drop queued starts and abort in-flight starts before the real request.
+      // The server orders any start already received against task progress.
+      voiceRequestsRef.current.forEach((active, request) => {
+        if (active) {
+          request.abort();
+          voiceRequestsRef.current.delete(request);
+        }
+      });
+      voiceQueueRef.current = Promise.resolve();
+      void reportListening(false);
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
       const internalCommand =

@@ -136,8 +136,14 @@ export function observeJackTask(
       operationalState.publish(scope, event);
       return;
     }
+    // Observation time must not depend on the latency of earlier journal writes.
+    const observed = {
+      ...event,
+      occurredAt: new Date().toISOString(),
+      correlationId: taskId,
+    };
     pending = pending
-      .then(() => publisher({ ...event, correlationId: taskId }))
+      .then(() => publisher(observed))
       .catch(() => {
         // The bus reports ingestion health; display persistence cannot bypass or
         // break the existing Jack authority/consent decision path.
