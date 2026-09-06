@@ -92,6 +92,105 @@ beforeEach(() => {
   ];
 });
 describe("Ask Jack Library request path", () => {
+  it("keeps quoted technical terms attached to the selected video", async () => {
+    const result = await request(app)
+      .post("/api/chat")
+      .set("X-Jack-Context", header())
+      .send({ message: 'What does "shrink allowance" mean in this video?' });
+    expect(result.status).toBe(200);
+    expect(result.body.citations).toContainEqual(
+      expect.objectContaining({ videoId: "e3", startTime: 80 }),
+    );
+    expect(
+      JSON.stringify(vi.mocked(chatCompletion).mock.calls[0][0].messages),
+    ).toContain("Mark the shrink allowance before bending.");
+  });
+  it("does not confuse this button with this video", async () => {
+    const result = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", "other")
+      .set("X-Jack-Context", header())
+      .send({ message: "What does this button do?" });
+    expect(result.status).toBe(200);
+    expect(chatCompletion).toHaveBeenCalledOnce();
+    expect(result.body.answer).not.toContain("account's access");
+  });
+  it("does not turn an unrelated question into a failure for the selected video", async () => {
+    const result = await request(app)
+      .post("/api/chat")
+      .set("x-test-user", "other")
+      .set("X-Jack-Context", header())
+      .send({ message: "Who are you?" });
+    expect(result.status).toBe(200);
+    expect(chatCompletion).toHaveBeenCalledOnce();
+    expect(result.body.answer).not.toContain("account's access");
+  });
+
+  it("honors an explicit different video title over the currently selected video", async () => {
+    fake.tables.videos.push({
+      id: "other",
+      title: "Other Lesson",
+      uploader_user_id: "owner",
+      analysis: "Other lesson evidence.",
+    });
+    const result = await request(app)
+      .post("/api/chat")
+      .set("X-Jack-Context", header())
+      .send({ message: 'Summarize the video titled "Other Lesson".' });
+    expect(result.status).toBe(200);
+    const prompt = JSON.stringify(
+      vi.mocked(chatCompletion).mock.calls[0][0].messages,
+    );
+    expect(prompt).toContain("Other lesson evidence.");
+    expect(prompt).not.toContain("Matched Library Video: E-3 EMT Offset");
+  });
+
+  it("suppresses rejected contextual segments and untimed summary fallback even when vector search is empty", async () => {
+    fake.tables.videos[0].analysis = "REJECTED EVIDENCE";
+    fake.tables.videos[0].transcript = "REJECTED EVIDENCE";
+    fake.tables.videos[0].key_points = ["REJECTED EVIDENCE"];
+    fake.tables.transcript_segments[0].text = "REJECTED EVIDENCE";
+    fake.tables.transcript_segments.push({
+      id: "safe",
+      video_id: "e3",
+      start_time: 200,
+      end_time: 210,
+      text: "Approved second section.",
+    });
+    fake.tables.knowledge_edges = [
+      {
+        id: "edge",
+        source_id: "video:e3",
+        target_id: "rejected",
+        kind: "knowledge",
+      },
+    ];
+    fake.tables.knowledge_nodes = [
+      {
+        id: "rejected",
+        verification_status: "rejected",
+        confidence: 0.4,
+        meta: { sources: [{ videoId: "e3", timestamps: [85] }] },
+      },
+    ];
+    const result = await request(app)
+      .post("/api/chat")
+      .set("X-Jack-Context", header())
+      .send({ message: "What is this video showing me?" });
+    expect(result.status).toBe(200);
+    const prompt = JSON.stringify(
+      vi.mocked(chatCompletion).mock.calls[0][0].messages,
+    );
+    expect(prompt).not.toContain("REJECTED EVIDENCE");
+    expect(prompt).toContain("Approved second section.");
+    expect(JSON.stringify(result.body.citations)).not.toContain(
+      "REJECTED EVIDENCE",
+    );
+    expect(result.body.citations).toContainEqual(
+      expect.objectContaining({ videoId: "e3", startTime: 200 }),
+    );
+  });
+
   it("passes indexed media to the model and returns a timestamp citation without a title in the question", async () => {
     const result = await request(app)
       .post("/api/chat")

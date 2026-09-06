@@ -207,7 +207,12 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
       });
     }
 
-    const libraryContext = await loadLibraryContext(message, userId);
+    const libraryContext =
+      /\bvideo\s+(?:called|named|titled)\b|\bbased on\s+(?:the\s+)?video\s+/i.test(
+        message,
+      ) && extractReferencedVideoTitles(message).length
+        ? { videos: [], failure: null }
+        : await loadLibraryContext(message, userId);
     if (libraryContext.failure) {
       await recordServerAskJackEvent({
         req,
@@ -514,6 +519,10 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
             text: seg["text"] as string,
             thumbnailUrl: (video["thumbnail_url"] as string | null) ?? null,
             sourceType: "video",
+            ...(seg["verification"] === "verified" ? { verified: true } : {}),
+            ...(typeof seg["source_count"] === "number"
+              ? { sourceCount: seg["source_count"] }
+              : {}),
           });
         }
       }

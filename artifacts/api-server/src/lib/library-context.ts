@@ -1,8 +1,27 @@
 import { supabase } from "./supabase.js";
 import { currentJackUiRequestContext } from "./jack-ui-request-context.js";
+import {
+  fetchVerificationCoverage,
+  rerankByVerification,
+} from "./verification-rerank.js";
 
 /** Resolve UI IDs as data, never as authority or as arbitrary table identifiers. */
 export async function loadLibraryContext(message: string, userId: string) {
+  // The view supplies referents, not the subject of every conversation. General
+  // questions must retain the ordinary retrieval/answer path even on a video.
+  if (
+    !/\b(video|videos|clip|clips|library|transcript|footage)\b/i.test(
+      message,
+    ) &&
+    !/^(?:what(?:'s| is)|explain|summari[sz]e)\s+(?:this|that)[?.!\s]*$/i.test(
+      message.trim(),
+    )
+  ) {
+    return {
+      videos: [] as Record<string, unknown>[],
+      failure: null as string | null,
+    };
+  }
   const context = currentJackUiRequestContext();
   const resources =
     context && ["Library", "Video"].includes(context.surface)
@@ -15,8 +34,8 @@ export async function loadLibraryContext(message: string, userId: string) {
       videos: [] as Record<string, unknown>[],
       failure: null as string | null,
     };
-  // Direct IDs cannot bypass ownership. Existing broad Library search has a
-  // separate shared-library policy; this new contextual lookup is owner-scoped.
+  // Direct IDs cannot bypass ownership. Existing broad Library reads have no
+  // explicit sharing grant here; this new contextual lookup is owner-scoped.
   const { data, error } = await supabase
     .from("videos")
     .select(
@@ -48,6 +67,9 @@ export async function loadLibraryContext(message: string, userId: string) {
     };
   }
   const videos: Record<string, unknown>[] = [];
+  const coverage = await fetchVerificationCoverage(
+    (data ?? []).map((video) => video.id),
+  );
   for (const video of data ?? []) {
     const { data: segments, error: segmentError } = await supabase
       .from("transcript_segments")
@@ -63,7 +85,10 @@ export async function loadLibraryContext(message: string, userId: string) {
           word,
         ),
     );
-    const ranked = (segments ?? [])
+    const scored = (segments ?? [])
+      .filter(
+        (segment) => typeof segment.text === "string" && segment.text.trim(),
+      )
       .map((segment) => ({
         segment,
         score: words.reduce(
@@ -76,18 +101,49 @@ export async function loadLibraryContext(message: string, userId: string) {
         (a, b) =>
           b.score - a.score ||
           Number(a.segment.start_time) - Number(b.segment.start_time),
-      )
+      );
+    const ranked = rerankByVerification(
+      scored,
+      ({ segment, score }) => ({
+        videoId: video.id,
+        startTime: Number(segment.start_time),
+        endTime: Number(segment.end_time),
+        score: words.length ? score / words.length : 0,
+      }),
+      coverage,
+    )
       .slice(0, 6)
-      .map(({ segment }) => segment);
+      .map(({ item, verification, sourceCount }) => ({
+        ...item.segment,
+        verification,
+        source_count: sourceCount,
+      }));
+    // Whole-video summaries have no time provenance: after a rejection they
+    // cannot safely serve as fallback for the suppressed transcript windows.
+    const safeVideo = coverage.some(
+      (item) => item.videoId === video.id && item.status === "rejected",
+    )
+      ? {
+          ...video,
+          transcript: null,
+          analysis: null,
+          key_points: [],
+          description: null,
+        }
+      : video;
     const hasContent =
       ranked.length > 0 ||
-      Boolean(video.analysis || video.transcript || video.key_points?.length);
+      Boolean(
+        safeVideo.analysis ||
+        safeVideo.transcript ||
+        safeVideo.key_points?.length,
+      );
     if (!hasContent && targets.length === 1)
       return {
         videos: [],
         failure: `You're looking at ${video.title}. I found its Library entry, but ${segmentError ? "I couldn't retrieve its saved transcript" : "its saved video content isn't available yet"}.`,
       };
-    if (hasContent) videos.push({ ...video, transcript_segments: ranked });
+    if (hasContent) videos.push({ ...safeVideo, transcript_segments: ranked });
   }
   if (!videos.length)
     return {
