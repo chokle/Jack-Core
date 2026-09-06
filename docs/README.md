@@ -6,6 +6,8 @@ Read order for a new agent: **`../VISION.md` (why + priorities) → `../JACK_CON
 
 ## Contents
 
+- [agent-context.md](./agent-context.md) — required source reading, Daz's responsibility to Derek, and evidence-preserving handoffs.
+
 - [architecture.md](./architecture.md) — stack and core architecture decisions (single-page model, persistence, video job pipeline lifecycle, strict knowledge-write verification, RAG-first answering, competency mapping).
 - [continuous-learning-design.md](./continuous-learning-design.md) — foundational philosophy and design proposal for evolving Interview Mode and Living Memory from finite knowledge capture into reviewed, curiosity-led continuous understanding (design only).
 - [knowledge-graph.md](./knowledge-graph.md) — Living Memory graph model, video/mentor ingestion bands, Knowledge Review resolution + drift resilience, Mentor Withdrawal, graph persistence & self-heal.
