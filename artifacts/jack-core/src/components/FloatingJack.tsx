@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
 import { askJack, getMe } from "@workspace/api-client-react";
 import {
@@ -85,6 +86,7 @@ export function FloatingJack() {
   const [listening, setListening] = useState(false);
   const [voiceState, setVoiceState] = useState<JackVoiceState>("idle");
   const [uiContext, setUiContext] = useState<JackUiContext | null>(null);
+  const [dialogHost, setDialogHost] = useState<HTMLElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const submissionInFlightRef = useRef(false);
   const currentContextRef = useRef<JackUiContext | null>(null);
@@ -117,9 +119,22 @@ export function FloatingJack() {
       observer?.disconnect();
       document.documentElement.style.removeProperty("--jack-pill-height");
     };
-  }, [authorized, cancelSpeech]);
+  }, [authorized, cancelSpeech, dialogHost]);
 
   const refreshContext = useCallback(() => {
+    const hosts = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-jack-assistant-host]"),
+    );
+    setDialogHost(
+      hosts
+        .filter(
+          (host) =>
+            !host.closest(
+              '[aria-hidden="true"], [hidden], [data-state="closed"]',
+            ),
+        )
+        .at(-1) ?? null,
+    );
     const next = collectJackUiContext();
     if (!sameUiContext(currentContextRef.current, next)) {
       // Controls can appear during a page fade without changing the selected
@@ -372,11 +387,15 @@ export function FloatingJack() {
 
   if (!authorized) return null;
 
-  return (
+  const content = (
     <div
       ref={pillRef}
       data-floating-jack
-      className="pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3"
+      className={
+        dialogHost
+          ? "relative z-[70] flex justify-center"
+          : "pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[70] flex justify-center px-3"
+      }
     >
       <div className="pointer-events-auto w-full max-w-2xl">
         {(answer || error) && (
@@ -511,4 +530,5 @@ export function FloatingJack() {
       </div>
     </div>
   );
+  return dialogHost ? createPortal(content, dialogHost) : content;
 }
