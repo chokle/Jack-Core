@@ -357,3 +357,126 @@ describe("FloatingJack submission lifecycle", () => {
     );
   });
 });
+
+describe("operational voice boundary", () => {
+  it("drops a queued listening start before submitting the actual question", async () => {
+    api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin: false });
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      FakeSpeechRecognition.latest!.onresult?.({
+        results: [{ 0: { transcript: "Explain this page" }, isFinal: true }],
+      });
+    });
+    expect(api.askJack).toHaveBeenCalledOnce();
+    const observations = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) =>
+        String(url).includes("/api/operational/voice"),
+      )
+      .map(([, options]) => JSON.parse(String(options?.body)).type);
+    expect(observations).toEqual(["voice.listening.stopped"]);
+  });
+
+  it.each(["started", "stopped"])(
+    "submits immediately while a listening %s observation is unresolved",
+    async (unresolvedType) => {
+      api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin: false });
+      vi.mocked(fetch).mockImplementation(async (_input, options) => {
+        const type = JSON.parse(String(options?.body)).type;
+        if (type === `voice.listening.${unresolvedType}`)
+          return new Promise<Response>(() => {});
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      render(<FloatingJack />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      });
+      const submittedAt = Date.now();
+      await act(async () => {
+        FakeSpeechRecognition.latest!.onresult?.({
+          results: [{ 0: { transcript: "Explain this page" }, isFinal: true }],
+        });
+      });
+      expect(Date.now()).toBe(submittedAt);
+      expect(api.askJack).toHaveBeenCalledOnce();
+      expect(api.askJack.mock.calls[0][0]).toEqual({
+        message: "Explain this page",
+      });
+      const startRequest = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([, options]) =>
+            JSON.parse(String(options?.body)).type ===
+            "voice.listening.started",
+        );
+      expect(startRequest).toBeDefined();
+      if (unresolvedType === "started")
+        expect(startRequest![1]?.signal?.aborted).toBe(true);
+    },
+  );
+
+  it.each([false, true])(
+    "routes internal voice commands only for resolved admins (%s)",
+    async (isAdmin) => {
+      api.getMe.mockResolvedValue({ userId: "voice-user", isAdmin });
+      vi.mocked(fetch).mockImplementation(async (input) => {
+        if (String(input).includes("/api/admin/agents/commands"))
+          return new Response(
+            JSON.stringify({
+              error: "No internal agent executor is configured.",
+            }),
+            { status: 501, headers: { "Content-Type": "application/json" } },
+          );
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      render(<FloatingJack />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      });
+      await act(async () => {
+        FakeSpeechRecognition.latest!.onresult?.({
+          results: [
+            { 0: { transcript: "Jack interrupt agent Dex" }, isFinal: true },
+          ],
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const requests = vi.mocked(fetch).mock.calls;
+      expect(
+        requests.filter(([url]) =>
+          String(url).includes("/api/admin/agents/commands"),
+        ),
+      ).toHaveLength(isAdmin ? 1 : 0);
+      const voiceRequests = requests.filter(([url]) =>
+        String(url).includes("/api/operational/voice"),
+      );
+      expect(
+        voiceRequests.map(
+          ([, options]) => JSON.parse(String(options?.body)).type,
+        ),
+      ).toEqual(["voice.listening.started", "voice.listening.stopped"]);
+      if (isAdmin) {
+        expect(api.askJack).not.toHaveBeenCalled();
+        expect(
+          screen.getByText(
+            "No internal agent executor is configured. Command was not executed.",
+          ),
+        ).toBeTruthy();
+      } else expect(api.askJack).toHaveBeenCalledOnce();
+    },
+  );
+});

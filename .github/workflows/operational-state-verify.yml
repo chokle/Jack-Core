@@ -1,0 +1,37 @@
+name: Jack Operational State Verification
+
+on:
+  pull_request:
+    paths:
+      - "lib/api-zod/**"
+      - "artifacts/api-server/**"
+      - "artifacts/jack-core/**"
+      - "supabase/migrations/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/operational-state-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @workspace/api-server exec vitest run --maxWorkers=1
+      - run: pnpm --filter @workspace/jack-core exec vitest run --maxWorkers=1
+      - run: pnpm --filter @workspace/api-server build
+      - run: pnpm --filter @workspace/jack-core build
+      - name: Operational contract formatting
+        run: pnpm exec prettier --check lib/api-zod/src/operational-state.ts lib/api-zod/src/operational-projections.ts artifacts/api-server/src/lib/agent-authorization.ts artifacts/api-server/src/lib/operational-state.ts artifacts/api-server/src/lib/operational-bus.ts artifacts/api-server/src/routes/operational-state.ts artifacts/jack-core/src/lib/operational-state.ts artifacts/jack-core/src/components/OperationalHud.tsx artifacts/jack-core/src/components/AgentCommandCentre.tsx docs/jack-operational-state.md .github/workflows/operational-state-verify.yml

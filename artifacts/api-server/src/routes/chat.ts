@@ -5,6 +5,9 @@ import { publish } from "../lib/vitality.js";
 import { AskJackBody } from "@workspace/api-zod";
 import { aiQueryLimiter } from "../lib/rate-limit.js";
 import { resolveIdentity } from "../lib/admin-auth.js";
+import { observeJackTask } from "../lib/operational-state.js";
+import { operationalPublisher } from "../lib/operational-bus.js";
+import { guardJackAgentBoundary } from "./operational-state.js";
 import { readSession, resolveSession } from "../lib/session.js";
 import { buildChatSystemPrompt } from "../lib/jurisdiction.js";
 import { sanitizeJackAnswer } from "../lib/answer-policy.js";
@@ -125,7 +128,8 @@ async function resolveKnowledgeScope(
   }
 }
 
-router.post("/chat", aiQueryLimiter, async (req, res) => {
+router.post("/chat", aiQueryLimiter, guardJackAgentBoundary);
+router.post("/chat", async (req, res) => {
   try {
     const parsed = AskJackBody.safeParse(req.body);
     if (!parsed.success)
@@ -152,6 +156,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
         .status(401)
         .json({ error: "Unauthorized — sign in required." });
     }
+    const operation = observeJackTask(userId, res, operationalPublisher(req));
     const session = resolveSession(req, res);
     const knowledgeScope = await resolveKnowledgeScope(userId);
 
@@ -184,6 +189,7 @@ router.post("/chat", aiQueryLimiter, async (req, res) => {
               reason:
                 "The authority gate did not return a supported blocked result, and no licensed-evidence answering path is implemented.",
             };
+      operation.authorityBlocked();
       const answer = formatCodeSafetyRefusal(codeSafety);
       const citations = codeSafety.citations.map(toChatAuthorityCitation);
       // Phase 1 has no authorized section-level, revision-reconciled answer
