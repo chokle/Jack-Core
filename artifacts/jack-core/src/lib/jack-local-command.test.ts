@@ -46,9 +46,14 @@ describe("Jack local commands", () => {
     ["go forward to Root Pass", "Root Pass"],
     ["forward to node Root Pass", "Root Pass"],
     ["navigate to the Root Pass node", "Root Pass"],
-    ["open Fit Up concept", "Fit Up"],
+    ["go to Fit Up concept", "Fit Up"],
     ["go to node Root Pass", "Root Pass"],
     ["open concept Fit Up", "Fit Up"],
+    ["show me branch Root Pass", "Root Pass"],
+    ["go to How to Weld node", "How to Weld"],
+    ["show me node How to Weld", "How to Weld"],
+    ["go to Rules of Welding branch", "Rules of Welding"],
+    ["show me node Rules of Welding", "Rules of Welding"],
   ])("resolves a named graph node: %s", (message, target) => {
     expect(resolveJackLocalCommand(message)).toEqual({
       kind: "node",
@@ -82,9 +87,33 @@ describe("Jack local commands", () => {
     });
   });
 
-  it("leaves content questions for the API", () => {
-    expect(resolveJackLocalCommand("What is a root pass?")).toBeNull();
-    expect(resolveJackLocalCommand("Where am I?")).toBeNull();
+  it.each([
+    "What is a root pass?",
+    "Where am I?",
+    "show me how to weld a root pass",
+    "find the right amperage for root pass",
+    "open the procedure for root pass",
+    "view root pass settings",
+    "show me Root Pass branch",
+    "open Fit Up concept",
+    "show me how to weld a branch",
+    "show me how to explain this concept",
+    "show me what's wrong with this branch",
+    "show me the procedure for preparing this branch",
+    "open the instructions for setting this branch",
+    "show me the right amperage for this branch",
+    "show me the correct voltage for that concept",
+    "find the recommended settings for this topic",
+    "show me the amperage in this branch",
+    "show me the voltage of that concept",
+    "show me the travel speed at this node",
+    "show me defects beneath this branch",
+    "find hazards around this node",
+    "show me everything under this topic",
+    "view details within this concept",
+    "show me guidance regarding this branch",
+  ])("leaves content or ambiguous suffix requests for the API: %s", (message) => {
+    expect(resolveJackLocalCommand(message)).toBeNull();
   });
 
   it("targets a visible video by its explicit title", () => {
