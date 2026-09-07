@@ -3,33 +3,60 @@ import { createSiteHudFixture } from "../lib/site-hud";
 import { SiteHud } from "./SiteHud";
 
 /** Explicit fictional site context. Never infer a worker's site from their account. */
-export function SiteHudDemo() {
+export function SiteHudDemo({
+  expanded = false,
+  onOpenRadar,
+  onExitRadar,
+}: {
+  expanded?: boolean;
+  onOpenRadar: () => void;
+  onExitRadar: () => void;
+}) {
   const [fixture, setFixture] = useState<ReturnType<
     typeof createSiteHudFixture
   > | null>(null);
 
   if (!fixture) {
     return (
-      <button
-        type="button"
-        onClick={() => setFixture(createSiteHudFixture(Date.now()))}
-        className="rounded-lg border border-cyan-700 bg-slate-950 px-3 py-2 text-xs font-medium text-cyan-200"
+      <div
+        className={
+          expanded ? "site-hud-entry site-hud-entry--page" : "site-hud-entry"
+        }
       >
-        Open demo site
-      </button>
+        <div>
+          <strong>Site radar</strong>
+          <span>Fictional site · Demo only</span>
+        </div>
+        {expanded && (
+          <p>
+            A full view of demo crew, site landmarks and signal conditions. Turn
+            the heading control to explore the radar. No nearby devices are
+            scanned.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setFixture(createSiteHudFixture(Date.now()));
+            onOpenRadar();
+          }}
+        >
+          Open demo site
+        </button>
+      </div>
     );
   }
 
   return (
-    <div className="w-fit max-w-full">
-      <SiteHud site={fixture.site} workers={fixture.workers} />
-      <button
-        type="button"
-        onClick={() => setFixture(null)}
-        className="mt-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-      >
-        Close demo site
-      </button>
-    </div>
+    <SiteHud
+      site={fixture.site}
+      workers={fixture.workers}
+      expanded={expanded}
+      onOpenRadar={onOpenRadar}
+      onCloseDemo={() => {
+        setFixture(null);
+        if (expanded) onExitRadar();
+      }}
+    />
   );
 }
