@@ -87,7 +87,7 @@ describe("Library contextual retrieval", () => {
   it("resolves a natural named title on the Library", async () => {
     state.context = { surface: "Library", resources: [] };
     const result = await loadLibraryContext(
-      "Summarize E-3: Bend a 30� EMT Offset",
+      "Summarize E-3: Bend a 30° EMT Offset",
       "owner",
     );
     expect(result.videos[0].id).toBe("e3");
@@ -181,14 +181,33 @@ describe("Library contextual retrieval", () => {
     expect(result.videos).toEqual([]);
     expect(result.failure).toContain("reviewed evidence");
   });
-  it("grounds a timestamp question and analysis request in the selected video", async () => {
-    const result = await loadLibraryContext("What happens at 1:20?", "owner");
-    expect((result.videos[0].transcript_segments as any[])[0].start_time).toBe(
-      80,
+  it("grounds colon and natural-language timestamp questions in the selected video", async () => {
+    const colon = await loadLibraryContext("What happens at 1:20?", "owner");
+    expect((colon.videos[0].transcript_segments as any[])[0].start_time).toBe(80);
+
+    const seconds = await loadLibraryContext(
+      "What happens at 10 seconds?",
+      "owner",
     );
+    expect((seconds.videos[0].transcript_segments as any[])[0].start_time).toBe(10);
+
+    const combined = await loadLibraryContext(
+      "What happens at 1 minute 20 seconds?",
+      "owner",
+    );
+    expect((combined.videos[0].transcript_segments as any[])[0].start_time).toBe(80);
+
     expect(
       (await loadLibraryContext("Explain the analysis", "owner")).videos[0].id,
     ).toBe("e3");
+  });
+  it("treats selected-video citation language as media intent without leaking general questions", async () => {
+    const cited = await loadLibraryContext("Cite the source at 10 sec", "owner");
+    expect((cited.videos[0].transcript_segments as any[])[0].start_time).toBe(10);
+    expect(await loadLibraryContext("What is 10 seconds in milliseconds?", "owner")).toEqual({
+      videos: [],
+      failure: null,
+    });
   });
   it("identifies the authorized entry when transcript retrieval fails", async () => {
     fake.failNext("transcript_segments", "select", { message: "unavailable" });
