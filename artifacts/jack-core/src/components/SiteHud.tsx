@@ -248,6 +248,120 @@ export function SiteHud({
                 </span>
               </div>
             </div>
+          </div>
+          <section className="site-hud__levels" aria-label="Level overview">
+            <header>
+              <h2>
+                <Layers3 size={16} aria-hidden="true" /> Floor / elevation view
+              </h2>
+              <span>{floor?.elevationMeters ?? "—"} m</span>
+            </header>
+            <p className="site-hud__site-name">{view.siteName}</p>
+            <div className="site-hud__level-stack">
+              {[...view.floors]
+                .sort((a, b) => b.elevationMeters - a.elevationMeters)
+                .map((item) => {
+                  const crew = view.crew.filter(
+                    (member) => member.position?.floorId === item.id,
+                  );
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-label={`View ${item.label}`}
+                      aria-pressed={floor?.id === item.id}
+                      onClick={() => setSelectedFloor(item.id)}
+                    >
+                      <span className="site-hud__level-name">
+                        {item.label}
+                        <small>{item.elevationMeters} m</small>
+                      </span>
+                      <span
+                        className="site-hud__level-positions"
+                        aria-hidden="true"
+                      >
+                        {crew.map((member) => (
+                          <span
+                            key={member.id}
+                            data-stale={member.stale}
+                            title={describeMember(member)}
+                          />
+                        ))}
+                      </span>
+                      <span className="site-hud__level-count">
+                        {crew.length}
+                        <small>positions</small>
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+            <div className="site-hud__level-key">
+              <span /> Retained position <span data-stale="true" /> Last known
+            </div>
+            <p className="site-hud__help">
+              Select a level to update the radar. Plan elevations, not measured
+              altitude. Lost signals are not plotted.
+            </p>
+            <div className="site-hud__level-crew">
+              <h3>Selected level · {floor?.label ?? "No floor"}</h3>
+              {plottedCrew.length === 0 ? (
+                <p>No retained positions on this level.</p>
+              ) : (
+                plottedCrew.map((member) => (
+                  <div key={member.id}>
+                    <strong>{member.name}</strong>
+                    <span>{member.status}</span>
+                    <small>
+                      {sourceLabel(member.source)} ·{" "}
+                      {timeLabel(member.observedAt)} · {ageLabel(member.ageMs)}
+                    </small>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+          <aside
+            className="site-hud__summary"
+            aria-label="Radar legend and awareness"
+          >
+            <section>
+              <h2>
+                <Users size={15} aria-hidden="true" /> Scoped crew
+              </h2>
+              <p>{view.crew.length} authorized demo crew</p>
+              {statuses.map((status) => (
+                <div className="site-hud__summary-row" key={status}>
+                  <span>{status}</span>
+                  <strong>
+                    {
+                      view.crew.filter((member) => member.status === status)
+                        .length
+                    }
+                  </strong>
+                </div>
+              ))}
+              <p className="site-hud__help">
+                Other nearby: {view.anonymousProximity.nearbyCount} anonymous.
+                No outside identities or floor positions.
+              </p>
+            </section>
+            <section>
+              <h2>
+                <MapPin size={15} aria-hidden="true" /> Safety landmarks
+              </h2>
+              <p>{floor?.label ?? "No floor"}</p>
+              {view.landmarks
+                .filter((landmark) => landmark.floorId === floor?.id)
+                .map((landmark) => (
+                  <div className="site-hud__summary-row" key={landmark.id}>
+                    <MapPin size={13} aria-hidden="true" />
+                    <span>{landmark.label}</span>
+                  </div>
+                ))}
+            </section>
+          </aside>
+          <div className="site-hud__support">
             <div className="site-hud__controls" aria-label="Site HUD panels">
               {(Object.keys(panelLabels) as Panel[]).map((key) => {
                 const Icon = panelIcons[key];

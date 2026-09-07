@@ -7,6 +7,8 @@ import {
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
 
+const SWEEP_PERIOD_MS = 4000;
+
 interface Props {
   crew: readonly HudCrewMember[];
   landmarks: readonly HudLandmark[];
@@ -46,7 +48,7 @@ export function SiteRadar({
     let previous = 0;
     const tick = (now: number) => {
       if (now - previous >= 32) {
-        setSweep((now % 1000) * 0.36);
+        setSweep(((now % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS) * 360);
         previous = now;
       }
       frame = requestAnimationFrame(tick);
@@ -144,7 +146,7 @@ export function SiteRadar({
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
         <strong>{Math.round(heading).toString().padStart(3, "0")}°</strong>
-        <span>1 SEC SWEEP · DEMO</span>
+        <span>4 SEC SWEEP · DEMO</span>
       </div>
       <svg
         className="site-radar__scope"
@@ -167,7 +169,7 @@ export function SiteRadar({
           </radialGradient>
         </defs>
         <circle cx="200" cy="200" r="165" fill={`url(#${id}-glow)`} />
-        {[55, 110, 165].map((r) => (
+        {[27.5, 55, 82.5, 110, 137.5, 165].map((r) => (
           <circle
             key={r}
             cx="200"
@@ -178,14 +180,33 @@ export function SiteRadar({
         ))}
         <path d="M200 35V365M35 200H365" className="site-radar__grid" />
         <g data-testid="radar-world" transform={`rotate(${-heading} 200 200)`}>
-          {Array.from({ length: 36 }, (_, index) => (
+          {Array.from({ length: 72 }, (_, index) => (
             <path
               key={index}
-              d={`M200 35V${index % 3 === 0 ? 44 : 39}`}
-              transform={`rotate(${index * 10} 200 200)`}
+              d={`M200 35V${index % 6 === 0 ? 44 : 39}`}
+              transform={`rotate(${index * 5} 200 200)`}
               className="site-radar__tick"
             />
           ))}
+          {Array.from({ length: 12 }, (_, index) => {
+            const degrees = index * 30;
+            const angle = (degrees * Math.PI) / 180;
+            const x = 200 + Math.sin(angle) * 150;
+            const y = 200 - Math.cos(angle) * 150;
+            return (
+              <text
+                key={`bearing-${degrees}`}
+                x={x}
+                y={y}
+                transform={`rotate(${heading} ${x} ${y})`}
+                className="site-radar__bearing"
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {degrees}
+              </text>
+            );
+          })}
           {(
             [
               ["N", 200, 20],
@@ -289,7 +310,7 @@ export function SiteRadar({
             <path
               d="M200 200L117.5 57.1A165 165 0 0 1 200 35Z"
               fill="var(--hud-accent, #67e8f9)"
-              opacity=".08"
+              opacity=".14"
             />
             <path
               d="M200 200V35"

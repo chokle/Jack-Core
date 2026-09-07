@@ -22,6 +22,28 @@ afterEach(() => {
 });
 
 describe("radar compass", () => {
+  it("takes four seconds to complete a sweep", () => {
+    let frame: FrameRequestCallback = () => {};
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
+    act(() => frame(1000));
+    expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
+      "rotate(90 200 200)",
+    );
+    act(() => frame(2000));
+    expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
+      "rotate(180 200 200)",
+    );
+    act(() => frame(4000));
+    expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
+      "rotate(0 200 200)",
+    );
+  });
+
   it("keeps north world anchored as the viewer turns", () => {
     render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
     fireEvent.change(
