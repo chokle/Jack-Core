@@ -1,5 +1,9 @@
 import { listVideos } from "@workspace/api-client-react";
-import { jackUiAction, type JackUiActionName } from "./jack-ui-context";
+import {
+  collectJackUiContext,
+  jackUiAction,
+  type JackUiActionName,
+} from "./jack-ui-context";
 
 export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
 
@@ -58,6 +62,10 @@ const ACTION_LABELS: Record<JackLocalAppAction, string> = {
   closeout: "Closeout",
 };
 
+const LIBRARY_PAGE_SIZE = 200;
+let localCommandGeneration = 0;
+let activeDestinationLookup: AbortController | null = null;
+
 function normalizeCommand(value: string) {
   return value
     .trim()
@@ -92,6 +100,23 @@ function compactDestinationTarget(value: string) {
   return normalizeDestinationTarget(value).replace(/\s+/g, "");
 }
 
+function exactNamedVideo(
+  videos: Array<{ id: string; title: string }>,
+  target: string,
+) {
+  const wanted = normalizeDestinationTarget(target);
+  const compactWanted = compactDestinationTarget(target);
+  if (!wanted || !compactWanted) return null;
+  return (
+    videos.find((video) => {
+      const actual = normalizeDestinationTarget(video.title);
+      const compactActual = compactDestinationTarget(video.title);
+      if (!actual || !compactActual) return false;
+      return actual === wanted || compactActual === compactWanted;
+    }) ?? null
+  );
+}
+
 function findNamedVideo(
   videos: Array<{ id: string; title: string }>,
   target: string,
@@ -100,15 +125,13 @@ function findNamedVideo(
   const compactWanted = compactDestinationTarget(target);
   if (!wanted || !compactWanted) return null;
 
-  const exact = videos.find((video) => {
-    const actual = normalizeDestinationTarget(video.title);
-    return actual === wanted || compactDestinationTarget(video.title) === compactWanted;
-  });
+  const exact = exactNamedVideo(videos, target);
   if (exact) return exact;
 
   const partial = videos.filter((video) => {
     const actual = normalizeDestinationTarget(video.title);
     const compactActual = compactDestinationTarget(video.title);
+    if (!actual || !compactActual) return false;
     return (
       actual.includes(wanted) ||
       wanted.includes(actual) ||
@@ -117,6 +140,48 @@ function findNamedVideo(
     );
   });
   return partial.length === 1 ? partial[0] : null;
+}
+
+function navigationContextKey() {
+  const context = collectJackUiContext();
+  return JSON.stringify({
+    route: context.route,
+    surface: context.surface,
+    path: context.path,
+    inspector: context.inspector,
+    selectedVideoId:
+      context.resources?.find((resource) => resource.selected)?.id ?? null,
+  });
+}
+
+async function loadNamedVideo(target: string, signal: AbortSignal) {
+  const videos: Array<{ id: string; title: string }> = [];
+  let offset = 0;
+
+  while (!signal.aborted) {
+    const result = await listVideos(
+      { limit: LIBRARY_PAGE_SIZE, offset },
+      { signal },
+    );
+    const batch = (result.videos ?? []).map((item) => ({
+      id: item.id,
+      title: item.title,
+    }));
+    const exact = exactNamedVideo(batch, target);
+    if (exact) return exact;
+    videos.push(...batch);
+
+    if (batch.length === 0) break;
+    offset += batch.length;
+    const total =
+      typeof (result as { total?: unknown }).total === "number"
+        ? (result as { total: number }).total
+        : undefined;
+    if (total !== undefined && offset >= total) break;
+    if (total === undefined && batch.length < LIBRARY_PAGE_SIZE) break;
+  }
+
+  return signal.aborted ? null : findNamedVideo(videos, target);
 }
 
 function isCurrentVideoTarget(target: string) {
@@ -256,6 +321,11 @@ export function resolveJackLocalCommand(
 ): JackLocalCommand | null {
   const intent = normalizeCommand(message);
   if (!intent) return null;
+
+  activeDestinationLookup?.abort();
+  activeDestinationLookup = null;
+  localCommandGeneration += 1;
+
   const normalizedIntent = intent.toLowerCase();
 
   if (
@@ -296,28 +366,41 @@ export function resolveJackLocalCommand(
 function deferredNamedDestinationAction(
   target: string,
   options: { fallbackToNode: boolean },
+  generation: number,
 ) {
   const action = document.createElement("button");
   action.type = "button";
   action.addEventListener("click", () => {
+    const controller = new AbortController();
+    activeDestinationLookup?.abort();
+    activeDestinationLookup = controller;
+    const startContext = navigationContextKey();
+
     void (async () => {
+      let video: { id: string; title: string } | null = null;
       try {
-        const result = await listVideos({ limit: 200 });
-        const video = findNamedVideo(
-          (result.videos ?? []).map((item) => ({ id: item.id, title: item.title })),
-          target,
-        );
-        if (video) {
-          window.dispatchEvent(
-            new CustomEvent("jack:open-video-source", {
-              detail: { videoId: video.id },
-            }),
-          );
-          return;
-        }
+        video = await loadNamedVideo(target, controller.signal);
       } catch {
+        if (controller.signal.aborted) return;
         // A Library lookup failure must not turn a valid rendered node command
         // into a dead end. Fall through to the existing app-owned controls.
+      }
+
+      if (
+        controller.signal.aborted ||
+        generation !== localCommandGeneration ||
+        navigationContextKey() !== startContext
+      ) {
+        return;
+      }
+
+      if (video) {
+        window.dispatchEvent(
+          new CustomEvent("jack:open-video-source", {
+            detail: { videoId: video.id },
+          }),
+        );
+        return;
       }
 
       if (options.fallbackToNode) {
@@ -328,7 +411,11 @@ function deferredNamedDestinationAction(
         }
       }
       jackUiAction("library")?.click();
-    })();
+    })().finally(() => {
+      if (activeDestinationLookup === controller) {
+        activeDestinationLookup = null;
+      }
+    });
   });
   return action;
 }
@@ -343,7 +430,7 @@ export function resolveJackLocalAction(
   if (command.kind === "destination") {
     return (
       jackUiAction("video", command.target) ??
-      deferredNamedDestinationAction(command.target, { fallbackToNode: true })
+      deferredNamedDestinationAction(command.target, { fallbackToNode: true }, localCommandGeneration)
     );
   }
   if (command.kind === "video") {
@@ -353,7 +440,7 @@ export function resolveJackLocalAction(
       // dispatch the existing app-owned video-source navigation event.
       return (
         jackUiAction("video", command.target) ??
-        deferredNamedDestinationAction(command.target, { fallbackToNode: false })
+        deferredNamedDestinationAction(command.target, { fallbackToNode: false }, localCommandGeneration)
       );
     }
     // A targetless retrieval is a request for the rendered Library surface.
