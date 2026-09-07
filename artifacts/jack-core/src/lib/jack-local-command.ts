@@ -1,3 +1,4 @@
+import { listVideos } from "@workspace/api-client-react";
 import { jackUiAction, type JackUiActionName } from "./jack-ui-context";
 
 export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
@@ -5,7 +6,8 @@ export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
 export type JackLocalCommand =
   | { kind: "app"; action: JackLocalAppAction; label: string }
   | { kind: "node"; target: string; label: string }
-  | { kind: "video"; target: string | null; label: string };
+  | { kind: "video"; target: string | null; label: string }
+  | { kind: "destination"; target: string; label: string };
 
 const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
   settings: "account",
@@ -75,6 +77,46 @@ function stripTarget(value: string) {
     .replace(/^['"]|['"]$/g, "")
     .replace(/\s+(?:from|in)\s+(?:the\s+)?(?:video\s+)?library$/i, "")
     .trim();
+}
+
+function normalizeDestinationTarget(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\u2018\u2019']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function compactDestinationTarget(value: string) {
+  return normalizeDestinationTarget(value).replace(/\s+/g, "");
+}
+
+function findNamedVideo(
+  videos: Array<{ id: string; title: string }>,
+  target: string,
+) {
+  const wanted = normalizeDestinationTarget(target);
+  const compactWanted = compactDestinationTarget(target);
+  if (!wanted || !compactWanted) return null;
+
+  const exact = videos.find((video) => {
+    const actual = normalizeDestinationTarget(video.title);
+    return actual === wanted || compactDestinationTarget(video.title) === compactWanted;
+  });
+  if (exact) return exact;
+
+  const partial = videos.filter((video) => {
+    const actual = normalizeDestinationTarget(video.title);
+    const compactActual = compactDestinationTarget(video.title);
+    return (
+      actual.includes(wanted) ||
+      wanted.includes(actual) ||
+      compactActual.includes(compactWanted) ||
+      compactWanted.includes(compactActual)
+    );
+  });
+  return partial.length === 1 ? partial[0] : null;
 }
 
 function isCurrentVideoTarget(target: string) {
@@ -178,8 +220,21 @@ function parseNodeCommand(intent: string): JackLocalCommand | null {
     return target ? { kind: "node", target, label: `node ${target}` } : null;
   }
 
+  // Natural "take/bring me to <name>" is a destination request rather than a
+  // graph assertion. Resolve it against the authenticated Library first, then
+  // fall back to a rendered Living Memory node when no video title matches.
+  const destinationMatch = intent.match(
+    /^(?:take me to|take me forward to|bring me to|bring me forward to|move forward to)\s+(?:the\s+)?(.+)$/i,
+  );
+  if (destinationMatch) {
+    const target = destinationMatch[1].replace(/^['"]|['"]$/g, "").trim();
+    return target
+      ? { kind: "destination", target, label: `destination ${target}` }
+      : null;
+  }
+
   const directionalMatch = intent.match(
-    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|take me to|take me forward to|bring me to|bring me forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
+    /^(?:go to|go forward to|forward to|navigate to|navigate forward to|move forward to)(?: me)?\s+(?:the\s+)?(.+)$/i,
   );
   const rawTarget = directionalMatch?.[1];
   if (!rawTarget) return null;
@@ -238,6 +293,46 @@ export function resolveJackLocalCommand(
   );
 }
 
+function deferredNamedDestinationAction(
+  target: string,
+  options: { fallbackToNode: boolean },
+) {
+  const action = document.createElement("button");
+  action.type = "button";
+  action.addEventListener("click", () => {
+    void (async () => {
+      try {
+        const result = await listVideos({ limit: 200 });
+        const video = findNamedVideo(
+          (result.videos ?? []).map((item) => ({ id: item.id, title: item.title })),
+          target,
+        );
+        if (video) {
+          window.dispatchEvent(
+            new CustomEvent("jack:open-video-source", {
+              detail: { videoId: video.id },
+            }),
+          );
+          return;
+        }
+      } catch {
+        // A Library lookup failure must not turn a valid rendered node command
+        // into a dead end. Fall through to the existing app-owned controls.
+      }
+
+      if (options.fallbackToNode) {
+        const node = jackUiAction("node", target);
+        if (node) {
+          node.click();
+          return;
+        }
+      }
+      jackUiAction("library")?.click();
+    })();
+  });
+  return action;
+}
+
 /** Execute a previously resolved command only through an app-owned action. */
 export function resolveJackLocalAction(
   command: JackLocalCommand,
@@ -245,11 +340,21 @@ export function resolveJackLocalAction(
   if (command.kind === "node") {
     return jackUiAction("node", command.target);
   }
+  if (command.kind === "destination") {
+    return (
+      jackUiAction("video", command.target) ??
+      deferredNamedDestinationAction(command.target, { fallbackToNode: true })
+    );
+  }
   if (command.kind === "video") {
     if (command.target) {
-      // Never substitute an unrelated visible card for a named recording.
-      // Send the user to Library so the missing title can be located there.
-      return jackUiAction("video", command.target) || jackUiAction("library");
+      // Prefer an already-rendered exact destination. Otherwise resolve the
+      // title through the same authenticated Library endpoint the app uses and
+      // dispatch the existing app-owned video-source navigation event.
+      return (
+        jackUiAction("video", command.target) ??
+        deferredNamedDestinationAction(command.target, { fallbackToNode: false })
+      );
     }
     // A targetless retrieval is a request for the rendered Library surface.
     // Do not guess which visible video card the user meant.
@@ -262,7 +367,7 @@ export function resolveJackLocalAction(
 }
 
 export function unavailableJackLocalCommand(command: JackLocalCommand) {
-  if (command.kind === "node") {
+  if (command.kind === "node" || command.kind === "destination") {
     return `I can’t find an available destination named “${command.target}” from this screen.`;
   }
   if (command.kind === "video") {
