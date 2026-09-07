@@ -35,6 +35,22 @@ describe("Site HUD demo", () => {
     render(<SiteHud {...createSiteHudFixture(NOW)} />);
     const levels = screen.getByRole("region", { name: "Level overview" });
     expect(
+      within(levels).getByRole("group", {
+        name: "Simulated building skeleton",
+      }),
+    ).toBeTruthy();
+    fireEvent.keyDown(
+      within(levels).getByRole("button", { name: "View Level 2" }),
+      { key: " " },
+    );
+    expect(
+      screen.getByRole("group", { name: /Schematic radar: Level 2/ }),
+    ).toBeTruthy();
+    fireEvent.keyDown(
+      within(levels).getByRole("button", { name: "View Ground" }),
+      { key: "Enter" },
+    );
+    expect(
       within(levels)
         .getByRole("button", { name: "View Ground" })
         .getAttribute("aria-pressed"),

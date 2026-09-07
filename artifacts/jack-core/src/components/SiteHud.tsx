@@ -20,6 +20,8 @@ import {
 } from "../lib/site-hud";
 import "./SiteHud.css";
 import { SiteRadar } from "./SiteRadar";
+import { SiteBuilding } from "./SiteBuilding";
+import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
 
 interface SiteHudProps {
   site: HudSiteContext;
@@ -257,45 +259,12 @@ export function SiteHud({
               <span>{floor?.elevationMeters ?? "—"} m</span>
             </header>
             <p className="site-hud__site-name">{view.siteName}</p>
-            <div className="site-hud__level-stack">
-              {[...view.floors]
-                .sort((a, b) => b.elevationMeters - a.elevationMeters)
-                .map((item) => {
-                  const crew = view.crew.filter(
-                    (member) => member.position?.floorId === item.id,
-                  );
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-label={`View ${item.label}`}
-                      aria-pressed={floor?.id === item.id}
-                      onClick={() => setSelectedFloor(item.id)}
-                    >
-                      <span className="site-hud__level-name">
-                        {item.label}
-                        <small>{item.elevationMeters} m</small>
-                      </span>
-                      <span
-                        className="site-hud__level-positions"
-                        aria-hidden="true"
-                      >
-                        {crew.map((member) => (
-                          <span
-                            key={member.id}
-                            data-stale={member.stale}
-                            title={describeMember(member)}
-                          />
-                        ))}
-                      </span>
-                      <span className="site-hud__level-count">
-                        {crew.length}
-                        <small>positions</small>
-                      </span>
-                    </button>
-                  );
-                })}
-            </div>
+            <SiteBuilding
+              floors={view.floors}
+              crew={view.crew}
+              selectedFloor={floor?.id}
+              onSelectFloor={setSelectedFloor}
+            />
             <div className="site-hud__level-key">
               <span /> Retained position <span data-stale="true" /> Last known
             </div>
@@ -353,12 +322,19 @@ export function SiteHud({
               <p>{floor?.label ?? "No floor"}</p>
               {view.landmarks
                 .filter((landmark) => landmark.floorId === floor?.id)
-                .map((landmark) => (
-                  <div className="site-hud__summary-row" key={landmark.id}>
-                    <MapPin size={13} aria-hidden="true" />
-                    <span>{landmark.label}</span>
-                  </div>
-                ))}
+                .map((landmark) => {
+                  const Icon = siteSafetyIcon(landmark.kind);
+                  return (
+                    <div className="site-hud__summary-row" key={landmark.id}>
+                      <Icon
+                        size={16}
+                        style={{ color: siteSafetyColor(landmark.kind) }}
+                        aria-hidden="true"
+                      />
+                      <span>{landmark.label}</span>
+                    </div>
+                  );
+                })}
             </section>
           </aside>
           <div className="site-hud__support">

@@ -93,6 +93,25 @@
   display: grid;
   gap: 10px;
 }
+.site-radar__controls[hidden] {
+  display: none;
+}
+.site-radar__settings {
+  display: block;
+  margin: 12px auto 0;
+  padding: 8px 14px;
+  min-height: 44px;
+  border: 1px solid var(--hud-line, #24525b);
+  border-radius: 4px;
+  color: var(--hud-accent);
+  font: inherit;
+  background: #000;
+  cursor: pointer;
+}
+.site-radar__settings:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 3px;
+}
 .site-radar__controls label {
   display: flex;
   justify-content: space-between;

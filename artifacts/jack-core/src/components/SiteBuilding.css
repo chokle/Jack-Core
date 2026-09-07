@@ -1,0 +1,78 @@
+.site-building {
+  margin: 16px 0;
+}
+.site-building svg {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+}
+.site-building__frame {
+  stroke: var(--hud-accent);
+  stroke-opacity: 0.3;
+  stroke-width: 0.7;
+  fill: none;
+}
+.site-building__floor {
+  cursor: pointer;
+  outline: none;
+}
+.site-building__hit {
+  fill: transparent;
+  stroke: transparent;
+}
+.site-building__slab {
+  fill: #000;
+  fill-opacity: 0.3;
+  stroke: var(--hud-accent);
+  stroke-opacity: 0.55;
+  stroke-width: 0.8;
+}
+.site-building__beam {
+  fill: none;
+  stroke: var(--hud-accent);
+  stroke-opacity: 0.24;
+  stroke-width: 0.6;
+  pointer-events: none;
+}
+.site-building__floor[aria-pressed="true"] .site-building__slab {
+  fill: var(--hud-accent);
+  fill-opacity: 0.2;
+  stroke-opacity: 1;
+  stroke-width: 1.6;
+}
+.site-building__floor:hover .site-building__slab {
+  fill: var(--hud-accent);
+  fill-opacity: 0.12;
+}
+.site-building__floor:focus-visible .site-building__hit {
+  stroke: var(--hud-accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+.site-building__label,
+.site-building__count {
+  fill: var(--hud-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.site-building__elevation {
+  fill: #94a3b8;
+  font-size: 9px;
+}
+.site-building__contact {
+  fill: var(--hud-accent);
+  stroke: #000;
+  stroke-width: 1;
+  filter: drop-shadow(0 0 3px var(--hud-accent));
+  pointer-events: none;
+}
+.site-building__contact[data-stale="true"] {
+  fill: #000;
+  stroke: #fbbf24;
+  filter: none;
+}
+.site-building > p {
+  color: #94a3b8;
+  text-align: center;
+  font-size: 9px;
+}

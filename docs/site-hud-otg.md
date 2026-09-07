@@ -14,7 +14,7 @@ All workers, contractor scopes, floor coordinates and landmarks are fixtures. Si
 
 ## Radar presentation and compass
 
-The instrument uses a black background. A persistent floor/elevation view sits beside the radar on desktop and directly below it on mobile. Its floor selection, retained-position counts and selected-floor roster use the same scoped projection as the radar; elevations are fixture plan values, not sensed altitude.
+The instrument uses a black background. A persistent floor/elevation view sits beside the radar on desktop and directly below it on mobile. It renders a simulated structural skeleton with selectable floor planes, frame columns and retained crew markers. Pointer, Enter and Space select floors. Its floor selection, retained-position counts and selected-floor roster use the same scoped projection as the radar; elevations are fixture plan values, not sensed altitude. Frame geometry is illustrative, not a surveyed building model or measured structural layout.
 
 The radar uses the same fixture projection and connectivity state as the persistent HUD. Navigating between pages retains the open demo and manual heading; closing the demo or changing accounts resets them. No separate Command Centre state or backend event system is introduced by this presentation change.
 
@@ -82,3 +82,7 @@ Radio Jack integration remains future work on an authorized, filtered HUD view. 
 Milestone verification must cover default-disabled entry, resolved authentication and explicit fictional-site activation; desktop/mobile expansion; cyan/amber states; observation expiry and missing/future data; contractor projection without outside identities or coordinates; bounded queues, duplicates, overflow and interrupted reconciliation; and applicable frontend tests, typecheck, build and formatting. A browser check must confirm the rendered interaction and clear simulation labels. Record actual results in the implementation handoff rather than treating this contract as evidence of passing checks.
 
 Derek explicitly authorized proceeding with this first milestone after the voice acceptance update, overriding the earlier sequencing hold. This permits the fictional demo release; it does not establish acceptance of the remaining #112 navigation work or telemetry, or authorize real tracking and later hardware phases. Release verification must establish the exact deployed revision and flag state, then verify the explicit demo on desktop and mobile. Keep later real-data, caching and radio milestones open.
+
+### Selected HUD design
+
+The user-supplied JACK SITE HUD image is the accepted visual target. The elevation panel depicts an illustrative structural frame, not stacked list cards. Safety landmarks use distinct, shared icons for muster, fire exit, fire extinguisher, first aid, air horn, entry and hazard in both the radar and legend. A fictional ground-floor extinguisher is included. Unknown landmark kinds use a generic marker rather than breaking the HUD. Compass settings expand from a compact control without activating device sensors on their own. No live building survey, scanning or structural accuracy is implied.

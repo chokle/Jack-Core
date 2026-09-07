@@ -100,6 +100,7 @@ describe("Site HUD demo entry", () => {
     vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
     const { rerender } = render(shell("demo-account", "radar"));
     fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compass controls" }));
     fireEvent.change(
       screen.getByRole("slider", { name: /Turn demo heading/ }),
       { target: { value: "90" } },

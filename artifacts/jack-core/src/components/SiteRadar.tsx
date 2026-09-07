@@ -6,6 +6,7 @@ import {
   radarBearing,
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
+import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
 
 const SWEEP_PERIOD_MS = 4000;
 
@@ -26,6 +27,7 @@ export function SiteRadar({
 }: Props) {
   const id = useId();
   const [manualHeading, setManualHeading] = useState(0);
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [deviceEnabled, setDeviceEnabled] = useState(false);
   const [message, setMessage] = useState("Manual demo heading");
@@ -229,6 +231,7 @@ export function SiteRadar({
             </text>
           ))}
           {landmarks.map((point) => {
+            const Icon = siteSafetyIcon(point.kind);
             const x = 200 + (point.x - 50) * 2.2,
               y = 200 + (point.y - 50) * 2.2;
             return (
@@ -236,11 +239,27 @@ export function SiteRadar({
                 key={point.id}
                 role="img"
                 aria-label={`${point.label}, ${point.kind}`}
+                transform={`rotate(${heading} ${x} ${y})`}
+                style={{ color: siteSafetyColor(point.kind) }}
               >
                 <title>{point.label}</title>
-                <path
-                  d={`M${x} ${y - 5}l5 5-5 5-5-5Z`}
-                  className="site-radar__landmark"
+                <rect
+                  x={x - 7}
+                  y={y - 7}
+                  width="14"
+                  height="14"
+                  rx="1"
+                  fill="#000"
+                  stroke="currentColor"
+                  strokeWidth=".7"
+                />
+                <Icon
+                  x={x - 5.5}
+                  y={y - 5.5}
+                  width="11"
+                  height="11"
+                  strokeWidth="2"
+                  aria-hidden="true"
                 />
               </g>
             );
@@ -329,10 +348,23 @@ export function SiteRadar({
       </svg>
       <div className="site-radar__legend">
         <span>● Crew</span>
-        <span>◇ Site landmark</span>
+        <span>Safety landmarks</span>
         <span>◌ Last known</span>
       </div>
-      <div className="site-radar__controls">
+      <button
+        className="site-radar__settings"
+        type="button"
+        aria-expanded={controlsOpen}
+        aria-controls={`${id}-controls`}
+        onClick={() => setControlsOpen(!controlsOpen)}
+      >
+        Compass controls
+      </button>
+      <div
+        className="site-radar__controls"
+        id={`${id}-controls`}
+        hidden={!controlsOpen}
+      >
         <label htmlFor={`${id}-heading`}>
           Turn demo heading <output>{manualHeading}°</output>
         </label>
@@ -364,11 +396,11 @@ export function SiteRadar({
           {deviceEnabled ? "Use manual heading" : "Use device compass"}
         </button>
         <p aria-live="polite">{message}</p>
+        <p className="site-radar__notice">
+          Fictional positions · sweep is a visual simulation, not nearby
+          detection. N is demo north in manual mode. Not for navigation.
+        </p>
       </div>
-      <p className="site-radar__notice">
-        Fictional positions · sweep is a visual simulation, not nearby
-        detection. N is demo north in manual mode. Not for navigation.
-      </p>
     </section>
   );
 }
