@@ -302,6 +302,7 @@ export function rerankByVerification<T>(
  */
 export async function fetchVerificationCoverage(
   videoIds: string[],
+  options: { failClosed?: boolean } = {},
 ): Promise<ConceptCoverage[]> {
   const unique = [
     ...new Set(
@@ -326,6 +327,7 @@ export async function fetchVerificationCoverage(
       unique.map((v) => `video:${v}`),
     );
   if (edgeError) {
+    if (options.failClosed) throw edgeError;
     logger.error(
       { err: edgeError },
       "fetchVerificationCoverage edges failed; skipping rerank",
@@ -346,6 +348,7 @@ export async function fetchVerificationCoverage(
     .select("verification_status, confidence, meta")
     .in("id", conceptIds);
   if (error) {
+    if (options.failClosed) throw error;
     logger.error(
       { err: error },
       "fetchVerificationCoverage nodes failed; skipping rerank",

@@ -15,7 +15,8 @@ const NOW = Date.parse("2026-09-05T12:00:00Z");
 let online: ReturnType<typeof vi.spyOn>;
 const openPanel = (name: string) =>
   fireEvent.click(screen.getByRole("button", { name }));
-const mode = () => screen.getByRole("status").textContent;
+const mode = () =>
+  screen.getByRole("status", { name: "Demo connectivity" }).textContent;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -30,7 +31,46 @@ afterEach(() => {
 });
 
 describe("Site HUD demo", () => {
-  it("starts collapsed with explicit simulation and navigation limits", () => {
+  it("keeps the elevation view visible and synchronizes floor selection with scoped radar positions", () => {
+    render(<SiteHud {...createSiteHudFixture(NOW)} />);
+    const levels = screen.getByRole("region", { name: "Level overview" });
+    expect(
+      within(levels).getByRole("group", {
+        name: "Simulated building skeleton",
+      }),
+    ).toBeTruthy();
+    fireEvent.keyDown(
+      within(levels).getByRole("button", { name: "View Level 2" }),
+      { key: " " },
+    );
+    expect(
+      screen.getByRole("group", { name: /Schematic radar: Level 2/ }),
+    ).toBeTruthy();
+    fireEvent.keyDown(
+      within(levels).getByRole("button", { name: "View Ground" }),
+      { key: "Enter" },
+    );
+    expect(
+      within(levels)
+        .getByRole("button", { name: "View Ground" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(
+      within(levels).getByRole("button", { name: "View Level 1" }),
+    );
+    expect(
+      screen.getByRole("group", { name: /Schematic radar: Level 1/ }),
+    ).toBeTruthy();
+    expect(within(levels).getByText("Sam Morgan")).toBeTruthy();
+    expect(within(levels).queryByText("Avery Chen")).toBeNull();
+    expect(within(levels).queryByText("Casey Brooks")).toBeNull();
+    act(() => vi.advanceTimersByTime(120_000));
+    expect(
+      within(levels).getByText("No retained positions on this level."),
+    ).toBeTruthy();
+  });
+
+  it("opens a full radar page with explicit simulation and navigation limits", () => {
     render(<SiteHud {...createSiteHudFixture(NOW)} />);
 
     expect(mode()).toBe("ONLINE");
@@ -38,8 +78,10 @@ describe("Site HUD demo", () => {
     expect(
       screen.getByText("Simulated data · Not for navigation"),
     ).toBeTruthy();
-    expect(screen.queryByRole("heading")).toBeNull();
-    for (const button of screen.getAllByRole("button"))
+    expect(screen.getByRole("heading", { name: "Site radar" })).toBeTruthy();
+    for (const button of screen
+      .getAllByRole("button")
+      .filter((button) => button.hasAttribute("aria-expanded")))
       expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(
       screen.getByRole("group", { name: /Schematic radar: Ground/ }),
@@ -263,7 +305,7 @@ describe("Site HUD demo", () => {
     const added = vi.spyOn(window, "addEventListener");
     const removed = vi.spyOn(window, "removeEventListener");
     const { unmount } = render(<SiteHud {...createSiteHudFixture(NOW)} />);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2); // Aging timer and the radar animation frame.
     unmount();
     expect(vi.getTimerCount()).toBe(0);
     for (const event of ["online", "offline"]) {

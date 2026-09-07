@@ -8,6 +8,13 @@ export interface JackUiContext {
     label: string | null;
   };
   visibleIds: string[];
+  resources?: Array<{
+    id: string;
+    title: string;
+    trade: string;
+    status: string;
+    selected: boolean;
+  }>;
   navigation: {
     canBack: boolean;
     canUp: boolean;
@@ -184,6 +191,67 @@ function visibleRecordIds() {
   return Array.from(values);
 }
 
+function visibleVideoResources(): NonNullable<JackUiContext["resources"]> {
+  const surface = activeSurfaceElement();
+  if (
+    !surface ||
+    !["Library", "Video"].includes(surface.dataset.jackSurface ?? "")
+  )
+    return [];
+  const nodes = [
+    surface,
+    ...surface.querySelectorAll<HTMLElement>(
+      "[data-video-id][data-video-title]",
+    ),
+  ];
+  const resources: NonNullable<JackUiContext["resources"]> = [];
+  for (const node of nodes) {
+    if (
+      !node.dataset.videoId ||
+      !node.dataset.videoTitle ||
+      !isElementVisible(node, { allowTransparent: true }) ||
+      node.closest("[data-jack-command-index]")
+    )
+      continue;
+    const selected =
+      node === surface && surface.dataset.jackSurface === "Video";
+    if (!selected) {
+      const rect = node.getBoundingClientRect();
+      let left = Math.max(rect.left, 0),
+        right = Math.min(rect.right, window.innerWidth);
+      let top = Math.max(rect.top, 0),
+        bottom = Math.min(rect.bottom, window.innerHeight);
+      for (
+        let parent = node.parentElement;
+        parent;
+        parent = parent.parentElement
+      ) {
+        const style = window.getComputedStyle(parent);
+        const bounds = parent.getBoundingClientRect();
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+          left = Math.max(left, bounds.left);
+          right = Math.min(right, bounds.right);
+        }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+          top = Math.max(top, bounds.top);
+          bottom = Math.min(bottom, bounds.bottom);
+        }
+      }
+      if (right <= left || bottom <= top) continue;
+    }
+    if (resources.some((item) => item.id === node.dataset.videoId)) continue;
+    resources.push({
+      id: cleanText(node.dataset.videoId, 160),
+      title: cleanText(node.dataset.videoTitle),
+      trade: cleanText(node.dataset.videoTrade),
+      status: cleanText(node.dataset.videoStatus, 40),
+      selected,
+    });
+    if (resources.length === 3) break;
+  }
+  return resources;
+}
+
 function inspectorState() {
   const surface = activeSurfaceElement();
   const inspector = surface?.matches(
@@ -302,6 +370,7 @@ export function collectJackUiContext(): JackUiContext {
     path: path.slice(-MAX_PATH_ITEMS),
     inspector: inspectorState(),
     visibleIds: visibleRecordIds(),
+    resources: visibleVideoResources(),
     navigation: {
       canBack: Boolean(jackUiAction("back") || jackUiAction("up")),
       canUp: Boolean(jackUiAction("up")),
@@ -331,6 +400,11 @@ export function encodeJackUiContextHeader(context: JackUiContext) {
       label: context.inspector.label?.slice(0, 60) ?? null,
     },
     visibleIds: context.visibleIds.slice(0, 3).map((id) => id.slice(0, 80)),
+    resources: context.resources?.map((item) => ({
+      ...item,
+      title: item.title.slice(0, 60),
+      trade: item.trade.slice(0, 40),
+    })),
   };
   encoded = encodeURIComponent(JSON.stringify(candidate));
   if (encoded.length <= MAX_HEADER_CHARS) return encoded;
@@ -341,6 +415,7 @@ export function encodeJackUiContextHeader(context: JackUiContext) {
     path: candidate.path.slice(0, 2).map((item) => item.slice(0, 40)),
     inspector: { open: candidate.inspector.open, label: null },
     visibleIds: [],
+    resources: [],
   };
   encoded = encodeURIComponent(JSON.stringify(candidate));
   if (encoded.length <= MAX_HEADER_CHARS) return encoded;
@@ -356,5 +431,21 @@ export function encodeJackUiContextHeader(context: JackUiContext) {
       navigation: candidate.navigation,
       capturedAt: candidate.capturedAt,
     } satisfies JackUiContext),
+  );
+}
+
+export function sameJackSelectionContext(
+  a: JackUiContext | null,
+  b: JackUiContext,
+) {
+  if (!a) return false;
+  return (
+    a.route === b.route &&
+    a.surface === b.surface &&
+    a.path.join("|") === b.path.join("|") &&
+    a.inspector.open === b.inspector.open &&
+    a.inspector.label === b.inspector.label &&
+    a.visibleIds.join("|") === b.visibleIds.join("|") &&
+    JSON.stringify(a.resources ?? []) === JSON.stringify(b.resources ?? [])
   );
 }

@@ -448,8 +448,15 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const call = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
     const system =
       call?.messages?.find((m) => m.role === "system")?.content ?? "";
-    expect(system).toContain("[Matched Library Video: 3gdemo]");
-    expect(system).toContain("Jack's saved Library analysis");
+    const evidence =
+      call?.messages?.find(
+        (m) =>
+          m.role === "user" &&
+          String(m.content).startsWith("UNTRUSTED RETRIEVED"),
+      )?.content ?? "";
+    expect(evidence).toContain("[Matched Library Video: 3gdemo]");
+    expect(evidence).toContain("Jack's saved Library analysis");
+    expect(system).not.toContain("cap pass is too cold");
     expect(system).toContain("Do not claim you lack access to this video");
   });
 
@@ -486,10 +493,14 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     );
 
     const call = vi.mocked(chatCompletion).mock.calls.at(-1)?.[0];
-    const system =
-      call?.messages?.find((m) => m.role === "system")?.content ?? "";
-    expect(system).toContain("[Living Memory: Split TIG torch ferrule check");
-    expect(system).toContain("radial cracks before assembly");
+    const evidence =
+      call?.messages?.find(
+        (m) =>
+          m.role === "user" &&
+          String(m.content).startsWith("UNTRUSTED RETRIEVED"),
+      )?.content ?? "";
+    expect(evidence).toContain("[Living Memory: Split TIG torch ferrule check");
+    expect(evidence).toContain("radial cracks before assembly");
   });
 
   it("ignores conflicting prior conversation identity claims and preserves canonical identity", async () => {

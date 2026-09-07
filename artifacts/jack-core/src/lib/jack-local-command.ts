@@ -5,6 +5,7 @@ export type JackLocalAppAction = Exclude<JackUiActionName, "video" | "node">;
 export type JackLocalCommand =
   | { kind: "app"; action: JackLocalAppAction; label: string }
   | { kind: "node"; target: string; label: string }
+  | { kind: "destination"; target: string; label: string }
   | { kind: "video"; target: string | null; label: string };
 
 const SECTION_ALIASES: Record<string, JackLocalAppAction> = {
@@ -187,7 +188,7 @@ function parseNodeCommand(intent: string): JackLocalCommand | null {
   const target = rawTarget.replace(/^['"]|['"]$/g, "").trim();
   if (!target) return null;
 
-  return { kind: "node", target, label: `node ${target}` };
+  return { kind: "destination", target, label: target };
 }
 
 /**
@@ -242,7 +243,7 @@ export function resolveJackLocalCommand(
 export function resolveJackLocalAction(
   command: JackLocalCommand,
 ): HTMLElement | null {
-  if (command.kind === "node") {
+  if (command.kind === "node" || command.kind === "destination") {
     return jackUiAction("node", command.target);
   }
   if (command.kind === "video") {
@@ -262,7 +263,7 @@ export function resolveJackLocalAction(
 }
 
 export function unavailableJackLocalCommand(command: JackLocalCommand) {
-  if (command.kind === "node") {
+  if (command.kind === "node" || command.kind === "destination") {
     return `I can’t find an available destination named “${command.target}” from this screen.`;
   }
   if (command.kind === "video") {

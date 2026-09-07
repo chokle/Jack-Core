@@ -574,6 +574,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       review: "knowledge_review",
       reports: null,
       closeout: null,
+      radar: null,
     } as const;
     if (feature[next]) {
       feedbackRef.current?.markFeature(feature[next]);
@@ -618,10 +619,29 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
   };
 
-  const handleCitationClick = (videoId: string, startTime: number) => {
-    setSeek({ time: startTime, token: Date.now() });
+  const handleCitationClick = (videoId: string, startTime?: number) => {
+    setSeek(startTime === undefined ? undefined : { time: startTime, token: Date.now() });
     navigateToLocation({ view, selectedVideoId: videoId });
   };
+
+  useEffect(() => {
+    const openSource = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (
+        !detail ||
+        typeof detail.videoId !== "string" ||
+        !detail.videoId ||
+        detail.videoId.length > 160 ||
+        (detail.startTime !== undefined &&
+          (!Number.isFinite(detail.startTime) || detail.startTime < 0))
+      )
+        return;
+      handleCitationClick(detail.videoId, detail.startTime);
+    };
+    window.addEventListener("jack:open-video-source", openSource);
+    return () =>
+      window.removeEventListener("jack:open-video-source", openSource);
+  }, [handleCitationClick]);
 
   const launchTestSession = async (pilotId?: string) => {
     const requestUserId = me?.userId;
@@ -1084,6 +1104,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     interview: "Interview",
     review: "Review",
     reports: "Pilot Reports",
+    radar: "Site radar demo",
     closeout: canViewCloseout ? "Closeout" : "Library",
   }[view];
 
@@ -1091,7 +1112,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     <>
       {/* Ambient memory wallpaper behind the library / detail surfaces. The
           Memory Graph view renders its own full-bleed interactive canvas. */}
-      {!inGraph && <KnowledgeGraph />}
+      {!inGraph && view !== "radar" && <KnowledgeGraph />}
 
       <JackShell
         active={activeNav}

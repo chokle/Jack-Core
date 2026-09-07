@@ -41,6 +41,10 @@ describe("Site HUD demo entry", () => {
     expect(baseline.surface).toBe("Living Memory");
     fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
     expect(snapshot()).toEqual(baseline);
+    expect(screen.queryByRole("group", { name: /Schematic radar/ })).toBeNull();
+    rerender(shell("demo-account", "radar"));
+    const radarContext = snapshot();
+    expect(radarContext.surface).toBe("Site radar demo");
     for (const name of [
       "Floor / elevation",
       "Crew roster",
@@ -52,10 +56,12 @@ describe("Site HUD demo entry", () => {
       if (name === "Floor / elevation") {
         fireEvent.click(screen.getByRole("button", { name: "Level 1 4 m" }));
       }
-      expect(snapshot()).toEqual(baseline);
+      expect(snapshot()).toEqual(radarContext);
     }
     rerender(shell("demo-account", "library"));
     expect(collectJackUiContext().surface).toBe("Library");
+    expect(screen.queryByRole("group", { name: /Schematic radar/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Open radar/ })).toBeTruthy();
   });
 
   it.each([undefined, "false", "1"])(
@@ -89,6 +95,23 @@ describe("Site HUD demo entry", () => {
     expect(screen.getByText("library content")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close demo site" }));
     expect(screen.getByRole("button", { name: "Open demo site" })).toBeTruthy();
+  });
+  it("keeps the same radar state across app pages without mounting page content behind it", () => {
+    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
+    const { rerender } = render(shell("demo-account", "radar"));
+    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compass controls" }));
+    fireEvent.change(
+      screen.getByRole("slider", { name: /Turn demo heading/ }),
+      { target: { value: "90" } },
+    );
+    expect(screen.queryByText("radar content")).toBeNull();
+    rerender(shell("demo-account", "library"));
+    expect(screen.getByText("library content")).toBeTruthy();
+    rerender(shell("demo-account", "radar"));
+    expect(screen.getByTestId("radar-world").getAttribute("transform")).toBe(
+      "rotate(-90 200 200)",
+    );
   });
 
   it("discards site state when account identity changes or disappears", () => {

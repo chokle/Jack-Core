@@ -1,0 +1,22 @@
+name: Founder Lock Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/jack-identity-founder-lock.yml"
+      - ".github/workflows/founder-lock-tests.yml"
+      - ".github/workflows/founder-lock-review-signal.yml"
+      - ".github/tests/jack-identity-founder-lock.test.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: node --test .github/tests/jack-identity-founder-lock.test.mjs

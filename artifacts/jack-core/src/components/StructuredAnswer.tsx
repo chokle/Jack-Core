@@ -38,7 +38,7 @@ interface StructuredAnswerProps {
   content: string;
   citations?: Citation[];
   usedInternalKnowledge?: boolean;
-  onCitationClick: (videoId: string, startTime: number) => void;
+  onCitationClick: (videoId: string, startTime?: number) => void;
   onFieldNoteClick?: (citation: Citation) => void;
 }
 
@@ -468,7 +468,9 @@ export function StructuredAnswer({
                       {c.videoTitle}
                     </div>
                     <div className="font-mono text-xs text-primary">
-                      {fmtTime(c.startTime)}–{fmtTime(c.endTime)}
+                      {c.endTime > c.startTime
+                        ? `${fmtTime(c.startTime)}–${fmtTime(c.endTime)}`
+                        : "Video analysis"}
                     </div>
                     {c.text && (
                       <div className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">
@@ -483,11 +485,16 @@ export function StructuredAnswer({
                 />
                 <button
                   type="button"
-                  onClick={() => onCitationClick(c.videoId, c.startTime)}
+                  onClick={() =>
+                    onCitationClick(
+                      c.videoId,
+                      c.endTime > c.startTime ? c.startTime : undefined,
+                    )
+                  }
                   className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <PlayCircle className="h-4 w-4" />
-                  Jump to Clip
+                  {c.endTime > c.startTime ? "Jump to Clip" : "Open video"}
                 </button>
               </div>
             );

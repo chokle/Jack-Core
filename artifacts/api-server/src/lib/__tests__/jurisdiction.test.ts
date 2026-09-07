@@ -160,7 +160,6 @@ describe("Canadian jurisdiction policy", () => {
     it("chat answer prompt embeds the full policy and stays Torch-first", () => {
       const withCtx = buildChatSystemPrompt({
         usedInternalKnowledge: true,
-        contextText: "SEG-CONTEXT",
       });
       expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
       expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
@@ -177,7 +176,7 @@ describe("Canadian jurisdiction policy", () => {
 
       expect(withCtx).toContain("SOURCE PRIORITY ORDER");
       expect(withCtx).toContain("Torch Knowledge Repository");
-      expect(withCtx).toContain("SEG-CONTEXT");
+      expect(withCtx).toContain("UNTRUSTED RETRIEVED LIBRARY SOURCE DATA");
       expect(withCtx).toContain("FAST-SCAN FORMATTING");
       expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
       expect(withCtx).toMatch(/not whole paragraphs/i);
@@ -190,7 +189,6 @@ describe("Canadian jurisdiction policy", () => {
 
       const noCtx = buildChatSystemPrompt({
         usedInternalKnowledge: false,
-        contextText: "",
       });
       expect(noCtx).toContain("SOURCE PRIORITY ORDER");
       expect(noCtx).toMatch(/No internal library content matched/);
@@ -200,7 +198,6 @@ describe("Canadian jurisdiction policy", () => {
     it("keeps authority centralized in the constitution block", () => {
       const prompt = buildChatSystemPrompt({
         usedInternalKnowledge: false,
-        contextText: "",
       });
 
       expect(prompt).toContain("PERSONA & COMMUNICATION.");
@@ -221,7 +218,6 @@ describe("Canadian jurisdiction policy", () => {
     it("gives Ask Jack one authoritative map of Jack Core", () => {
       const prompt = buildChatSystemPrompt({
         usedInternalKnowledge: false,
-        contextText: "",
       });
 
       for (const system of JACK_CORE_SYSTEMS) {
@@ -282,7 +278,6 @@ describe("Canadian jurisdiction policy", () => {
     it("distinguishes identity questions from capability questions", () => {
       const withCtx = buildChatSystemPrompt({
         usedInternalKnowledge: false,
-        contextText: "",
       });
 
       expect(withCtx).toContain(
