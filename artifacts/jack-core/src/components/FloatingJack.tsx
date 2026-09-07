@@ -15,6 +15,7 @@ import {
   unavailableJackLocalCommand,
 } from "../lib/jack-local-command";
 import { JackSpeechPlayer, type JackVoiceState } from "../lib/jack-speech";
+import { resolveJackVideoDestination } from "../lib/jack-video-destination";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -272,6 +273,33 @@ export function FloatingJack() {
     try {
       const localCommand = resolveJackLocalCommand(trimmed);
       if (localCommand) {
+        if (localCommand.kind === "destination") {
+          const destination = await resolveJackVideoDestination(
+            localCommand.target,
+            controller.signal,
+          );
+          refreshContext();
+          if (controller.signal.aborted || contextEpochRef.current !== epoch)
+            return;
+          if (destination.kind === "video") {
+            window.dispatchEvent(
+              new CustomEvent("jack:open-video-source", {
+                detail: { videoId: destination.id },
+              }),
+            );
+            window.setTimeout(refreshContext, 0);
+            return;
+          }
+          if (destination.kind !== "missing") {
+            const message =
+              destination.kind === "ambiguous"
+                ? `Which video: ${destination.titles.join(" or ")}?`
+                : "I couldn’t check the full Library. Open Library to choose the video.";
+            setAnswer(message);
+            speak(message);
+            return;
+          }
+        }
         const action = resolveJackLocalAction(localCommand);
         if (action) {
           action.click();

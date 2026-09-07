@@ -46,8 +46,6 @@ describe("Jack local commands", () => {
   });
 
   it.each([
-    ["go to Root Pass", "Root Pass"],
-    ["go forward to Root Pass", "Root Pass"],
     ["forward to node Root Pass", "Root Pass"],
     ["navigate to the Root Pass node", "Root Pass"],
     ["go to Fit Up concept", "Fit Up"],
@@ -65,6 +63,13 @@ describe("Jack local commands", () => {
       label: `node ${target}`,
     });
   });
+
+  it.each(["Take me to 3G demo", "go to Root Pass", "go forward to Root Pass"])(
+    "resolves a natural destination without assuming a graph node: %s",
+    (message) => {
+      expect(resolveJackLocalCommand(message)?.kind).toBe("destination");
+    },
+  );
 
   it.each([
     "Show me the source",
@@ -153,7 +158,7 @@ describe("Jack local commands", () => {
     button.addEventListener("click", click);
 
     const command = resolveJackLocalCommand("go to Root Pass");
-    expect(command).toMatchObject({ kind: "node", target: "Root Pass" });
+    expect(command).toMatchObject({ kind: "destination", target: "Root Pass" });
     resolveJackLocalAction(command!)?.click();
     expect(click).toHaveBeenCalledTimes(1);
   });
