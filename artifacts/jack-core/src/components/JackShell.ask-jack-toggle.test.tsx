@@ -46,18 +46,18 @@ describe("Ask Jack shell toggle", () => {
     const floatingComposer = screen.getByText("Radio Jack composer");
 
     expect(screen.queryByLabelText("Close Ask Jack")).toBeNull();
-    expect(floatingComposer).not.toHaveAttribute("hidden");
+    expect(floatingComposer.hasAttribute("hidden")).toBe(false);
 
     fireEvent.click(trigger);
 
     await waitFor(() => expect(screen.getByLabelText("Close Ask Jack")).toBeTruthy());
-    await waitFor(() => expect(floatingComposer).toHaveAttribute("hidden"));
-    expect(floatingComposer).toHaveAttribute("aria-hidden", "true");
+    await waitFor(() => expect(floatingComposer.hasAttribute("hidden")).toBe(true));
+    expect(floatingComposer.getAttribute("aria-hidden")).toBe("true");
 
     fireEvent.click(trigger);
 
     await waitFor(() => expect(screen.queryByLabelText("Close Ask Jack")).toBeNull());
-    await waitFor(() => expect(floatingComposer).not.toHaveAttribute("hidden"));
-    expect(floatingComposer).toHaveAttribute("aria-hidden", "false");
+    await waitFor(() => expect(floatingComposer.hasAttribute("hidden")).toBe(false));
+    expect(floatingComposer.getAttribute("aria-hidden")).toBe("false");
   });
 });
