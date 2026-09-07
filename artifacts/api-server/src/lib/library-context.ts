@@ -28,6 +28,27 @@ function titleScore(wanted: string, title: string) {
   );
 }
 
+function parseRequestedTimeSeconds(message: string) {
+  const timestamp = message.match(/\b(\d{1,3}):([0-5]\d)\b/);
+  if (timestamp) return Number(timestamp[1]) * 60 + Number(timestamp[2]);
+
+  const minuteSecond = message.match(
+    /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min)\s*(?:and\s*)?(\d+(?:\.\d+)?)\s*-?\s*(?:seconds?|secs?|sec)\b/i,
+  );
+  if (minuteSecond)
+    return Number(minuteSecond[1]) * 60 + Number(minuteSecond[2]);
+
+  const seconds = message.match(
+    /\b(\d+(?:\.\d+)?)\s*-?\s*(?:seconds?|secs?|sec)\b/i,
+  );
+  if (seconds) return Number(seconds[1]);
+
+  const minutes = message.match(
+    /\b(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|min)\b/i,
+  );
+  return minutes ? Number(minutes[1]) * 60 : null;
+}
+
 /** Resolve UI IDs as data, never as authority or arbitrary table identifiers. */
 export async function loadLibraryContext(
   message: string,
@@ -56,11 +77,16 @@ export async function loadLibraryContext(
       ? [naturalTitle]
       : []),
   ];
+  const requestedTime = parseRequestedTimeSeconds(message);
   const intent =
     /\b(video|videos|clip|clips|library|transcript|footage|analysis|key points)\b/i.test(
       message,
     ) ||
-    /\b\d{1,3}:\d{2}\b/.test(message) ||
+    requestedTime !== null ||
+    Boolean(
+      selected &&
+        /\b(cite|citation|source|sources|timestamp|time stamp)\b/i.test(message),
+    ) ||
     /^(?:please\s+)?(?:what(?:'s| is)|describe|explain|summari[sz]e|tell me about)\s+(?:this|that|it)[?.!\s]*$/i.test(
       message.trim(),
     );
@@ -213,10 +239,6 @@ export async function loadLibraryContext(
           word,
         ) && !normalized(String(video.title)).split(" ").includes(word),
     );
-    const timestamp = message.match(/\b(\d{1,3}):([0-5]\d)\b/);
-    const requestedTime = timestamp
-      ? Number(timestamp[1]) * 60 + Number(timestamp[2])
-      : null;
     const scored = segments
       .filter(
         (segment) =>
