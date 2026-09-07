@@ -12,12 +12,14 @@ import { FloatingJack } from "./FloatingJack";
 const api = vi.hoisted(() => ({
   askJack: vi.fn(),
   getMe: vi.fn(),
+  listVideos: vi.fn(),
 }));
 
 vi.mock("@workspace/api-client-react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@workspace/api-client-react")>()),
   askJack: api.askJack,
   getMe: api.getMe,
+  listVideos: api.listVideos,
 }));
 
 class FakeSpeechRecognition {
@@ -42,6 +44,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   api.askJack.mockReset();
   api.getMe.mockReset();
+  api.listVideos.mockReset();
+  api.listVideos.mockResolvedValue({ videos: [], total: 0 });
   api.getMe.mockResolvedValue({});
   api.askJack.mockImplementation(() => new Promise(() => {}));
   FakeSpeechRecognition.latest = null;
@@ -70,6 +74,107 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("interrupts the 15-second explanation and opens a catalog video by its natural spoken name", async () => {
+    let finishOld!: (value: unknown) => void;
+    api.askJack.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "three-g", title: "3gdemo" }],
+      total: 1,
+    });
+    const open = vi.fn((event: Event) => {
+      const section = document.querySelector("section")!;
+      section.dataset.videoId = (event as CustomEvent).detail.videoId;
+      section.dataset.videoTitle = "3gdemo";
+      section.dataset.jackPath = '["Library","3gdemo","Transcript"]';
+    });
+    window.addEventListener("jack:open-video-source", open);
+    try {
+      render(
+        <>
+          <section
+            data-jack-surface="Video"
+            data-video-id="oxy"
+            data-video-title="Oxy"
+            data-jack-path='["Library","Oxy","Transcript"]'
+          />
+          <FloatingJack />
+        </>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      fireEvent.change(screen.getByLabelText("Ask Jack"), {
+        target: { value: "Summarize what happened at 15 seconds" },
+      });
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      await act(async () => {
+        FakeSpeechRecognition.latest!.onresult?.({
+          results: [{ 0: { transcript: "Take me to 3G demo" }, isFinal: true }],
+        });
+      });
+      expect(open).toHaveBeenCalledOnce();
+      expect((open.mock.calls[0][0] as CustomEvent).detail).toEqual({
+        videoId: "three-g",
+      });
+      await act(async () => {
+        finishOld({ answer: "Stale Oxy answer", citations: [] });
+      });
+      expect(screen.queryByText("Stale Oxy answer")).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(screen.getByText(/Jack is with you:/).textContent).toContain(
+        "3gdemo",
+      );
+      expect(api.askJack).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener("jack:open-video-source", open);
+    }
+  });
+
+  it("discards a pending destination lookup when the selected screen changes", async () => {
+    let finishLookup!: (value: unknown) => void;
+    api.listVideos.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishLookup = resolve;
+        }),
+    );
+    const open = vi.fn();
+    window.addEventListener("jack:open-video-source", open);
+    try {
+      render(
+        <>
+          <section data-jack-surface="Library" />
+          <FloatingJack />
+        </>,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      fireEvent.change(screen.getByLabelText("Ask Jack"), {
+        target: { value: "Take me to 3G demo" },
+      });
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+      await act(async () => {
+        document.querySelector("section")!.dataset.jackSurface = "Interview";
+      });
+      await act(async () => {
+        finishLookup({
+          videos: [{ id: "three-g", title: "3gdemo" }],
+          total: 1,
+        });
+      });
+      expect(open).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("jack:open-video-source", open);
+    }
+  });
+
   it.each(["listening", "recognition error", "no speech", "start error"])(
     "never resumes interrupted audio or answers after %s",
     async (mode) => {
