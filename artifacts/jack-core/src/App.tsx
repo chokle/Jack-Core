@@ -574,6 +574,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       review: "knowledge_review",
       reports: null,
       closeout: null,
+      radar: null,
     } as const;
     if (feature[next]) {
       feedbackRef.current?.markFeature(feature[next]);
@@ -1103,6 +1104,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     interview: "Interview",
     review: "Review",
     reports: "Pilot Reports",
+    radar: "Site radar demo",
     closeout: canViewCloseout ? "Closeout" : "Library",
   }[view];
 
@@ -1110,7 +1112,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     <>
       {/* Ambient memory wallpaper behind the library / detail surfaces. The
           Memory Graph view renders its own full-bleed interactive canvas. */}
-      {!inGraph && <KnowledgeGraph />}
+      {!inGraph && view !== "radar" && <KnowledgeGraph />}
 
       <JackShell
         active={activeNav}
