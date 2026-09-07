@@ -154,8 +154,16 @@ export function SiteRadar({
       >
         <defs>
           <radialGradient id={`${id}-glow`}>
-            <stop offset="0" stopColor="#22d3ee" stopOpacity=".09" />
-            <stop offset="1" stopColor="#22d3ee" stopOpacity=".015" />
+            <stop
+              offset="0"
+              stopColor="var(--hud-accent, #67e8f9)"
+              stopOpacity=".09"
+            />
+            <stop
+              offset="1"
+              stopColor="var(--hud-accent, #67e8f9)"
+              stopOpacity=".015"
+            />
           </radialGradient>
         </defs>
         <circle cx="200" cy="200" r="165" fill={`url(#${id}-glow)`} />
@@ -280,12 +288,12 @@ export function SiteRadar({
           >
             <path
               d="M200 200L117.5 57.1A165 165 0 0 1 200 35Z"
-              fill="#22d3ee"
+              fill="var(--hud-accent, #67e8f9)"
               opacity=".08"
             />
             <path
               d="M200 200V35"
-              stroke="#67e8f9"
+              stroke="var(--hud-accent, #67e8f9)"
               strokeWidth="1.8"
               opacity=".8"
             />

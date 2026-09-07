@@ -1,5 +1,5 @@
 .site-radar {
-  color: #a5f3fc;
+  color: var(--hud-accent, #67e8f9);
   width: 100%;
   max-width: 680px;
   margin: 0 auto;
@@ -16,7 +16,7 @@
 }
 .site-radar__readout strong {
   font-size: 24px;
-  color: #ecfeff;
+  color: var(--hud-accent, #67e8f9);
   font-variant-numeric: tabular-nums;
 }
 .site-radar__scope {
@@ -27,13 +27,13 @@
   overflow: visible;
 }
 .site-radar__grid {
-  stroke: #22d3ee;
+  stroke: var(--hud-accent, #67e8f9);
   stroke-opacity: 0.2;
   fill: none;
   stroke-width: 0.75;
 }
 .site-radar__tick {
-  stroke: #67e8f9;
+  stroke: var(--hud-accent, #67e8f9);
   stroke-opacity: 0.4;
   fill: none;
 }
@@ -43,14 +43,14 @@
   font-weight: 800;
 }
 .site-radar__cardinal {
-  fill: #67e8f9;
+  fill: var(--hud-accent, #67e8f9);
   font-size: 13px;
 }
 .site-radar__contact {
-  fill: #67e8f9;
+  fill: var(--hud-accent, #67e8f9);
 }
 .site-radar__contact text {
-  fill: #cffafe;
+  fill: var(--hud-accent, #67e8f9);
   font-size: 10px;
   text-anchor: middle;
 }
@@ -62,7 +62,7 @@
 }
 .site-radar__ping {
   fill: none;
-  stroke: #67e8f9;
+  stroke: var(--hud-accent, #67e8f9);
   stroke-width: 1;
 }
 .site-radar__landmark {
@@ -72,7 +72,7 @@
 }
 .site-radar__viewer {
   fill: white;
-  stroke: #22d3ee;
+  stroke: var(--hud-accent, #67e8f9);
   stroke-width: 1;
 }
 .site-radar__legend {
@@ -96,22 +96,23 @@
 .site-radar__controls input {
   width: 100%;
   min-height: 28px;
-  accent-color: #22d3ee;
+  accent-color: var(--hud-accent, #67e8f9);
 }
 .site-radar__controls button {
   justify-self: center;
   padding: 9px 16px;
-  border: 1px solid #22d3ee66;
+  border: 1px solid
+    color-mix(in srgb, var(--hud-accent, #67e8f9) 40%, transparent);
   border-radius: 8px;
   background: transparent;
-  color: #a5f3fc;
+  color: var(--hud-accent, #67e8f9);
   font: inherit;
   font-size: 13px;
   min-height: 44px;
 }
 .site-radar__controls button:focus-visible,
 .site-radar__controls input:focus-visible {
-  outline: 2px solid #67e8f9;
+  outline: 2px solid var(--hud-accent, #67e8f9);
   outline-offset: 3px;
 }
 .site-radar__controls p,
