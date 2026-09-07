@@ -375,6 +375,13 @@ function deferredNamedDestinationAction(
     activeDestinationLookup?.abort();
     activeDestinationLookup = controller;
     const startContext = navigationContextKey();
+    const abortOnNewMicTurn = (event: Event) => {
+      const element = event.target instanceof Element ? event.target : null;
+      if (element?.closest('[aria-label="Talk to Jack"]')) {
+        controller.abort();
+      }
+    };
+    document.addEventListener("click", abortOnNewMicTurn, true);
 
     void (async () => {
       let video: { id: string; title: string } | null = null;
@@ -412,6 +419,7 @@ function deferredNamedDestinationAction(
       }
       jackUiAction("library")?.click();
     })().finally(() => {
+      document.removeEventListener("click", abortOnNewMicTurn, true);
       if (activeDestinationLookup === controller) {
         activeDestinationLookup = null;
       }
@@ -428,19 +436,22 @@ export function resolveJackLocalAction(
     return jackUiAction("node", command.target);
   }
   if (command.kind === "destination") {
-    return (
-      jackUiAction("video", command.target) ??
-      deferredNamedDestinationAction(command.target, { fallbackToNode: true }, localCommandGeneration)
+    // Always resolve natural named destinations against the authenticated
+    // Library before considering a node fallback. `jackUiAction("video")`
+    // intentionally permits partial visible matches, which is too permissive
+    // for choosing between recordings with similar titles.
+    return deferredNamedDestinationAction(
+      command.target,
+      { fallbackToNode: true },
+      localCommandGeneration,
     );
   }
   if (command.kind === "video") {
     if (command.target) {
-      // Prefer an already-rendered exact destination. Otherwise resolve the
-      // title through the same authenticated Library endpoint the app uses and
-      // dispatch the existing app-owned video-source navigation event.
-      return (
-        jackUiAction("video", command.target) ??
-        deferredNamedDestinationAction(command.target, { fallbackToNode: false }, localCommandGeneration)
+      return deferredNamedDestinationAction(
+        command.target,
+        { fallbackToNode: false },
+        localCommandGeneration,
       );
     }
     // A targetless retrieval is a request for the rendered Library surface.
