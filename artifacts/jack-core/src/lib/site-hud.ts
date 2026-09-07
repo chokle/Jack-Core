@@ -28,7 +28,14 @@ export interface HudPosition {
 export interface HudLandmark extends HudPosition {
   id: string;
   label: string;
-  kind: "entry" | "hazard" | "muster" | "fire-exit" | "first-aid" | "air-horn";
+  kind:
+    | "entry"
+    | "hazard"
+    | "muster"
+    | "fire-exit"
+    | "fire-extinguisher"
+    | "first-aid"
+    | "air-horn";
 }
 
 export interface HudSiteContext {
@@ -321,6 +328,14 @@ export function createSiteHudFixture(nowMs: number): {
       { id: "level-2", label: "Level 2", elevationMeters: 8 },
     ],
     landmarks: [
+      {
+        id: "ground-extinguisher",
+        label: "Fire extinguisher",
+        kind: "fire-extinguisher",
+        floorId: "ground",
+        x: 15,
+        y: 30,
+      },
       {
         id: "entry",
         label: "Site entry",

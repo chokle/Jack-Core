@@ -645,59 +645,6 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.site-hud__level-stack {
-  display: flex;
-  flex-direction: column;
-  margin: 22px 0 16px;
-  border: 1px solid var(--hud-line);
-}
-.site-hud__level-stack button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 88px;
-  padding: 12px;
-  color: var(--hud-accent);
-  background: #000;
-  border: 0;
-  border-bottom: 1px solid var(--hud-line);
-  text-align: left;
-  cursor: pointer;
-}
-.site-hud__level-stack button:last-child {
-  border-bottom: 0;
-}
-.site-hud__level-stack button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--hud-accent) 12%, #000);
-  box-shadow: inset 3px 0 var(--hud-accent);
-}
-.site-hud__level-stack button:hover {
-  background: color-mix(in srgb, var(--hud-accent) 8%, #000);
-}
-.site-hud__level-stack button:focus-visible {
-  outline: 2px solid var(--hud-accent);
-  outline-offset: 3px;
-  z-index: 1;
-}
-.site-hud__level-name {
-  min-width: 58px;
-  font-weight: 700;
-}
-.site-hud__level-name small,
-.site-hud__level-count small {
-  display: block;
-  color: #94a3b8;
-  font-size: 9px;
-  font-weight: 400;
-  margin-top: 4px;
-}
-.site-hud__level-positions {
-  flex: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-.site-hud__level-positions > span,
 .site-hud__level-key > span {
   width: 7px;
   height: 7px;
@@ -705,15 +652,10 @@
   background: var(--hud-accent);
   box-shadow: 0 0 7px var(--hud-accent);
 }
-.site-hud__level-positions > span[data-stale="true"],
 .site-hud__level-key > span[data-stale="true"] {
   background: transparent;
   border: 1px solid #fbbf24;
   box-shadow: none;
-}
-.site-hud__level-count {
-  text-align: right;
-  font-size: 18px;
 }
 .site-hud__level-key {
   display: flex;

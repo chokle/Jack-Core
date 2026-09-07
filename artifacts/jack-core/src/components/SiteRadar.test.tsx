@@ -4,15 +4,23 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderComponent,
   screen,
 } from "@testing-library/react";
 import { SiteRadar } from "./SiteRadar";
+import type { ReactElement } from "react";
+import type { HudLandmark } from "../lib/site-hud";
 import {
   compassHeading,
   contactIllumination,
   radarBearing,
 } from "../lib/radar-heading";
+
+function render(ui: ReactElement) {
+  const result = renderComponent(ui);
+  fireEvent.click(screen.getByRole("button", { name: "Compass controls" }));
+  return result;
+}
 
 afterEach(() => {
   cleanup();
@@ -22,6 +30,33 @@ afterEach(() => {
 });
 
 describe("radar compass", () => {
+  it.each(["future-station", "constructor"])(
+    "keeps an unfamiliar safety landmark %s visible without crashing the radar",
+    (kind) => {
+      render(
+        <SiteRadar
+          crew={[]}
+          floorLabel="Ground"
+          landmarks={[
+            {
+              id: "future",
+              label: "Future safety station",
+              kind: kind as HudLandmark["kind"],
+              floorId: "ground",
+              x: 25,
+              y: 25,
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.getByRole("img", {
+          name: `Future safety station, ${kind}`,
+        }),
+      ).toBeTruthy();
+      expect(screen.getByTestId("radar-world")).toBeTruthy();
+    },
+  );
   it("takes four seconds to complete a sweep", () => {
     let frame: FrameRequestCallback = () => {};
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
