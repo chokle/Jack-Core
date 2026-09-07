@@ -31,6 +31,29 @@ afterEach(() => {
 });
 
 describe("Site HUD demo", () => {
+  it("keeps the elevation view visible and synchronizes floor selection with scoped radar positions", () => {
+    render(<SiteHud {...createSiteHudFixture(NOW)} />);
+    const levels = screen.getByRole("region", { name: "Level overview" });
+    expect(
+      within(levels)
+        .getByRole("button", { name: "View Ground" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(
+      within(levels).getByRole("button", { name: "View Level 1" }),
+    );
+    expect(
+      screen.getByRole("group", { name: /Schematic radar: Level 1/ }),
+    ).toBeTruthy();
+    expect(within(levels).getByText("Sam Morgan")).toBeTruthy();
+    expect(within(levels).queryByText("Avery Chen")).toBeNull();
+    expect(within(levels).queryByText("Casey Brooks")).toBeNull();
+    act(() => vi.advanceTimersByTime(120_000));
+    expect(
+      within(levels).getByText("No retained positions on this level."),
+    ).toBeTruthy();
+  });
+
   it("opens a full radar page with explicit simulation and navigation limits", () => {
     render(<SiteHud {...createSiteHudFixture(NOW)} />);
 

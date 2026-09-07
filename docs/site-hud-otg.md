@@ -14,9 +14,11 @@ All workers, contractor scopes, floor coordinates and landmarks are fixtures. Si
 
 ## Radar presentation and compass
 
+The instrument uses a black background. A persistent floor/elevation view sits beside the radar on desktop and directly below it on mobile. Its floor selection, retained-position counts and selected-floor roster use the same scoped projection as the radar; elevations are fixture plan values, not sensed altitude.
+
 The radar uses the same fixture projection and connectivity state as the persistent HUD. Navigating between pages retains the open demo and manual heading; closing the demo or changing accounts resets them. No separate Command Centre state or backend event system is introduced by this presentation change.
 
-A one-second visual sweep illuminates fresh plotted contacts as it crosses their bearing. Stale contacts remain visibly stale; animation never refreshes an observation timestamp. Reduced-motion preferences disable the animated sweep. The sweep is a visual simulation, not an active radio scan.
+A four-second visual sweep illuminates fresh plotted contacts as it crosses their bearing. Stale contacts remain visibly stale; animation never refreshes an observation timestamp. Reduced-motion preferences disable the animated sweep. The sweep is a visual simulation, not an active radio scan.
 
 North and the fictional world rotate opposite the selected heading while the viewer marker stays fixed. Manual heading is always available. **Use device compass** explicitly enables supported browser orientation readings and requests permission where required. Relative, invalid, excessively tilted, inaccurate or expired readings fall back to manual heading. Leaving the radar page removes sensor listeners and stops animation; returning requires explicitly enabling the device compass again. Device readings are a magnetic/absolute reference, not verified true north. They remain local and are not stored or transmitted. Physical-device acceptance remains required.
 
