@@ -67,9 +67,24 @@ vi.mock("./components/PilotActivityReports", () => ({
 vi.mock("./components/SystemHealthWidget", () => ({
   SystemHealthWidget: () => null,
 }));
-vi.mock("./components/testing/TestingOverlay", () => ({
-  TestingOverlay: () => null,
-}));
+vi.mock("./components/testing/TestingOverlay", async () => {
+  const ReactModule = await import("react");
+  return {
+    TestingOverlay: ReactModule.forwardRef<
+      { open: () => void },
+      { onEvent?: (event: "unavailable") => void }
+    >(function TestingOverlayMock({ onEvent }, ref) {
+      ReactModule.useImperativeHandle(
+        ref,
+        () => ({
+          open: () => onEvent?.("unavailable"),
+        }),
+        [onEvent],
+      );
+      return null;
+    }),
+  };
+});
 vi.mock("./components/testing/UserTestFeedback", () => ({
   UserTestFeedback: () => null,
 }));
@@ -136,6 +151,15 @@ describe("participant Closeout navigation without telemetry", () => {
       const { default: App } = await import("./App");
       render(<App />);
       await waitFor(() => expect(loadTelemetryContext).toHaveBeenCalled());
+
+      if (context === "unavailable") {
+        expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
+        fireEvent.click(screen.getByTestId("user-testing-gate-start"));
+      }
+      await waitFor(() =>
+        expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull(),
+      );
+
       fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
       fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
       expect(screen.getByText("Participant library")).toBeTruthy();
