@@ -14,10 +14,17 @@ import {
   resolveJackLocalAction,
 } from "./jack-local-command";
 
+async function flushAsync() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
   api.listVideos.mockReset();
-  api.listVideos.mockResolvedValue({ videos: [] });
+  api.listVideos.mockResolvedValue({ videos: [], total: 0 });
 });
 
 describe("Jack local commands", () => {
@@ -156,6 +163,7 @@ describe("Jack local commands", () => {
   it("resolves natural take-me-to wording against the authenticated Library before node fallback", async () => {
     api.listVideos.mockResolvedValue({
       videos: [{ id: "3g", title: "3gdemo" }],
+      total: 1,
     });
     const nodeClick = vi.fn();
     document.body.innerHTML = `
@@ -175,15 +183,119 @@ describe("Jack local commands", () => {
       label: "destination 3G demo",
     });
     resolveJackLocalAction(command!)?.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushAsync();
 
-    expect(api.listVideos).toHaveBeenCalledWith({ limit: 200 });
+    expect(api.listVideos.mock.calls[0][0]).toEqual({ limit: 200, offset: 0 });
+    expect(api.listVideos.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     expect(opened).toHaveBeenCalledTimes(1);
     expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
       videoId: "3g",
     });
     expect(nodeClick).not.toHaveBeenCalled();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("pages through the complete authorized Library before declaring a title missing", async () => {
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({
+      id: `new-${index}`,
+      title: `New recording ${index}`,
+    }));
+    api.listVideos.mockImplementation(({ offset }: { offset?: number }) =>
+      Promise.resolve(
+        offset === 0
+          ? { videos: firstPage, total: 201 }
+          : { videos: [{ id: "3g", title: "3gdemo" }], total: 201 },
+      ),
+    );
+    document.body.innerHTML = `<button data-jack-action="library">Library</button>`;
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    await flushAsync();
+
+    expect(api.listVideos.mock.calls.map((call) => call[0])).toEqual([
+      { limit: 200, offset: 0 },
+      { limit: 200, offset: 200 },
+    ]);
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      videoId: "3g",
+    });
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("does not treat a title that normalizes to empty as a partial destination match", async () => {
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "unicode", title: "中文" }],
+      total: 1,
+    });
+    const libraryClick = vi.fn();
+    document.body.innerHTML = `<button data-jack-action="library">Library</button>`;
+    document
+      .querySelector<HTMLElement>("[data-jack-action='library']")!
+      .addEventListener("click", libraryClick);
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    await flushAsync();
+
+    expect(opened).not.toHaveBeenCalled();
+    expect(libraryClick).toHaveBeenCalledTimes(1);
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("cancels a pending destination lookup when a newer Jack turn starts", async () => {
+    let resolveLookup!: (value: unknown) => void;
+    api.listVideos.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+    );
+    document.body.innerHTML = `<button data-jack-action="library">Library</button>`;
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    const signal = api.listVideos.mock.calls[0][1].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    expect(resolveJackLocalCommand("Where am I?")).toBeNull();
+    expect(signal.aborted).toBe(true);
+    resolveLookup({ videos: [{ id: "3g", title: "3gdemo" }], total: 1 });
+    await flushAsync();
+
+    expect(opened).not.toHaveBeenCalled();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("does not navigate when the rendered Jack context changes during lookup", async () => {
+    let resolveLookup!: (value: unknown) => void;
+    api.listVideos.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+    );
+    document.body.innerHTML = `
+      <section data-jack-surface="Library" data-jack-path='["Library"]'></section>
+      <button data-jack-action="library">Library</button>
+    `;
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    document.querySelector<HTMLElement>("section")!.dataset.jackPath =
+      '["Living Memory","Welding"]';
+    resolveLookup({ videos: [{ id: "3g", title: "3gdemo" }], total: 1 });
+    await flushAsync();
+
+    expect(opened).not.toHaveBeenCalled();
     window.removeEventListener("jack:open-video-source", opened);
   });
 
@@ -203,8 +315,7 @@ describe("Jack local commands", () => {
       target: "Root Pass",
     });
     resolveJackLocalAction(command!)?.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushAsync();
 
     expect(nodeClick).toHaveBeenCalledTimes(1);
   });
@@ -251,6 +362,7 @@ describe("Jack local commands", () => {
   it("does not open an unrelated video when a named title is missing", async () => {
     api.listVideos.mockResolvedValue({
       videos: [{ id: "root", title: "Root Pass Demo" }],
+      total: 1,
     });
     const videoClick = vi.fn();
     document.body.innerHTML = `
@@ -262,8 +374,7 @@ describe("Jack local commands", () => {
 
     const command = resolveJackLocalCommand("open video Cap Pass Demo");
     resolveJackLocalAction(command!)?.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushAsync();
     expect(videoClick).not.toHaveBeenCalled();
   });
 });
