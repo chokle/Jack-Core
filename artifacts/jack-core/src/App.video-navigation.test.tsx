@@ -68,8 +68,8 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => ({
   setAuthTokenGetter: vi.fn(),
 }));
 
-// Keep the real App, JackShell navigation, TestingOverlay transition, and
-// Closeout form. Unrelated pages and external service boundaries are isolated.
+// Keep the real App, JackShell navigation, VideoDetail and FloatingJack.
+// Unrelated pages and external service boundaries are isolated.
 vi.mock("./components/Library", () => ({
   Library: ({ onSelectVideo }: { onSelectVideo: (id: string) => void }) => (
     <button onClick={() => onSelectVideo("oxy")}>Open Oxy</button>
@@ -193,10 +193,8 @@ describe("natural video navigation through the real App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open menu" }));
     fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
     fireEvent.click(await screen.findByText("Open Oxy"));
-    await screen.findByRole("heading", { name: "Oxy", exact: true });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Transcript", exact: true }),
-    );
+    await screen.findByRole("heading", { name: /^Oxy$/ });
+    fireEvent.click(screen.getByRole("button", { name: /^Transcript$/ }));
     const input = await screen.findByLabelText("Ask Jack");
     fireEvent.change(input, {
       target: { value: "Summarize what happened at 15 seconds" },
@@ -209,7 +207,7 @@ describe("natural video navigation through the real App", () => {
         results: [{ 0: { transcript: "Take me to 3G demo" }, isFinal: true }],
       });
     });
-    await screen.findByRole("heading", { name: "3gdemo", exact: true });
+    await screen.findByRole("heading", { name: /^3gdemo$/ });
     expect(
       document.querySelector(
         'video[src="https://fixture.invalid/three-g.mp4"]',
