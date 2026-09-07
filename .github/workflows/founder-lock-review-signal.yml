@@ -1,0 +1,13 @@
+name: Founder Lock Review Signal
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Founder review evidence changed; trusted workflow will reevaluate.'

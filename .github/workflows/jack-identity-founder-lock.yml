@@ -1,0 +1,145 @@
+name: Jack Identity Founder Lock
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: [Founder Lock Review Signal]
+    types: [completed]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: founder-lock-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+  cancel-in-progress: false
+
+jobs:
+  founder-lock:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify founder approval for Jack identity-core changes
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request?.number ?? context.payload.issue?.number ?? context.payload.workflow_run?.pull_requests?.[0]?.number;
+
+            if (!prNumber) {
+              core.setFailed('Unable to resolve pull request number.');
+              return;
+            }
+
+            const pr = (await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            })).data;
+            const headSha = pr.head.sha;
+
+            const publish = async (state, description) => {
+              await github.rest.repos.createCommitStatus({
+                owner, repo, sha: headSha, state,
+                context: 'Jack Identity Founder Lock', description,
+              });
+            };
+            await publish('pending', 'Verifying current founder approval evidence');
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const lockedExact = new Set([
+              'artifacts/api-server/src/lib/constitution.ts',
+              'artifacts/api-server/src/lib/jack-identity.ts',
+              '.github/CODEOWNERS',
+              '.github/workflows/jack-identity-founder-lock.yml',
+              '.github/workflows/founder-lock-review-signal.yml',
+              '.github/workflows/founder-lock-tests.yml',
+              '.github/tests/jack-identity-founder-lock.test.mjs',
+            ]);
+            const lockedPrefixes = ['docs/jack-identity/'];
+
+            const lockedFiles = files
+              .flatMap((file) => [file.filename, file.previous_filename].filter(Boolean))
+              .filter(
+                (filename) =>
+                  lockedExact.has(filename) ||
+                  lockedPrefixes.some((prefix) => filename.startsWith(prefix)),
+              );
+
+            if (lockedFiles.length === 0) {
+              await publish('success', 'No founder-locked identity files changed');
+              core.info('No founder-locked Jack identity-core files changed.');
+              return;
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const latestReview = reviews
+              .filter((review) =>
+                review.user?.login?.toLowerCase() === 'chokle' &&
+                ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state))
+              .sort((a, b) => b.id - a.id)[0];
+            const exactHeadApproval = latestReview?.state === 'APPROVED' &&
+              latestReview.commit_id === headSha;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            let dismissalTime = 0;
+            if (latestReview?.state === 'DISMISSED') {
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              dismissalTime = Math.max(0, ...timeline
+                .filter((event) => event.event === 'review_dismissed' &&
+                  event.dismissed_review?.review_id === latestReview.id)
+                .map((event) => Date.parse(event.created_at)));
+            }
+            const approvalMarker = `FOUNDER-APPROVED-JACK-IDENTITY ${headSha}`;
+            const exactHeadCommentApproval = comments.some(
+              (comment) =>
+                comment.user?.login?.toLowerCase() === 'chokle' &&
+                comment.body?.trim() === approvalMarker &&
+                (!latestReview || latestReview.state === 'APPROVED' ||
+                  (latestReview.state === 'DISMISSED'
+                    ? dismissalTime > 0 && Date.parse(comment.updated_at) > dismissalTime
+                    : Date.parse(comment.updated_at) > Date.parse(latestReview.submitted_at))),
+            );
+
+            if (!exactHeadApproval && !exactHeadCommentApproval) {
+              await publish('failure', 'Exact-head founder approval required');
+              core.setFailed(
+                [
+                  'Founder approval is required for Jack identity-core changes.',
+                  `Locked files changed: ${lockedFiles.join(', ')}`,
+                  `Exact head requiring approval: ${headSha}`,
+                  `Derek/Dee (@chokle) must either APPROVE this exact head or comment: ${approvalMarker}`,
+                ].join('\n'),
+              );
+              return;
+            }
+
+            await publish('success', 'Exact-head founder approval verified');
+            core.info(`Founder approval verified for exact head ${headSha}.`);
