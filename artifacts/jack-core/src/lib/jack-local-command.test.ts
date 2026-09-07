@@ -1,5 +1,14 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const api = vi.hoisted(() => ({
+  listVideos: vi.fn(),
+}));
+
+vi.mock("@workspace/api-client-react", () => ({
+  listVideos: api.listVideos,
+}));
+
 import {
   resolveJackLocalCommand,
   resolveJackLocalAction,
@@ -7,6 +16,8 @@ import {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  api.listVideos.mockReset();
+  api.listVideos.mockResolvedValue({ videos: [] });
 });
 
 describe("Jack local commands", () => {
@@ -52,6 +63,7 @@ describe("Jack local commands", () => {
     ["navigate to the Root Pass node", "Root Pass"],
     ["go to Fit Up concept", "Fit Up"],
     ["go to node Root Pass", "Root Pass"],
+    ["take me to node Root Pass", "Root Pass"],
     ["open concept Fit Up", "Fit Up"],
     ["show me branch Root Pass", "Root Pass"],
     ["go to How to Weld node", "How to Weld"],
@@ -138,6 +150,63 @@ describe("Jack local commands", () => {
     const action = resolveJackLocalAction(command!);
     action?.click();
     expect(click).toHaveBeenCalledTimes(1);
+    expect(api.listVideos).not.toHaveBeenCalled();
+  });
+
+  it("resolves natural take-me-to wording against the authenticated Library before node fallback", async () => {
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "3g", title: "3gdemo" }],
+    });
+    const nodeClick = vi.fn();
+    document.body.innerHTML = `
+      <button data-jack-action="node" data-node-label="3G demo">3G demo node</button>
+      <button data-jack-action="library">Library</button>
+    `;
+    document
+      .querySelector<HTMLElement>("[data-jack-action='node']")!
+      .addEventListener("click", nodeClick);
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    expect(command).toEqual({
+      kind: "destination",
+      target: "3G demo",
+      label: "destination 3G demo",
+    });
+    resolveJackLocalAction(command!)?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.listVideos).toHaveBeenCalledWith({ limit: 200 });
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      videoId: "3g",
+    });
+    expect(nodeClick).not.toHaveBeenCalled();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("falls back to a rendered node when natural destination wording is not a Library title", async () => {
+    const nodeClick = vi.fn();
+    document.body.innerHTML = `
+      <button data-jack-action="node" data-node-label="Root Pass">Root Pass</button>
+      <button data-jack-action="library">Library</button>
+    `;
+    document
+      .querySelector<HTMLElement>("[data-jack-action='node']")!
+      .addEventListener("click", nodeClick);
+
+    const command = resolveJackLocalCommand("take me to Root Pass");
+    expect(command).toMatchObject({
+      kind: "destination",
+      target: "Root Pass",
+    });
+    resolveJackLocalAction(command!)?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(nodeClick).toHaveBeenCalledTimes(1);
   });
 
   it("targets a visible graph node by its explicit label", () => {
@@ -179,7 +248,10 @@ describe("Jack local commands", () => {
     expect(videoClick).not.toHaveBeenCalled();
   });
 
-  it("does not open an unrelated video when a named title is missing", () => {
+  it("does not open an unrelated video when a named title is missing", async () => {
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "root", title: "Root Pass Demo" }],
+    });
     const videoClick = vi.fn();
     document.body.innerHTML = `
       <button data-jack-action="video" data-video-title="Root Pass Demo">Root Pass Demo</button>
@@ -189,7 +261,9 @@ describe("Jack local commands", () => {
       .addEventListener("click", videoClick);
 
     const command = resolveJackLocalCommand("open video Cap Pass Demo");
-    expect(resolveJackLocalAction(command!)).toBeNull();
+    resolveJackLocalAction(command!)?.click();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(videoClick).not.toHaveBeenCalled();
   });
 });
