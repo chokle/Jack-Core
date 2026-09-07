@@ -45,8 +45,8 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => ({
   setAuthTokenGetter: vi.fn(),
 }));
 
-// Keep the real App, JackShell navigation, and Closeout form. Unrelated pages
-// and external service boundaries are isolated so no telemetry is needed.
+// Keep the real App, JackShell navigation, TestingOverlay transition, and
+// Closeout form. Unrelated pages and external service boundaries are isolated.
 vi.mock("./components/Library", () => ({
   Library: () => <div>Participant library</div>,
 }));
@@ -67,24 +67,6 @@ vi.mock("./components/PilotActivityReports", () => ({
 vi.mock("./components/SystemHealthWidget", () => ({
   SystemHealthWidget: () => null,
 }));
-vi.mock("./components/testing/TestingOverlay", async () => {
-  const ReactModule = await import("react");
-  return {
-    TestingOverlay: ReactModule.forwardRef<
-      { open: () => void },
-      { onEvent?: (event: "unavailable") => void }
-    >(function TestingOverlayMock({ onEvent }, ref) {
-      ReactModule.useImperativeHandle(
-        ref,
-        () => ({
-          open: () => onEvent?.("unavailable"),
-        }),
-        [onEvent],
-      );
-      return null;
-    }),
-  };
-});
 vi.mock("./components/testing/UserTestFeedback", () => ({
   UserTestFeedback: () => null,
 }));
@@ -94,6 +76,13 @@ vi.mock("./lib/use-memory-graph", () => ({
     readyCount: 0,
     isLoading: false,
   }),
+}));
+vi.mock("@/lib/user-testing/recording-service", () => ({
+  isScreenRecordingSupported: () => false,
+  RecordingService: class RecordingService {},
+}));
+vi.mock("@/lib/user-testing/upload-service", () => ({
+  uploadTestRecording: vi.fn(),
 }));
 vi.mock("./lib/user-testing/test-session-service", async (importOriginal) => ({
   ...(await importOriginal<
@@ -155,6 +144,11 @@ describe("participant Closeout navigation without telemetry", () => {
       if (context === "unavailable") {
         expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
         fireEvent.click(screen.getByTestId("user-testing-gate-start"));
+        const startRecording = await screen.findByTestId("user-testing-start");
+        fireEvent.click(startRecording);
+        await waitFor(() =>
+          expect(screen.queryByTestId("user-testing-modal")).toBeNull(),
+        );
       }
       await waitFor(() =>
         expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull(),
