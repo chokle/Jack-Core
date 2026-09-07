@@ -78,15 +78,22 @@ export async function loadLibraryContext(
       : []),
   ];
   const requestedTime = parseRequestedTimeSeconds(message);
+  const timeIntent =
+    requestedTime !== null &&
+    (/\b(at|around|about|near|after|before|from)\b/i.test(message) ||
+      /\b(happens?|happened|happening|occurs?|occurred|occurring|shows?|showed|showing|doing)\b/i.test(
+        message,
+      ));
+  const citationIntent = Boolean(
+    selected &&
+      /\b(cite|citation|source|sources|timestamp|time stamp)\b/i.test(message),
+  );
   const intent =
     /\b(video|videos|clip|clips|library|transcript|footage|analysis|key points)\b/i.test(
       message,
     ) ||
-    requestedTime !== null ||
-    Boolean(
-      selected &&
-        /\b(cite|citation|source|sources|timestamp|time stamp)\b/i.test(message),
-    ) ||
+    timeIntent ||
+    citationIntent ||
     /^(?:please\s+)?(?:what(?:'s| is)|describe|explain|summari[sz]e|tell me about)\s+(?:this|that|it)[?.!\s]*$/i.test(
       message.trim(),
     );
