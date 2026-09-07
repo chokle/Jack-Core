@@ -70,6 +70,172 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it.each(["listening", "recognition error", "no speech", "start error"])(
+    "never resumes interrupted audio or answers after %s",
+    async (mode) => {
+      let resolveOld!: (value: unknown) => void;
+      api.askJack.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          }),
+      );
+      api.askJack.mockResolvedValue({ answer: "Retry answer" });
+      render(<FloatingJack />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      fireEvent.change(screen.getByLabelText("Ask Jack"), {
+        target: { value: "Old question" },
+      });
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+      if (mode === "start error") {
+        window.SpeechRecognition = class extends FakeSpeechRecognition {
+          start = vi.fn(() => {
+            throw new Error("Microphone unavailable");
+          });
+        };
+      }
+      fireEvent.click(screen.getByLabelText("Talk to Jack"));
+      expect(api.askJack.mock.calls[0][1].signal.aborted).toBe(true);
+      const recognition = FakeSpeechRecognition.latest!;
+      await act(async () => {
+        if (mode === "recognition error") recognition.onerror?.({});
+        if (mode === "no speech") recognition.onend?.();
+        resolveOld({
+          answer: "Cancelled answer",
+          citations: [
+            {
+              sourceType: "video",
+              videoId: "oxy",
+              videoTitle: "Cancelled source",
+              startTime: 1,
+              endTime: 3,
+            },
+          ],
+        });
+      });
+      expect(screen.queryByText("Cancelled answer")).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /Cancelled source/ }),
+      ).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+      fireEvent.change(screen.getByLabelText("Ask Jack"), {
+        target: { value: "Retry question" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText("Send to Jack"));
+      });
+      expect(screen.getByText("Retry answer")).toBeTruthy();
+    },
+  );
+
+  it("interrupts a pending explanation with voice video navigation and rejects the old answer", async () => {
+    let resolveOld!: (value: unknown) => void;
+    api.askJack.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const navigate = vi.fn(() => {
+      const surface = document.querySelector("section")!;
+      surface.dataset.videoId = "3gdemo";
+      surface.dataset.jackPath = '["Library","3gdemo","Transcript"]';
+    });
+    render(
+      <>
+        <section
+          data-jack-surface="Video"
+          data-video-id="oxy"
+          data-jack-path='["Library","Oxy","Analysis"]'
+        />
+        <button
+          data-jack-action="video"
+          data-video-title="3gdemo"
+          onClick={navigate}
+        >
+          3gdemo
+        </button>
+        <FloatingJack />
+      </>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    fireEvent.change(screen.getByLabelText("Ask Jack"), {
+      target: { value: "Explain Oxy" },
+    });
+    fireEvent.click(screen.getByLabelText("Send to Jack"));
+    const oldSignal = api.askJack.mock.calls[0][1].signal;
+    fireEvent.click(screen.getByLabelText("Talk to Jack"));
+    await act(async () => {
+      FakeSpeechRecognition.latest!.onresult?.({
+        results: [{ 0: { transcript: "Open video 3gdemo" }, isFinal: true }],
+      });
+    });
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(oldSignal.aborted).toBe(true);
+    await act(async () => {
+      resolveOld({
+        answer: "Old Oxy explanation",
+        citations: [
+          {
+            sourceType: "video",
+            videoId: "oxy",
+            videoTitle: "Oxy source",
+            startTime: 20,
+            endTime: 30,
+          },
+        ],
+      });
+    });
+    expect(screen.queryByText("Old Oxy explanation")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Oxy source/ })).toBeNull();
+    expect(screen.getByText(/Jack is with you:/).textContent).toContain(
+      "3gdemo",
+    );
+  });
+
+  it("lets a new voice question own the pending state even when the cancelled answer arrives late", async () => {
+    const resolve: Array<(value: unknown) => void> = [];
+    api.askJack.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve.push(done);
+        }),
+    );
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    fireEvent.change(screen.getByLabelText("Ask Jack"), {
+      target: { value: "Old question" },
+    });
+    fireEvent.click(screen.getByLabelText("Send to Jack"));
+    fireEvent.click(screen.getByLabelText("Talk to Jack"));
+    await act(async () => {
+      FakeSpeechRecognition.latest!.onresult?.({
+        results: [{ 0: { transcript: "New question" }, isFinal: true }],
+      });
+    });
+    expect(api.askJack).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolve[0]({ answer: "Old answer" });
+    });
+    expect(screen.queryByText("Old answer")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Ask Jack"), {
+      target: { value: "Unsent draft" },
+    });
+    expect(
+      (screen.getByLabelText("Send to Jack") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => {
+      resolve[1]({ answer: "New answer" });
+    });
+    expect(screen.getByText("New answer")).toBeTruthy();
+  });
+
   it("sends the selected Library resource and opens returned timestamp sources", async () => {
     api.askJack.mockResolvedValue({
       answer: "The video shows an EMT offset.",

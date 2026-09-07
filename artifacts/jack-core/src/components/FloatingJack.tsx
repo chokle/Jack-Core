@@ -262,7 +262,6 @@ export function FloatingJack() {
     setSources([]);
     setError(null);
     setAnswer(null);
-    setSources([]);
     setInput("");
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
@@ -338,6 +337,17 @@ export function FloatingJack() {
       return;
     }
 
+    // Starting a new mic turn explicitly interrupts the previous response.
+    // Abort and retire its ownership before listening, including providers
+    // that deliver a response after cancellation. Its finally block must not
+    // clear the pending state of the new turn.
+    contextEpochRef.current += 1;
+    requestRef.current?.abort();
+    requestRef.current = null;
+    submissionInFlightRef.current = false;
+    setPending(false);
+    setAnswer(null);
+    setSources([]);
     cancelSpeech();
     const recognition = new Recognition();
     refreshContext();
