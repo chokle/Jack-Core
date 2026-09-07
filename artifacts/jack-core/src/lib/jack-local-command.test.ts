@@ -142,22 +142,26 @@ describe("Jack local commands", () => {
     },
   );
 
-  it("targets a visible video by its explicit title", () => {
-    const click = vi.fn();
+  it("resolves an explicit named video through the authenticated Library", async () => {
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "root", title: "Root Pass Demo" }],
+      total: 1,
+    });
     document.body.innerHTML = `
-      <button data-jack-action="video" data-video-title="Root Pass Demo" onclick="">Root Pass Demo</button>
+      <button data-jack-action="video" data-video-title="Root Pass Demo">Root Pass Demo</button>
     `;
-    const button = document.querySelector<HTMLElement>(
-      "[data-jack-action='video']",
-    )!;
-    button.addEventListener("click", click);
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
 
     const command = resolveJackLocalCommand("open video Root Pass Demo");
-    expect(command).toBeTruthy();
-    const action = resolveJackLocalAction(command!);
-    action?.click();
-    expect(click).toHaveBeenCalledTimes(1);
-    expect(api.listVideos).not.toHaveBeenCalled();
+    resolveJackLocalAction(command!)?.click();
+    await flushAsync();
+
+    expect(api.listVideos).toHaveBeenCalled();
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      videoId: "root",
+    });
+    window.removeEventListener("jack:open-video-source", opened);
   });
 
   it("resolves natural take-me-to wording against the authenticated Library before node fallback", async () => {
@@ -192,6 +196,33 @@ describe("Jack local commands", () => {
       videoId: "3g",
     });
     expect(nodeClick).not.toHaveBeenCalled();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("does not let a partially matching visible card bypass an exact Library title", async () => {
+    api.listVideos.mockResolvedValue({
+      videos: [{ id: "exact", title: "3G demo" }],
+      total: 1,
+    });
+    const visibleClick = vi.fn();
+    document.body.innerHTML = `
+      <button data-jack-action="video" data-video-title="3G demo extended">3G demo extended</button>
+      <button data-jack-action="library">Library</button>
+    `;
+    document
+      .querySelector<HTMLElement>("[data-jack-action='video']")!
+      .addEventListener("click", visibleClick);
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    await flushAsync();
+
+    expect(visibleClick).not.toHaveBeenCalled();
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      videoId: "exact",
+    });
     window.removeEventListener("jack:open-video-source", opened);
   });
 
@@ -265,6 +296,35 @@ describe("Jack local commands", () => {
     expect(signal.aborted).toBe(false);
 
     expect(resolveJackLocalCommand("Where am I?")).toBeNull();
+    expect(signal.aborted).toBe(true);
+    resolveLookup({ videos: [{ id: "3g", title: "3gdemo" }], total: 1 });
+    await flushAsync();
+
+    expect(opened).not.toHaveBeenCalled();
+    window.removeEventListener("jack:open-video-source", opened);
+  });
+
+  it("cancels a pending destination lookup as soon as a new microphone turn starts", async () => {
+    let resolveLookup!: (value: unknown) => void;
+    api.listVideos.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        }),
+    );
+    document.body.innerHTML = `
+      <button aria-label="Talk to Jack">Mic</button>
+      <button data-jack-action="library">Library</button>
+    `;
+    const opened = vi.fn();
+    window.addEventListener("jack:open-video-source", opened);
+
+    const command = resolveJackLocalCommand("Take me to 3G demo");
+    resolveJackLocalAction(command!)?.click();
+    const signal = api.listVideos.mock.calls[0][1].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    document.querySelector<HTMLElement>('[aria-label="Talk to Jack"]')!.click();
     expect(signal.aborted).toBe(true);
     resolveLookup({ videos: [{ id: "3g", title: "3gdemo" }], total: 1 });
     await flushAsync();
@@ -367,6 +427,7 @@ describe("Jack local commands", () => {
     const videoClick = vi.fn();
     document.body.innerHTML = `
       <button data-jack-action="video" data-video-title="Root Pass Demo">Root Pass Demo</button>
+      <button data-jack-action="library">Library</button>
     `;
     document
       .querySelector<HTMLElement>("[data-jack-action='video']")!
