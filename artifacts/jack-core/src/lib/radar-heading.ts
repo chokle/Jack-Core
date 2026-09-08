@@ -49,6 +49,15 @@ export function radarBearing(x: number, y: number): number {
   return normalizeHeading((Math.atan2(x - 50, 50 - y) * 180) / Math.PI);
 }
 
+/** Distance from the viewer in plan units, converted to the site's meter scale. */
+export function radarDistanceMeters(
+  x: number,
+  y: number,
+  metersPerPlanUnit = 1,
+): number {
+  return Math.round(Math.hypot(x - 50, y - 50) * metersPerPlanUnit);
+}
+
 export function contactIllumination(
   bearing: number,
   heading: number,

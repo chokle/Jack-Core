@@ -51,7 +51,7 @@ describe("radar compass", () => {
       );
       expect(
         screen.getByRole("img", {
-          name: `Future safety station, ${kind}`,
+          name: `Future safety station, ${kind}, 35 meters away`,
         }),
       ).toBeTruthy();
       expect(screen.getByTestId("radar-world")).toBeTruthy();
@@ -100,6 +100,24 @@ describe("radar compass", () => {
     expect(contactIllumination(90, 0, 90)).toBe(1);
     expect(contactIllumination(90, 90, 0)).toBe(1);
     expect(contactIllumination(90, 0, 89)).toBe(0.3);
+  });
+
+  it("reports distance from the viewer in meters", () => {
+    render(
+      <SiteRadar
+        crew={[]}
+        floorLabel="Ground"
+        landmarks={[{
+          id: "east",
+          label: "East beacon",
+          kind: "air-horn",
+          floorId: "ground",
+          x: 60,
+          y: 50,
+        }]}
+      />,
+    );
+    expect(screen.getByRole("img", { name: /East beacon.*10 meters away/ })).toBeTruthy();
   });
 
   it("rejects relative, invalid, inaccurate and tilted compass readings", () => {

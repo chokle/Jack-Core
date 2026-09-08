@@ -59,6 +59,19 @@
   font-size: 10px;
   text-anchor: middle;
 }
+.site-radar__distance {
+  font-size: 8px !important;
+  opacity: 0.8;
+}
+.site-radar__sweep {
+  animation: site-radar-sweep-pulse 1.35s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes site-radar-sweep-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
 .site-radar__contact--stale circle {
   fill: none;
   stroke: #fbbf24;

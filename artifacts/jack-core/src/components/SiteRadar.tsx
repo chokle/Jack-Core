@@ -3,12 +3,14 @@ import type { HudCrewMember, HudLandmark } from "../lib/site-hud";
 import {
   compassHeading,
   contactIllumination,
+  radarDistanceMeters,
   radarBearing,
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
 import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
 
 const SWEEP_PERIOD_MS = 4000;
+const RADAR_METERS_PER_PLAN_UNIT = 1;
 
 interface Props {
   crew: readonly HudCrewMember[];
@@ -258,15 +260,16 @@ export function SiteRadar({
             const Icon = siteSafetyIcon(point.kind);
             const x = 200 + (point.x - 50) * 2.2,
               y = 200 + (point.y - 50) * 2.2;
+            const distance = radarDistanceMeters(point.x, point.y, RADAR_METERS_PER_PLAN_UNIT);
             return (
               <g
                 key={point.id}
                 role="img"
-                aria-label={`${point.label}, ${point.kind}`}
+                aria-label={`${point.label}, ${point.kind}, ${distance} meters away`}
                 transform={`rotate(${heading} ${x} ${y})`}
                 style={{ color: siteSafetyColor(point.kind) }}
               >
-                <title>{point.label}</title>
+                <title>{point.label} · {distance} m</title>
                 <rect
                   x={x - 7}
                   y={y - 7}
@@ -294,6 +297,7 @@ export function SiteRadar({
               const position = member.position!;
               const x = 200 + (position.x - 50) * 2.2,
                 y = 200 + (position.y - 50) * 2.2;
+              const distance = radarDistanceMeters(position.x, position.y, RADAR_METERS_PER_PLAN_UNIT);
               const illumination = reducedMotion
                 ? 1
                 : contactIllumination(
@@ -307,7 +311,7 @@ export function SiteRadar({
                   role="img"
                   aria-label={
                     describeMember?.(member) ??
-                    `${member.name}, ${member.status}`
+                    `${member.name}, ${member.status}, ${distance} meters away`
                   }
                   className={
                     member.stale
@@ -316,7 +320,7 @@ export function SiteRadar({
                   }
                 >
                   <title>
-                    {member.name} · {member.status}
+                    {member.name} · {member.status} · {distance} m
                   </title>
                   {!member.stale && (
                     <circle
@@ -340,6 +344,14 @@ export function SiteRadar({
                   >
                     {member.name.split(" ")[0]}
                   </text>
+                  <text
+                    x={x}
+                    y={y + 27}
+                    transform={`rotate(${heading} ${x} ${y})`}
+                    className="site-radar__distance"
+                  >
+                    {distance} m
+                  </text>
                 </g>
               );
             })}
@@ -347,6 +359,7 @@ export function SiteRadar({
         {!reducedMotion && (
           <g
             data-testid="radar-sweep"
+            className="site-radar__sweep"
             transform={`rotate(${sweep} 200 200)`}
             aria-hidden="true"
           >
