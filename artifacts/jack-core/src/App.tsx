@@ -295,8 +295,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           : "graph";
   });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isChatMinimized, setIsChatMinimized] = useState(false);
+  const [askJackPanelState, setAskJackPanelState] = useState({
+    isOpen: false,
+    isMinimized: false,
+  });
+  const isChatOpen = askJackPanelState.isOpen;
+  const isChatMinimized = askJackPanelState.isMinimized;
   const [chatContext, setChatContext] = useState<string | undefined>();
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
@@ -391,20 +395,21 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
     setChatContext(context);
-    if (isChatOpen) {
-      setIsChatOpen(false);
-      setIsChatMinimized(true);
-      void trackTestEvent("ask_jack_minimized", { reason: "toggle" });
-      return;
-    }
-    void openChat(context, "open");
+    setAskJackPanelState((prevState) => {
+      if (prevState.isOpen) {
+        void trackTestEvent("ask_jack_minimized", { reason: "toggle" });
+        return { isOpen: false, isMinimized: true };
+      }
+      void trackTestEvent("ask_jack_opened", { reason: "open" });
+      return { isOpen: true, isMinimized: false };
+    });
+    setChatContext(context);
   };
 
   const openChat = (context?: string) => {
-    setIsChatMinimized(false);
-    setIsChatOpen(true);
-    setChatContext(context);
+    setAskJackPanelState({ isOpen: true, isMinimized: false });
     void trackTestEvent("ask_jack_opened", { reason: "open" });
+    setChatContext(context);
   };
 
   // Resume a parked Ask Jack conversation: prefill the input with whatever was
@@ -442,8 +447,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleFieldNoteClick = (citation: Citation) => {
-    setIsChatOpen(false);
-    setIsChatMinimized(false);
+    setAskJackPanelState({ isOpen: false, isMinimized: false });
     setResumedThought(null);
     setSelectedVideoId(null);
     setInterviewPreload(undefined);
@@ -492,8 +496,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleAskJackClose = () => {
-    setIsChatOpen(false);
-    setIsChatMinimized(true);
+    setAskJackPanelState({ isOpen: false, isMinimized: true });
     setResumedThought(null);
     void trackTestEvent("ask_jack_minimized", { reason: "close" });
   };
