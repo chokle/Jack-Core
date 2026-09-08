@@ -397,8 +397,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       void trackTestEvent("ask_jack_minimized", { reason: "toggle" });
       return;
     }
+    void openChat(context, "open");
+  };
+
+  const openChat = (context?: string) => {
     setIsChatMinimized(false);
     setIsChatOpen(true);
+    setChatContext(context);
     void trackTestEvent("ask_jack_opened", { reason: "open" });
   };
 
@@ -409,8 +414,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const handleResumeChat = (thought: ParkedThought) => {
     setResumedThought(thought);
     setChatContext(thought.unfinishedThought ?? undefined);
-    setIsChatMinimized(false);
-    setIsChatOpen(true);
+    openChat(thought.unfinishedThought ?? undefined);
   };
 
   const handleSelectVideo = (videoId: string) => {
@@ -774,8 +778,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <button
             type="button"
             onClick={() => {
-              setIsChatMinimized(false);
-              setIsChatOpen(true);
+              openChat(chatContext);
             }}
             className="rounded-full border border-primary/45 bg-card/90 px-4 py-2 text-sm font-semibold text-primary shadow-lg shadow-black/30 transition hover:bg-card"
             aria-label="Open Ask Jack"
