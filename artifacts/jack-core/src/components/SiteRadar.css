@@ -168,3 +168,7 @@
     transition: none !important;
   }
 }
+.site-radar { position: relative; }
+.site-radar__compass-status { text-align: center; font-size: 10px; color: #94a3b8; margin: 5px 0; }
+.site-radar__settings { margin-top: 4px; }
+.site-radar__controls { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 45; width: min(360px, 100%); max-height: min(360px, 55dvh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 14px; border: 1px solid var(--hud-line, #24525b); border-radius: 16px; background: rgba(6, 16, 20, .88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 12px 36px #0009; }

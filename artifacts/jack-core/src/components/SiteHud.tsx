@@ -147,7 +147,7 @@ export function SiteHud({
   }, [clock]);
 
   useEffect(() => {
-    if (panel) panelRef.current?.focus();
+    if (panel) panelRef.current?.focus({ preventScroll: true });
   }, [panel]);
 
   const view = projectSiteHud(site, workers, {
@@ -162,7 +162,7 @@ export function SiteHud({
   const offline = connectivity.mode !== "ONLINE";
   const LinkIcon = offline ? Radio : Wifi;
   const closePanel = () => {
-    if (panel) panelButtons.current[panel]?.focus();
+    if (panel) panelButtons.current[panel]?.focus({ preventScroll: true });
     setPanel(null);
   };
   const applyDemoEvent = (event: ConnectivityEvent) => {
@@ -272,71 +272,7 @@ export function SiteHud({
               Select a level to update the radar. Plan elevations, not measured
               altitude. Lost signals are not plotted.
             </p>
-            <div className="site-hud__level-crew">
-              <h3>Selected level · {floor?.label ?? "No floor"}</h3>
-              {plottedCrew.length === 0 ? (
-                <p>No retained positions on this level.</p>
-              ) : (
-                plottedCrew.map((member) => (
-                  <div key={member.id}>
-                    <strong>{member.name}</strong>
-                    <span>{member.status}</span>
-                    <small>
-                      {sourceLabel(member.source)} ·{" "}
-                      {timeLabel(member.observedAt)} · {ageLabel(member.ageMs)}
-                    </small>
-                  </div>
-                ))
-              )}
-            </div>
           </section>
-          <aside
-            className="site-hud__summary"
-            aria-label="Radar legend and awareness"
-          >
-            <section>
-              <h2>
-                <Users size={15} aria-hidden="true" /> Scoped crew
-              </h2>
-              <p>{view.crew.length} authorized demo crew</p>
-              {statuses.map((status) => (
-                <div className="site-hud__summary-row" key={status}>
-                  <span>{status}</span>
-                  <strong>
-                    {
-                      view.crew.filter((member) => member.status === status)
-                        .length
-                    }
-                  </strong>
-                </div>
-              ))}
-              <p className="site-hud__help">
-                Other nearby: {view.anonymousProximity.nearbyCount} anonymous.
-                No outside identities or floor positions.
-              </p>
-            </section>
-            <section>
-              <h2>
-                <MapPin size={15} aria-hidden="true" /> Safety landmarks
-              </h2>
-              <p>{floor?.label ?? "No floor"}</p>
-              {view.landmarks
-                .filter((landmark) => landmark.floorId === floor?.id)
-                .map((landmark) => {
-                  const Icon = siteSafetyIcon(landmark.kind);
-                  return (
-                    <div className="site-hud__summary-row" key={landmark.id}>
-                      <Icon
-                        size={16}
-                        style={{ color: siteSafetyColor(landmark.kind) }}
-                        aria-hidden="true"
-                      />
-                      <span>{landmark.label}</span>
-                    </div>
-                  );
-                })}
-            </section>
-          </aside>
           <div className="site-hud__support">
             <div className="site-hud__controls" aria-label="Site HUD panels">
               {(Object.keys(panelLabels) as Panel[]).map((key) => {
@@ -379,15 +315,7 @@ export function SiteHud({
             <p className="site-hud__disclaimer">
               Simulated data · Not for navigation
             </p>
-            <div className="site-hud__nearby">
-              <strong>Nearby signals</strong>
-              <span>No device scan</span>
-              <p>
-                Unpositioned signals belong here, not on the radar. No
-                direction, distance, floor or person is inferred from a signal.
-                An empty view does not mean the area is clear.
-              </p>
-            </div>
+
           </div>
 
           {panel && (
@@ -412,6 +340,24 @@ export function SiteHud({
               <p className="site-hud__site-name">{view.siteName}</p>
               {panel === "floors" && (
                 <>
+            <div className="site-hud__level-crew">
+              <h3>Selected level · {floor?.label ?? "No floor"}</h3>
+              {plottedCrew.length === 0 ? (
+                <p>No retained positions on this level.</p>
+              ) : (
+                plottedCrew.map((member) => (
+                  <div key={member.id}>
+                    <strong>{member.name}</strong>
+                    <span>{member.status}</span>
+                    <small>
+                      {sourceLabel(member.source)} ·{" "}
+                      {timeLabel(member.observedAt)} · {ageLabel(member.ageMs)}
+                    </small>
+                  </div>
+                ))
+              )}
+            </div>
+
                   <p className="site-hud__help">
                     Choose a simulated floor. Elevations are plan references,
                     not measured device altitude.
@@ -558,6 +504,15 @@ export function SiteHud({
               )}
               {panel === "signal" && (
                 <>
+            <div className="site-hud__nearby">
+              <strong>Nearby signals</strong>
+              <span>No device scan</span>
+              <p>
+                Unpositioned signals belong here, not on the radar. No
+                direction, distance, floor or person is inferred from a signal.
+                An empty view does not mean the area is clear.
+              </p>
+            </div>
                   <div className="site-hud__signal-state">
                     <LinkIcon size={20} aria-hidden="true" />
                     <strong>{connectivity.mode}</strong>

@@ -61,12 +61,17 @@ describe("Site HUD demo", () => {
     expect(
       screen.getByRole("group", { name: /Schematic radar: Level 1/ }),
     ).toBeTruthy();
-    expect(within(levels).getByText("Sam Morgan")).toBeTruthy();
-    expect(within(levels).queryByText("Avery Chen")).toBeNull();
-    expect(within(levels).queryByText("Casey Brooks")).toBeNull();
+    expect(within(levels).queryByText("Sam Morgan")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Floor / elevation" }));
+    const floors = screen.getByRole("region", { name: "Floor / elevation" });
+    expect(within(floors).getByText("Sam Morgan")).toBeTruthy();
+    expect(within(floors).queryByText("Avery Chen")).toBeNull();
+    expect(within(floors).queryByText("Casey Brooks")).toBeNull();
     act(() => vi.advanceTimersByTime(120_000));
     expect(
-      within(levels).getByText("No retained positions on this level."),
+      within(screen.getByRole("region", { name: "Floor / elevation" })).getByText(
+        "No retained positions on this level.",
+      ),
     ).toBeTruthy();
   });
 

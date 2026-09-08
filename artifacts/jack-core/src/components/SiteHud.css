@@ -691,3 +691,27 @@
   color: #94a3b8;
   line-height: 1.6;
 }
+/* Compact instrument with supporting information in floating panels. */
+.site-hud__page { padding: 12px 16px calc(76px + env(safe-area-inset-bottom)); }
+.site-hud__page-title { margin-bottom: 10px; gap: 6px; }
+.site-hud__page-title p { margin-bottom: 3px; }
+.site-hud__page-title h1 { font-size: 22px; }
+.site-hud__workspace { position: relative; grid-template-columns: minmax(0, 680px) minmax(180px, 240px); gap: 12px; max-width: 940px; }
+.site-hud__instrument { grid-column: 1; grid-row: 1; overflow: visible; }
+.site-hud__levels { grid-column: 2; grid-row: 1; padding: 10px; }
+.site-hud__levels .site-building { margin: 6px 0; }
+.site-hud__levels .site-building svg { max-height: 260px; }
+.site-hud__levels > .site-hud__help { margin: 6px 0 0; font-size: 10px; }
+.site-hud__levels .site-hud__site-name { margin-bottom: 4px; }
+.site-hud__overview { gap: 4px; }
+.site-hud__readout { gap: 10px; padding: 4px; font-size: 10px; }
+.site-hud__controls { margin-top: 0; }
+.site-hud__disclaimer { padding: 5px; }
+.site-hud__workspace > .site-hud__panel { position: absolute; inset: auto 0 68px auto; z-index: 40; width: min(360px, 100%); max-width: 100%; max-height: min(420px, 60dvh); padding: 12px; background: rgba(6, 16, 20, .88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--hud-line); border-radius: 16px; box-shadow: 0 12px 36px #0009; }
+.site-hud__panel-heading { position: sticky; top: -12px; background: rgba(6, 16, 20, .96); padding: 4px 0; z-index: 1; }
+@media (max-width: 900px) {
+  .site-hud__workspace { grid-template-columns: minmax(0, 1fr); }
+  .site-hud__levels { grid-column: 1; grid-row: 2; }
+  .site-hud__levels .site-building svg { max-height: 180px; }
+  .site-hud__page-title { flex-direction: row; flex-wrap: wrap; align-items: center; }
+}

@@ -30,6 +30,8 @@ export function SiteRadar({
   const [controlsOpen, setControlsOpen] = useState(false);
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [deviceEnabled, setDeviceEnabled] = useState(false);
+  const [preferDevice, setPreferDevice] = useState(true);
+  const [permissionGranted, setPermissionGranted] = useState(false);
   const [message, setMessage] = useState("Manual demo heading");
   const [sweep, setSweep] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -60,16 +62,28 @@ export function SiteRadar({
   }, [active, reducedMotion]);
 
   useEffect(() => {
-    if (!active) {
+    const sensor = window.DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+      requestPermission?: (absolute?: boolean) => Promise<string>;
+    };
+    if (!active || !preferDevice) {
       permissionGeneration.current++;
       setDeviceEnabled(false);
       setDeviceHeading(null);
       setMessage("Manual demo heading");
+    } else if (!window.isSecureContext || !sensor) {
+      setDeviceEnabled(false);
+      setMessage("Device compass unavailable · using manual heading");
+    } else if (sensor.requestPermission && !permissionGranted) {
+      setDeviceEnabled(false);
+      setMessage("Enable device compass to allow access");
+    } else {
+      setDeviceEnabled(true);
+      setMessage("Waiting for compass · hold the device flat");
     }
     return () => {
       permissionGeneration.current++;
     };
-  }, [active]);
+  }, [active, preferDevice, permissionGranted]);
 
   useEffect(() => {
     if (!active || !deviceEnabled) return;
@@ -135,6 +149,8 @@ export function SiteRadar({
         setMessage("Compass permission denied · using manual heading");
         return;
       }
+      setPreferDevice(true);
+      setPermissionGranted(true);
       setDeviceEnabled(true);
       setMessage("Waiting for compass · hold the device flat");
     } catch {
@@ -144,7 +160,15 @@ export function SiteRadar({
   }
 
   return (
-    <section className="site-radar" aria-label="Site radar">
+    <section className="site-radar" aria-label="Site radar"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && controlsOpen) {
+          event.stopPropagation();
+          setControlsOpen(false);
+          document.getElementById(`${id}-settings`)?.focus({ preventScroll: true });
+        }
+      }}
+    >
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
         <strong>{Math.round(heading).toString().padStart(3, "0")}°</strong>
@@ -351,7 +375,9 @@ export function SiteRadar({
         <span>Safety landmarks</span>
         <span>◌ Last known</span>
       </div>
+      <p className="site-radar__compass-status" role="status">{message}</p>
       <button
+        id={`${id}-settings`}
         className="site-radar__settings"
         type="button"
         aria-expanded={controlsOpen}
@@ -365,6 +391,13 @@ export function SiteRadar({
         id={`${id}-controls`}
         hidden={!controlsOpen}
       >
+        <button type="button" role="switch" aria-checked={preferDevice}
+          onClick={() => {
+            permissionGeneration.current++;
+            setPreferDevice(!preferDevice);
+          }}>
+          Device compass {preferDevice ? "on" : "off"}
+        </button>
         <label htmlFor={`${id}-heading`}>
           Turn demo heading <output>{manualHeading}°</output>
         </label>
@@ -376,6 +409,7 @@ export function SiteRadar({
           value={manualHeading}
           onChange={(event) => {
             permissionGeneration.current++;
+            setPreferDevice(false);
             setDeviceEnabled(false);
             setDeviceHeading(null);
             setMessage("Manual demo heading");
@@ -387,6 +421,7 @@ export function SiteRadar({
           onClick={() => {
             if (deviceEnabled) {
               permissionGeneration.current++;
+              setPreferDevice(false);
               setDeviceEnabled(false);
               setDeviceHeading(null);
               setMessage("Manual demo heading");
@@ -395,7 +430,6 @@ export function SiteRadar({
         >
           {deviceEnabled ? "Use manual heading" : "Use device compass"}
         </button>
-        <p aria-live="polite">{message}</p>
         <p className="site-radar__notice">
           Fictional positions · sweep is a visual simulation, not nearby
           detection. N is demo north in manual mode. Not for navigation.
