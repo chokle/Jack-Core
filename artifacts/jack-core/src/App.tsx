@@ -296,6 +296,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   });
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isChatMinimized, setIsChatMinimized] = useState(false);
   const [chatContext, setChatContext] = useState<string | undefined>();
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
@@ -390,7 +391,15 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const handleOpenChat = (context?: string) => {
     setResumedThought(null);
     setChatContext(context);
+    if (isChatOpen) {
+      setIsChatOpen(false);
+      setIsChatMinimized(true);
+      void trackTestEvent("ask_jack_minimized", { reason: "toggle" });
+      return;
+    }
+    setIsChatMinimized(false);
     setIsChatOpen(true);
+    void trackTestEvent("ask_jack_opened", { reason: "open" });
   };
 
   // Resume a parked Ask Jack conversation: prefill the input with whatever was
@@ -400,6 +409,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const handleResumeChat = (thought: ParkedThought) => {
     setResumedThought(thought);
     setChatContext(thought.unfinishedThought ?? undefined);
+    setIsChatMinimized(false);
     setIsChatOpen(true);
   };
 
@@ -429,9 +439,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const handleFieldNoteClick = (citation: Citation) => {
     setIsChatOpen(false);
+    setIsChatMinimized(false);
     setResumedThought(null);
     setSelectedVideoId(null);
     setInterviewPreload(undefined);
+    void trackTestEvent("ask_jack_field_note_opened", {
+      knowledge_entry_id: citation.videoId || "knowledge_note",
+      has_text: Boolean(citation.text),
+    });
     fieldNoteHandoffToken.current += 1;
     setFieldNotePreload({ title: citation.videoTitle, text: citation.text });
     setView("interview");
@@ -454,9 +469,29 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
   };
 
-  const handleCitationClick = (videoId: string, startTime: number) => {
-    setSelectedVideoId(videoId);
-    setSeek({ time: startTime, token: Date.now() });
+  const handleCitationClick = (
+    citationIndex: number,
+    videoId: string,
+    startTime: number,
+    sourceType: "video" | "knowledge",
+  ) => {
+    void trackTestEvent("ask_jack_citation_clicked", {
+      citation_index: citationIndex,
+      source_type: sourceType,
+      source_id: videoId,
+      start_time_seconds: startTime,
+    });
+    if (sourceType === "video" && videoId) {
+      setSelectedVideoId(videoId);
+      setSeek({ time: startTime, token: Date.now() });
+    }
+  };
+
+  const handleAskJackClose = () => {
+    setIsChatOpen(false);
+    setIsChatMinimized(true);
+    setResumedThought(null);
+    void trackTestEvent("ask_jack_minimized", { reason: "close" });
   };
 
   const launchTestSession = async (pilotId?: string) => {
@@ -725,16 +760,30 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       {/* Chat Drawer overlay */}
       <AskJack
         isOpen={isChatOpen}
-        onClose={() => {
-          setIsChatOpen(false);
-          setResumedThought(null);
-        }}
+        onClose={handleAskJackClose}
         resumedThought={resumedThought ?? undefined}
         initialContext={chatContext}
+        selectedVideoId={selectedVideoId}
         onCitationClick={handleCitationClick}
         onFieldNoteClick={handleFieldNoteClick}
         onMeaningfulSessionComplete={handleAskJackComplete}
       />
+
+      {(!isChatOpen && isChatMinimized) && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <button
+            type="button"
+            onClick={() => {
+              setIsChatMinimized(false);
+              setIsChatOpen(true);
+            }}
+            className="rounded-full border border-primary/45 bg-card/90 px-4 py-2 text-sm font-semibold text-primary shadow-lg shadow-black/30 transition hover:bg-card"
+            aria-label="Open Ask Jack"
+          >
+            Ask Jack
+          </button>
+        </div>
+      )}
 
       <TestingOverlay
         ref={testingOverlayRef}

@@ -23,6 +23,10 @@ export const CLIENT_EVENT_TYPES = new Set([
   "onboarding_skipped",
   "feature_viewed",
   "workflow_completed",
+  "ask_jack_opened",
+  "ask_jack_minimized",
+  "ask_jack_citation_clicked",
+  "ask_jack_field_note_opened",
   "recording_started",
   "recording_stopped",
   "recording_upload_succeeded",
@@ -43,6 +47,10 @@ export const ALL_EVENT_TYPES = new Set([
   "onboarding_skipped",
   "feature_viewed",
   "workflow_completed",
+  "ask_jack_opened",
+  "ask_jack_minimized",
+  "ask_jack_citation_clicked",
+  "ask_jack_field_note_opened",
   "ask_jack_completed",
   "ask_jack_failed",
   "recording_started",
@@ -104,6 +112,10 @@ const SURFACE_BY_EVENT: Record<string, string> = {
   workflow_completed: "app",
   ask_jack_completed: "ask_jack",
   ask_jack_failed: "ask_jack",
+  ask_jack_opened: "ask_jack",
+  ask_jack_minimized: "ask_jack",
+  ask_jack_citation_clicked: "ask_jack",
+  ask_jack_field_note_opened: "ask_jack",
   recording_started: "recording",
   recording_stopped: "recording",
   recording_upload_succeeded: "recording",
@@ -308,6 +320,40 @@ export function validateEventMetadata(
     if (!exactKeys(input, ["citation_count"]) || !Number.isInteger(input["citation_count"])) return null;
     const count = Number(input["citation_count"]);
     return count >= 0 && count <= 100 ? { citation_count: count } : null;
+  }
+  if (eventType === "ask_jack_citation_clicked") {
+    if (
+      !exactKeys(input, [
+        "citation_index",
+        "source_type",
+        "source_id",
+        "start_time_seconds",
+      ])
+    ) return null;
+    if (!Number.isInteger(input["citation_index"]) || typeof input["source_type"] !== "string") return null;
+    if (!["video", "knowledge"].includes(input["source_type"])) return null;
+    if (typeof input["source_id"] !== "string" || !input["source_id"].trim()) return null;
+    if (typeof input["start_time_seconds"] !== "number" || input["start_time_seconds"] < 0) return null;
+    return {
+      citation_index: Number(input["citation_index"]),
+      source_type: String(input["source_type"]),
+      source_id: String(input["source_id"]),
+      start_time_seconds: Number(input["start_time_seconds"]),
+    };
+  }
+  if (eventType === "ask_jack_field_note_opened") {
+    if (!exactKeys(input, ["knowledge_entry_id", "has_text"])) return null;
+    if (typeof input["knowledge_entry_id"] !== "string" || !input["knowledge_entry_id"].trim()) return null;
+    if (typeof input["has_text"] !== "boolean") return null;
+    return {
+      knowledge_entry_id: String(input["knowledge_entry_id"]),
+      has_text: input["has_text"],
+    };
+  }
+  if (["ask_jack_opened", "ask_jack_minimized"].includes(eventType)) {
+    if (!exactKeys(input, ["reason"])) return null;
+    if (!["open", "toggle", "close"].includes(input["reason"])) return null;
+    return { reason: String(input["reason"]) };
   }
   if (eventType === "recording_started") {
     if (!exactKeys(input, ["microphone_included"]) || typeof input["microphone_included"] !== "boolean") return null;

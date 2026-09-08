@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
+  ChevronDown,
   Send,
   Bot,
   User,
@@ -8,6 +9,10 @@ import {
   Sparkles,
   Bookmark,
   RotateCcw,
+  Pause,
+  Volume2,
+  VolumeX,
+  Play,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -39,6 +44,13 @@ import { timeAgo } from "@/lib/memory-graph";
 import { getCachedTestSession } from "@/lib/user-testing/test-session-service";
 
 type DisplayMessage = ChatMessage & { usedInternalKnowledge?: boolean };
+const STORAGE_VOICE_ENABLED_KEY = "jack.ask-jack.voice-enabled";
+const STORAGE_VOICE_VOLUME_KEY = "jack.ask-jack.voice-volume";
+const STORAGE_VOICE_PAUSED_KEY = "jack.ask-jack.voice-paused";
+
+function clampVolume(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
 
 // Chat history is scoped server-side to the signed-in Clerk account (derived
 // from the auth session on every /api request), so it follows the user across
@@ -50,7 +62,13 @@ interface AskJackProps {
   isOpen: boolean;
   onClose: () => void;
   initialContext?: string;
-  onCitationClick: (videoId: string, startTime: number) => void;
+  selectedVideoId?: string | null;
+  onCitationClick: (
+    citationIndex: number,
+    videoId: string,
+    startTime: number,
+    sourceType: "video" | "knowledge",
+  ) => void;
   onFieldNoteClick: (citation: Citation) => void;
   /** Set when the drawer was opened via "Resume" on a parked thought. */
   resumedThought?: ParkedThought;
@@ -61,6 +79,7 @@ export function AskJack({
   isOpen,
   onClose,
   initialContext,
+  selectedVideoId,
   onCitationClick,
   onFieldNoteClick,
   resumedThought,
@@ -101,6 +120,16 @@ export function AskJack({
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [successfulTurns, setSuccessfulTurns] = useState(0);
+  const [speechEnabled, setSpeechEnabled] = useState(true);
+  const [speechPaused, setSpeechPaused] = useState(false);
+  const [speechVolume, setSpeechVolume] = useState(0.9);
+  const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const stopSpeech = useCallback(() => {
+    if (!speechSupported) return;
+    window.speechSynthesis.cancel();
+    speechUtteranceRef.current = null;
+  }, [speechSupported]);
 
   function formatMessageTime(createdAt?: string): string | null {
     if (!createdAt) return null;
@@ -115,7 +144,68 @@ export function AskJack({
   const close = () => {
     if (successfulTurns > 0) onMeaningfulSessionComplete?.();
     setSuccessfulTurns(0);
+    stopSpeech();
     onClose();
+  };
+
+  const persistVoiceSettings = (enabled: boolean, paused: boolean, volume: number) => {
+    if (!speechSupported) return;
+    try {
+      window.localStorage.setItem(STORAGE_VOICE_ENABLED_KEY, String(enabled));
+      window.localStorage.setItem(STORAGE_VOICE_PAUSED_KEY, String(paused));
+      window.localStorage.setItem(STORAGE_VOICE_VOLUME_KEY, String(volume));
+    } catch {
+      return;
+    }
+  };
+
+  const speakAnswer = useCallback(
+    (text: string) => {
+      if (
+        !speechEnabled ||
+        speechPaused ||
+        !speechSupported ||
+        !text.trim()
+      ) {
+        return;
+      }
+      stopSpeech();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.volume = speechVolume;
+      utterance.lang = "en-US";
+      speechUtteranceRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    },
+    [speechEnabled, speechPaused, speechSupported, speechVolume, stopSpeech],
+  );
+
+  const handleSetSpeechEnabled = (nextEnabled: boolean) => {
+    setSpeechEnabled(nextEnabled);
+    if (!nextEnabled) {
+      stopSpeech();
+    }
+    persistVoiceSettings(nextEnabled, speechPaused, speechVolume);
+  };
+
+  const handleToggleSpeechPause = () => {
+    setSpeechPaused((prev) => {
+      const next = !prev;
+      if (next) {
+        stopSpeech();
+      }
+      persistVoiceSettings(speechEnabled, next, speechVolume);
+      return next;
+    });
+  };
+
+  const handleSetSpeechVolume = (nextVolume: number) => {
+    const normalized = clampVolume(nextVolume);
+    setSpeechVolume(normalized);
+    persistVoiceSettings(speechEnabled, speechPaused, normalized);
+  };
+
+  const increaseSpeechVolumeByTenPercent = () => {
+    handleSetSpeechVolume(Math.round((speechVolume + 0.1) * 10) / 10);
   };
 
   const handleClearConversation = () => {
@@ -139,6 +229,30 @@ export function AskJack({
       setMessages(history);
     }
   }, [history]);
+
+  useEffect(() => {
+    if (!speechSupported) return;
+    try {
+      const rawEnabled = window.localStorage.getItem(STORAGE_VOICE_ENABLED_KEY);
+      const rawPaused = window.localStorage.getItem(STORAGE_VOICE_PAUSED_KEY);
+      const rawVolume = window.localStorage.getItem(STORAGE_VOICE_VOLUME_KEY);
+
+      if (rawEnabled !== null) {
+        setSpeechEnabled(rawEnabled === "true");
+      }
+      if (rawPaused !== null) {
+        setSpeechPaused(rawPaused === "true");
+      }
+      if (rawVolume !== null) {
+        const parsed = Number(rawVolume);
+        if (Number.isFinite(parsed)) {
+          setSpeechVolume(clampVolume(parsed));
+        }
+      }
+    } catch {
+      return;
+    }
+  }, [speechSupported]);
 
   useEffect(() => {
     if (initialContext) {
@@ -169,6 +283,16 @@ export function AskJack({
     );
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    persistVoiceSettings(speechEnabled, speechPaused, speechVolume);
+  }, [speechEnabled, speechPaused, speechVolume]);
+
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, [stopSpeech]);
 
   function requestInputFocusAfterResponse() {
     if (!shouldReturnFocusToInputRef.current) return;
@@ -226,7 +350,12 @@ export function AskJack({
     setInput("");
 
     askJack.mutate(
-      { data: { message: userMessage.content } },
+      {
+        data: {
+          message: userMessage.content,
+          ...(selectedVideoId ? { selectedVideoId } : {}),
+        },
+      },
       {
         onSuccess: (data) => {
           if (requestId !== activeRequestIdRef.current) return;
@@ -240,6 +369,7 @@ export function AskJack({
             createdAt: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
+          speakAnswer(data.answer);
           setSuccessfulTurns((count) => count + 1);
           setErrorMessage(null);
           requestInputFocusAfterResponse();
@@ -366,6 +496,15 @@ export function AskJack({
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                title="Minimize Ask Jack"
+                aria-label="Minimize Ask Jack"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
               {messages.length > 0 && (
                 <Button
                   variant="ghost"
@@ -491,6 +630,72 @@ export function AskJack({
                 className="text-sm text-destructive rounded-lg border border-destructive/40 bg-destructive/10 p-3 font-mono"
               >
                 {errorMessage}
+              </div>
+            )}
+            {speechSupported && (
+              <div className="space-y-2 rounded-lg border border-sidebar-border bg-sidebar p-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleSetSpeechEnabled(!speechEnabled)}
+                      className="h-8 px-2"
+                    >
+                      {speechEnabled ? (
+                        <>
+                          <Volume2 className="mr-1.5 h-3.5 w-3.5" />
+                          Voice On
+                        </>
+                      ) : (
+                        <>
+                          <VolumeX className="mr-1.5 h-3.5 w-3.5" />
+                          Voice Off
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleToggleSpeechPause}
+                      disabled={!speechEnabled}
+                      className="h-8 px-2"
+                    >
+                      {speechPaused ? (
+                        <>
+                          <Play className="mr-1.5 h-3.5 w-3.5" />
+                          Resume Jack
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="mr-1.5 h-3.5 w-3.5" />
+                          Pause Jack
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={increaseSpeechVolumeByTenPercent}
+                    disabled={!speechEnabled}
+                    className="h-8 px-2"
+                  >
+                    +10%
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>Vol {Math.round(speechVolume * 100)}%</span>
+                  <div className="w-1/2 h-1 rounded-full bg-border">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${Math.round(speechVolume * 100)}%` }}
+                    />
+                  </div>
+                </div>
               </div>
             )}
             {messages.length > 0 && (
