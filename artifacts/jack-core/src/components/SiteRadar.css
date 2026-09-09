@@ -64,13 +64,14 @@
   opacity: 0.8;
 }
 .site-radar__sweep {
-  animation: site-radar-sweep-pulse 1.35s ease-in-out infinite;
+  /* 400ms pulse followed by a full 2000ms dark interval; rotation is independent. */
+  animation: site-radar-sweep-pulse 2.4s linear infinite;
   transform-box: fill-box;
   transform-origin: center;
 }
 @keyframes site-radar-sweep-pulse {
-  0%, 100% { opacity: 0.72; }
-  50% { opacity: 1; }
+  0% { opacity: 1; }
+  16.6666667%, 100% { opacity: 0; }
 }
 .site-radar__contact--stale circle {
   fill: none;
