@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Bot,
   Network,
@@ -59,6 +59,21 @@ function fmt(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+function syncAskJackComposerState(): boolean {
+  const closeButton = document.querySelector<HTMLButtonElement>(
+    'button[aria-label="Close Ask Jack"]',
+  );
+  const drawerOpen = !!closeButton;
+  document.querySelectorAll<HTMLElement>("[data-floating-jack]").forEach((pill) => {
+    pill.hidden = drawerOpen;
+    pill.setAttribute("aria-hidden", drawerOpen ? "true" : "false");
+  });
+  if (drawerOpen) {
+    document.documentElement.style.removeProperty("--jack-pill-height");
+  }
+  return drawerOpen;
+}
+
 export function JackShell({
   active,
   onNavigate,
@@ -95,13 +110,34 @@ export function JackShell({
   const hudEnabled =
     import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" && !!siteHudUserId;
 
+  useEffect(() => {
+    const sync = () => syncAskJackComposerState();
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      document.querySelectorAll<HTMLElement>("[data-floating-jack]").forEach((pill) => {
+        pill.hidden = false;
+        pill.removeAttribute("aria-hidden");
+      });
+    };
+  }, []);
+
   const go = (v: JackView) => {
     onNavigate(v);
     setIsPanelOpen(false);
   };
 
   const openChat = () => {
-    onOpenChat();
+    const closeButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close Ask Jack"]',
+    );
+    if (closeButton) {
+      closeButton.click();
+    } else {
+      onOpenChat();
+    }
     setIsPanelOpen(false);
   };
 

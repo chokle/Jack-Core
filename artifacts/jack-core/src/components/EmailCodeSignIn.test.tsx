@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { EmailCodeSignIn } from "./EmailCodeSignIn";
 
 const h = vi.hoisted(() => ({
@@ -8,6 +14,15 @@ const h = vi.hoisted(() => ({
   prepare: vi.fn(),
   attempt: vi.fn(),
   setActive: vi.fn(),
+  setLocation: vi.fn(),
+  auth: {
+    isLoaded: true,
+    isSignedIn: false,
+  },
+}));
+
+vi.mock("@clerk/react", () => ({
+  useAuth: () => h.auth,
 }));
 
 vi.mock("@clerk/react/legacy", () => ({
@@ -21,11 +36,19 @@ vi.mock("@clerk/react/legacy", () => ({
   }),
 }));
 
+vi.mock("wouter", () => ({
+  useLocation: () => ["/sign-in", h.setLocation],
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  h.auth.isLoaded = true;
+  h.auth.isSignedIn = false;
   h.prepare.mockResolvedValue({});
   h.create.mockResolvedValue({
-    supportedFirstFactors: [{ strategy: "email_code", emailAddressId: "email_123" }],
+    supportedFirstFactors: [
+      { strategy: "email_code", emailAddressId: "email_123" },
+    ],
     prepareFirstFactor: h.prepare,
   });
 });
@@ -51,7 +74,9 @@ describe("EmailCodeSignIn", () => {
   });
 
   it("surfaces Clerk errors instead of leaving Continue apparently inert", async () => {
-    h.create.mockRejectedValue({ errors: [{ longMessage: "Couldn't find your account." }] });
+    h.create.mockRejectedValue({
+      errors: [{ longMessage: "Couldn't find your account." }],
+    });
     render(<EmailCodeSignIn />);
 
     fireEvent.change(screen.getByLabelText("Email address"), {
@@ -59,13 +84,32 @@ describe("EmailCodeSignIn", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Couldn't find your account."));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Couldn't find your account.",
+      ),
+    );
+  });
+
+  it("recovers an already-authenticated user to the app instead of showing sign-in again", async () => {
+    h.auth.isSignedIn = true;
+    render(<EmailCodeSignIn />);
+
+    await waitFor(() =>
+      expect(h.setLocation).toHaveBeenCalledWith("/app", { replace: true }),
+    );
+    expect(
+      screen.queryByRole("heading", { name: /pilot participant access/i }),
+    ).toBeNull();
+    expect(h.create).not.toHaveBeenCalled();
   });
 
   it("does not offer disabled social providers", () => {
     render(<EmailCodeSignIn />);
 
-    expect(screen.queryByRole("button", { name: "Continue with Google" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Continue with Google" }),
+    ).toBeNull();
     expect(screen.queryByText("or use an email code")).toBeNull();
   });
 });
