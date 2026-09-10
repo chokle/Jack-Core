@@ -15,6 +15,14 @@ export interface HydraRecallMatch {
   metadata: Record<string, unknown>;
 }
 
+export interface HydraCanonicalKnowledge {
+  id: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+  subTenantId?: string;
+}
+
 interface HydraRecallResponse {
   chunks?: unknown;
 }
@@ -29,6 +37,15 @@ export function hydraRecallConfigured(): boolean {
       process.env["HYDRA_DB_API_KEY"] &&
       process.env["HYDRA_DB_TENANT_ID"],
   );
+}
+
+function requireHydraConfig(): { apiKey: string; tenantId: string } {
+  const apiKey = process.env["HYDRA_DB_API_KEY"];
+  const tenantId = process.env["HYDRA_DB_TENANT_ID"];
+  if (!apiKey || !tenantId) {
+    throw new Error("HYDRA_DB_API_KEY and HYDRA_DB_TENANT_ID are required");
+  }
+  return { apiKey, tenantId };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -94,8 +111,7 @@ export async function recallHydraKnowledge(
 ): Promise<HydraRecallMatch[]> {
   if (!hydraRecallConfigured()) return [];
 
-  const apiKey = process.env["HYDRA_DB_API_KEY"] as string;
-  const tenantId = process.env["HYDRA_DB_TENANT_ID"] as string;
+  const { apiKey, tenantId } = requireHydraConfig();
   const configuredTimeout = Number(process.env["HYDRA_DB_TIMEOUT_MS"] ?? "");
   const timeoutMs =
     Number.isFinite(configuredTimeout) && configuredTimeout > 0
@@ -139,5 +155,48 @@ export async function recallHydraKnowledge(
     return [];
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Upload canonical, already-approved Torch knowledge into HydraDB. This helper
+ * never decides approval itself; callers must supply only rows that have already
+ * cleared Jack's canonical review boundary.
+ */
+export async function upsertHydraCanonicalKnowledge(
+  items: HydraCanonicalKnowledge[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const { apiKey, tenantId } = requireHydraConfig();
+
+  const appKnowledge = items.map((item) => ({
+    tenant_id: tenantId,
+    sub_tenant_id: item.subTenantId ?? tenantId,
+    id: item.id,
+    title: item.title,
+    type: "torch_living_memory",
+    kind: "knowledge",
+    provider: "torch",
+    external_id: item.id,
+    fields: { body: item.body },
+    metadata: {
+      ...item.metadata,
+      torch_approved: true,
+      canonical_id: item.id,
+    },
+  }));
+
+  const form = new FormData();
+  form.append("tenant_id", tenantId);
+  form.append("upsert", "true");
+  form.append("app_knowledge", JSON.stringify(appKnowledge));
+
+  const response = await fetch(`${HYDRA_BASE_URL}/ingestion/upload_knowledge`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`HydraDB upload returned HTTP ${response.status}`);
   }
 }
