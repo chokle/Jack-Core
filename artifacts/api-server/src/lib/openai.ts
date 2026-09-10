@@ -119,10 +119,22 @@ export const MODELS = {
  */
 const embeddingCache = new Map<string, number[]>();
 const inFlight = new Map<string, Promise<number[]>>();
+const embeddingSourceText = new WeakMap<number[], string>();
 const EMBEDDING_CACHE_MAX = 1000;
 
 function embeddingKey(model: string, input: string): string {
   return createHash("sha256").update(`${model}:${input}`).digest("hex");
+}
+
+/**
+ * Retrieval adapters may need the original query text when the existing caller
+ * only passes the resulting embedding downstream. This WeakMap keeps that
+ * request text attached to the exact embedding array without introducing a
+ * global string cache or changing the public retrieval RPC contract.
+ */
+export function sourceTextForEmbedding(embedding: unknown): string | null {
+  if (!Array.isArray(embedding)) return null;
+  return embeddingSourceText.get(embedding as number[]) ?? null;
 }
 
 /**
@@ -141,9 +153,16 @@ export async function createEmbedding(
 
   if (useCache) {
     const cached = embeddingCache.get(key);
-    if (cached) return cached;
+    if (cached) {
+      embeddingSourceText.set(cached, input);
+      return cached;
+    }
     const pending = inFlight.get(key);
-    if (pending) return pending;
+    if (pending) {
+      const embedding = await pending;
+      embeddingSourceText.set(embedding, input);
+      return embedding;
+    }
   }
 
   const request = (async () => {
@@ -152,6 +171,9 @@ export async function createEmbedding(
     );
     const embedding = res.data[0]?.embedding ?? [];
 
+    if (embedding.length > 0) {
+      embeddingSourceText.set(embedding, input);
+    }
     if (useCache && embedding.length > 0) {
       if (embeddingCache.size >= EMBEDDING_CACHE_MAX) {
         const firstKey = embeddingCache.keys().next().value;
