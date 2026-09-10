@@ -5,12 +5,15 @@ import {
   contactIllumination,
   radarDistanceMeters,
   radarBearing,
+  sweepPulseOpacity,
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
 import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
 
 const SWEEP_PERIOD_MS = 4000;
 const RADAR_METERS_PER_PLAN_UNIT = 1;
+const MOBILE_QUERY =
+  "(max-width: 767px), (pointer: coarse) and (max-width: 1024px)";
 
 interface Props {
   crew: readonly HudCrewMember[];
@@ -28,6 +31,9 @@ export function SiteRadar({
   active = true,
 }: Props) {
   const id = useId();
+  const [mobile, setMobile] = useState(
+    () => window.matchMedia?.(MOBILE_QUERY).matches ?? false,
+  );
   const [manualHeading, setManualHeading] = useState(0);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
@@ -38,7 +44,17 @@ export function SiteRadar({
   const [sweep, setSweep] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
   const permissionGeneration = useRef(0);
-  const heading = deviceHeading ?? manualHeading;
+  const useDevice = mobile || preferDevice;
+  const heading = deviceHeading ?? (mobile ? 0 : manualHeading);
+  const fallback = mobile ? "heading unavailable" : "using manual heading";
+
+  useEffect(() => {
+    const media = window.matchMedia?.(MOBILE_QUERY);
+    const update = () => setMobile(media?.matches ?? false);
+    update();
+    media?.addEventListener("change", update);
+    return () => media?.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -64,17 +80,19 @@ export function SiteRadar({
   }, [active, reducedMotion]);
 
   useEffect(() => {
-    const sensor = window.DeviceOrientationEvent as typeof DeviceOrientationEvent & {
-      requestPermission?: (absolute?: boolean) => Promise<string>;
-    };
-    if (!active || !preferDevice) {
+    const sensor =
+      window.DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+        requestPermission?: (absolute?: boolean) => Promise<string>;
+      };
+    if (!active || !useDevice) {
       permissionGeneration.current++;
       setDeviceEnabled(false);
       setDeviceHeading(null);
       setMessage("Manual demo heading");
     } else if (!window.isSecureContext || !sensor) {
       setDeviceEnabled(false);
-      setMessage("Device compass unavailable · using manual heading");
+      setDeviceHeading(null);
+      setMessage(`Device compass unavailable · ${fallback}`);
     } else if (sensor.requestPermission && !permissionGranted) {
       setDeviceEnabled(false);
       setMessage("Enable device compass to allow access");
@@ -85,14 +103,14 @@ export function SiteRadar({
     return () => {
       permissionGeneration.current++;
     };
-  }, [active, preferDevice, permissionGranted]);
+  }, [active, useDevice, permissionGranted, fallback]);
 
   useEffect(() => {
     if (!active || !deviceEnabled) return;
     let timeout: ReturnType<typeof setTimeout>;
     const expire = () => {
       setDeviceHeading(null);
-      setMessage("Compass unavailable or stale · using manual heading");
+      setMessage(`Compass unavailable or stale · ${fallback}`);
     };
     const receive = (raw: Event) => {
       const orientation = raw as DeviceOrientationEvent & {
@@ -111,7 +129,7 @@ export function SiteRadar({
       );
       if (reading === null) {
         setDeviceHeading(null);
-        setMessage("Hold the device flat · using manual heading");
+        setMessage(`Hold the device flat · ${fallback}`);
         return;
       }
       setDeviceHeading(reading);
@@ -129,7 +147,7 @@ export function SiteRadar({
       window.removeEventListener("deviceorientationabsolute", receive);
       window.removeEventListener("deviceorientation", receive);
     };
-  }, [active, deviceEnabled]);
+  }, [active, deviceEnabled, fallback]);
 
   async function enableCompass() {
     if (!active) return;
@@ -139,7 +157,7 @@ export function SiteRadar({
         requestPermission?: (absolute?: boolean) => Promise<string>;
       };
     if (!window.isSecureContext || !constructor) {
-      setMessage("Device compass unavailable · using manual heading");
+      setMessage(`Device compass unavailable · ${fallback}`);
       return;
     }
     try {
@@ -148,7 +166,10 @@ export function SiteRadar({
         : "granted";
       if (generation !== permissionGeneration.current) return;
       if (result !== "granted") {
-        setMessage("Compass permission denied · using manual heading");
+        setPermissionGranted(false);
+        setDeviceEnabled(false);
+        setDeviceHeading(null);
+        setMessage(`Compass permission denied · ${fallback}`);
         return;
       }
       setPreferDevice(true);
@@ -157,23 +178,31 @@ export function SiteRadar({
       setMessage("Waiting for compass · hold the device flat");
     } catch {
       if (generation === permissionGeneration.current)
-        setMessage("Compass unavailable · using manual heading");
+        setMessage(`Compass unavailable · ${fallback}`);
     }
   }
 
   return (
-    <section className="site-radar" aria-label="Site radar"
+    <section
+      className="site-radar"
+      aria-label="Site radar"
       onKeyDown={(event) => {
         if (event.key === "Escape" && controlsOpen) {
           event.stopPropagation();
           setControlsOpen(false);
-          document.getElementById(`${id}-settings`)?.focus({ preventScroll: true });
+          document
+            .getElementById(`${id}-settings`)
+            ?.focus({ preventScroll: true });
         }
       }}
     >
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
-        <strong>{Math.round(heading).toString().padStart(3, "0")}°</strong>
+        <strong>
+          {mobile && deviceHeading === null
+            ? "—"
+            : `${Math.round(heading).toString().padStart(3, "0")}°`}
+        </strong>
         <span>4 SEC SWEEP · DEMO</span>
       </div>
       <svg
@@ -260,7 +289,11 @@ export function SiteRadar({
             const Icon = siteSafetyIcon(point.kind);
             const x = 200 + (point.x - 50) * 2.2,
               y = 200 + (point.y - 50) * 2.2;
-            const distance = radarDistanceMeters(point.x, point.y, RADAR_METERS_PER_PLAN_UNIT);
+            const distance = radarDistanceMeters(
+              point.x,
+              point.y,
+              RADAR_METERS_PER_PLAN_UNIT,
+            );
             return (
               <g
                 key={point.id}
@@ -269,7 +302,9 @@ export function SiteRadar({
                 transform={`rotate(${heading} ${x} ${y})`}
                 style={{ color: siteSafetyColor(point.kind) }}
               >
-                <title>{point.label} · {distance} m</title>
+                <title>
+                  {point.label} · {distance} m
+                </title>
                 <rect
                   x={x - 7}
                   y={y - 7}
@@ -297,7 +332,11 @@ export function SiteRadar({
               const position = member.position!;
               const x = 200 + (position.x - 50) * 2.2,
                 y = 200 + (position.y - 50) * 2.2;
-              const distance = radarDistanceMeters(position.x, position.y, RADAR_METERS_PER_PLAN_UNIT);
+              const distance = radarDistanceMeters(
+                position.x,
+                position.y,
+                RADAR_METERS_PER_PLAN_UNIT,
+              );
               const illumination = reducedMotion
                 ? 1
                 : contactIllumination(
@@ -360,6 +399,7 @@ export function SiteRadar({
           <g
             data-testid="radar-sweep"
             className="site-radar__sweep"
+            opacity={sweepPulseOpacity(sweep)}
             transform={`rotate(${sweep} 200 200)`}
             aria-hidden="true"
           >
@@ -388,7 +428,9 @@ export function SiteRadar({
         <span>Safety landmarks</span>
         <span>◌ Last known</span>
       </div>
-      <p className="site-radar__compass-status" role="status">{message}</p>
+      <p className="site-radar__compass-status" role="status">
+        {message}
+      </p>
       <button
         id={`${id}-settings`}
         className="site-radar__settings"
@@ -404,35 +446,44 @@ export function SiteRadar({
         id={`${id}-controls`}
         hidden={!controlsOpen}
       >
-        <button type="button" role="switch" aria-checked={preferDevice}
-          onClick={() => {
-            permissionGeneration.current++;
-            setPreferDevice(!preferDevice);
-          }}>
-          Device compass {preferDevice ? "on" : "off"}
-        </button>
-        <label htmlFor={`${id}-heading`}>
-          Turn demo heading <output>{manualHeading}°</output>
-        </label>
-        <input
-          id={`${id}-heading`}
-          type="range"
-          min="0"
-          max="359"
-          value={manualHeading}
-          onChange={(event) => {
-            permissionGeneration.current++;
-            setPreferDevice(false);
-            setDeviceEnabled(false);
-            setDeviceHeading(null);
-            setMessage("Manual demo heading");
-            setManualHeading(Number(event.target.value));
-          }}
-        />
+        {!mobile && (
+          <>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={preferDevice}
+              onClick={() => {
+                permissionGeneration.current++;
+                setPreferDevice(!preferDevice);
+              }}
+            >
+              Device compass {preferDevice ? "on" : "off"}
+            </button>
+            <label htmlFor={`${id}-heading`}>
+              Turn demo heading <output>{manualHeading}°</output>
+            </label>
+            <input
+              id={`${id}-heading`}
+              type="range"
+              min="0"
+              max="359"
+              value={manualHeading}
+              onChange={(event) => {
+                permissionGeneration.current++;
+                setPreferDevice(false);
+                setDeviceEnabled(false);
+                setDeviceHeading(null);
+                setMessage("Manual demo heading");
+                setManualHeading(Number(event.target.value));
+              }}
+            />
+          </>
+        )}
         <button
           type="button"
+          disabled={mobile && deviceEnabled}
           onClick={() => {
-            if (deviceEnabled) {
+            if (deviceEnabled && !mobile) {
               permissionGeneration.current++;
               setPreferDevice(false);
               setDeviceEnabled(false);
@@ -441,7 +492,11 @@ export function SiteRadar({
             } else void enableCompass();
           }}
         >
-          {deviceEnabled ? "Use manual heading" : "Use device compass"}
+          {mobile && deviceEnabled
+            ? "Using device compass"
+            : deviceEnabled
+              ? "Use manual heading"
+              : "Use device compass"}
         </button>
         <p className="site-radar__notice">
           Fictional positions · sweep is a visual simulation, not nearby

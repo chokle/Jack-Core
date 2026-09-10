@@ -64,14 +64,9 @@
   opacity: 0.8;
 }
 .site-radar__sweep {
-  /* 400ms pulse followed by a full 2000ms dark interval; rotation is independent. */
-  animation: site-radar-sweep-pulse 2.4s linear infinite;
+  /* Pulse opacity and rotation share the same animation frame in SiteRadar. */
   transform-box: fill-box;
   transform-origin: center;
-}
-@keyframes site-radar-sweep-pulse {
-  0% { opacity: 1; }
-  16.6666667%, 100% { opacity: 0; }
 }
 .site-radar__contact--stale circle {
   fill: none;
@@ -182,7 +177,34 @@
     transition: none !important;
   }
 }
-.site-radar { position: relative; }
-.site-radar__compass-status { text-align: center; font-size: 10px; color: #94a3b8; margin: 5px 0; }
-.site-radar__settings { margin-top: 4px; }
-.site-radar__controls { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 45; width: min(360px, 100%); max-height: min(360px, 55dvh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 14px; border: 1px solid var(--hud-line, #24525b); border-radius: 16px; background: rgba(6, 16, 20, .88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 12px 36px #0009; }
+.site-radar {
+  position: relative;
+}
+.site-radar__compass-status {
+  text-align: center;
+  font-size: 10px;
+  color: #94a3b8;
+  margin: 5px 0;
+}
+.site-radar__settings {
+  margin-top: 4px;
+}
+.site-radar__controls {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  width: min(360px, 100%);
+  max-height: min(360px, 55dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--hud-line, #24525b);
+  border-radius: 16px;
+  background: rgba(6, 16, 20, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 36px #0009;
+}

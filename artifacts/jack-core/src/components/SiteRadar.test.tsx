@@ -14,6 +14,7 @@ import {
   compassHeading,
   contactIllumination,
   radarBearing,
+  sweepPulseOpacity,
 } from "../lib/radar-heading";
 
 function render(ui: ReactElement) {
@@ -30,6 +31,99 @@ afterEach(() => {
 });
 
 describe("radar compass", () => {
+  it("pulses at each quarter turn and fades out between pulses", () => {
+    for (const quarter of [0, 90, 180, 270, 360]) {
+      expect(sweepPulseOpacity(quarter)).toBe(1);
+      expect(sweepPulseOpacity(quarter + 18)).toBe(0.5);
+      expect(sweepPulseOpacity(quarter + 36)).toBe(0);
+      expect(sweepPulseOpacity(quarter + 89)).toBe(0);
+    }
+  });
+
+  it("keeps mobile on device compass and permits retry after denial", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("max-width"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal("isSecureContext", true);
+    const requestPermission = vi
+      .fn()
+      .mockResolvedValueOnce("denied")
+      .mockResolvedValue("granted");
+    vi.stubGlobal("DeviceOrientationEvent", { requestPermission });
+    render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("slider")).toBeNull();
+    await act(async () =>
+      fireEvent.click(
+        screen.getByRole("button", { name: "Use device compass" }),
+      ),
+    );
+    expect(
+      screen.getByText(/permission denied · heading unavailable/),
+    ).toBeTruthy();
+    await act(async () =>
+      fireEvent.click(
+        screen.getByRole("button", { name: "Use device compass" }),
+      ),
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Using device compass" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    const event = new Event("deviceorientationabsolute");
+    Object.assign(event, { alpha: 270, beta: 0, gamma: 0, absolute: true });
+    act(() => window.dispatchEvent(event));
+    expect(screen.getByTestId("radar-world").getAttribute("transform")).toBe(
+      "rotate(-90 200 200)",
+    );
+  });
+
+  it("retains both compass modes on desktop", () => {
+    render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
+    expect(screen.getByRole("switch")).toBeTruthy();
+    expect(screen.getByRole("slider")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Use device compass" }),
+    ).toBeTruthy();
+  });
+
+  it("forces device mode when a desktop manual session changes to mobile", () => {
+    let change = () => {};
+    const media = {
+      matches: false,
+      addEventListener: (_: string, callback: () => void) => {
+        change = callback;
+      },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", (query: string) =>
+      query.includes("max-width")
+        ? media
+        : {
+            matches: false,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+          },
+    );
+    render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "120" } });
+    expect(screen.getByTestId("radar-world").getAttribute("transform")).toBe(
+      "rotate(-120 200 200)",
+    );
+    act(() => {
+      media.matches = true;
+      change();
+    });
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.getByTestId("radar-world").getAttribute("transform")).toBe(
+      "rotate(0 200 200)",
+    );
+    expect(screen.getByText("—")).toBeTruthy();
+  });
   it.each(["future-station", "constructor"])(
     "keeps an unfamiliar safety landmark %s visible without crashing the radar",
     (kind) => {
@@ -66,6 +160,7 @@ describe("radar compass", () => {
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     render(<SiteRadar crew={[]} landmarks={[]} floorLabel="Ground" />);
     act(() => frame(1000));
+    expect(screen.getByTestId("radar-sweep").getAttribute("opacity")).toBe("1");
     expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
       "rotate(90 200 200)",
     );
@@ -73,6 +168,12 @@ describe("radar compass", () => {
     expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
       "rotate(180 200 200)",
     );
+    act(() => frame(2200));
+    expect(
+      Number(screen.getByTestId("radar-sweep").getAttribute("opacity")),
+    ).toBeCloseTo(0.5);
+    act(() => frame(2500));
+    expect(screen.getByTestId("radar-sweep").getAttribute("opacity")).toBe("0");
     act(() => frame(4000));
     expect(screen.getByTestId("radar-sweep").getAttribute("transform")).toBe(
       "rotate(0 200 200)",
@@ -107,17 +208,21 @@ describe("radar compass", () => {
       <SiteRadar
         crew={[]}
         floorLabel="Ground"
-        landmarks={[{
-          id: "east",
-          label: "East beacon",
-          kind: "air-horn",
-          floorId: "ground",
-          x: 60,
-          y: 50,
-        }]}
+        landmarks={[
+          {
+            id: "east",
+            label: "East beacon",
+            kind: "air-horn",
+            floorId: "ground",
+            x: 60,
+            y: 50,
+          },
+        ]}
       />,
     );
-    expect(screen.getByRole("img", { name: /East beacon.*10 meters away/ })).toBeTruthy();
+    expect(
+      screen.getByRole("img", { name: /East beacon.*10 meters away/ }),
+    ).toBeTruthy();
   });
 
   it("rejects relative, invalid, inaccurate and tilted compass readings", () => {
