@@ -66,3 +66,8 @@ export function contactIllumination(
   const age = normalizeHeading(sweep - normalizeHeading(bearing - heading));
   return 0.3 + 0.7 * Math.max(0, 1 - age / 110);
 }
+/** Four pulses per revolution, fading during the first 40% of each quarter. */
+export function sweepPulseOpacity(sweepDegrees: number): number {
+  const phase = ((sweepDegrees % 90) + 90) % 90;
+  return Math.max(0, 1 - phase / 36);
+}
