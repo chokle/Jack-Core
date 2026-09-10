@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "seed:knowledge": "tsx src/scripts/seed-knowledge-entry.ts",
     "import:knowledge": "tsx src/scripts/import-knowledge-objects.ts",
+    "sync:hydradb": "tsx src/scripts/sync-hydradb.ts",
     "test": "vitest run",
     "typecheck": "tsc --build ../../lib/api-zod ../../lib/db && tsc -p tsconfig.json --noEmit"
   },
