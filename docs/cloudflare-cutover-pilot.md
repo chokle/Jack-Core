@@ -51,17 +51,18 @@ The Pilot001 Cloudflare production path requires Clerk authentication. `VITE_CLE
 7. hand runtime secrets to Wrangler without exposing them job-wide;
 8. deploy Worker + Container to the temporary `workers.dev` target;
 9. resolve the deployed target/version from Wrangler structured output;
-10. run 120 primary attempts, admitting terminal reconciliation only from an exact active/ready application digest plus warmup `200` and exactly one stopped `jack-production` instance whose non-empty ID/version matches the application;
+10. run 240 primary attempts, admitting terminal reconciliation only from an exact active/ready application digest plus warmup `200` and exactly one stopped `jack-production` instance whose non-empty ID/version matches the application;
 11. pin the admitted application ID/digest/version and instance ID/version, require a fresh transition to `running` by 33:00 on a monotonic clock, then finish the complete acceptance transaction by the internal 34:30 deadline (inside the 35-minute step timeout);
 12. re-prove the pinned application and serving instance before and after checking public shell `200`, `/api/healthz` `200` with `status=ok`, and anonymous `/api/me` exact `401` with the sign-in-required body; every Wrangler subprocess, HTTP probe, and poll sleep is bounded, and any identity/digest/version drift fails closed;
 13. record deployment evidence in the workflow summary.
 
-Production DNS remains unchanged during this lane so Railway stays available as rollback.
+The temporary-host deployment itself leaves the production route unchanged. After a successful production deploy, `.github/workflows/cloudflare-production-route-handoff.yml` is the route-transfer source of truth: it moves `jack.torchlabs.ca/*` to `jack-core-production`, verifies the custom-domain root and health endpoint, anonymous `/api/me = 401`, the CSP baseline, and the absence of Railway/legacy recovery headers, and rolls the route back if verification fails. Railway remains available as rollback until that custom-domain transaction passes.
+
 The production and verification workflows pin Wrangler `4.127.1`; do not replace that pin with `latest` during the pilot.
 
 ## Production cutover
 
-Only after the temporary `workers.dev` deployment passes acceptance, bind `jack.torchlabs.ca` to the accepted Worker and repeat the acceptance set on the production hostname:
+After the temporary `workers.dev` deployment passes acceptance, the automated `Cloudflare Production Route Handoff` workflow performs the production route transfer and repeats the custom-domain acceptance set. Treat the successful handoff workflow run—not a manual route mutation—as the current production cutover source of truth.
 
 - public application shell loads;
 - `/api/healthz` responds;
