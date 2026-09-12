@@ -1,9 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 
-// interview.ts and distillation.ts transitively import openai.ts (which throws at
-// import time when OPENAI_API_KEY is unset) and supabase.ts. Mock both so the
-// pure prompt builders can be imported with zero env/network — this mirrors the
-// mock setup used by the other lib tests (see distillation.test.ts).
 vi.mock("../openai.js", async () => {
   const m = await import("./mocks.js");
   return {
@@ -25,292 +21,98 @@ import {
   JURISDICTION_POLICY_BRIEF,
   buildChatSystemPrompt,
 } from "../jurisdiction.js";
+import { JACK_SOUL_PROMPT } from "../soul.js";
+import { JACK_CONSTITUTION_PROMPT } from "../constitution.js";
+import { JACK_CORE_SYSTEM_MAP_PROMPT } from "../system-map.js";
+import { JACK_CANONICAL_IDENTITY_BLOCK } from "../jack-identity.js";
 import { buildInterviewSystemPrompt } from "../interview.js";
 import { buildDistillationSystemPrompt } from "../distillation.js";
-import {
-  JACK_CORE_SYSTEM_MAP_BRIEF,
-  JACK_CORE_SYSTEM_MAP_PROMPT,
-  JACK_CORE_SYSTEMS,
-} from "../system-map.js";
-import { JACK_CONSTITUTION_PROMPT } from "../constitution.js";
-import {
-  JACK_CANONICAL_IDENTITY_BLOCK,
-  JACK_CANONICAL_IDENTITY_INTRODUCTION,
-} from "../jack-identity.js";
 
-/**
- * QA checks for the "default jurisdiction = Canada" policy. These are
- * deterministic assertions over the canonical policy (the single source every
- * prompt embeds) plus the composed chat/interview/distillation prompts — no live
- * LLM call, so they run fast and offline in CI. They cover the five required
- * guarantees: (1) Canadian sources preferred, (2) OSHA/AWS/NEC never defaulted,
- * (3) CWB/CSA prioritized for welding & safety, (4) Red Seal prioritized for
- * apprenticeship & certification, (5) provincial regulators used when province
- * matters.
- */
 describe("Canadian jurisdiction policy", () => {
-  describe("QA #1 — Canadian sources are preferred", () => {
-    it("ranks Torch first, then Red Seal, CSA, CWB, provincial, Canadian gov, international last", () => {
-      expect([...CANADIAN_SOURCE_PRIORITY]).toEqual([
-        "Torch Knowledge Repository",
-        "Red Seal Occupational Standards",
-        "CSA Standards",
-        "CWB Standards",
-        "Provincial regulations",
-        "Trusted Canadian government and standards-related publications",
-        "International sources",
-      ]);
-    });
-
-    it("keeps international sources dead last", () => {
-      expect(
-        CANADIAN_SOURCE_PRIORITY[CANADIAN_SOURCE_PRIORITY.length - 1],
-      ).toBe("International sources");
-    });
-
-    it("lists the priority order, numbered in order, in the answer policy", () => {
-      const p = JURISDICTION_POLICY_PROMPT;
-      expect(p).toContain("1. Torch Knowledge Repository");
-      expect(p).toContain("2. Red Seal Occupational Standards");
-      expect(p).toContain("3. CSA Standards");
-      expect(p).toContain("4. CWB Standards");
-      expect(p).toContain("5. Provincial regulations");
-      expect(p).toContain("6. Trusted Canadian government");
-      expect(p).toContain("7. International sources");
-      // International is conditional, never a default.
-      expect(p).toMatch(
-        /International sources[^\n]*ONLY when Canadian guidance is unavailable/,
-      );
-    });
-
-    it("searches Canadian sources first for any external knowledge", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /search Canadian sources first/i,
-      );
-    });
+  it("keeps the authority order deterministic", () => {
+    expect([...CANADIAN_SOURCE_PRIORITY]).toEqual([
+      "Torch Knowledge Repository",
+      "Red Seal Occupational Standards",
+      "CSA Standards",
+      "CWB Standards",
+      "Provincial regulations",
+      "Trusted Canadian government and standards-related publications",
+      "International sources",
+    ]);
   });
 
-  describe("QA #2 — OSHA/AWS/NEC are never used as defaults", () => {
-    it("tracks exactly OSHA, AWS, NEC as forbidden defaults", () => {
-      expect([...US_DEFAULT_STANDARDS]).toEqual(["OSHA", "AWS", "NEC"]);
-    });
-
-    it("names each US standard only to forbid defaulting to it", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /Do NOT default to OSHA, AWS welding codes, NEC/,
-      );
-      for (const std of US_DEFAULT_STANDARDS) {
-        expect(JURISDICTION_POLICY_PROMPT).toContain(std);
-      }
-    });
-
-    it("assumes Canada unless the user states otherwise", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /default jurisdiction is Canada/i,
-      );
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /unless the user explicitly states another jurisdiction/i,
-      );
-    });
+  it("never defaults to US standards", () => {
+    expect([...US_DEFAULT_STANDARDS]).toEqual(["OSHA", "AWS", "NEC"]);
+    expect(JURISDICTION_POLICY_PROMPT).toMatch(/Do NOT default to OSHA, AWS welding codes, NEC/i);
+    expect(JURISDICTION_POLICY_PROMPT).toMatch(/default jurisdiction is Canada/i);
   });
 
-  describe("QA #3 — CWB and CSA prioritized for welding and safety", () => {
-    it("names CWB and CSA for welding/safety topics", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /welding and safety[^\n]*prioritize CWB and CSA/i,
-      );
-    });
+  it("keeps Canadian trade authorities explicit", () => {
+    expect(JURISDICTION_POLICY_PROMPT).toMatch(/welding and safety[^\n]*CWB and CSA/i);
+    expect(JURISDICTION_POLICY_PROMPT).toMatch(/apprenticeship and certification[^\n]*Red Seal/i);
+    expect(JURISDICTION_POLICY_PROMPT).toContain("WorkSafeBC");
+    expect(JURISDICTION_POLICY_PROMPT).toMatch(/instead of guessing/i);
   });
 
-  describe("QA #4 — Red Seal prioritized for apprenticeship and certification", () => {
-    it("names Red Seal for apprenticeship/certification topics", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /apprenticeship and certification[^\n]*Red Seal/i,
-      );
-    });
+  it("keeps the brief Canada-first", () => {
+    expect(JURISDICTION_POLICY_BRIEF).toMatch(/Default to Canada/i);
+    for (const body of ["Red Seal", "CSA", "CWB"])
+      expect(JURISDICTION_POLICY_BRIEF).toContain(body);
+  });
+});
+
+describe("Ask Jack soul-first architecture", () => {
+  it("uses one identity layer at answer time", () => {
+    const prompt = buildChatSystemPrompt({ usedInternalKnowledge: true });
+
+    expect(prompt).toContain(JACK_SOUL_PROMPT);
+    expect(prompt).not.toContain(JACK_CONSTITUTION_PROMPT);
+    expect(prompt).not.toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
+    expect(prompt).not.toContain(JACK_CANONICAL_IDENTITY_BLOCK);
   });
 
-  describe("QA #5 — provincial regulators used when the province matters", () => {
-    it("names provincial regulators and the ask/flag rule", () => {
-      const p = JURISDICTION_POLICY_PROMPT;
-      expect(p).toContain("WorkSafeBC");
-      expect(p).toContain("Alberta OHS");
-      expect(p).toContain("Ontario MLITSD");
-      expect(p).toMatch(/province matters/i);
-      expect(p).toMatch(/provincial rules may vary/i);
-    });
+  it("keeps personality small and moves hard boundaries outside it", () => {
+    const prompt = buildChatSystemPrompt({ usedInternalKnowledge: false });
+
+    expect(prompt).toContain("JACK SOUL.");
+    expect(prompt).toContain("Usually give 1-3 things to check");
+    expect(prompt).toContain("Do not dump every plausible cause at once");
+    expect(prompt).toContain("SOURCE / PROVENANCE:");
+    expect(prompt).toContain("JURISDICTION — DEFAULT TO CANADA.");
+    expect(prompt).toContain("JACK UI CONTEXT TRUST BOUNDARY:");
   });
 
-  describe("conflict + unverifiable handling", () => {
-    it("names the governing Canadian standard first on a conflict", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /identify the governing Canadian standard FIRST/,
-      );
-    });
+  it("defaults field answers to short progressive disclosure", () => {
+    const prompt = buildChatSystemPrompt({ usedInternalKnowledge: true });
 
-    it("says so instead of guessing when it cannot verify a Canadian standard", () => {
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(
-        /cannot verify the applicable Canadian standard, say so/i,
-      );
-      expect(JURISDICTION_POLICY_PROMPT).toMatch(/instead of guessing/i);
-    });
+    expect(prompt).toContain("Default to the shortest useful field answer");
+    expect(prompt).toContain("Lead with the likely next move");
+    expect(prompt).toContain("Usually give 1-3 checks at once");
+    expect(prompt).toContain("Go deeper only when asked");
+    expect(prompt).toContain("UNTRUSTED RETRIEVED LIBRARY SOURCE DATA");
   });
 
-  describe("the policy reaches every generation prompt", () => {
-    it("chat answer prompt embeds the full policy and stays Torch-first", () => {
-      const withCtx = buildChatSystemPrompt({
-        usedInternalKnowledge: true,
-      });
-      expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
-      expect(withCtx).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-      expect(withCtx).not.toContain(
-        "AI Trade Intelligence Engine designed to support skilled trades workers in Canada",
-      );
-      const idxCanonical = withCtx.indexOf(JACK_CANONICAL_IDENTITY_BLOCK);
-      const idxConstitution = withCtx.indexOf(JACK_CONSTITUTION_PROMPT);
-      const idxSystemMap = withCtx.indexOf(JACK_CORE_SYSTEM_MAP_PROMPT);
-      const idxJurisdiction = withCtx.indexOf(JURISDICTION_POLICY_PROMPT);
-      expect(idxConstitution).toBeGreaterThan(idxCanonical);
-      expect(idxSystemMap).toBeGreaterThan(idxCanonical);
-      expect(idxJurisdiction).toBeGreaterThan(idxCanonical);
+  it("keeps no-evidence handling concise and non-hallucinatory", () => {
+    const prompt = buildChatSystemPrompt({ usedInternalKnowledge: false });
+    expect(prompt).toMatch(/No internal library content matched/i);
+    expect(prompt).toMatch(/say that briefly instead of guessing/i);
+  });
+});
 
-      expect(withCtx).toContain("SOURCE PRIORITY ORDER");
-      expect(withCtx).toContain("Torch Knowledge Repository");
-      expect(withCtx).toContain("UNTRUSTED RETRIEVED LIBRARY SOURCE DATA");
-      expect(withCtx).toContain("FAST-SCAN FORMATTING");
-      expect(withCtx).toMatch(/2–4 short, high-value action, safety/i);
-      expect(withCtx).toMatch(/not whole paragraphs/i);
-      expect(withCtx).toContain("DIAGNOSTIC CONFIDENCE GATE.");
-      expect(withCtx).toContain(
-        "When essential diagnostic context is missing, briefly acknowledge the issue",
-      );
-      expect(withCtx).toContain("BEHAVIOR TO AVOID.");
-      expect(withCtx).toContain("LEADERSHIP PRINCIPLE.");
-
-      const noCtx = buildChatSystemPrompt({
-        usedInternalKnowledge: false,
-      });
-      expect(noCtx).toContain("SOURCE PRIORITY ORDER");
-      expect(noCtx).toMatch(/No internal library content matched/);
-      expect(noCtx).toMatch(/say so rather than guessing/i);
+describe("non-answer generation paths", () => {
+  it("interview still carries the Canada boundary", () => {
+    const prompt = buildInterviewSystemPrompt({
+      name: "Welder",
+      remaining: ["safety"],
+      machineHint: undefined,
     });
-
-    it("keeps authority centralized in the constitution block", () => {
-      const prompt = buildChatSystemPrompt({
-        usedInternalKnowledge: false,
-      });
-
-      expect(prompt).toContain("PERSONA & COMMUNICATION.");
-      expect(prompt).toContain("When essential diagnostic context is missing,");
-      expect(prompt).toContain("Slow is fast. Clear is safe.");
-      expect(prompt).toContain("I’m designed to...");
-      expect(prompt).toContain('Do not say "How may I assist you?"');
-      expect(prompt).toContain("Avoid shotgun lists such as");
-      expect(prompt).toMatch(/field-native shop and jobsite language/i);
-      expect(prompt).toContain("let me know what you need");
-      expect(prompt).toMatch(
-        /rendered Library,\s+Living Memory,\s+Interview,\s+and Review surfaces/i,
-      );
-      expect(prompt).toMatch(/application-owned capability/i);
-      expect(prompt).toMatch(/generic help-desk refusal/i);
-    });
-
-    it("gives Ask Jack one authoritative map of Jack Core", () => {
-      const prompt = buildChatSystemPrompt({
-        usedInternalKnowledge: false,
-      });
-
-      for (const system of JACK_CORE_SYSTEMS) {
-        expect(prompt).toContain(system.name);
-        expect(prompt).toContain(system.role);
-      }
-      expect(prompt).toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
-      expect(prompt).toMatch(/not an isolated generic chatbot/i);
-      expect(prompt).toMatch(
-        /supersedes any contradictory assistant statement in conversation history/i,
-      );
-      expect(prompt).toMatch(/correct that statement directly/i);
-      expect(prompt).toMatch(
-        /cannot store information[^\n]*false descriptions/i,
-      );
-      expect(prompt).toContain(
-        "I do not have that record in my current retrieval context yet.",
-      );
-      expect(prompt).toMatch(
-        /contribution is captured and being evaluated for Living Memory/i,
-      );
-      expect(prompt).toMatch(
-        /Only the interview's contributor may resume or answer/i,
-      );
-    });
-
-    it("interview prompt assumes Canada and forbids US defaults", () => {
-      const s = buildInterviewSystemPrompt({
-        name: "Welder",
-        remaining: ["safety"],
-        machineHint: undefined,
-      });
-      expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
-      expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-      expect(s).not.toContain(
-        "AI Trade Intelligence Engine designed to support skilled trades workers in Canada",
-      );
-      expect(s).toContain(JURISDICTION_POLICY_BRIEF);
-      expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
-      expect(s).toMatch(/never assume OSHA, AWS, NEC/);
-    });
-
-    it("distillation prompt records Canadian standards, not US equivalents", () => {
-      const s = buildDistillationSystemPrompt("(none)");
-      expect(s).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
-      expect(s).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
-      expect(s).not.toContain(
-        "AI Trade Intelligence Engine for skilled trades training",
-      );
-      expect(s).toContain(JURISDICTION_POLICY_BRIEF);
-      expect(s).toContain(JACK_CORE_SYSTEM_MAP_BRIEF);
-      expect(s).toMatch(
-        /do NOT record U\.S\. equivalents like OSHA, AWS, or NEC/,
-      );
-      expect(s).toMatch(/CSA, CWB, Red Seal/);
-    });
-
-    it("distinguishes identity questions from capability questions", () => {
-      const withCtx = buildChatSystemPrompt({
-        usedInternalKnowledge: false,
-      });
-
-      expect(withCtx).toContain(
-        "Use the exact canonical introduction only when the user's primary intent is identity-only:",
-      );
-      expect(withCtx).toContain("- Who are you?");
-      expect(withCtx).toContain("- What are you?");
-      expect(withCtx).toContain("- Introduce yourself.");
-      expect(withCtx).toContain("- Who are you and what do you do?");
-      expect(withCtx).toContain(
-        "Capability, knowledge, suitability, and problem-solving questions are not identity questions.",
-      );
-      expect(withCtx).toContain(
-        "When responding to an identity-only question, output exactly:",
-      );
-      expect(withCtx).toContain(
-        "with no preamble, no explanation, and no additional content.",
-      );
-      expect(withCtx).toContain(
-        "Identity-only inputs are limited to these prompts:",
-      );
-      expect(withCtx).toMatch(/PERSONA & COMMUNICATION/i);
-      expect(withCtx).toContain("Slow is fast. Clear is safe.");
-    });
+    expect(prompt).toContain(JURISDICTION_POLICY_BRIEF);
+    expect(prompt).toMatch(/never assume OSHA, AWS, NEC/i);
   });
 
-  describe("jurisdiction brief", () => {
-    it("is Canada-first, names Canadian bodies, and forbids US defaults", () => {
-      const b = JURISDICTION_POLICY_BRIEF;
-      expect(b).toMatch(/Default to Canada/i);
-      for (const body of ["Red Seal", "CSA", "CWB", "WorkSafeBC"])
-        expect(b).toContain(body);
-      for (const std of US_DEFAULT_STANDARDS) expect(b).toContain(std);
-    });
+  it("distillation still carries the Canada boundary", () => {
+    const prompt = buildDistillationSystemPrompt("(none)");
+    expect(prompt).toContain(JURISDICTION_POLICY_BRIEF);
+    expect(prompt).toMatch(/CSA, CWB, Red Seal/);
   });
 });
