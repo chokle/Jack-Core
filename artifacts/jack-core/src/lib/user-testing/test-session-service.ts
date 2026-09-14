@@ -109,6 +109,7 @@ interface QueuedEvent {
 const SESSION_CACHE_KEY = "jack.userTesting.activeSession.v2";
 const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
+const REJECTED_QUEUE_PREFIX = "jack.userTesting.rejectedEvents.v1:";
 const TELEMETRY_IDENTITY_KEY = "jack.userTesting.identity.v1";
 const MAX_QUEUE_SIZE = 100;
 interface FlushRequestState {
@@ -317,6 +318,15 @@ export async function withdrawTelemetry(
   scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
+    try {
+      const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+      if (owner) {
+        localStorage.removeItem(`${REJECTED_QUEUE_PREFIX}${owner}`);
+        localStorage.removeItem(`${EVENT_QUEUE_KEY}:${owner}`);
+      }
+    } catch {
+      // Local cleanup is best effort when browser storage is unavailable.
+    }
     invalidateTestSessionStarts();
     writeQueue([]);
   }
@@ -432,6 +442,25 @@ async function reportDropped(sessionId: string, count: number): Promise<void> {
   }
 }
 
+function preserveRejectedEvent(event: QueuedEvent, status: number): boolean {
+  try {
+    const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+    if (!owner) return false;
+    const key = `${REJECTED_QUEUE_PREFIX}${owner}`;
+    const existing: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const saved = Array.isArray(existing) ? existing : [];
+    if (!saved.some((item) => item?.eventId === event.eventId)) {
+      // Do not evict retained evidence to make room for another failed upload.
+      if (saved.length >= MAX_QUEUE_SIZE) return false;
+      saved.push({ ...event, rejectedStatus: status });
+      localStorage.setItem(key, JSON.stringify(saved));
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function flushTestEvents(): Promise<TestSession | null> {
   const generation = flushGeneration;
   if (flushRequest?.generation === generation) {
@@ -508,6 +537,14 @@ export function flushTestEvents(): Promise<TestSession | null> {
             return latest;
           }
 
+          // A closed or expired original session cannot accept a late event.
+          // Preserve it for recovery without blocking newer sessions or
+          // silently relabelling it as activity from a new session.
+          if (
+            (response.status === 404 || response.status === 409) &&
+            !preserveRejectedEvent(next, response.status)
+          )
+            return latest;
           if (!isCurrent()) return null;
           advanceQueue(next.eventId);
           continue;

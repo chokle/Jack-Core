@@ -485,6 +485,52 @@ describe("test session service", () => {
     },
   );
 
+  it("preserves expired-session rejections without blocking fresh session events", async () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([
+        queuedEvent("expired-event"),
+        queuedEvent("fresh-event", { sessionId: "new-session" }),
+      ]),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await flushTestEvents();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a") ??
+          "[]",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        eventId: "expired-event",
+        sessionId: session.id,
+        rejectedStatus: 404,
+      }),
+    ]);
+    fetchMock.mockResolvedValueOnce(
+      new Response('{"withdrawn":["telemetry"],"deletionDueAt":null}', {
+        status: 200,
+      }),
+    );
+    await withdrawTelemetry(session.pilotId);
+    expect(
+      localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a"),
+    ).toBeNull();
+  });
+
   it("drops non-retryable client errors after one submission attempt", async () => {
     cacheTestSession(session);
     localStorage.setItem(
