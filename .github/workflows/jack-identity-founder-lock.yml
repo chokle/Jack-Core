@@ -62,6 +62,15 @@ jobs:
             });
 
             const lockedExact = new Set([
+              'SOUL.md',
+              'JACK_CONSTITUTION.md',
+              'artifacts/api-server/src/lib/soul.ts',
+              // Prompt composition and model boundary are locked so a new source
+              // cannot replace identity via an import outside the original list.
+              'artifacts/api-server/src/lib/jurisdiction.ts',
+              'artifacts/api-server/src/lib/system-map.ts',
+              'artifacts/api-server/src/lib/openai.ts',
+              'artifacts/api-server/src/routes/chat.ts',
               'artifacts/api-server/src/lib/constitution.ts',
               'artifacts/api-server/src/lib/jack-identity.ts',
               '.github/CODEOWNERS',
@@ -71,12 +80,18 @@ jobs:
               '.github/tests/jack-identity-founder-lock.test.mjs',
             ]);
             const lockedPrefixes = ['docs/jack-identity/'];
+            const canonicalPath = /(^|\/)(?:soul|jack[-_.]identity|constitution)(?:[.-]|\/|$)/i;
+            const canonicalDeclaration = /(?:canonical (?:identity|self-model)|(?:source of truth|runtime projection) (?:for|of) .*?(?:identity|SOUL)|JACK_(?:SOUL|CANONICAL_IDENTITY))/i;
+            const declaredSources = files.filter((file) => canonicalDeclaration.test(file.patch ?? ''))
+              .map((file) => file.filename);
 
             const lockedFiles = files
               .flatMap((file) => [file.filename, file.previous_filename].filter(Boolean))
               .filter(
                 (filename) =>
                   lockedExact.has(filename) ||
+                  canonicalPath.test(filename) ||
+                  declaredSources.includes(filename) ||
                   lockedPrefixes.some((prefix) => filename.startsWith(prefix)),
               );
 
