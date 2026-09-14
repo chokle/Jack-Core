@@ -40,7 +40,7 @@ function containerEnv(env) {
     PORT: String(CONTAINER_PORT),
     BASE_PATH: "/",
     PUBLIC_SITE_URL: "https://jack.torchlabs.ca",
-    CORS_ALLOWED_ORIGINS: "https://jack.torchlabs.ca",
+    CORS_ALLOWED_ORIGINS: "https://jack.torchlabs.ca,https://app.torchlabs.ca",
   };
 
   for (const key of RUNTIME_ENV_KEYS) {

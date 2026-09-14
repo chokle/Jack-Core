@@ -467,6 +467,32 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
   );
 });
 
+test("production allows the authenticated Torch browser origin without wildcard CORS", async () => {
+  const [worker, baseText] = await Promise.all([
+    read("cloudflare/worker.mjs"),
+    read("cloudflare/wrangler.base.json"),
+  ]);
+  const runtimeSource = worker.slice(
+    worker.indexOf("const CONTAINER_PORT"),
+    worker.indexOf("/**"),
+  );
+  const resolve = runInNewContext(`${runtimeSource}; containerEnv`);
+  const base = JSON.parse(baseText);
+  for (const env of [{}, base.vars]) {
+    const origins = resolve(env).CORS_ALLOWED_ORIGINS.split(",");
+    assert.ok(origins.includes("https://app.torchlabs.ca"));
+    assert.ok(origins.includes("https://jack.torchlabs.ca"));
+    assert.equal(origins.length, 2);
+    assert.ok(!origins.includes("*"));
+  }
+  assert.equal(base.vars.PILOT_AUTH_BYPASS, "false");
+  assert.equal(
+    resolve({ CORS_ALLOWED_ORIGINS: "https://explicit.example" })
+      .CORS_ALLOWED_ORIGINS,
+    "https://explicit.example",
+  );
+});
+
 test("cloned voice secrets reach only server runtime and remain optional", async () => {
   const [worker, workflow, dockerfile, baseText, verification] =
     await Promise.all([
