@@ -8,3 +8,14 @@
 /.github/workflows/founder-lock-review-signal.yml @chokle
 /.github/workflows/founder-lock-tests.yml @chokle
 /.github/tests/jack-identity-founder-lock.test.mjs @chokle
+
+# Canonical Soul and prompt composition/model injection boundaries.
+/SOUL.md @chokle
+/JACK_CONSTITUTION.md @chokle
+/artifacts/api-server/src/lib/soul.ts @chokle
+/artifacts/api-server/src/lib/jurisdiction.ts @chokle
+/artifacts/api-server/src/lib/system-map.ts @chokle
+/artifacts/api-server/src/lib/openai.ts @chokle
+/artifacts/api-server/src/routes/chat.ts @chokle
+**/SOUL.md @chokle
+**/soul.* @chokle

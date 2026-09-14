@@ -186,3 +186,55 @@ test("privileged workflow does not execute on untrusted review revision", () => 
   assert.match(workflow, /workflows: \[Founder Lock Review Signal\]/);
   assert.doesNotMatch(workflow, /actions\/checkout/);
 });
+
+for (const filename of [
+  "SOUL.md",
+  "artifacts/api-server/src/lib/soul.ts",
+  "new/soul-v2.ts",
+  "artifacts/api-server/src/lib/jurisdiction.ts",
+  "artifacts/api-server/src/lib/openai.ts",
+  "artifacts/api-server/src/routes/chat.ts",
+]) {
+  test(`identity source or injection boundary ${filename} requires current-head approval`, async () => {
+    const files = [{ filename }];
+    assert.equal((await evaluate({ files })).state, "failure");
+    assert.equal(
+      (
+        await evaluate({
+          files,
+          reviews: [review("APPROVED", 1, "b".repeat(40))],
+        })
+      ).state,
+      "failure",
+    );
+    assert.equal(
+      (await evaluate({ files, reviews: [review("APPROVED")] })).state,
+      "success",
+    );
+  });
+}
+test("new arbitrarily named canonical source requires approval", async () => {
+  assert.equal(
+    (
+      await evaluate({
+        files: [
+          {
+            filename: "new/presence.ts",
+            patch: "+// canonical identity source for Jack",
+          },
+        ],
+      })
+    ).state,
+    "failure",
+  );
+});
+test("renamed Soul remains locked outside recognizable paths", async () => {
+  assert.equal(
+    (
+      await evaluate({
+        files: [{ filename: "new/presence.ts", previous_filename: "SOUL.md" }],
+      })
+    ).state,
+    "failure",
+  );
+});
