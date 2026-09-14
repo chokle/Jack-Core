@@ -6,13 +6,15 @@ import { resolveActiveTesterScope } from "../lib/activity-telemetry.js";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EXPIRES_IN_SECONDS = 900;
 const REDIRECT_DEFAULT = "https://jack.torchlabs.ca/app";
+const DIRECT_ACCESS_DENIED =
+  "Direct sign-in could not be completed. Contact a pilot admin for approval.";
 
 function canonicalEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
 function parseAllowedEmails(): Set<string> {
-  const configured = process.env["PILOT_DIRECT_ACCESS_EMAILS"];
+  const configured = process.env["PILOT_DIRECT_ACCESS_EMAILS"]?.trim();
   if (!configured) return new Set<string>();
   return new Set(
     configured
@@ -34,10 +36,6 @@ function redirectUrl(): string {
   }
 }
 
-function mapAllowlistError(rawEmail: string): string {
-  return `The identifier ${rawEmail} is not configured for direct pilot sign-in.`;
-}
-
 const router = Router();
 
 router.post("/", async (req: Request, res: Response) => {
@@ -52,8 +50,8 @@ router.post("/", async (req: Request, res: Response) => {
   }
 
   const allowedEmails = parseAllowedEmails();
-  if (allowedEmails.size > 0 && !allowedEmails.has(identifier)) {
-    return res.status(403).json({ error: mapAllowlistError(identifier) });
+  if (allowedEmails.size === 0 || !allowedEmails.has(identifier)) {
+    return res.status(403).json({ error: DIRECT_ACCESS_DENIED });
   }
 
   try {
@@ -63,10 +61,7 @@ router.post("/", async (req: Request, res: Response) => {
     });
     const user = users.data?.[0];
     if (!user?.id) {
-      return res.status(403).json({
-        error:
-          "Direct sign-in could not be completed. Contact a pilot admin for approval.",
-      });
+      return res.status(403).json({ error: DIRECT_ACCESS_DENIED });
     }
 
     const membershipScope = await resolveActiveTesterScope(user.id);
@@ -75,10 +70,7 @@ router.post("/", async (req: Request, res: Response) => {
         { userId: user.id, email: identifier, reason: membershipScope.reason },
         "direct pilot sign-in denied: no active membership",
       );
-      return res.status(403).json({
-        error:
-          "Direct sign-in could not be completed. Contact a pilot admin for approval.",
-      });
+      return res.status(403).json({ error: DIRECT_ACCESS_DENIED });
     }
 
     const token = await clerkClient.signInTokens.createSignInToken({
@@ -90,9 +82,6 @@ router.post("/", async (req: Request, res: Response) => {
 
     res.setHeader("Cache-Control", "no-store, max-age=0");
     return res.status(200).json({
-      userId: user.id,
-      pilotId: membershipScope.scope.pilotId,
-      organizationId: membershipScope.scope.organizationId,
       url: enrollmentUrl.toString(),
     });
   } catch (error) {
