@@ -17,6 +17,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 import express, { type Express, type Request } from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
+import { JACK_SOUL_PROMPT } from "../../lib/soul.js";
 
 vi.mock("../../lib/supabase.js", async () => {
   const m = await import("../../lib/__tests__/mocks.js");
@@ -539,7 +540,8 @@ describe("POST /api/chat — writes carry the owner and load account history", (
     const system =
       requestMessages.find((message) => message.role === "system")?.content ??
       "";
-    expect(system).toContain(JACK_CANONICAL_IDENTITY_BLOCK);
+    expect(system).toContain(JACK_SOUL_PROMPT);
+    expect(system).not.toContain(JACK_CANONICAL_IDENTITY_BLOCK);
     expect(system).toContain(JACK_CANONICAL_IDENTITY_INTRODUCTION);
     expect(system).toContain(
       "When responding to an identity-only question, output exactly:",
