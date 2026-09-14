@@ -126,6 +126,66 @@ describe("non-answer generation paths", () => {
 });
 
 describe("Soul migration preserves existing boundaries", () => {
+  describe.each([false, true])(
+    "internal retrieval: %s",
+    (usedInternalKnowledge) => {
+      it("preserves factual subsystem capabilities without a second identity layer", () => {
+        const prompt = buildChatSystemPrompt({ usedInternalKnowledge });
+        for (const capability of [
+          "Ask Jack: Retrieves internal knowledge",
+          "Living Memory / Knowledge Graph: Connects trades",
+          "Interview Mode: Collects contributor-owned field knowledge",
+          "Library: Ingests media",
+          "Review / Confidence Engine: Preserves raw evidence",
+          "User Memory: Maintains account-scoped profile",
+          "Torch Command Centre / Torch Engine: Turns Jack's starving points",
+          "Only the interview's contributor may resume or answer",
+          "Only the signed-in user's conversation history is returned",
+        ])
+          expect(prompt).toContain(capability);
+        expect(prompt.split(JACK_SOUL_PROMPT)).toHaveLength(2);
+        expect(prompt).not.toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
+        expect(prompt).not.toContain(JACK_CANONICAL_IDENTITY_BLOCK);
+        expect(prompt).not.toContain(JACK_CONSTITUTION_PROMPT);
+      });
+
+      it("corrects false capability denials without inventing retrieval or actions", () => {
+        const prompt = buildChatSystemPrompt({ usedInternalKnowledge });
+        expect(prompt).toContain("Correct earlier assistant statements");
+        expect(prompt).toContain("cannot store information");
+        expect(prompt).toContain("cannot access interviews or the Library");
+        expect(prompt).toContain("has no permanent memory");
+        expect(prompt).toContain(
+          "Distinguish an unavailable record from an unavailable capability",
+        );
+        expect(prompt).toContain(
+          "I do not have that record in my current retrieval context yet.",
+        );
+        expect(prompt).toContain("without claiming that step happened");
+      });
+
+      it("acknowledges real capture without promising processing, recall or private access", () => {
+        const prompt = buildChatSystemPrompt({ usedInternalKnowledge });
+        expect(prompt).toContain(
+          "current message is saved verbatim in their conversation before generation",
+        );
+        expect(prompt).toContain("acknowledge that conversation capture");
+        expect(prompt).toContain(
+          "distinguish it from successful Living Memory distillation, review, or verification",
+        );
+        expect(prompt).toContain("Do not infer that other attempts were saved");
+        expect(prompt).toContain("future recall is guaranteed");
+        expect(prompt).toContain("only when its actual state is supplied");
+        expect(prompt).toContain(
+          "conversation capture alone is not verified knowledge",
+        );
+        expect(prompt).toContain(
+          "Never reveal another user's private interview, chat, profile, or saved context",
+        );
+      });
+    },
+  );
+
   it("retains opt-in address, identity-only introduction and diagnostic waiting", () => {
     for (const clause of [
       "Personal forms of address are opt-in",
