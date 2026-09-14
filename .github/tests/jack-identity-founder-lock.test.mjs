@@ -75,15 +75,6 @@ test("unlocked changes publish success on PR head", async () =>
     (await evaluate({ files: [{ filename: "README.md" }] })).state,
     "success",
   ));
-test("founder-lock governance-only changes do not require founder approval", async () =>
-  assert.equal(
-    (
-      await evaluate({
-        files: [{ filename: ".github/workflows/jack-identity-founder-lock.yml" }],
-      })
-    ).state,
-    "success",
-  ));
 test("locked files fail closed without approval", async () =>
   assert.equal((await evaluate()).state, "failure"));
 test("rename outside locked paths still requires approval", async () =>

@@ -73,9 +73,13 @@ jobs:
               'artifacts/api-server/src/routes/chat.ts',
               'artifacts/api-server/src/lib/constitution.ts',
               'artifacts/api-server/src/lib/jack-identity.ts',
+              '.github/CODEOWNERS',
+              '.github/workflows/jack-identity-founder-lock.yml',
+              '.github/workflows/founder-lock-review-signal.yml',
+              '.github/workflows/founder-lock-tests.yml',
+              '.github/tests/jack-identity-founder-lock.test.mjs',
             ]);
             const lockedPrefixes = ['docs/jack-identity/'];
-            const heuristicIgnoredPrefixes = ['.github/'];
             const canonicalPath = /(^|\/)(?:soul|jack[-_.]identity|constitution)(?:[.-]|\/|$)/i;
             const canonicalDeclaration = /(?:canonical (?:identity|self-model)|(?:source of truth|runtime projection) (?:for|of) .*?(?:identity|SOUL)|JACK_(?:SOUL|CANONICAL_IDENTITY))/i;
             const declaredSources = files.filter((file) => canonicalDeclaration.test(file.patch ?? ''))
@@ -86,8 +90,8 @@ jobs:
               .filter(
                 (filename) =>
                   lockedExact.has(filename) ||
-                  (!heuristicIgnoredPrefixes.some((prefix) => filename.startsWith(prefix)) &&
-                    (canonicalPath.test(filename) || declaredSources.includes(filename))) ||
+                  canonicalPath.test(filename) ||
+                  declaredSources.includes(filename) ||
                   lockedPrefixes.some((prefix) => filename.startsWith(prefix)),
               );
 
