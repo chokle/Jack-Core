@@ -270,6 +270,37 @@ describe("test session service", () => {
     }
   });
 
+  it("does not delete the old owner's archive when saving the new identity fails", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("old-owner")]),
+    );
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.identity.v1")
+          throw new Error("identity storage unavailable");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-b");
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1:user-a") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "old-owner" })]);
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+        ),
+      ).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("restores the current session and sends only event metadata", async () => {
     const updated = { ...session, onboardingStep: 2 };
     const fetchMock = vi

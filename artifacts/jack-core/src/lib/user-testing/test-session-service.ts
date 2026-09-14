@@ -196,11 +196,11 @@ function readQueue(): QueuedEvent[] {
   }
 }
 
-function writeQueue(queue: QueuedEvent[]): void {
+function writeQueue(queue: QueuedEvent[], restoredOwner?: string | null): void {
   try {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
-    const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
-    if (owner) localStorage.removeItem(`${EVENT_QUEUE_KEY}:${owner}`);
+    if (restoredOwner)
+      localStorage.removeItem(`${EVENT_QUEUE_KEY}:${restoredOwner}`);
     memoryQueue = [];
     memoryQueueIsAuthoritative = false;
   } catch {
@@ -226,7 +226,7 @@ export function setTelemetryIdentity(userId: string | null): void {
     // the newly signed-in person; restore them only when that person returns.
     const pending = readQueue();
     try {
-      if (previousUserId && pending.length) {
+      if (previousUserId) {
         localStorage.setItem(
           `${EVENT_QUEUE_KEY}:${previousUserId}`,
           JSON.stringify(pending),
@@ -253,7 +253,7 @@ export function setTelemetryIdentity(userId: string | null): void {
     } catch {
       // Storage-unavailable operation is limited to the current in-memory queue.
     }
-    writeQueue(restored);
+    writeQueue(restored, nextUserId);
   }
 
   try {
