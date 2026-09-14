@@ -349,6 +349,9 @@ export function FloatingJack() {
       refreshContext();
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
+      void trackTestEvent("reliability_error", {
+        error_code: "ask_jack_failed",
+      });
       setInput(trimmed);
       setError("Couldn’t reach Jack. Try that again.");
     } finally {

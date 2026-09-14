@@ -199,6 +199,8 @@ function readQueue(): QueuedEvent[] {
 function writeQueue(queue: QueuedEvent[]): void {
   try {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
+    const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+    if (owner) localStorage.removeItem(`${EVENT_QUEUE_KEY}:${owner}`);
     memoryQueue = [];
     memoryQueueIsAuthoritative = false;
   } catch {
@@ -241,10 +243,15 @@ export function setTelemetryIdentity(userId: string | null): void {
           localStorage.getItem(`${EVENT_QUEUE_KEY}:${nextUserId}`) ?? "[]",
         );
         if (Array.isArray(saved)) restored = saved;
-        localStorage.removeItem(`${EVENT_QUEUE_KEY}:${nextUserId}`);
       }
     } catch {
       // An unreadable archive cannot be submitted.
+    }
+    try {
+      if (nextUserId) localStorage.setItem(TELEMETRY_IDENTITY_KEY, nextUserId);
+      else localStorage.removeItem(TELEMETRY_IDENTITY_KEY);
+    } catch {
+      // Storage-unavailable operation is limited to the current in-memory queue.
     }
     writeQueue(restored);
   }
