@@ -87,6 +87,79 @@ beforeEach(() => {
   });
 });
 describe("operational scope and journal boundary", () => {
+  function replayRows(count: number, pageSize = 500, honorCursor = true) {
+    const sequences: number[] = [];
+    mocks.from.mockImplementation(() => {
+      let after = 0;
+      let last = 499;
+      const query: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "is", "order"])
+        query[method] = () => query;
+      query.gt = (column: string, value: number) => {
+        if (column === "sequence") {
+          if (honorCursor) after = value;
+          sequences.push(value);
+        }
+        return query;
+      };
+      query.range = (first: number, end: number) => {
+        expect(first).toBe(0);
+        last = end;
+        return query;
+      };
+      query.then = (done: (result: unknown) => unknown) =>
+        Promise.resolve({
+          data: Array.from(
+            { length: Math.min(pageSize, last + 1, count - after) },
+            (_, index) => ({
+              sequence: after + index + 1,
+              event: {
+                version: 1,
+                id: `event-${after + index + 1}`,
+                sequence: after + index + 1,
+                scope,
+                sessionId: session,
+                type: "voice.listening.started",
+                audience: "field",
+                payload: {},
+              },
+            }),
+          ),
+          error: null,
+        }).then(done);
+      return query;
+    });
+    return sequences;
+  }
+  it("replays short provider pages until exhaustion using increasing sequence cursors", async () => {
+    const sequences = replayRows(5, 2);
+    const events = await new SupabaseOperationalJournal().load(context);
+    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(sequences).toEqual([0, 2, 4, 5]);
+    expect(mocks.consent).toHaveBeenCalledTimes(2);
+  });
+  it("accepts exactly the replay cap after an empty final probe", async () => {
+    const sequences = replayRows(10000);
+    expect(await new SupabaseOperationalJournal().load(context)).toHaveLength(
+      10000,
+    );
+    expect(sequences).toHaveLength(21);
+    expect(sequences.at(-1)).toBe(10000);
+  });
+  it("fails closed when a row exists beyond the replay cap", async () => {
+    const sequences = replayRows(10001);
+    await expect(
+      new SupabaseOperationalJournal().load(context),
+    ).rejects.toThrow(/replay limit exceeded/);
+    expect(sequences).toHaveLength(21);
+  });
+  it("rejects a nonadvancing provider response instead of looping or duplicating replay", async () => {
+    const sequences = replayRows(2, 1, false);
+    await expect(
+      new SupabaseOperationalJournal().load(context),
+    ).rejects.toThrow(/sequence did not advance/);
+    expect(sequences).toEqual([0, 1]);
+  });
   it("uses exact server membership, actor, session and consent predicates", async () => {
     expect(await resolveOperationalContext(req, identity)).toEqual(context);
     for (const [key, value] of [

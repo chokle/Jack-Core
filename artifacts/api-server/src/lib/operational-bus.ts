@@ -219,7 +219,9 @@ export class SupabaseOperationalJournal implements OperationalJournal {
   async load(context: OperationalContext) {
     await this.consentCurrent(context);
     const events: OperationalEvent[] = [];
-    for (let offset = 0; offset < 10000; offset += 500) {
+    let afterSequence = 0;
+    const retainedAfter = new Date().toISOString();
+    for (;;) {
       let query = db
         .from("jack_operational_events")
         .select("sequence,event")
@@ -230,11 +232,17 @@ export class SupabaseOperationalJournal implements OperationalJournal {
         .eq("consent_id", context.consent!.id)
         .is("site_id", null)
         .is("crew_id", null)
-        .gt("retained_until", new Date().toISOString())
+        .gt("retained_until", retainedAfter)
+        .gt("sequence", afterSequence)
         .order("sequence", { ascending: true })
-        .range(offset, offset + 499);
+        // At the cap, probe one more row before declaring replay incomplete.
+        .range(0, Math.min(499, 10000 - events.length));
       const result = await query;
       if (result.error) throw result.error;
+      if (events.length + (result.data?.length ?? 0) > 10000)
+        throw new Error(
+          "Operational history replay limit exceeded; checkpoint required.",
+        );
       for (const row of result.data ?? []) {
         const event = OperationalEventSchema.parse({
           ...row.event,
@@ -248,16 +256,18 @@ export class SupabaseOperationalJournal implements OperationalJournal {
           event.crewId !== null
         )
           throw new Error("Invalid event scope in journal.");
+        if (event.sequence <= afterSequence)
+          throw new Error("Operational journal sequence did not advance.");
         events.push(event);
+        afterSequence = event.sequence;
       }
-      if ((result.data?.length ?? 0) < 500) {
+      // A provider can impose a smaller page size. Only an empty page proves
+      // exhaustion; sequence cursors also avoid skipping rows after retention.
+      if ((result.data?.length ?? 0) === 0) {
         await this.consentCurrent(context);
         return events;
       }
     }
-    throw new Error(
-      "Operational history replay limit exceeded; checkpoint required.",
-    );
   }
 }
 
