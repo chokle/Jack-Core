@@ -42,7 +42,10 @@ export function TelemetryConsentModal({
 
   return (
     <AlertDialog open={open} onOpenChange={(next) => !next && !saving && onClose()}>
-      <AlertDialogContent data-testid="telemetry-consent-modal" className="max-w-2xl">
+      <AlertDialogContent
+        data-testid="telemetry-consent-modal"
+        className="z-[100] max-h-[calc(100dvh-1rem)] max-w-2xl overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))]"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>Optional Jack pilot telemetry</AlertDialogTitle>
           <AlertDialogDescription asChild>
@@ -128,7 +131,7 @@ export function TelemetryConsentModal({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="sticky bottom-0 z-[110] -mx-6 -mb-6 border-t bg-background px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
           <AlertDialogCancel
             disabled={saving}
             onClick={() =>
