@@ -1,3 +1,5 @@
+import { authenticatedFetch } from "@workspace/api-client-react";
+
 export type TestEventType =
   | "test_completed"
   | "test_abandoned"
@@ -107,6 +109,7 @@ interface QueuedEvent {
 const SESSION_CACHE_KEY = "jack.userTesting.activeSession.v2";
 const APP_SESSION_KEY = "jack.appSession.v1";
 const EVENT_QUEUE_KEY = "jack.userTesting.eventQueue.v1";
+const REJECTED_QUEUE_PREFIX = "jack.userTesting.rejectedEvents.v1:";
 const TELEMETRY_IDENTITY_KEY = "jack.userTesting.identity.v1";
 const MAX_QUEUE_SIZE = 100;
 interface FlushRequestState {
@@ -121,6 +124,7 @@ let flushGeneration = 0;
 let flushRequest: FlushRequestState | null = null;
 let initialized = false;
 let memoryQueue: QueuedEvent[] = [];
+let activeTelemetryIdentity: string | null | undefined;
 let memoryQueueIsAuthoritative = false;
 
 function uuid(): string {
@@ -149,7 +153,9 @@ export function deviceCategory(): "desktop" | "tablet" | "mobile" {
 
 export function getCachedTestSession(): TestSession | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null") as TestSession | null;
+    const value = JSON.parse(
+      sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null",
+    ) as TestSession | null;
     return value?.id && value.status === "active" ? value : null;
   } catch {
     return null;
@@ -183,16 +189,20 @@ function readQueue(): QueuedEvent[] {
   if (memoryQueueIsAuthoritative) return [...memoryQueue];
 
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
+    const value: unknown = JSON.parse(
+      localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]",
+    );
     return Array.isArray(value) ? (value as QueuedEvent[]) : [];
   } catch {
     return [];
   }
 }
 
-function writeQueue(queue: QueuedEvent[]): void {
+function writeQueue(queue: QueuedEvent[], restoredOwner?: string | null): void {
   try {
     localStorage.setItem(EVENT_QUEUE_KEY, JSON.stringify(queue));
+    if (restoredOwner)
+      localStorage.removeItem(`${EVENT_QUEUE_KEY}:${restoredOwner}`);
     memoryQueue = [];
     memoryQueueIsAuthoritative = false;
   } catch {
@@ -204,18 +214,56 @@ function writeQueue(queue: QueuedEvent[]): void {
   }
 }
 
+function telemetryIdentity(): string | null {
+  if (activeTelemetryIdentity !== undefined) return activeTelemetryIdentity;
+  try {
+    activeTelemetryIdentity = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+  } catch {
+    activeTelemetryIdentity = null;
+  }
+  return activeTelemetryIdentity;
+}
+
 export function setTelemetryIdentity(userId: string | null): void {
   const nextUserId = userId?.trim() || null;
-  let previousUserId: string | null = null;
-  try {
-    previousUserId = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
-  } catch {
-    // Treat unavailable identity storage as a fresh scope.
-  }
+  const previousUserId = telemetryIdentity();
+  // Clerk's caller-supplied identity is authoritative even if browser storage
+  // cannot persist it. Never attribute the next person's queue to a stale key.
+  activeTelemetryIdentity = nextUserId;
 
   if (previousUserId !== nextUserId) {
+    // Park pending events under their original identity. Never upload them as
+    // the newly signed-in person; restore them only when that person returns.
+    const pending = readQueue();
+    try {
+      if (previousUserId) {
+        localStorage.setItem(
+          `${EVENT_QUEUE_KEY}:${previousUserId}`,
+          JSON.stringify(pending),
+        );
+      }
+    } catch {
+      // The active queue is still isolated if browser storage is unavailable.
+    }
     invalidateTestSessionStarts();
-    writeQueue([]);
+    let restored: QueuedEvent[] = [];
+    try {
+      if (nextUserId) {
+        const saved: unknown = JSON.parse(
+          localStorage.getItem(`${EVENT_QUEUE_KEY}:${nextUserId}`) ?? "[]",
+        );
+        if (Array.isArray(saved)) restored = saved;
+      }
+    } catch {
+      // An unreadable archive cannot be submitted.
+    }
+    try {
+      if (nextUserId) localStorage.setItem(TELEMETRY_IDENTITY_KEY, nextUserId);
+      else localStorage.removeItem(TELEMETRY_IDENTITY_KEY);
+    } catch {
+      // Storage-unavailable operation is limited to the current in-memory queue.
+    }
+    writeQueue(restored, nextUserId);
   }
 
   try {
@@ -230,8 +278,11 @@ export function setTelemetryIdentity(userId: string | null): void {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "Request could not be completed.");
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
+  if (!response.ok)
+    throw new Error(body.error || "Request could not be completed.");
   return body;
 }
 
@@ -240,10 +291,13 @@ export async function loadTelemetryContext(
   options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
 ): Promise<TelemetryContext> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
-  const response = await fetch(`/api/testing/telemetry/context${query}`, {
-    credentials: "include",
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const response = await authenticatedFetch(
+    `/api/testing/telemetry/context${query}`,
+    {
+      credentials: "include",
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+  );
   const context = await readJson<TelemetryContext>(response);
   if (options.shouldCache?.() ?? true) {
     cacheTestSession(context.session);
@@ -259,7 +313,7 @@ export async function saveTelemetryConsents(input: {
   privacyNoticeVersion: string;
   consentVersion: string;
 }): Promise<TelemetryContext> {
-  const response = await fetch("/api/testing/telemetry/consents", {
+  const response = await authenticatedFetch("/api/testing/telemetry/consents", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -273,19 +327,33 @@ export async function withdrawTelemetry(
   scopes: Array<"telemetry" | "screen" | "microphone"> = ["telemetry"],
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
+    try {
+      const owner = telemetryIdentity();
+      if (owner) {
+        localStorage.removeItem(`${REJECTED_QUEUE_PREFIX}${owner}`);
+        localStorage.removeItem(`${EVENT_QUEUE_KEY}:${owner}`);
+      }
+    } catch {
+      // Local cleanup is best effort when browser storage is unavailable.
+    }
     invalidateTestSessionStarts();
     writeQueue([]);
   }
-  window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
-    detail: { withdrawn: scopes, deletionDueAt: null },
-  }));
-  const response = await fetch("/api/testing/telemetry/withdraw", {
+  window.dispatchEvent(
+    new CustomEvent("jack:telemetry-withdrawn", {
+      detail: { withdrawn: scopes, deletionDueAt: null },
+    }),
+  );
+  const response = await authenticatedFetch("/api/testing/telemetry/withdraw", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pilotId, scopes }),
   });
-  const result = await readJson<{ withdrawn: string[]; deletionDueAt: string | null }>(response);
+  const result = await readJson<{
+    withdrawn: string[];
+    deletionDueAt: string | null;
+  }>(response);
   return result;
 }
 
@@ -318,7 +386,7 @@ export function startTestSession(
   if (existing) return existing;
 
   const generation = startGeneration;
-  const request = fetch("/api/testing/sessions/start", {
+  const request = authenticatedFetch("/api/testing/sessions/start", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -349,10 +417,13 @@ export async function loadCurrentTestSession(
   options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
 ): Promise<TestSession | null> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
-  const response = await fetch(`/api/testing/sessions/current${query}`, {
-    credentials: "include",
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const response = await authenticatedFetch(
+    `/api/testing/sessions/current${query}`,
+    {
+      credentials: "include",
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+  );
   if (!response.ok) return null;
   const body = (await response.json()) as { session: TestSession | null };
   if (options.shouldCache?.() ?? true) {
@@ -363,14 +434,39 @@ export async function loadCurrentTestSession(
 
 async function reportDropped(sessionId: string, count: number): Promise<void> {
   try {
-    await fetch(`/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasonCode: "queue_overflow", eventCount: count }),
-    });
+    await authenticatedFetch(
+      `/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reasonCode: "queue_overflow",
+          eventCount: count,
+        }),
+      },
+    );
   } catch {
     // Payload-free observability is best effort and never blocks the product.
+  }
+}
+
+function preserveRejectedEvent(event: QueuedEvent, status: number): boolean {
+  try {
+    const owner = telemetryIdentity();
+    if (!owner) return false;
+    const key = `${REJECTED_QUEUE_PREFIX}${owner}`;
+    const existing: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const saved = Array.isArray(existing) ? existing : [];
+    if (!saved.some((item) => item?.eventId === event.eventId)) {
+      // Do not evict retained evidence to make room for another failed upload.
+      if (saved.length >= MAX_QUEUE_SIZE) return false;
+      saved.push({ ...event, rejectedStatus: status });
+      localStorage.setItem(key, JSON.stringify(saved));
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -407,7 +503,11 @@ export function flushTestEvents(): Promise<TestSession | null> {
       writeQueue(queue);
     };
     const isRetryable = (status: number): boolean =>
-      status >= 500 || status === 408 || status === 429;
+      status >= 500 ||
+      status === 401 ||
+      status === 403 ||
+      status === 408 ||
+      status === 429;
 
     while (isCurrent()) {
       mergeNewEvents();
@@ -415,7 +515,7 @@ export function flushTestEvents(): Promise<TestSession | null> {
       if (!next) return latest;
 
       try {
-        const response = await fetch(
+        const response = await authenticatedFetch(
           `/api/testing/sessions/${encodeURIComponent(next.sessionId)}/events`,
           {
             method: "POST",
@@ -446,6 +546,14 @@ export function flushTestEvents(): Promise<TestSession | null> {
             return latest;
           }
 
+          // A closed or expired original session cannot accept a late event.
+          // Preserve it for recovery without blocking newer sessions or
+          // silently relabelling it as activity from a new session.
+          if (
+            (response.status === 404 || response.status === 409) &&
+            !preserveRejectedEvent(next, response.status)
+          )
+            return latest;
           if (!isCurrent()) return null;
           advanceQueue(next.eventId);
           continue;
@@ -503,7 +611,7 @@ export async function trackTestEvent(
         ? "failure"
         : eventType === "test_abandoned" || eventType === "onboarding_skipped"
           ? "cancelled"
-        : "success"),
+          : "success"),
     ...(dedupeKey ? { dedupeKey } : {}),
     appVersion: import.meta.env.VITE_APP_VERSION || undefined,
     deployVersion: import.meta.env.VITE_DEPLOY_VERSION || undefined,
@@ -522,9 +630,14 @@ export function initializeTelemetryRetry(): () => void {
   initialized = true;
   const onOnline = () => void flushTestEvents();
   window.addEventListener("online", onOnline);
+  window.addEventListener("focus", onOnline);
+  // Authentication can recover without an offline-to-online transition.
+  const retryTimer = window.setInterval(onOnline, 60_000);
   void flushTestEvents();
   return () => {
     initialized = false;
     window.removeEventListener("online", onOnline);
+    window.removeEventListener("focus", onOnline);
+    window.clearInterval(retryTimer);
   };
 }

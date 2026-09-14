@@ -1,3 +1,5 @@
+import { authenticatedFetch } from "@workspace/api-client-react";
+
 interface CloseoutQuestionErrorMap {
   [key: string]: string;
 }
@@ -67,16 +69,19 @@ export async function loadCloseout(payload: {
   const query = new URLSearchParams();
   query.set("shift", payload.shift);
   if (payload.workDate) query.set("workDate", payload.workDate);
-  const response = await fetch(`/api/testing/closeouts?${query.toString()}`, {
-    credentials: "include",
-  });
+  const response = await authenticatedFetch(
+    `/api/testing/closeouts?${query.toString()}`,
+    {
+      credentials: "include",
+    },
+  );
   return parseJson<GetCloseoutResponse>(response);
 }
 
 export async function saveCloseout(
   payload: CloseoutPayload,
 ): Promise<SaveCloseoutResponse> {
-  const response = await fetch("/api/testing/closeouts", {
+  const response = await authenticatedFetch("/api/testing/closeouts", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

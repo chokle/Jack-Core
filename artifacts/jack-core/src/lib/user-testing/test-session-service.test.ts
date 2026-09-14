@@ -69,10 +69,15 @@ describe("test session service", () => {
     sessionStorage.clear();
     localStorage.clear();
     invalidateTestSessionStarts();
+    setTelemetryIdentity(null);
+    localStorage.clear();
     vi.unstubAllGlobals();
   });
 
-  const queuedEvent = (eventId: string, overrides: Partial<TestQueuedEvent> = {}): TestQueuedEvent => ({
+  const queuedEvent = (
+    eventId: string,
+    overrides: Partial<TestQueuedEvent> = {},
+  ): TestQueuedEvent => ({
     sessionId: session.id,
     eventId,
     eventType: "feature_viewed",
@@ -98,10 +103,12 @@ describe("test session service", () => {
     const first = startTestSession();
     const second = startTestSession();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    resolveResponse(new Response(JSON.stringify({ session, resumed: false }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveResponse(
+      new Response(JSON.stringify({ session, resumed: false }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
 
     expect(await first).toEqual(session);
     expect(await second).toEqual(session);
@@ -139,17 +146,21 @@ describe("test session service", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    resolveA(new Response(JSON.stringify({ session: sessionA }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveA(
+      new Response(JSON.stringify({ session: sessionA }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     expect(await startA).toEqual(sessionA);
     expect(getCachedTestSession()).toBeNull();
 
-    resolveB(new Response(JSON.stringify({ session: sessionB }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveB(
+      new Response(JSON.stringify({ session: sessionB }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     expect(await startB).toEqual(sessionB);
     expect(getCachedTestSession()).toEqual(sessionB);
   });
@@ -179,16 +190,18 @@ describe("test session service", () => {
       requestKey: "user-a",
     });
     await withdrawTelemetry(session.pilotId);
-    resolveStart(new Response(JSON.stringify({ session }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveStart(
+      new Response(JSON.stringify({ session }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
 
     expect(await pendingStart).toEqual(session);
     expect(getCachedTestSession()).toBeNull();
   });
 
-  it("clears another identity's cached session and queued telemetry", () => {
+  it("parks another identity's queue and restores it only for its owner", () => {
     setTelemetryIdentity("user-a");
     cacheTestSession(session);
     localStorage.setItem(
@@ -199,21 +212,173 @@ describe("test session service", () => {
     setTelemetryIdentity("user-b");
 
     expect(getCachedTestSession()).toBeNull();
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
+    setTelemetryIdentity("user-a");
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([expect.objectContaining({ eventId: "queued-a" })]);
+  });
+
+  it("preserves the original queue through sign-out and the same person's return", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("before-signout")]),
+    );
+    setTelemetryIdentity(null);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
+    setTelemetryIdentity("user-a");
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([expect.objectContaining({ eventId: "before-signout" })]);
+  });
+
+  it("keeps the parked copy if restoring the active queue cannot be persisted", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("parked")]),
+    );
+    setTelemetryIdentity("user-b");
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.eventQueue.v1")
+          throw new Error("storage full");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-a");
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1:user-a") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "parked" })]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does not delete the old owner's archive when saving the new identity fails", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("old-owner")]),
+    );
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.identity.v1")
+          throw new Error("identity storage unavailable");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-b");
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1:user-a") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "old-owner" })]);
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+        ),
+      ).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("uses the active owner for rejected events and withdrawal when identity persistence fails", async () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("a-pending")]),
+    );
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.identity.v1")
+          throw new Error("identity write failed");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-b");
+      cacheTestSession({ ...session, id: "b-session" });
+      localStorage.setItem(
+        "jack.userTesting.eventQueue.v1",
+        JSON.stringify([queuedEvent("b-rejected", { sessionId: "b-session" })]),
+      );
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+      vi.stubGlobal("fetch", fetchMock);
+      await flushTestEvents();
+      expect(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a"),
+      ).toBeNull();
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-b") ??
+            "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "b-rejected" })]);
+      fetchMock.mockResolvedValueOnce(
+        new Response('{"withdrawn":["telemetry"],"deletionDueAt":null}', {
+          status: 200,
+        }),
+      );
+      await withdrawTelemetry(session.pilotId);
+      expect(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-b"),
+      ).toBeNull();
+      expect(
+        localStorage.getItem("jack.userTesting.eventQueue.v1:user-a"),
+      ).not.toBeNull();
+      cacheTestSession({ ...session, id: "b-session" });
+      setTelemetryIdentity("user-a");
+      expect(getCachedTestSession()).toBeNull();
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "a-pending" })]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("restores the current session and sends only event metadata", async () => {
     const updated = { ...session, onboardingStep: 2 };
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ session }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ session: updated }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: updated }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     expect(await loadCurrentTestSession()).toEqual(session);
@@ -240,32 +405,51 @@ describe("test session service", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("{}", { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ session }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
-    await trackTestEvent("feature_viewed", { feature: "library" }, "feature:library");
+    await trackTestEvent(
+      "feature_viewed",
+      { feature: "library" },
+      "feature:library",
+    );
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toHaveLength(1);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toHaveLength(1);
 
     await flushTestEvents();
     const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(retryBody.eventId).toBe(firstBody.eventId);
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("removes successfully submitted events from an in-memory queue snapshot if storage writes fail", async () => {
     cacheTestSession(session);
     const events = [queuedEvent("e-1"), queuedEvent("e-2")];
-    localStorage.setItem("jack.userTesting.eventQueue.v1", JSON.stringify(events));
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify(events),
+    );
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ session }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
       .mockResolvedValueOnce(new Response("{}", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
     const originalSetItem = Storage.prototype.setItem;
@@ -280,8 +464,12 @@ describe("test session service", () => {
 
     await flushTestEvents();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).eventId).toBe("e-1");
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).eventId).toBe("e-2");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).eventId).toBe(
+      "e-1",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).eventId).toBe(
+      "e-2",
+    );
     setItemSpy.mockRestore();
   });
 
@@ -290,10 +478,12 @@ describe("test session service", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("{}", { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ session }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const originalSetItem = Storage.prototype.setItem;
     const setItemSpy = vi
@@ -305,10 +495,18 @@ describe("test session service", () => {
         return originalSetItem.call(this, key, value);
       });
 
-    await trackTestEvent("feature_viewed", { feature: "library" }, "feature:library");
+    await trackTestEvent(
+      "feature_viewed",
+      { feature: "library" },
+      "feature:library",
+    );
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
 
     await flushTestEvents();
     const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
@@ -338,12 +536,62 @@ describe("test session service", () => {
 
       await flushTestEvents();
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).eventId).toBe("queued-retry");
-      expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual(
-        [queuedEvent("queued-retry")],
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).eventId).toBe(
+        "queued-retry",
       );
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+        ),
+      ).toEqual([queuedEvent("queued-retry")]);
     },
   );
+
+  it("preserves expired-session rejections without blocking fresh session events", async () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([
+        queuedEvent("expired-event"),
+        queuedEvent("fresh-event", { sessionId: "new-session" }),
+      ]),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await flushTestEvents();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a") ??
+          "[]",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        eventId: "expired-event",
+        sessionId: session.id,
+        rejectedStatus: 404,
+      }),
+    ]);
+    fetchMock.mockResolvedValueOnce(
+      new Response('{"withdrawn":["telemetry"],"deletionDueAt":null}', {
+        status: 200,
+      }),
+    );
+    await withdrawTelemetry(session.pilotId);
+    expect(
+      localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a"),
+    ).toBeNull();
+  });
 
   it("drops non-retryable client errors after one submission attempt", async () => {
     cacheTestSession(session);
@@ -361,14 +609,20 @@ describe("test session service", () => {
 
     await flushTestEvents();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
-  it("drops unauthorized events that cannot be safely retried across identity changes", async () => {
+  it("retains unauthorized events until authentication recovers", async () => {
     cacheTestSession(session);
     localStorage.setItem(
       "jack.userTesting.eventQueue.v1",
-      JSON.stringify([queuedEvent("queued-401", { appSessionId: "stale-session-id" })]),
+      JSON.stringify([
+        queuedEvent("queued-401", { appSessionId: "stale-session-id" }),
+      ]),
     );
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("{}", {
@@ -380,31 +634,55 @@ describe("test session service", () => {
 
     await flushTestEvents();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([expect.objectContaining({ eventId: "queued-401" })]);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ session }), { status: 200 }),
+    );
+    await flushTestEvents();
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("flushes multiple events in deterministic order and only removes each once", async () => {
     cacheTestSession(session);
-    const events = [queuedEvent("queued-1"), queuedEvent("queued-2"), queuedEvent("queued-3")];
-    localStorage.setItem("jack.userTesting.eventQueue.v1", JSON.stringify(events));
-    const fetchMock = vi
-      .fn()
-      .mockImplementation(() =>
-        Promise.resolve(
-          new Response(JSON.stringify({ session }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        ),
-      );
+    const events = [
+      queuedEvent("queued-1"),
+      queuedEvent("queued-2"),
+      queuedEvent("queued-3"),
+    ];
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify(events),
+    );
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ session }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await flushTestEvents();
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).eventId)).toEqual(
-      ["queued-1", "queued-2", "queued-3"],
-    );
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      fetchMock.mock.calls.map(
+        ([, init]) => JSON.parse(String(init?.body)).eventId,
+      ),
+    ).toEqual(["queued-1", "queued-2", "queued-3"]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("fences a late identity-A flush from identity B's session and queue", async () => {
@@ -452,15 +730,21 @@ describe("test session service", () => {
     );
     await flushTestEvents();
 
-    resolveA(new Response(JSON.stringify({ session }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveA(
+      new Response(JSON.stringify({ session }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     await flushA;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(getCachedTestSession()).toEqual(updatedB);
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("prevents a late event flush from restoring telemetry after withdrawal", async () => {
@@ -492,14 +776,20 @@ describe("test session service", () => {
     const pendingFlush = flushTestEvents();
     await withdrawTelemetry(session.pilotId);
 
-    resolveFlush(new Response(JSON.stringify({ session }), {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    resolveFlush(
+      new Response(JSON.stringify({ session }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     await pendingFlush;
 
     expect(getCachedTestSession()).toBeNull();
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("clears the local session and pending queue immediately on withdrawal", async () => {
@@ -507,20 +797,29 @@ describe("test session service", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("{}", { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        withdrawn: ["telemetry", "screen", "microphone"],
-        deletionDueAt: "2026-08-24T00:00:00.000Z",
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }));
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            withdrawn: ["telemetry", "screen", "microphone"],
+            deletionDueAt: "2026-08-24T00:00:00.000Z",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     await trackTestEvent("feature_viewed", { feature: "library" });
     await withdrawTelemetry(session.pilotId);
 
     expect(getCachedTestSession()).toBeNull();
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
   });
 
   it("stops local telemetry immediately even when the withdrawal request fails", async () => {
@@ -531,14 +830,19 @@ describe("test session service", () => {
     );
     const stopped = vi.fn();
     window.addEventListener("jack:telemetry-withdrawn", stopped);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response("{}", { status: 503 }),
-    ));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 503 })),
+    );
 
     await expect(withdrawTelemetry(session.pilotId)).rejects.toThrow();
 
     expect(getCachedTestSession()).toBeNull();
-    expect(JSON.parse(localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]")).toEqual([]);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
     expect(stopped).toHaveBeenCalledTimes(1);
   });
 });

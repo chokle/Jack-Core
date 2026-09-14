@@ -1,3 +1,5 @@
+import { authenticatedFetch } from "@workspace/api-client-react";
+
 import { deviceCategory, getCachedTestSession } from "./test-session-service";
 
 export const ACTIVITY_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -22,7 +24,7 @@ export function initializeActivityHeartbeat(): () => void {
       lastMeaningfulActivityAt != null &&
       Date.now() - lastMeaningfulActivityAt <= ACTIVITY_INACTIVITY_CUTOFF_MS;
 
-    await fetch("/api/testing/activity-heartbeat", {
+    await authenticatedFetch("/api/testing/activity-heartbeat", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
