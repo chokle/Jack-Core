@@ -37,7 +37,10 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { StructuredAnswer } from "@/components/StructuredAnswer";
 import { ParkThisThoughtButton } from "@/components/ParkedThoughts";
 import { timeAgo } from "@/lib/memory-graph";
-import { getCachedTestSession } from "@/lib/user-testing/test-session-service";
+import {
+  getCachedTestSession,
+  trackTestEvent,
+} from "@/lib/user-testing/test-session-service";
 import {
   collectJackUiContext,
   sameJackSelectionContext,
@@ -354,6 +357,9 @@ export function AskJack({
           )
             return;
 
+          void trackTestEvent("reliability_error", {
+            error_code: "ask_jack_failed",
+          });
           const waitingMessage = queuedMessageRef.current;
           setMessages((prev) => prev.slice(0, -1));
 

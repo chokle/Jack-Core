@@ -7,6 +7,11 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cacheTestSession,
+  invalidateTestSessionStarts,
+  type TestSession,
+} from "../lib/user-testing/test-session-service";
 import { FloatingJack } from "./FloatingJack";
 
 const api = vi.hoisted(() => ({
@@ -41,6 +46,9 @@ class FakeSpeechRecognition {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
+  invalidateTestSessionStarts();
   vi.useFakeTimers();
   api.askJack.mockReset();
   api.getMe.mockReset();
@@ -74,6 +82,46 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("queues failed questions without content and supplies the telemetry session", async () => {
+    cacheTestSession({
+      id: "test-session",
+      status: "active",
+      telemetryStatus: "granted",
+    } as TestSession);
+    api.askJack.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    fireEvent.change(screen.getByLabelText("Ask Jack"), {
+      target: { value: "How do I install a bolt?" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+    });
+    expect(api.askJack).toHaveBeenCalledWith(
+      { message: "How do I install a bolt?" },
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Jack-Test-Session-Id": "test-session",
+        }),
+      }),
+    );
+    expect(
+      screen.getByText("Couldn�t reach Jack. Try that again."),
+    ).toBeTruthy();
+    const saved =
+      localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]";
+    expect(JSON.parse(saved)).toEqual([
+      expect.objectContaining({
+        eventType: "reliability_error",
+        result: "failure",
+        metadata: { error_code: "ask_jack_failed" },
+      }),
+    ]);
+    expect(saved).not.toContain("How do I install");
+  });
+
   it("interrupts the 15-second explanation and opens a catalog video by its natural spoken name", async () => {
     let finishOld!: (value: unknown) => void;
     api.askJack.mockImplementationOnce(

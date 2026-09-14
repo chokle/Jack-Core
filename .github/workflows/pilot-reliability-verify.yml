@@ -1,0 +1,37 @@
+name: Pilot reliability verification
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/jack-core/src/components/AskJack*"
+      - "artifacts/jack-core/src/components/FloatingJack*"
+      - "artifacts/jack-core/src/lib/user-testing/**"
+      - "lib/api-client-react/src/custom-fetch.ts"
+      - "lib/api-client-react/src/index.ts"
+      - ".github/workflows/pilot-reliability-verify.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Pilot auth and failure regression tests
+        run: pnpm --filter @workspace/jack-core exec vitest run src/lib/user-testing/test-session-service.test.ts src/lib/user-testing/end-of-shift-closeout-service.test.ts src/lib/user-testing/activity-heartbeat.test.ts src/components/FloatingJack.test.tsx src/components/AskJack.test.tsx src/components/EndOfShiftCloseout.test.tsx
+      - name: Frontend typecheck
+        run: pnpm --filter @workspace/jack-core typecheck
+      - name: Production frontend build
+        run: pnpm --filter @workspace/jack-core build
+      - name: Formatting
+        run: pnpm exec prettier --check artifacts/jack-core/src/components/AskJack.tsx artifacts/jack-core/src/components/AskJack.test.tsx artifacts/jack-core/src/components/FloatingJack.tsx artifacts/jack-core/src/components/FloatingJack.test.tsx artifacts/jack-core/src/lib/user-testing/activity-heartbeat.ts artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.ts artifacts/jack-core/src/lib/user-testing/end-of-shift-closeout-service.test.ts artifacts/jack-core/src/lib/user-testing/test-session-service.ts artifacts/jack-core/src/lib/user-testing/test-session-service.test.ts lib/api-client-react/src/custom-fetch.ts lib/api-client-react/src/index.ts .github/workflows/pilot-reliability-verify.yml

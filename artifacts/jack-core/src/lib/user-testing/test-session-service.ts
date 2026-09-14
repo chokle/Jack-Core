@@ -1,3 +1,5 @@
+import { authenticatedFetch } from "@workspace/api-client-react";
+
 export type TestEventType =
   | "test_completed"
   | "test_abandoned"
@@ -149,7 +151,9 @@ export function deviceCategory(): "desktop" | "tablet" | "mobile" {
 
 export function getCachedTestSession(): TestSession | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null") as TestSession | null;
+    const value = JSON.parse(
+      sessionStorage.getItem(SESSION_CACHE_KEY) ?? "null",
+    ) as TestSession | null;
     return value?.id && value.status === "active" ? value : null;
   } catch {
     return null;
@@ -183,7 +187,9 @@ function readQueue(): QueuedEvent[] {
   if (memoryQueueIsAuthoritative) return [...memoryQueue];
 
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]");
+    const value: unknown = JSON.parse(
+      localStorage.getItem(EVENT_QUEUE_KEY) ?? "[]",
+    );
     return Array.isArray(value) ? (value as QueuedEvent[]) : [];
   } catch {
     return [];
@@ -214,8 +220,33 @@ export function setTelemetryIdentity(userId: string | null): void {
   }
 
   if (previousUserId !== nextUserId) {
+    // Park pending events under their original identity. Never upload them as
+    // the newly signed-in person; restore them only when that person returns.
+    const pending = readQueue();
+    try {
+      if (previousUserId && pending.length) {
+        localStorage.setItem(
+          `${EVENT_QUEUE_KEY}:${previousUserId}`,
+          JSON.stringify(pending),
+        );
+      }
+    } catch {
+      // The active queue is still isolated if browser storage is unavailable.
+    }
     invalidateTestSessionStarts();
-    writeQueue([]);
+    let restored: QueuedEvent[] = [];
+    try {
+      if (nextUserId) {
+        const saved: unknown = JSON.parse(
+          localStorage.getItem(`${EVENT_QUEUE_KEY}:${nextUserId}`) ?? "[]",
+        );
+        if (Array.isArray(saved)) restored = saved;
+        localStorage.removeItem(`${EVENT_QUEUE_KEY}:${nextUserId}`);
+      }
+    } catch {
+      // An unreadable archive cannot be submitted.
+    }
+    writeQueue(restored);
   }
 
   try {
@@ -230,8 +261,11 @@ export function setTelemetryIdentity(userId: string | null): void {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "Request could not be completed.");
+  const body = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+  };
+  if (!response.ok)
+    throw new Error(body.error || "Request could not be completed.");
   return body;
 }
 
@@ -240,10 +274,13 @@ export async function loadTelemetryContext(
   options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
 ): Promise<TelemetryContext> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
-  const response = await fetch(`/api/testing/telemetry/context${query}`, {
-    credentials: "include",
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const response = await authenticatedFetch(
+    `/api/testing/telemetry/context${query}`,
+    {
+      credentials: "include",
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+  );
   const context = await readJson<TelemetryContext>(response);
   if (options.shouldCache?.() ?? true) {
     cacheTestSession(context.session);
@@ -259,7 +296,7 @@ export async function saveTelemetryConsents(input: {
   privacyNoticeVersion: string;
   consentVersion: string;
 }): Promise<TelemetryContext> {
-  const response = await fetch("/api/testing/telemetry/consents", {
+  const response = await authenticatedFetch("/api/testing/telemetry/consents", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -276,16 +313,21 @@ export async function withdrawTelemetry(
     invalidateTestSessionStarts();
     writeQueue([]);
   }
-  window.dispatchEvent(new CustomEvent("jack:telemetry-withdrawn", {
-    detail: { withdrawn: scopes, deletionDueAt: null },
-  }));
-  const response = await fetch("/api/testing/telemetry/withdraw", {
+  window.dispatchEvent(
+    new CustomEvent("jack:telemetry-withdrawn", {
+      detail: { withdrawn: scopes, deletionDueAt: null },
+    }),
+  );
+  const response = await authenticatedFetch("/api/testing/telemetry/withdraw", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pilotId, scopes }),
   });
-  const result = await readJson<{ withdrawn: string[]; deletionDueAt: string | null }>(response);
+  const result = await readJson<{
+    withdrawn: string[];
+    deletionDueAt: string | null;
+  }>(response);
   return result;
 }
 
@@ -318,7 +360,7 @@ export function startTestSession(
   if (existing) return existing;
 
   const generation = startGeneration;
-  const request = fetch("/api/testing/sessions/start", {
+  const request = authenticatedFetch("/api/testing/sessions/start", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -349,10 +391,13 @@ export async function loadCurrentTestSession(
   options: { signal?: AbortSignal; shouldCache?: () => boolean } = {},
 ): Promise<TestSession | null> {
   const query = pilotId ? `?pilotId=${encodeURIComponent(pilotId)}` : "";
-  const response = await fetch(`/api/testing/sessions/current${query}`, {
-    credentials: "include",
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const response = await authenticatedFetch(
+    `/api/testing/sessions/current${query}`,
+    {
+      credentials: "include",
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+  );
   if (!response.ok) return null;
   const body = (await response.json()) as { session: TestSession | null };
   if (options.shouldCache?.() ?? true) {
@@ -363,12 +408,18 @@ export async function loadCurrentTestSession(
 
 async function reportDropped(sessionId: string, count: number): Promise<void> {
   try {
-    await fetch(`/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reasonCode: "queue_overflow", eventCount: count }),
-    });
+    await authenticatedFetch(
+      `/api/testing/sessions/${encodeURIComponent(sessionId)}/ingest-failures`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reasonCode: "queue_overflow",
+          eventCount: count,
+        }),
+      },
+    );
   } catch {
     // Payload-free observability is best effort and never blocks the product.
   }
@@ -407,7 +458,11 @@ export function flushTestEvents(): Promise<TestSession | null> {
       writeQueue(queue);
     };
     const isRetryable = (status: number): boolean =>
-      status >= 500 || status === 408 || status === 429;
+      status >= 500 ||
+      status === 401 ||
+      status === 403 ||
+      status === 408 ||
+      status === 429;
 
     while (isCurrent()) {
       mergeNewEvents();
@@ -415,7 +470,7 @@ export function flushTestEvents(): Promise<TestSession | null> {
       if (!next) return latest;
 
       try {
-        const response = await fetch(
+        const response = await authenticatedFetch(
           `/api/testing/sessions/${encodeURIComponent(next.sessionId)}/events`,
           {
             method: "POST",
@@ -503,7 +558,7 @@ export async function trackTestEvent(
         ? "failure"
         : eventType === "test_abandoned" || eventType === "onboarding_skipped"
           ? "cancelled"
-        : "success"),
+          : "success"),
     ...(dedupeKey ? { dedupeKey } : {}),
     appVersion: import.meta.env.VITE_APP_VERSION || undefined,
     deployVersion: import.meta.env.VITE_DEPLOY_VERSION || undefined,
@@ -522,9 +577,14 @@ export function initializeTelemetryRetry(): () => void {
   initialized = true;
   const onOnline = () => void flushTestEvents();
   window.addEventListener("online", onOnline);
+  window.addEventListener("focus", onOnline);
+  // Authentication can recover without an offline-to-online transition.
+  const retryTimer = window.setInterval(onOnline, 60_000);
   void flushTestEvents();
   return () => {
     initialized = false;
     window.removeEventListener("online", onOnline);
+    window.removeEventListener("focus", onOnline);
+    window.clearInterval(retryTimer);
   };
 }

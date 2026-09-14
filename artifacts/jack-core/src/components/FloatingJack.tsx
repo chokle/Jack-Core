@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
+import {
+  getCachedTestSession,
+  trackTestEvent,
+} from "../lib/user-testing/test-session-service";
 import { askJack, getMe } from "@workspace/api-client-react";
 import {
   collectJackUiContext,
@@ -314,12 +318,16 @@ export function FloatingJack() {
         speak(localAnswer);
         return;
       }
+      const telemetrySession = getCachedTestSession();
       const response = await askJack(
         { message: trimmed },
         {
           credentials: "include",
           signal: controller.signal,
           headers: {
+            ...(telemetrySession
+              ? { "X-Jack-Test-Session-Id": telemetrySession.id }
+              : {}),
             "X-Jack-Surface": encodeURIComponent(context.surface),
             "X-Jack-Context": encodeJackUiContextHeader(context),
           },

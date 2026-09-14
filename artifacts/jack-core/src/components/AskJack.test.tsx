@@ -72,6 +72,7 @@ vi.mock("@/components/ParkedThoughts", () => ({
 }));
 
 vi.mock("@/lib/user-testing/test-session-service", () => ({
+  trackTestEvent: vi.fn().mockResolvedValue(null),
   getCachedTestSession: () => askJackState.telemetrySession,
 }));
 
