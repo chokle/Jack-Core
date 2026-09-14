@@ -117,11 +117,11 @@ jobs:
 
       - name: Cloudflare configuration regression tests
         timeout-minutes: 3
-        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.test.mjs
+        run: node --test cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance-config.test.mjs
 
       - name: Format check
         timeout-minutes: 3
-        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
+        run: pnpm exec prettier --check cloudflare/worker.mjs cloudflare/generate-deploy-config.mjs cloudflare/auth-defaults.test.mjs cloudflare/resolve-account-context.mjs cloudflare/resolve-account-context.test.mjs cloudflare/rollout-acceptance.mjs cloudflare/rollout-acceptance.test.mjs cloudflare/run-rollout-acceptance.mjs cloudflare/run-rollout-acceptance-config.test.mjs cloudflare/wrangler.base.json docs/cloudflare-cutover-pilot.md .github/workflows/cloudflare-production-deploy.yml
 
       - name: Wrangler dry run
         timeout-minutes: 6
@@ -347,5 +347,5 @@ jobs:
             echo "- /api/healthz: PASS"
             echo "- anonymous /api/me rejected: PASS (401)"
             echo "- approved Clerk sign-in: REQUIRES LIVE ACCEPTANCE"
-            echo "- production DNS: unchanged (Railway rollback preserved)"
+            echo "- production DNS at deploy stage: unchanged; subsequent Cloudflare Production Route Handoff records final route ownership (Railway rollback preserved)"
           } >> "$GITHUB_STEP_SUMMARY"
