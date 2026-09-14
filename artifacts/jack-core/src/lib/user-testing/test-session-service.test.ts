@@ -69,6 +69,8 @@ describe("test session service", () => {
     sessionStorage.clear();
     localStorage.clear();
     invalidateTestSessionStarts();
+    setTelemetryIdentity(null);
+    localStorage.clear();
     vi.unstubAllGlobals();
   });
 
@@ -296,6 +298,66 @@ describe("test session service", () => {
           localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
         ),
       ).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("uses the active owner for rejected events and withdrawal when identity persistence fails", async () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("a-pending")]),
+    );
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.identity.v1")
+          throw new Error("identity write failed");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-b");
+      cacheTestSession({ ...session, id: "b-session" });
+      localStorage.setItem(
+        "jack.userTesting.eventQueue.v1",
+        JSON.stringify([queuedEvent("b-rejected", { sessionId: "b-session" })]),
+      );
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("{}", { status: 404 }));
+      vi.stubGlobal("fetch", fetchMock);
+      await flushTestEvents();
+      expect(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-a"),
+      ).toBeNull();
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-b") ??
+            "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "b-rejected" })]);
+      fetchMock.mockResolvedValueOnce(
+        new Response('{"withdrawn":["telemetry"],"deletionDueAt":null}', {
+          status: 200,
+        }),
+      );
+      await withdrawTelemetry(session.pilotId);
+      expect(
+        localStorage.getItem("jack.userTesting.rejectedEvents.v1:user-b"),
+      ).toBeNull();
+      expect(
+        localStorage.getItem("jack.userTesting.eventQueue.v1:user-a"),
+      ).not.toBeNull();
+      cacheTestSession({ ...session, id: "b-session" });
+      setTelemetryIdentity("user-a");
+      expect(getCachedTestSession()).toBeNull();
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "a-pending" })]);
     } finally {
       spy.mockRestore();
     }

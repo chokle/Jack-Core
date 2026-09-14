@@ -124,6 +124,7 @@ let flushGeneration = 0;
 let flushRequest: FlushRequestState | null = null;
 let initialized = false;
 let memoryQueue: QueuedEvent[] = [];
+let activeTelemetryIdentity: string | null | undefined;
 let memoryQueueIsAuthoritative = false;
 
 function uuid(): string {
@@ -213,14 +214,22 @@ function writeQueue(queue: QueuedEvent[], restoredOwner?: string | null): void {
   }
 }
 
+function telemetryIdentity(): string | null {
+  if (activeTelemetryIdentity !== undefined) return activeTelemetryIdentity;
+  try {
+    activeTelemetryIdentity = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+  } catch {
+    activeTelemetryIdentity = null;
+  }
+  return activeTelemetryIdentity;
+}
+
 export function setTelemetryIdentity(userId: string | null): void {
   const nextUserId = userId?.trim() || null;
-  let previousUserId: string | null = null;
-  try {
-    previousUserId = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
-  } catch {
-    // Treat unavailable identity storage as a fresh scope.
-  }
+  const previousUserId = telemetryIdentity();
+  // Clerk's caller-supplied identity is authoritative even if browser storage
+  // cannot persist it. Never attribute the next person's queue to a stale key.
+  activeTelemetryIdentity = nextUserId;
 
   if (previousUserId !== nextUserId) {
     // Park pending events under their original identity. Never upload them as
@@ -319,7 +328,7 @@ export async function withdrawTelemetry(
 ): Promise<{ withdrawn: string[]; deletionDueAt: string | null }> {
   if (scopes.includes("telemetry")) {
     try {
-      const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+      const owner = telemetryIdentity();
       if (owner) {
         localStorage.removeItem(`${REJECTED_QUEUE_PREFIX}${owner}`);
         localStorage.removeItem(`${EVENT_QUEUE_KEY}:${owner}`);
@@ -444,7 +453,7 @@ async function reportDropped(sessionId: string, count: number): Promise<void> {
 
 function preserveRejectedEvent(event: QueuedEvent, status: number): boolean {
   try {
-    const owner = localStorage.getItem(TELEMETRY_IDENTITY_KEY);
+    const owner = telemetryIdentity();
     if (!owner) return false;
     const key = `${REJECTED_QUEUE_PREFIX}${owner}`;
     const existing: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
