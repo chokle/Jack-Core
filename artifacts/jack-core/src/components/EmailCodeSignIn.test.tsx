@@ -1,82 +1,77 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { EmailCodeSignIn } from "./EmailCodeSignIn";
 
+type FetchMockResponse = {
+  ok: boolean;
+  json: () => Promise<unknown>;
+};
+
 const h = vi.hoisted(() => ({
-  create: vi.fn(),
-  prepare: vi.fn(),
-  attempt: vi.fn(),
-  setActive: vi.fn(),
-  setLocation: vi.fn(),
-  auth: {
-    isLoaded: true,
-    isSignedIn: false,
-  },
+  fetch: vi.fn(),
+  assign: vi.fn(),
 }));
-
-vi.mock("@clerk/react", () => ({
-  useAuth: () => h.auth,
-}));
-
-vi.mock("@clerk/react/legacy", () => ({
-  useSignIn: () => ({
-    isLoaded: true,
-    signIn: {
-      create: h.create,
-      attemptFirstFactor: h.attempt,
-    },
-    setActive: h.setActive,
-  }),
-}));
-
-vi.mock("wouter", () => ({
-  useLocation: () => ["/sign-in", h.setLocation],
-}));
+let originalLocation: Location;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.auth.isLoaded = true;
-  h.auth.isSignedIn = false;
-  h.prepare.mockResolvedValue({});
-  h.create.mockResolvedValue({
-    supportedFirstFactors: [
-      { strategy: "email_code", emailAddressId: "email_123" },
-    ],
-    prepareFirstFactor: h.prepare,
+  originalLocation = window.location;
+  h.fetch.mockReset();
+  h.assign.mockReset();
+  h.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      url: "/app?connected=1",
+    }),
+  } as FetchMockResponse);
+  vi.spyOn(window, "fetch").mockImplementation(h.fetch);
+  Object.defineProperty(window, "location", {
+    value: {
+      ...window.location,
+      assign: h.assign,
+    },
+    configurable: true,
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "location", {
+    value: originalLocation,
+    configurable: true,
+  });
+  vi.restoreAllMocks();
+});
 
 describe("EmailCodeSignIn", () => {
-  it("makes Continue start email verification and visibly advances to the code step", async () => {
+  it("starts direct pilot sign-in from email and redirects to Clerk session URL", async () => {
     render(<EmailCodeSignIn />);
 
     fireEvent.change(screen.getByLabelText("Email address"), {
-      target: { value: "mentor@torchlabs.ca" },
+      target: { value: "NICK@torchlabs.ca" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    await screen.findByText("Check your email");
-    expect(screen.getByText(/mentor@torchlabs\.ca/)).toBeTruthy();
-    expect(h.create).toHaveBeenCalledWith({ identifier: "mentor@torchlabs.ca" });
-    expect(h.prepare).toHaveBeenCalledWith({
-      strategy: "email_code",
-      emailAddressId: "email_123",
-    });
+    await waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(1));
+
+    expect(h.fetch).toHaveBeenCalledWith(
+      "/api/pilot-direct-access",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: "nick@torchlabs.ca" }),
+      }),
+    );
+    expect(h.assign).toHaveBeenCalledWith("/app?connected=1");
   });
 
-  it("surfaces Clerk errors instead of leaving Continue apparently inert", async () => {
-    h.create.mockRejectedValue({
-      errors: [{ longMessage: "Couldn't find your account." }],
-    });
+  it("surfaces endpoint errors instead of leaving the form idle", async () => {
+    h.fetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Not configured for direct pilot sign-in." }),
+    } as FetchMockResponse);
+
     render(<EmailCodeSignIn />);
 
     fireEvent.change(screen.getByLabelText("Email address"), {
@@ -84,32 +79,17 @@ describe("EmailCodeSignIn", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Couldn't find your account.",
-      ),
+    await waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Not configured for direct pilot sign-in.",
     );
-  });
-
-  it("recovers an already-authenticated user to the app instead of showing sign-in again", async () => {
-    h.auth.isSignedIn = true;
-    render(<EmailCodeSignIn />);
-
-    await waitFor(() =>
-      expect(h.setLocation).toHaveBeenCalledWith("/app", { replace: true }),
-    );
-    expect(
-      screen.queryByRole("heading", { name: /pilot participant access/i }),
-    ).toBeNull();
-    expect(h.create).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
   });
 
   it("does not offer disabled social providers", () => {
     render(<EmailCodeSignIn />);
 
-    expect(
-      screen.queryByRole("button", { name: "Continue with Google" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue with Google" })).toBeNull();
     expect(screen.queryByText("or use an email code")).toBeNull();
   });
 });

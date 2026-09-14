@@ -12,6 +12,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
+import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -124,6 +125,10 @@ app.get(/^\/sign-up(?:\/.*)?$/, (_req, res) => {
   res.setHeader("Cache-Control", "no-store, max-age=0");
   res.redirect(302, "/sign-in");
 });
+
+// Direct pilot entry is intentionally outside the auth gate so the token endpoint
+// can issue a valid Clerk session URL before the standard authorization boundary.
+app.use("/api/pilot-direct-access", pilotDirectAccessRouter);
 
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
