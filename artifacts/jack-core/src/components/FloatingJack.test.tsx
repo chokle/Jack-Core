@@ -107,9 +107,7 @@ describe("FloatingJack submission lifecycle", () => {
         }),
       }),
     );
-    expect(
-      screen.getByText("Couldn�t reach Jack. Try that again."),
-    ).toBeTruthy();
+    expect(screen.getByText(/reach Jack. Try that again./)).toBeTruthy();
     const saved =
       localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]";
     expect(JSON.parse(saved)).toEqual([

@@ -223,6 +223,53 @@ describe("test session service", () => {
     ).toEqual([expect.objectContaining({ eventId: "queued-a" })]);
   });
 
+  it("preserves the original queue through sign-out and the same person's return", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("before-signout")]),
+    );
+    setTelemetryIdentity(null);
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([]);
+    setTelemetryIdentity("user-a");
+    expect(
+      JSON.parse(
+        localStorage.getItem("jack.userTesting.eventQueue.v1") ?? "[]",
+      ),
+    ).toEqual([expect.objectContaining({ eventId: "before-signout" })]);
+  });
+
+  it("keeps the parked copy if restoring the active queue cannot be persisted", () => {
+    setTelemetryIdentity("user-a");
+    localStorage.setItem(
+      "jack.userTesting.eventQueue.v1",
+      JSON.stringify([queuedEvent("parked")]),
+    );
+    setTelemetryIdentity("user-b");
+    const originalSet = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (key, value) {
+        if (key === "jack.userTesting.eventQueue.v1")
+          throw new Error("storage full");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      setTelemetryIdentity("user-a");
+      expect(
+        JSON.parse(
+          localStorage.getItem("jack.userTesting.eventQueue.v1:user-a") ?? "[]",
+        ),
+      ).toEqual([expect.objectContaining({ eventId: "parked" })]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("restores the current session and sends only event metadata", async () => {
     const updated = { ...session, onboardingStep: 2 };
     const fetchMock = vi
