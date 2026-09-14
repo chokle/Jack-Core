@@ -4,14 +4,6 @@ import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
 import { EmailCodeSignIn } from "./EmailCodeSignIn";
 
-vi.mock("@clerk/react/legacy", () => ({
-  useSignIn: () => ({
-    isLoaded: true,
-    signIn: null,
-    setActive: vi.fn(),
-  }),
-}));
-
 afterEach(() => cleanup());
 
 describe("EmailCodeSignIn pilot access gateway", () => {
