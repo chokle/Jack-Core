@@ -4,6 +4,36 @@ import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
 import { EmailCodeSignIn } from "./EmailCodeSignIn";
 
+const h = vi.hoisted(() => ({
+  auth: {
+    isLoaded: true,
+    isSignedIn: false,
+  },
+  create: vi.fn(),
+  attempt: vi.fn(),
+  setActive: vi.fn(),
+  setLocation: vi.fn(),
+}));
+
+vi.mock("@clerk/react", () => ({
+  useAuth: () => h.auth,
+}));
+
+vi.mock("@clerk/react/legacy", () => ({
+  useSignIn: () => ({
+    isLoaded: true,
+    signIn: {
+      create: h.create,
+      attemptFirstFactor: h.attempt,
+    },
+    setActive: h.setActive,
+  }),
+}));
+
+vi.mock("wouter", () => ({
+  useLocation: () => ["/sign-in", h.setLocation],
+}));
+
 afterEach(() => cleanup());
 
 describe("EmailCodeSignIn pilot access gateway", () => {
