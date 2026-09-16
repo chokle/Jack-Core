@@ -87,6 +87,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function startAdminSignIn(email = "derek@torchlabs.ca") {
+  fireEvent.click(
+    screen.getByRole("button", { name: "Torch admin / founder sign in" }),
+  );
+  fireEvent.change(screen.getByLabelText("Torch account email"), {
+    target: { value: email },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Send verification code" }),
+  );
+}
+
+async function reachAdminCodeStep() {
+  startAdminSignIn();
+  await screen.findByText("Check your email");
+}
+
 describe("EmailCodeSignIn", () => {
   it("starts direct pilot sign-in from email and redirects to Clerk session URL", async () => {
     render(<EmailCodeSignIn />);
@@ -167,6 +184,102 @@ describe("EmailCodeSignIn", () => {
     });
     expect(h.setActive).toHaveBeenCalledWith({ session: "sess_admin" });
     expect(h.assign).toHaveBeenCalledWith("/app");
+  });
+
+  it("contains a rejected Clerk signIn.create without falling back to pilot access", async () => {
+    h.create.mockRejectedValueOnce(new Error("Unable to start admin sign-in."));
+    render(<EmailCodeSignIn />);
+
+    startAdminSignIn();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Unable to start admin sign-in.",
+      ),
+    );
+    expect(h.prepare).not.toHaveBeenCalled();
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("contains a rejected Clerk prepareFirstFactor without activating or using pilot access", async () => {
+    h.prepare.mockRejectedValueOnce(new Error("Unable to send verification code."));
+    render(<EmailCodeSignIn />);
+
+    startAdminSignIn();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Unable to send verification code.",
+      ),
+    );
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("contains a rejected Clerk attemptFirstFactor without activating or using pilot access", async () => {
+    render(<EmailCodeSignIn />);
+    await reachAdminCodeStep();
+    h.attempt.mockRejectedValueOnce(new Error("Verification failed."));
+
+    fireEvent.change(screen.getByLabelText("Verification code"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Verification failed.",
+      ),
+    );
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-complete Clerk attempt without activating or using pilot access", async () => {
+    render(<EmailCodeSignIn />);
+    await reachAdminCodeStep();
+    h.attempt.mockResolvedValueOnce({
+      status: "needs_first_factor",
+      createdSessionId: null,
+    });
+
+    fireEvent.change(screen.getByLabelText("Verification code"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "That code could not complete sign-in. Please request a new code.",
+      ),
+    );
+    expect(h.setActive).not.toHaveBeenCalled();
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it("contains a rejected Clerk setActive without redirecting or using pilot access", async () => {
+    render(<EmailCodeSignIn />);
+    await reachAdminCodeStep();
+    h.setActive.mockRejectedValueOnce(new Error("Session activation failed."));
+
+    fireEvent.change(screen.getByLabelText("Verification code"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Session activation failed.",
+      ),
+    );
+    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_admin" });
+    expect(h.assign).not.toHaveBeenCalled();
+    expect(h.fetch).not.toHaveBeenCalled();
   });
 
   it("recovers an already-authenticated user to the app instead of showing sign-in again", async () => {
