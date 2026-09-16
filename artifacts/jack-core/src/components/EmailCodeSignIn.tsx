@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 const publicDemoUrl =
   import.meta.env.VITE_PUBLIC_DEMO_URL?.trim() ||
   "https://jack-core-demo-ycf4yh.v2.appdeploy.ai/";
+const appPath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/app`;
 
 type ClerkError = {
   errors?: Array<{ longMessage?: string; message?: string }>;
@@ -34,7 +35,7 @@ export function EmailCodeSignIn() {
 
   useEffect(() => {
     if (authLoaded && isSignedIn) {
-      setLocation("/app", { replace: true });
+      setLocation(appPath, { replace: true });
     }
   }, [authLoaded, isSignedIn, setLocation]);
 
@@ -127,7 +128,7 @@ export function EmailCodeSignIn() {
         );
       }
       await setActive({ session: attempt.createdSessionId });
-      window.location.assign("/app");
+      window.location.assign(appPath);
     } catch (caught) {
       setError(
         caught instanceof Error && !((caught as ClerkError).errors?.length)
