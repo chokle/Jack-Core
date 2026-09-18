@@ -1,47 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { buildPublishableKey } from "@clerk/shared/keys";
-import { getClerkProxyTarget } from "../clerkProxyMiddleware";
+import {
+  CLERK_PROXY_PATH,
+  clerkFrontendApiProxyOptions,
+} from "../clerkProxyMiddleware";
 
-describe("getClerkProxyTarget", () => {
-  it("routes development instances to their own frontend API", () => {
-    const key = buildPublishableKey("free-roughy-91.clerk.accounts.dev");
-
-    expect(getClerkProxyTarget(key)).toBe(
-      "https://free-roughy-91.clerk.accounts.dev",
-    );
+describe("clerkFrontendApiProxyOptions", () => {
+  it("enables Clerk's supported same-origin proxy in production", () => {
+    expect(clerkFrontendApiProxyOptions("production")).toEqual({
+      enabled: true,
+      path: "/api/__clerk",
+    });
   });
 
-  it("uses an explicitly configured Clerk target", () => {
-    expect(
-      getClerkProxyTarget(
-        undefined,
-        "https://free-roughy-91.clerk.accounts.dev/",
-      ),
-    ).toBe("https://free-roughy-91.clerk.accounts.dev");
+  it("keeps proxy transport disabled outside production", () => {
+    expect(clerkFrontendApiProxyOptions("development")).toEqual({
+      enabled: false,
+      path: "/api/__clerk",
+    });
+    expect(clerkFrontendApiProxyOptions("test")).toEqual({
+      enabled: false,
+      path: "/api/__clerk",
+    });
   });
 
-  it("rejects configured targets outside Clerk", () => {
-    expect(
-      getClerkProxyTarget(
-        " ",
-        "https://example.com/not-a-clerk-instance",
-      ),
-    ).toBe("https://frontend-api.clerk.dev");
-  });
-
-  it("routes production proxy traffic to the configured live Clerk frontend API", () => {
-    const encodedHost = Buffer.from("clerk.example.com$")
-      .toString("base64")
-      .replace(/=+$/, "");
-
-    expect(getClerkProxyTarget(`pk_live_${encodedHost}`, " ")).toBe(
-      "https://clerk.example.com",
-    );
-  });
-
-  it("uses Clerk's proxy frontend API when no key is configured", () => {
-    expect(getClerkProxyTarget(" ", " ")).toBe(
-      "https://frontend-api.clerk.dev",
-    );
+  it("keeps the browser and server proxy path contract stable", () => {
+    expect(CLERK_PROXY_PATH).toBe("/api/__clerk");
   });
 });

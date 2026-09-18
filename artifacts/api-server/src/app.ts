@@ -6,10 +6,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-} from "./middlewares/clerkProxyMiddleware";
+import { CLERK_PROXY_PATH } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
@@ -19,6 +16,22 @@ import { publish } from "./lib/vitality";
 
 const app: Express = express();
 const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
+
+// Clerk must be the first application middleware. In production it owns the
+// same-origin Frontend API proxy as well as session handshake/auth state. This
+// keeps proxy transport semantics on Clerk's supported Express path instead of
+// maintaining a second hand-built proxy implementation.
+if (!pilotAuthBypass) {
+  app.use(
+    clerkMiddleware({
+      publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+      frontendApiProxy: {
+        enabled: process.env.NODE_ENV === "production",
+        path: CLERK_PROXY_PATH,
+      },
+    }),
+  );
+}
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -59,11 +72,6 @@ app.use(
   }),
 );
 
-// Clerk auth proxy — must run before the body parsers because it streams raw
-// request bytes to Clerk's Frontend API. No-op in dev (the browser hits Clerk's
-// dev FAPI directly); active in production where VITE_CLERK_PROXY_URL is set.
-if (!pilotAuthBypass) app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
-
 const allowedOrigins = (process.env["CORS_ALLOWED_ORIGINS"] || "")
   .split(",")
   .map((o) => o.trim())
@@ -89,16 +97,6 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Populate Clerk auth state (reads the session cookie / Authorization header)
-// so getAuth(req) works in the auth gate and route handlers. The publishable
-// key is resolved from the request host to support multiple Clerk custom
-// domains, falling back to CLERK_PUBLISHABLE_KEY.
-if (!pilotAuthBypass) {
-  app.use(
-    clerkMiddleware({ publishableKey: process.env.CLERK_PUBLISHABLE_KEY }),
-  );
-}
 
 // Recovery for a browser holding a session for a Clerk user that was deleted.
 // This must remain outside the /api auth gate because the stale token cannot
