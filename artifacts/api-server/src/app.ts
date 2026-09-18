@@ -6,7 +6,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
-import { clerkFrontendApiProxyOptions } from "./middlewares/clerkProxyMiddleware";
+import { CLERK_PROXY_PATH } from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
@@ -25,7 +25,10 @@ if (!pilotAuthBypass) {
   app.use(
     clerkMiddleware({
       publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-      frontendApiProxy: clerkFrontendApiProxyOptions(),
+      frontendApiProxy: {
+        enabled: process.env.NODE_ENV === "production",
+        path: CLERK_PROXY_PATH,
+      },
     }),
   );
 }
