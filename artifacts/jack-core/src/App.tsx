@@ -125,7 +125,8 @@ const clerkPubKey = configuredClerkPubKey;
 const clerkProxyUrl = isLocalClerkHost
   ? `${window.location.origin}/api/__clerk`
   : clerkProxyEnabled
-    ? import.meta.env.VITE_CLERK_PROXY_URL
+    ? import.meta.env.VITE_CLERK_PROXY_URL ||
+      `${window.location.origin}/api/__clerk`
     : undefined;
 
 const localClerkJsUrl = useDirectClerkAssets
