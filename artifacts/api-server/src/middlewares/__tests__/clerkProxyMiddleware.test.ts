@@ -29,13 +29,13 @@ describe("getClerkProxyTarget", () => {
     ).toBe("https://frontend-api.clerk.dev");
   });
 
-  it("keeps production proxy traffic on Clerk's proxy frontend API", () => {
+  it("routes production proxy traffic to the configured live Clerk frontend API", () => {
     const encodedHost = Buffer.from("clerk.example.com$")
       .toString("base64")
       .replace(/=+$/, "");
 
     expect(getClerkProxyTarget(`pk_live_${encodedHost}`, " ")).toBe(
-      "https://frontend-api.clerk.dev",
+      "https://clerk.example.com",
     );
   });
 
