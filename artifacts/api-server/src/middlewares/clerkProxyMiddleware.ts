@@ -37,14 +37,16 @@ export function getClerkProxyTarget(
       const target = new URL(configuredTarget);
       const allowedHost =
         target.hostname === "frontend-api.clerk.dev" ||
-        target.hostname.endsWith(".clerk.accounts.dev");
+        target.hostname.endsWith(".clerk.accounts.dev") ||
+        target.hostname === "clerk.torchlabs.ca" ||
+        target.hostname === "clerk.jack.torchlabs.ca";
       if (target.protocol === "https:" && allowedHost) return target.origin;
     } catch {
       // Fall through to the publishable-key-derived target.
     }
   }
   const parsedKey = parsePublishableKey(publishableKey);
-  return parsedKey?.instanceType === "development"
+  return parsedKey?.frontendApi
     ? `https://${parsedKey.frontendApi}`
     : CLERK_PROXY_FAPI;
 }
