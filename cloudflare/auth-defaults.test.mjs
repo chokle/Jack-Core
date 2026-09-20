@@ -175,10 +175,25 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     );
     assert.equal(
       workflow.match(new RegExp(`secrets\\.${secretName}`, "g"))?.length,
-      2,
-      `${secretName} should be bound only to preflight and secret handoff`,
+      secretName === "CLERK_SECRET_KEY" ? 3 : 2,
+      `${secretName} must remain scoped to its explicit secret-consuming steps`,
     );
   }
+  const registration = workflowSteps(workflow).find(
+    (step) => stepIdentity(step) === "Register ready Clerk production proxy",
+  );
+  assert.match(
+    registration,
+    /github.event_name == 'workflow_dispatch' && inputs.register_clerk_proxy/,
+  );
+  assert.match(
+    registration,
+    /Unexpected existing proxy URL; no mutation performed/,
+  );
+  assert.match(
+    registration,
+    /Canonical proxy is not ready; no mutation performed/,
+  );
 });
 
 test("Cloudflare rollout acceptance cannot pass against the previous container", async () => {
@@ -294,6 +309,7 @@ test("Cloudflare production job budget cannot preempt rollout diagnostics", asyn
   );
   assert.deepEqual(postGateSteps.map(stepIdentity), [
     "Smoke-test workers.dev deployment",
+    "Register ready Clerk production proxy",
     "Capture failed startup diagnostics",
     "Record deployment evidence",
   ]);

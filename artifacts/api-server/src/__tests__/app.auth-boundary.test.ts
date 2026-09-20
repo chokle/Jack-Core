@@ -13,12 +13,6 @@ vi.mock("@clerk/express", () => ({
 }));
 vi.mock("../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
 vi.mock("../lib/admin-auth.js", () => ({ resolveIdentity }));
-vi.mock("../middlewares/clerkProxyMiddleware.js", () => ({
-  CLERK_PROXY_PATH: "/api/__clerk",
-  clerkProxyMiddleware:
-    () => (_req: unknown, _res: unknown, next: () => void) =>
-      next(),
-}));
 vi.mock("pino-http", () => ({
   default: () => (req: { log?: unknown }, _res: unknown, next: () => void) => {
     req.log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
