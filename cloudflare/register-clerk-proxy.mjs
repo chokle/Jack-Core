@@ -13,10 +13,18 @@ export async function registerClerkProxy(secret, fetcher = fetch) {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok)
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      const codes = (failure.errors ?? []).map((error) => ({
+        code: error.code,
+        message: error.message,
+        long_message: error.long_message,
+      }));
+      console.error(JSON.stringify({ status: response.status, errors: codes }));
       throw new Error(
         `Clerk API returned HTTP ${response.status}; reconcile before retry`,
       );
+    }
     return response.json();
   }
   const payload = await api("domains?limit=100");
