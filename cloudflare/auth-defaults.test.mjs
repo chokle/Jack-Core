@@ -497,7 +497,7 @@ test("production allows the authenticated Torch browser origin without wildcard 
   );
 });
 
-test("cloned voice secrets reach only server runtime and remain optional", async () => {
+test("voice and Daz integration secrets reach only server runtime and remain optional", async () => {
   const [worker, workflow, dockerfile, baseText, verification] =
     await Promise.all([
       read("cloudflare/worker.mjs"),
@@ -514,10 +514,18 @@ test("cloned voice secrets reach only server runtime and remain optional", async
   const configured = resolve({
     ELEVENLABS_API_KEY: "test-provider-key",
     JACK_VOICE_ID: "approved-clone",
+    DAZ_RUNTIME_URL: "https://runtime.example.test",
+    DAZ_RUNTIME_TOKEN: "test-runtime-token",
   });
   const missing = resolve({});
-  const blank = resolve({ ELEVENLABS_API_KEY: "", JACK_VOICE_ID: "" });
-  for (const name of ["ELEVENLABS_API_KEY", "JACK_VOICE_ID"]) {
+  const names = [
+    "ELEVENLABS_API_KEY",
+    "JACK_VOICE_ID",
+    "DAZ_RUNTIME_URL",
+    "DAZ_RUNTIME_TOKEN",
+  ];
+  const blank = resolve(Object.fromEntries(names.map((name) => [name, ""])));
+  for (const name of names) {
     assert.equal(missing[name], undefined);
     assert.equal(blank[name], undefined);
     assert.equal(JSON.parse(baseText).secrets.required.includes(name), false);
@@ -530,9 +538,14 @@ test("cloned voice secrets reach only server runtime and remain optional", async
       stepBody(workflow, "Prepare Worker secret handoff"),
       new RegExp(`secrets\\.${name}`),
     );
-    assert.equal(workflow.split(`secrets.${name}`).length - 1, 1);
+    assert.equal(
+      workflow.split(`secrets.${name}`).length - 1,
+      name.startsWith("DAZ_RUNTIME_") ? 2 : 1,
+    );
   }
   assert.equal(configured.ELEVENLABS_API_KEY, "test-provider-key");
   assert.equal(configured.JACK_VOICE_ID, "approved-clone");
+  assert.equal(configured.DAZ_RUNTIME_URL, "https://runtime.example.test");
+  assert.equal(configured.DAZ_RUNTIME_TOKEN, "test-runtime-token");
   assert.doesNotMatch(verification, /VITE_JACK_VOICE_HINT/);
 });
