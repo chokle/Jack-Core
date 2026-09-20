@@ -105,44 +105,19 @@ jobs:
         run: pnpm build
       - name: Diff check
         run: git diff --check origin/main...HEAD
-      - name: Verify Clerk production proxy registration
+      - name: Verify Clerk direct sign-in configuration
         env:
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          EXPECTED_CLERK_PROXY_URL: "https://jack.torchlabs.ca/api/__clerk"
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: |
           node <<'NODE'
-          const secretKey = process.env.CLERK_SECRET_KEY;
-          const expected = (process.env.EXPECTED_CLERK_PROXY_URL || "").replace(/\/+$/, "");
-          if (!secretKey) {
-            console.error("Missing required GitHub Actions secret: CLERK_SECRET_KEY");
-            process.exit(1);
+          const key = process.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
+          if (!key.startsWith("pk_live_")) throw new Error("Live Clerk publishable key required");
+          const host = Buffer.from(key.slice("pk_live_".length), "base64").toString().replace(/\$$/, "");
+          if (host !== "clerk.torchlabs.ca") throw new Error("Unexpected Clerk frontend host");
+          for (const path of ["/v1/environment", "/npm/@clerk/ui@1/dist/ui.browser.js"]) {
+            const response = await fetch(`https://${host}${path}`, {headers:{Origin:"https://jack.torchlabs.ca"}, signal:AbortSignal.timeout(10000)});
+            if (!response.ok) throw new Error(`Direct Clerk ${path} returned HTTP ${response.status}`);
+            await response.body?.cancel();
           }
-          const response = await fetch("https://api.clerk.com/v1/domains?limit=100", {
-            headers: {
-              Authorization: `Bearer ${secretKey}`,
-              Accept: "application/json",
-            },
-          });
-          if (!response.ok) {
-            console.error(`Clerk domains read failed: HTTP ${response.status}`);
-            process.exit(1);
-          }
-          const payload = await response.json();
-          const domains = Array.isArray(payload)
-            ? payload
-            : Array.isArray(payload?.data)
-              ? payload.data
-              : [];
-          const matches = domains.filter((domain) => {
-            const proxyUrl = typeof domain?.proxy_url === "string"
-              ? domain.proxy_url.replace(/\/+$/, "")
-              : "";
-            return proxyUrl === expected;
-          });
-          console.log(`Clerk domains inspected: ${domains.length}; exact proxy registrations: ${matches.length}.`);
-          if (matches.length !== 1) {
-            console.error(`Expected exactly one Clerk domain with proxy_url=${expected}.`);
-            process.exit(1);
-          }
-          console.log("Exact Clerk production proxy registration verified.");
+          console.log("Existing Clerk direct environment and UI are reachable; authentication remains required");
           NODE
