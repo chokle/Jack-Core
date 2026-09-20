@@ -47,8 +47,8 @@ config.containers = config.containers.map((container) => ({
             process.env.PILOT_AUTH_USER_ID || "pilot001-bypass",
         }
       : {}),
-    VITE_DISABLE_CLERK_PROXY: "false",
-    VITE_ENABLE_CLERK_PROXY: "true",
+    VITE_DISABLE_CLERK_PROXY: "true",
+    VITE_ENABLE_CLERK_PROXY: "false",
     VITE_SITE_HUD_DEMO_ENABLED:
       process.env.VITE_SITE_HUD_DEMO_ENABLED === "true" ? "true" : "false",
   },

@@ -123,6 +123,10 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   const base = JSON.parse(baseText);
 
   assert.equal(base.vars.PILOT_AUTH_BYPASS, "false");
+  assert.match(generator, /VITE_ENABLE_CLERK_PROXY: "false"/);
+  assert.match(generator, /VITE_DISABLE_CLERK_PROXY: "true"/);
+  assert.match(dockerfile, /ARG VITE_ENABLE_CLERK_PROXY=false/);
+  assert.match(dockerfile, /ARG VITE_DISABLE_CLERK_PROXY=true/);
   assert.equal(base.vars.PILOT_AUTH_USER_ID, undefined);
   assert.deepEqual(base.secrets.required, [
     "SUPABASE_URL",
@@ -176,7 +180,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     assert.equal(
       workflow.match(new RegExp(`secrets\\.${secretName}`, "g"))?.length,
       2,
-      `${secretName} should be bound only to preflight and secret handoff`,
+      `${secretName} must remain scoped to its explicit secret-consuming steps`,
     );
   }
 });
