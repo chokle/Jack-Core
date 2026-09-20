@@ -1,0 +1,28 @@
+name: Clerk canonical proxy registration
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/clerk-supported-proxy-20260918]
+    paths:
+      - cloudflare/register-clerk-proxy.mjs
+      - .github/workflows/clerk-canonical-proxy-register.yml
+permissions:
+  contents: read
+concurrency:
+  group: clerk-canonical-proxy-registration
+  cancel-in-progress: false
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+        timeout-minutes: 1
+      - name: Verify registration guards
+        timeout-minutes: 1
+        run: node --test cloudflare/register-clerk-proxy.test.mjs
+      - name: Register and read back the ready canonical proxy
+        timeout-minutes: 2
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: node cloudflare/register-clerk-proxy.mjs
