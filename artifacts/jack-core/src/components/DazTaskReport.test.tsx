@@ -32,6 +32,36 @@ describe("Daz report tasks", () => {
     });
     expect(authenticatedFetch).not.toHaveBeenCalled();
   });
+  it("discards only an invalid saved task pointer without submitting work", async () => {
+    localStorage.setItem(key, "------------------------------------");
+    localStorage.setItem("unrelated-preference", "preserved");
+    await act(async () => {
+      render(<DazTaskReport />);
+    });
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem("unrelated-preference")).toBe("preserved");
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Create report" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Retry same task" }),
+    ).toBeNull();
+  });
+  it("normalizes a saved uppercase UUID and retrieves without submitting", async () => {
+    localStorage.setItem(key, id.toUpperCase());
+    authenticatedFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, task }),
+    });
+    await act(async () => {
+      render(<DazTaskReport />);
+    });
+    expect(localStorage.getItem(key)).toBe(id);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(authenticatedFetch.mock.calls[0][0]).toBe(
+      `/api/daz-runtime/tasks/${id}`,
+    );
+    expect(authenticatedFetch.mock.calls[0][1].method).toBeUndefined();
+  });
   it("recovers a saved receipt with GET only after reopening", async () => {
     localStorage.setItem(key, id);
     authenticatedFetch.mockResolvedValue({

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
+import { z } from "zod";
 import { authenticatedFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 
@@ -111,8 +112,13 @@ export function DazTaskReport() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (key) {
       try {
-        const id = localStorage.getItem(key);
-        if (id && /^[0-9a-f-]{36}$/i.test(id)) {
+        const storedId = localStorage.getItem(key);
+        const parsedId = z.string().uuid().safeParse(storedId);
+        if (storedId !== null && !parsedId.success)
+          localStorage.removeItem(key);
+        if (parsedId.success) {
+          const id = parsedId.data.toLowerCase();
+          if (id !== storedId) localStorage.setItem(key, id);
           setTaskId(id);
           setBusy(true);
           timer = setTimeout(() => controller.abort(), 30000);
