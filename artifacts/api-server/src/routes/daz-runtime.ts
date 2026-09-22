@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAdmin } from "../lib/admin-auth.js";
+import { getAdminReviewer, requireAdmin } from "../lib/admin-auth.js";
 import { readDazRuntimeStatus } from "../lib/daz-runtime.js";
 
 const router = Router();
@@ -8,10 +8,18 @@ router.get("/daz-runtime/status", requireAdmin, async (req, res) => {
   try {
     const status = await readDazRuntimeStatus();
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, status });
+    return res.json({
+      ok: true,
+      checked_at: new Date().toISOString(),
+      reviewer: getAdminReviewer(req),
+      request: { path: req.originalUrl || req.url, method: req.method },
+      status,
+    });
   } catch (error) {
     req.log?.warn({ error }, "Daz runtime status unavailable");
-    return res.status(503).json({ ok: false, error: "Daz runtime status unavailable." });
+    return res
+      .status(503)
+      .json({ ok: false, error: "Daz runtime status unavailable." });
   }
 });
 

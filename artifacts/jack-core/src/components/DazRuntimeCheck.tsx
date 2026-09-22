@@ -23,6 +23,9 @@ interface DazRuntimeStatus {
 
 interface DazRuntimeEnvelope {
   ok: boolean;
+  checked_at?: string;
+  reviewer?: string | null;
+  request?: { path?: string; method?: string };
   status: DazRuntimeStatus;
 }
 
@@ -86,7 +89,8 @@ export function DazRuntimeCheck() {
     void runCheck();
   }, [runCheck]);
 
-  const status = state.status === "ready" ? state.data.status : null;
+  const receipt = state.status === "ready" ? state.data : null;
+  const status = receipt?.status ?? null;
 
   return (
     <main className="min-h-[100dvh] bg-slate-950 px-5 py-8 text-slate-100">
@@ -128,6 +132,29 @@ export function DazRuntimeCheck() {
             </Button>
           </div>
         </div>
+
+        {receipt ? (
+          <div className="rounded-lg border border-orange-900/50 bg-orange-950/20 p-4">
+            <p className="text-sm font-semibold text-orange-200">
+              Acceptance receipt
+            </p>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+              <StatusRow
+                label="Checked at"
+                value={receipt.checked_at ?? "not returned"}
+              />
+              <StatusRow
+                label="Reviewer"
+                value={receipt.reviewer ?? "unknown"}
+              />
+              <StatusRow
+                label="Request"
+                value={`${receipt.request?.method ?? "GET"} ${receipt.request?.path ?? "/api/daz-runtime/status"}`}
+              />
+              <StatusRow label="Result" value="authenticated pass" />
+            </dl>
+          </div>
+        ) : null}
 
         {status ? (
           <dl className="grid gap-3 sm:grid-cols-2">

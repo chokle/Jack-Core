@@ -103,7 +103,14 @@ describe("GET /daz-runtime/status", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
-    expect(res.body).toEqual({ ok: true, status });
+    expect(res.body).toMatchObject({
+      ok: true,
+      reviewer: "Derek Admin",
+      request: { path: "/api/daz-runtime/status", method: "GET" },
+      status,
+    });
+    expect(typeof res.body.checked_at).toBe("string");
+    expect(new Date(res.body.checked_at).toString()).not.toBe("Invalid Date");
     expect(readDazRuntimeStatus).toHaveBeenCalledTimes(1);
   });
 
