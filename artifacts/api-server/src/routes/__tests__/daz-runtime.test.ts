@@ -119,6 +119,22 @@ describe("Daz task routes", () => {
     expect(res.text).not.toContain("secret token");
     expect(res.body.error).toContain("same task ID");
   });
+  it("normalizes uppercase UUIDs before forwarding create and retrieve", async () => {
+    signInAs("admin");
+    requestDazTask.mockResolvedValue({ ok: true, task: { task_id: id } });
+    const created = await request(app)
+      .post("/api/daz-runtime/tasks")
+      .send({ ...input, task_id: id.toUpperCase() });
+    const retrieved = await request(app).get(
+      `/api/daz-runtime/tasks/${id.toUpperCase()}`,
+    );
+    expect(created.status).toBe(200);
+    expect(retrieved.status).toBe(200);
+    expect(requestDazTask.mock.calls).toEqual([
+      [id, "u_admin", true],
+      [id, "u_admin", false],
+    ]);
+  });
 });
 
 describe("GET /daz-runtime/status", () => {

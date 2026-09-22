@@ -24,7 +24,11 @@ router.post("/daz-runtime/tasks", requireAdmin, async (req, res) => {
       .json({ ok: false, error: "Admin identity unavailable." });
   try {
     return res.json(
-      await requestDazTask(input.data.task_id, req.admin.userId, true),
+      await requestDazTask(
+        input.data.task_id.toLowerCase(),
+        req.admin.userId,
+        true,
+      ),
     );
   } catch (error) {
     return res
@@ -47,7 +51,9 @@ router.get("/daz-runtime/tasks/:id", requireAdmin, async (req, res) => {
       .status(403)
       .json({ ok: false, error: "Admin identity unavailable." });
   try {
-    return res.json(await requestDazTask(id.data.id, req.admin.userId, false));
+    return res.json(
+      await requestDazTask(id.data.id.toLowerCase(), req.admin.userId, false),
+    );
   } catch (error) {
     return res
       .status(error instanceof RuntimeTaskError ? error.status : 503)

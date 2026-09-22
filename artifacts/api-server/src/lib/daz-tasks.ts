@@ -13,7 +13,7 @@ export async function requestDazTask(
   requester: string,
   create: boolean,
   fetchImpl: typeof fetch = fetch,
-  timeoutMs = 10000,
+  timeoutMs = 25000,
 ) {
   const token = process.env["DAZ_RUNTIME_TOKEN"]?.trim();
   const base = new URL(process.env["DAZ_RUNTIME_URL"] ?? "");

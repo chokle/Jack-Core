@@ -58,7 +58,7 @@ export function DazTaskReport() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ task_id: id, kind: "jack_health_report" }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(30000),
         });
         const body = await response.json();
         if (!response.ok || !body.ok || body.task?.task_id !== id)
@@ -67,7 +67,7 @@ export function DazTaskReport() {
               "Submission unconfirmed. Retry uses the same task ID.",
           );
         result = body.task;
-      } else result = await retrieve(id, AbortSignal.timeout(15000));
+      } else result = await retrieve(id, AbortSignal.timeout(30000));
       for (let poll = 0; current === epoch.current; poll++) {
         if (
           result.status === "COMPLETED" &&
@@ -82,7 +82,7 @@ export function DazTaskReport() {
           );
         await new Promise((resolve) => setTimeout(resolve, 2000));
         if (current !== epoch.current) break;
-        result = await retrieve(id, AbortSignal.timeout(5000));
+        result = await retrieve(id, AbortSignal.timeout(30000));
       }
     } catch (failure) {
       if (current === epoch.current)
@@ -115,7 +115,7 @@ export function DazTaskReport() {
         if (id && /^[0-9a-f-]{36}$/i.test(id)) {
           setTaskId(id);
           setBusy(true);
-          timer = setTimeout(() => controller.abort(), 15000);
+          timer = setTimeout(() => controller.abort(), 30000);
           // Mount only reconciles an existing task. It NEVER submits work.
           void retrieve(id, controller.signal)
             .then((result) => {
