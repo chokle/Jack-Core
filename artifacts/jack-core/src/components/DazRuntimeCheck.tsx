@@ -86,6 +86,7 @@ export function DazRuntimeCheck() {
   }, []);
 
   useEffect(() => {
+    window.__JACK_MARK_READY__?.();
     void runCheck();
   }, [runCheck]);
 
