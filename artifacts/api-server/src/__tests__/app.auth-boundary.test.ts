@@ -5,11 +5,13 @@ import { readFileSync } from "node:fs";
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
 const resolveIdentity = vi.hoisted(() => vi.fn());
+const clerkMiddleware = vi.hoisted(() =>
+  vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
+);
 
 vi.mock("@clerk/express", () => ({
   getAuth,
-  clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) =>
-    next(),
+  clerkMiddleware,
 }));
 vi.mock("../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
 vi.mock("../lib/admin-auth.js", () => ({ resolveIdentity }));
@@ -59,6 +61,11 @@ beforeEach(() => {
 });
 
 describe("app-wide authentication composition", () => {
+  it("keeps session handshakes in the frontend's direct Clerk mode", () => {
+    expect(clerkMiddleware).toHaveBeenCalledWith({
+      publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+    });
+  });
   it("protects paid Jack speech with authentication and pilot membership", async () => {
     getAuth.mockReturnValue({ userId: null });
     expect(
