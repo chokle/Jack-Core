@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { authenticatedFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
+import { DazTaskReport } from "./DazTaskReport";
 
 interface DazRuntimeStatus {
   health: {
@@ -133,6 +134,8 @@ export function DazRuntimeCheck() {
             </Button>
           </div>
         </div>
+
+        <DazTaskReport />
 
         {receipt ? (
           <div className="rounded-lg border border-orange-900/50 bg-orange-950/20 p-4">

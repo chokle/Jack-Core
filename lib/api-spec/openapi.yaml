@@ -26,6 +26,51 @@ tags:
     description: Live Systems Health telemetry (heartbeat widget)
 
 paths:
+  /daz-runtime/tasks:
+    post:
+      operationId: createDazTask
+      tags: [system]
+      summary: Create an admin-owned Jack liveness report with a stable idempotency key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DazTaskInput"
+      responses:
+        "200":
+          description: Durable task state; only COMPLETED with receipt establishes completion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DazTaskEnvelope"
+        "400": { description: Invalid task request }
+        "401": { description: Sign in required }
+        "403": { description: Admin required }
+        "409": { description: Task conflict }
+        "503":
+          { description: Outcome unknown; reconcile or retry the same task ID }
+  /daz-runtime/tasks/{id}:
+    get:
+      operationId: getDazTask
+      tags: [system]
+      summary: Retrieve a task owned by the current authenticated admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Durable task state and evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DazTaskEnvelope"
+        "401": { description: Sign in required }
+        "403": { description: Admin required }
+        "404": { description: Task not found for this requester }
+        "503": { description: Outcome unavailable }
   /healthz:
     get:
       operationId: healthCheck
@@ -983,6 +1028,48 @@ paths:
 
 components:
   schemas:
+    DazTaskInput:
+      type: object
+      additionalProperties: false
+      required: [task_id, kind]
+      properties:
+        task_id: { type: string, format: uuid }
+        kind: { type: string, enum: [jack_health_report] }
+    DazTaskEnvelope:
+      type: object
+      required: [ok, task]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        task:
+          type: object
+          required:
+            [
+              task_id,
+              kind,
+              status,
+              requested_by,
+              created_at,
+              updated_at,
+              attempts,
+              result,
+              receipt,
+              error,
+            ]
+          properties:
+            task_id: { type: string, format: uuid }
+            kind: { type: string, enum: [jack_health_report] }
+            status:
+              {
+                type: string,
+                enum: [PROPOSED, EXECUTED, VERIFIED, COMPLETED, BLOCKED],
+              }
+            requested_by: { type: string }
+            created_at: { type: string }
+            updated_at: { type: string }
+            attempts: { type: integer, minimum: 0 }
+            result: { type: [object, "null"], additionalProperties: true }
+            receipt: { type: [object, "null"], additionalProperties: true }
+            error: { type: [string, "null"] }
     CurrentUser:
       type: object
       required: [userId, email, name, isAdmin, canViewPilotReports]

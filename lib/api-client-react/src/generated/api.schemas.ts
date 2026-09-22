@@ -5,6 +5,68 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+export type DazTaskInputKind = typeof DazTaskInputKind[keyof typeof DazTaskInputKind];
+
+
+export const DazTaskInputKind = {
+  jack_health_report: 'jack_health_report',
+} as const;
+
+export interface DazTaskInput {
+  task_id: string;
+  kind: DazTaskInputKind;
+}
+
+export type DazTaskEnvelopeTaskKind = typeof DazTaskEnvelopeTaskKind[keyof typeof DazTaskEnvelopeTaskKind];
+
+
+export const DazTaskEnvelopeTaskKind = {
+  jack_health_report: 'jack_health_report',
+} as const;
+
+export type DazTaskEnvelopeTaskStatus = typeof DazTaskEnvelopeTaskStatus[keyof typeof DazTaskEnvelopeTaskStatus];
+
+
+export const DazTaskEnvelopeTaskStatus = {
+  PROPOSED: 'PROPOSED',
+  EXECUTED: 'EXECUTED',
+  VERIFIED: 'VERIFIED',
+  COMPLETED: 'COMPLETED',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+/**
+ * @nullable
+ */
+export type DazTaskEnvelopeTaskResult = { [key: string]: unknown } | null;
+
+/**
+ * @nullable
+ */
+export type DazTaskEnvelopeTaskReceipt = { [key: string]: unknown } | null;
+
+export type DazTaskEnvelopeTask = {
+  task_id: string;
+  kind: DazTaskEnvelopeTaskKind;
+  status: DazTaskEnvelopeTaskStatus;
+  requested_by: string;
+  created_at: string;
+  updated_at: string;
+  /** @minimum 0 */
+  attempts: number;
+  /** @nullable */
+  result: DazTaskEnvelopeTaskResult;
+  /** @nullable */
+  receipt: DazTaskEnvelopeTaskReceipt;
+  /** @nullable */
+  error: string | null;
+};
+
+export interface DazTaskEnvelope {
+  ok: true;
+  task: DazTaskEnvelopeTask;
+}
+
 export interface CurrentUser {
   userId: string;
   /** @nullable */

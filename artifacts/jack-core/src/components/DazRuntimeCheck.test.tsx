@@ -7,6 +7,7 @@ import { DazRuntimeCheck } from "./DazRuntimeCheck";
 
 const authenticatedFetch = vi.hoisted(() => vi.fn());
 vi.mock("@workspace/api-client-react", () => ({ authenticatedFetch }));
+vi.mock("@clerk/react", () => ({ useAuth: () => ({ userId: null }) }));
 
 const html = readFileSync(
   path.resolve(import.meta.dirname, "../../index.html"),

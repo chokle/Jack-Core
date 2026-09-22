@@ -9,6 +9,63 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Create an admin-owned Jack liveness report with a stable idempotency key
+ */
+export const CreateDazTaskBody = zod.object({
+  "task_id": zod.string().uuid(),
+  "kind": zod.enum(['jack_health_report'])
+})
+
+export const createDazTaskResponseTaskAttemptsMin = 0;
+
+
+
+export const CreateDazTaskResponse = zod.object({
+  "ok": zod.literal(true),
+  "task": zod.object({
+  "task_id": zod.string().uuid(),
+  "kind": zod.enum(['jack_health_report']),
+  "status": zod.enum(['PROPOSED', 'EXECUTED', 'VERIFIED', 'COMPLETED', 'BLOCKED']),
+  "requested_by": zod.string(),
+  "created_at": zod.string(),
+  "updated_at": zod.string(),
+  "attempts": zod.number().min(createDazTaskResponseTaskAttemptsMin),
+  "result": zod.record(zod.string(), zod.unknown()).nullable(),
+  "receipt": zod.record(zod.string(), zod.unknown()).nullable(),
+  "error": zod.string().nullable()
+})
+})
+
+
+/**
+ * @summary Retrieve a task owned by the current authenticated admin
+ */
+export const GetDazTaskParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const getDazTaskResponseTaskAttemptsMin = 0;
+
+
+
+export const GetDazTaskResponse = zod.object({
+  "ok": zod.literal(true),
+  "task": zod.object({
+  "task_id": zod.string().uuid(),
+  "kind": zod.enum(['jack_health_report']),
+  "status": zod.enum(['PROPOSED', 'EXECUTED', 'VERIFIED', 'COMPLETED', 'BLOCKED']),
+  "requested_by": zod.string(),
+  "created_at": zod.string(),
+  "updated_at": zod.string(),
+  "attempts": zod.number().min(getDazTaskResponseTaskAttemptsMin),
+  "result": zod.record(zod.string(), zod.unknown()).nullable(),
+  "receipt": zod.record(zod.string(), zod.unknown()).nullable(),
+  "error": zod.string().nullable()
+})
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
