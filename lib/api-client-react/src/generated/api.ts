@@ -30,6 +30,8 @@ import type {
   Competency,
   CurrentInterviewProfile,
   CurrentUser,
+  DazTaskEnvelope,
+  DazTaskInput,
   GraphHealthReport,
   HealthStatus,
   InterviewSession,
@@ -99,6 +101,153 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getCreateDazTaskUrl = () => {
+
+
+
+
+  return `/api/daz-runtime/tasks`
+}
+
+/**
+ * @summary Create an admin-owned Jack liveness report with a stable idempotency key
+ */
+export const createDazTask = async (dazTaskInput: DazTaskInput, options?: RequestInit): Promise<DazTaskEnvelope> => {
+
+  return customFetch<DazTaskEnvelope>(getCreateDazTaskUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(dazTaskInput)
+  }
+);}
+
+
+
+
+export const getCreateDazTaskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDazTask>>, TError,{data: BodyType<DazTaskInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDazTask>>, TError,{data: BodyType<DazTaskInput>}, TContext> => {
+
+const mutationKey = ['createDazTask'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDazTask>>, {data: BodyType<DazTaskInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createDazTask(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDazTaskMutationResult = NonNullable<Awaited<ReturnType<typeof createDazTask>>>
+    export type CreateDazTaskMutationBody = BodyType<DazTaskInput>
+    export type CreateDazTaskMutationError = ErrorType<void>
+
+    /**
+ * @summary Create an admin-owned Jack liveness report with a stable idempotency key
+ */
+export const useCreateDazTask = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDazTask>>, TError,{data: BodyType<DazTaskInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDazTask>>,
+        TError,
+        {data: BodyType<DazTaskInput>},
+        TContext
+      > => {
+      return useMutation(getCreateDazTaskMutationOptions(options));
+    }
+
+export const getGetDazTaskUrl = (id: string,) => {
+
+
+
+
+  return `/api/daz-runtime/tasks/${id}`
+}
+
+/**
+ * @summary Retrieve a task owned by the current authenticated admin
+ */
+export const getDazTask = async (id: string, options?: RequestInit): Promise<DazTaskEnvelope> => {
+
+  return customFetch<DazTaskEnvelope>(getGetDazTaskUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDazTaskQueryKey = (id: string,) => {
+    return [
+    `/api/daz-runtime/tasks/${id}`
+    ] as const;
+    }
+
+
+export const getGetDazTaskQueryOptions = <TData = Awaited<ReturnType<typeof getDazTask>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDazTask>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDazTaskQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDazTask>>> = ({ signal }) => getDazTask(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDazTask>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDazTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getDazTask>>>
+export type GetDazTaskQueryError = ErrorType<void>
+
+
+/**
+ * @summary Retrieve a task owned by the current authenticated admin
+ */
+
+export function useGetDazTask<TData = Awaited<ReturnType<typeof getDazTask>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDazTask>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDazTaskQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

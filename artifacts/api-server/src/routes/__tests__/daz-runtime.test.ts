@@ -14,6 +14,11 @@ vi.mock("@clerk/express", () => ({
 }));
 
 const readDazRuntimeStatus = vi.hoisted(() => vi.fn());
+const requestDazTask = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/daz-tasks.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/daz-tasks.js")>()),
+  requestDazTask,
+}));
 vi.mock("../../lib/daz-runtime.js", () => ({
   readDazRuntimeStatus,
 }));
@@ -56,6 +61,64 @@ beforeEach(() => {
   getAuth.mockReset();
   getUser.mockReset();
   readDazRuntimeStatus.mockReset();
+  requestDazTask.mockReset();
+});
+
+describe("Daz task routes", () => {
+  const id = "17fe8057-e179-4483-8d1b-b676b5a490fd";
+  const input = { task_id: id, kind: "jack_health_report" };
+  it("rejects anonymous and non-admin creation and retrieval", async () => {
+    expect(
+      (await request(app).post("/api/daz-runtime/tasks").send(input)).status,
+    ).toBe(401);
+    expect(
+      (await request(app).get(`/api/daz-runtime/tasks/${id}`)).status,
+    ).toBe(401);
+    signInAs("user");
+    expect(
+      (await request(app).post("/api/daz-runtime/tasks").send(input)).status,
+    ).toBe(403);
+    expect(
+      (await request(app).get(`/api/daz-runtime/tasks/${id}`)).status,
+    ).toBe(403);
+    expect(requestDazTask).not.toHaveBeenCalled();
+  });
+  it("rejects requester spoofing, arbitrary tasks and invalid IDs", async () => {
+    signInAs("admin");
+    for (const body of [
+      { ...input, requested_by: "other" },
+      { ...input, kind: "delete" },
+      { ...input, task_id: "bad" },
+    ]) {
+      expect(
+        (await request(app).post("/api/daz-runtime/tasks").send(body)).status,
+      ).toBe(400);
+    }
+    expect(requestDazTask).not.toHaveBeenCalled();
+  });
+  it("preserves the idempotency key and derives identity from Clerk for all attempts", async () => {
+    signInAs("admin");
+    requestDazTask.mockResolvedValue({ ok: true, task: { task_id: id } });
+    await request(app).post("/api/daz-runtime/tasks").send(input);
+    await request(app).post("/api/daz-runtime/tasks").send(input);
+    expect(requestDazTask.mock.calls).toEqual([
+      [id, "u_admin", true],
+      [id, "u_admin", true],
+    ]);
+    const res = await request(app).get(
+      `/api/daz-runtime/tasks/${id}?requested_by=spoof`,
+    );
+    expect(requestDazTask).toHaveBeenLastCalledWith(id, "u_admin", false);
+    expect(res.headers["cache-control"]).toBe("no-store");
+  });
+  it("returns a safe unknown-outcome error without leaking runtime details", async () => {
+    signInAs("admin");
+    requestDazTask.mockRejectedValue(new Error("secret token"));
+    const res = await request(app).post("/api/daz-runtime/tasks").send(input);
+    expect(res.status).toBe(503);
+    expect(res.text).not.toContain("secret token");
+    expect(res.body.error).toContain("same task ID");
+  });
 });
 
 describe("GET /daz-runtime/status", () => {
