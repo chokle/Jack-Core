@@ -6,10 +6,6 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { clerkMiddleware } from "@clerk/express";
-import {
-  CLERK_PROXY_PATH,
-  sanitizeClerkProxyHeaders,
-} from "./middlewares/clerkProxyMiddleware";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
@@ -20,22 +16,13 @@ import { publish } from "./lib/vitality";
 const app: Express = express();
 const pilotAuthBypass = process.env["PILOT_AUTH_BYPASS"] === "true";
 
-// Clerk must be the first application middleware. In production it owns the
-// same-origin Frontend API proxy as well as session handshake/auth state. This
-// keeps proxy transport semantics on Clerk's supported Express path instead of
-// maintaining a second hand-built proxy implementation.
+// Match the frontend's direct Clerk mode. Enabling frontendApiProxy also makes
+// the SDK route cookie/session-refresh handshakes through that proxy, even when
+// the frontend never uses it. Our Clerk instance does not register this proxy.
 if (!pilotAuthBypass) {
-  app.use((req, _res, next) => {
-    sanitizeClerkProxyHeaders(req.path, req.headers);
-    next();
-  });
   app.use(
     clerkMiddleware({
       publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-      frontendApiProxy: {
-        enabled: process.env.NODE_ENV === "production",
-        path: CLERK_PROXY_PATH,
-      },
     }),
   );
 }
