@@ -47,6 +47,7 @@ import { AskJack } from "./components/AskJack";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { JackShell, type JackView } from "./components/JackShell";
 import { PilotActivityReports } from "./components/PilotActivityReports";
+import { DazRuntimeCheck } from "./components/DazRuntimeCheck";
 import { EndOfShiftCloseout } from "./components/EndOfShiftCloseout";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Landing } from "./components/Landing";
@@ -621,7 +622,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleCitationClick = (videoId: string, startTime?: number) => {
-    setSeek(startTime === undefined ? undefined : { time: startTime, token: Date.now() });
+    setSeek(
+      startTime === undefined
+        ? undefined
+        : { time: startTime, token: Date.now() },
+    );
     navigateToLocation({ view, selectedVideoId: videoId });
   };
 
@@ -1534,6 +1539,19 @@ function ProtectedApp() {
   );
 }
 
+function ProtectedDazRuntimeCheck() {
+  return (
+    <>
+      <Show when="signed-in">
+        <DazRuntimeCheck />
+      </Show>
+      <Show when="signed-out">
+        <Redirect to="/sign-in" />
+      </Show>
+    </>
+  );
+}
+
 // Clears the React Query cache when the signed-in user changes, so one user's
 // data never bleeds into the next session on the same device.
 function ClerkQueryClientCacheInvalidator() {
@@ -1604,6 +1622,10 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
         <ClerkQueryClientCacheInvalidator />
         <Switch>
           <Route path="/" component={HomeRedirect} />
+          <Route
+            path="/admin/daz-runtime"
+            component={ProtectedDazRuntimeCheck}
+          />
           <Route path="/app" component={ProtectedApp} />
           {/* REQUIRED — copy "/sign-in/*?" and "/sign-up/*?" verbatim. The /*?
               optional wildcard is the only wouter syntax that matches both the
