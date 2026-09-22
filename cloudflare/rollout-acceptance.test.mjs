@@ -184,6 +184,7 @@ test("an initially running candidate retries a transient preprobe control-plane 
     applicationVersion: "14",
     instanceId: "instance-1",
     instanceVersion: "14",
+    instanceState: "running",
   });
   assert.equal(calls.applications, 4);
   assert.equal(calls.instances, 3);
@@ -215,6 +216,51 @@ test("an initially running candidate restarts the full transaction after a trans
   assert.equal(calls.instances, 5);
   assert.equal(calls.probes.filter(({ kind }) => kind === "root").length, 2);
   assert.match(logs.join("\n"), /full transaction will restart/);
+});
+
+test("an exact stopped instance can pass through public probes", async () => {
+  const clock = createFakeClock();
+  const { adapter, calls } = createAdapter({
+    clock,
+    instances: [instance({ state: "stopped" })],
+  });
+  const result = await runScenario({ adapter, clock, logger: () => {} });
+
+  assert.equal(result.ready, true);
+  assert.equal(result.code, "accepted");
+  assert.deepEqual(result.admission, {
+    admittedAtMs: 0,
+    applicationId: "app-1",
+    digest: DIGEST,
+    applicationVersion: "14",
+    instanceId: "instance-1",
+    instanceVersion: "14",
+    instanceState: "stopped",
+  });
+  assert.deepEqual(calls.events.slice(-5), [
+    "probe:root",
+    "probe:health",
+    "probe:anonymous-me",
+    "applications:3",
+    "instances:3",
+  ]);
+  assert.equal(result.snapshot.postprobeInstance.state, "stopped");
+});
+
+test("a stopped admission can transition to running during probes", async () => {
+  const clock = createFakeClock();
+  const { adapter } = createAdapter({
+    clock,
+    instances: ({ call }) => [
+      instance({ state: call >= 3 ? "running" : "stopped" }),
+    ],
+  });
+  const result = await runScenario({ adapter, clock, logger: () => {} });
+
+  assert.equal(result.ready, true);
+  assert.equal(result.code, "accepted");
+  assert.equal(result.admission.instanceState, "stopped");
+  assert.equal(result.snapshot.postprobeInstance.state, "running");
 });
 
 test("an initially running admission never retries drift or public probe failure", async (t) => {
@@ -277,7 +323,7 @@ test("an initially running admission never retries drift or public probe failure
   });
 });
 
-test("a stopped instance transitioning at 32:30 passes before both internal deadlines", async () => {
+test("a stopped instance no longer waits until 32:30 when public probes pass", async () => {
   const clock = createFakeClock();
   const { adapter } = createAdapter({
     clock,
@@ -298,20 +344,18 @@ test("a stopped instance transitioning at 32:30 passes before both internal dead
   });
 
   assert.equal(result.ready, true);
-  assert.equal(result.snapshot.primaryAttempt, 120);
-  assert.ok(result.elapsedMs >= 32.5 * 60_000);
-  assert.ok(result.elapsedMs <= 33 * 60_000);
+  assert.equal(result.snapshot.primaryAttempt, 1);
+  assert.equal(result.elapsedMs, 0);
 });
 
-test("a transition after 33:00 fails without observing or sleeping past the deadline", async () => {
+test("a stopped instance still fails when public probes fail", async () => {
   const clock = createFakeClock();
   const { adapter } = createAdapter({
     clock,
-    instances: ({ clock: fakeClock }) => [
-      instance({
-        state: fakeClock.now() > 33 * 60_000 ? "running" : "stopped",
-      }),
-    ],
+    instances: [instance({ state: "stopped" })],
+    probes: {
+      health: { status: 503, body: JSON.stringify({ status: "bad" }) },
+    },
   });
   const result = await runScenario({
     adapter,
@@ -324,9 +368,8 @@ test("a transition after 33:00 fails without observing or sleeping past the dead
   });
 
   assert.equal(result.ready, false);
-  assert.equal(result.code, "transition-deadline");
-  assert.ok(clock.now() < 33 * 60_000);
-  assert.ok(clock.sleeps.every(({ to }) => to < 33 * 60_000));
+  assert.equal(result.code, "health-probe-failed");
+  assert.equal(clock.now(), 0);
 });
 
 const admissionDivergences = [
@@ -448,7 +491,7 @@ test("a transient pre-admission warmup transport error retries and can pass", as
   }
 });
 
-test("post-admission warmup transport and HTTP failures retry without acceptance", async (t) => {
+test("stopped admission does not require repeated warmup after public probes pass", async (t) => {
   for (const [name, failedWarmup] of [
     [
       "transport error",
@@ -482,10 +525,10 @@ test("post-admission warmup transport and HTTP failures retry without acceptance
       assert.equal(result.ready, true);
       assert.equal(result.code, "accepted");
       assert.notEqual(result.admission, null);
-      assert.equal(result.snapshot.primaryAttempt, 3);
+      assert.equal(result.snapshot.primaryAttempt, 1);
       assert.equal(
         calls.probes.filter(({ kind }) => kind === "warmup").length,
-        3,
+        1,
       );
       assert.equal(
         calls.probes.filter(({ kind }) => kind === "root").length,
@@ -519,10 +562,10 @@ test("a transient terminal API read retries only from pinned admission and never
   });
 
   assert.equal(result.ready, true);
-  assert.match(logs.join("\n"), /stale admission cannot be accepted/);
+  assert.match(logs.join("\n"), /stale evidence cannot be accepted/);
   assert.equal(
     calls.instances,
-    4,
+    3,
     "the stale failed application read must not trigger an instance read",
   );
 });
@@ -561,7 +604,8 @@ test("a bounded terminal read timeout retries from pinned admission before the a
   assert.equal(result.ready, true);
   assert.equal(result.code, "accepted");
   assert.notEqual(result.admission, null);
-  assert.equal(result.snapshot.terminalPoll, 2);
+  assert.equal(result.snapshot.primaryAttempt, 1);
+  assert.equal(result.snapshot.terminalPoll, 0);
   assert.match(logs.join("\n"), /exceeded its bounded 10ms operation window/);
 });
 
@@ -594,15 +638,11 @@ test("an operation that reaches the absolute phase deadline remains fatal", asyn
   assert.equal(result.admission, null);
 });
 
-test("a timely running observation may restart a transient acceptance API read until 34:30", async () => {
+test("a stopped admission may complete before the instance is observed running", async () => {
   const clock = createFakeClock();
   const logs = [];
   const { adapter } = createAdapter({
     clock,
-    applications: ({ call }) => {
-      if (call === 4) throw new Error("temporary preprobe API failure");
-      return [application()];
-    },
     instances: ({ call }) => [
       instance({ state: call < 3 ? "stopped" : "running" }),
     ],
@@ -624,9 +664,9 @@ test("a timely running observation may restart a transient acceptance API read u
   });
 
   assert.equal(result.ready, true);
-  assert.ok(clock.now() > 100, "the fresh transaction may finish after 33:00");
   assert.ok(clock.now() < 200, "the fresh transaction must finish by 34:30");
-  assert.match(logs.join("\n"), /full transaction will restart/);
+  assert.match(logs.join("\n"), /terminal admission/);
+  assert.equal(result.admission.instanceState, "stopped");
 });
 
 const probeFailures = [
@@ -933,6 +973,7 @@ test("the clock refuses a sleep that would reach or cross the transition deadlin
   const { adapter } = createAdapter({
     clock,
     instances: [instance({ state: "stopped" })],
+    probes: { warmup: { status: 503, body: "" } },
   });
   const result = await runScenario({
     adapter,
@@ -947,7 +988,7 @@ test("the clock refuses a sleep that would reach or cross the transition deadlin
     },
   });
   assert.equal(result.ready, false);
-  assert.equal(result.code, "transition-deadline");
+  assert.equal(result.code, "primary-exhausted-without-terminal-admission");
   assert.equal(clock.now(), 950);
   assert.deepEqual(clock.sleeps, [{ from: 0, delayMs: 950, to: 950 }]);
 });

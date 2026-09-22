@@ -160,6 +160,7 @@ function admissionFrom(application, instance, admittedAtMs) {
     applicationVersion: application.version,
     instanceId: instance.id,
     instanceVersion: instance.version,
+    instanceState: instance.state,
   };
 }
 
@@ -399,12 +400,26 @@ export async function runRolloutAcceptance({
       acceptanceDeadline,
     );
     snapshot.instance = preprobeInstance;
+    const preprobeState =
+      transactionAdmission.instanceState === "stopped"
+        ? preprobeInstance.state
+        : transactionAdmission.instanceState;
+    const preprobeStateAllowed =
+      transactionAdmission.instanceState === "stopped"
+        ? preprobeInstance.state === "stopped" ||
+          preprobeInstance.state === "running"
+        : preprobeInstance.state === transactionAdmission.instanceState;
     if (
-      !pinnedInstanceMatches(preprobeInstance, transactionAdmission, "running")
+      !preprobeStateAllowed ||
+      !pinnedInstanceMatches(
+        preprobeInstance,
+        transactionAdmission,
+        preprobeState,
+      )
     ) {
       throw new GateFailure(
         "preprobe-instance-mismatch",
-        "The unique named serving instance did not preserve its pinned running identity and version before probes.",
+        "The unique named instance did not preserve its pinned identity, version, or admissible state before probes.",
       );
     }
 
@@ -482,12 +497,26 @@ export async function runRolloutAcceptance({
       acceptanceDeadline,
     );
     snapshot.postprobeInstance = postprobeInstance;
+    const postprobeState =
+      transactionAdmission.instanceState === "stopped"
+        ? postprobeInstance.state
+        : transactionAdmission.instanceState;
+    const postprobeStateAllowed =
+      transactionAdmission.instanceState === "stopped"
+        ? postprobeInstance.state === "stopped" ||
+          postprobeInstance.state === "running"
+        : postprobeInstance.state === transactionAdmission.instanceState;
     if (
-      !pinnedInstanceMatches(postprobeInstance, transactionAdmission, "running")
+      !postprobeStateAllowed ||
+      !pinnedInstanceMatches(
+        postprobeInstance,
+        transactionAdmission,
+        postprobeState,
+      )
     ) {
       throw new GateFailure(
         "postprobe-instance-mismatch",
-        "The unique named serving instance did not preserve its pinned running identity and version after probes.",
+        "The unique named instance did not preserve its pinned identity, version, or admissible state after probes.",
       );
     }
 
@@ -501,7 +530,7 @@ export async function runRolloutAcceptance({
     return finish(
       true,
       "accepted",
-      "Exact application and serving-instance identity survived the complete public acceptance transaction.",
+      "Exact application and named-instance identity survived the complete public acceptance transaction.",
     );
   };
 
@@ -621,6 +650,12 @@ export async function runRolloutAcceptance({
             admission = admissionFrom(application, instance, elapsed());
             logger(
               `workers.dev rollout terminal admission: elapsed=${formatElapsed(elapsed())} application=${application.id}@${application.version} instance=${instance.id}@${instance.version}`,
+            );
+            logSnapshot(`primary ${attempt}/${options.primaryAttempts}`);
+            return await completeAcceptanceWithRetries(
+              { application, instance },
+              clock.now(),
+              true,
             );
           }
         }
