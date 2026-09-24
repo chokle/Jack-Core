@@ -16,6 +16,7 @@ interface Props {
   floorLabel: string;
   describeMember?: (member: HudCrewMember) => string;
   active?: boolean;
+  live?: boolean;
 }
 
 export function SiteRadar({
@@ -24,6 +25,7 @@ export function SiteRadar({
   floorLabel,
   describeMember,
   active = true,
+  live = false,
 }: Props) {
   const id = useId();
   const [manualHeading, setManualHeading] = useState(0);
@@ -147,8 +149,10 @@ export function SiteRadar({
     <section className="site-radar" aria-label="Site radar">
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
-        <strong>{Math.round(heading).toString().padStart(3, "0")}°</strong>
-        <span>4 SEC SWEEP · DEMO</span>
+        <strong>
+          {live ? "—" : `${Math.round(heading).toString().padStart(3, "0")}°`}
+        </strong>
+        <span>{live ? "NO SITE MAP" : "4 SEC SWEEP · DEMO"}</span>
       </div>
       <svg
         className="site-radar__scope"
@@ -320,7 +324,7 @@ export function SiteRadar({
               );
             })}
         </g>
-        {!reducedMotion && (
+        {!live && !reducedMotion && (
           <g
             data-testid="radar-sweep"
             transform={`rotate(${sweep} 200 200)`}
@@ -339,68 +343,76 @@ export function SiteRadar({
             />
           </g>
         )}
-        <path
-          d="M200 187L208 207L200 202L192 207Z"
-          className="site-radar__viewer"
-        >
-          <title>You · facing forward</title>
-        </path>
+        {!live && (
+          <path
+            d="M200 187L208 207L200 202L192 207Z"
+            className="site-radar__viewer"
+          >
+            <title>You · facing forward</title>
+          </path>
+        )}
       </svg>
-      <div className="site-radar__legend">
-        <span>● Crew</span>
-        <span>Safety landmarks</span>
-        <span>◌ Last known</span>
-      </div>
-      <button
-        className="site-radar__settings"
-        type="button"
-        aria-expanded={controlsOpen}
-        aria-controls={`${id}-controls`}
-        onClick={() => setControlsOpen(!controlsOpen)}
-      >
-        Compass controls
-      </button>
-      <div
-        className="site-radar__controls"
-        id={`${id}-controls`}
-        hidden={!controlsOpen}
-      >
-        <label htmlFor={`${id}-heading`}>
-          Turn demo heading <output>{manualHeading}°</output>
-        </label>
-        <input
-          id={`${id}-heading`}
-          type="range"
-          min="0"
-          max="359"
-          value={manualHeading}
-          onChange={(event) => {
-            permissionGeneration.current++;
-            setDeviceEnabled(false);
-            setDeviceHeading(null);
-            setMessage("Manual demo heading");
-            setManualHeading(Number(event.target.value));
-          }}
-        />
+      {!live && (
+        <div className="site-radar__legend">
+          <span>● Crew</span>
+          <span>Safety landmarks</span>
+          <span>◌ Last known</span>
+        </div>
+      )}
+      {!live && (
         <button
+          className="site-radar__settings"
           type="button"
-          onClick={() => {
-            if (deviceEnabled) {
+          aria-expanded={controlsOpen}
+          aria-controls={`${id}-controls`}
+          onClick={() => setControlsOpen(!controlsOpen)}
+        >
+          Compass controls
+        </button>
+      )}
+      {!live && (
+        <div
+          className="site-radar__controls"
+          id={`${id}-controls`}
+          hidden={!controlsOpen}
+        >
+          <label htmlFor={`${id}-heading`}>
+            Turn demo heading <output>{manualHeading}°</output>
+          </label>
+          <input
+            id={`${id}-heading`}
+            type="range"
+            min="0"
+            max="359"
+            value={manualHeading}
+            onChange={(event) => {
               permissionGeneration.current++;
               setDeviceEnabled(false);
               setDeviceHeading(null);
               setMessage("Manual demo heading");
-            } else void enableCompass();
-          }}
-        >
-          {deviceEnabled ? "Use manual heading" : "Use device compass"}
-        </button>
-        <p aria-live="polite">{message}</p>
-        <p className="site-radar__notice">
-          Fictional positions · sweep is a visual simulation, not nearby
-          detection. N is demo north in manual mode. Not for navigation.
-        </p>
-      </div>
+              setManualHeading(Number(event.target.value));
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (deviceEnabled) {
+                permissionGeneration.current++;
+                setDeviceEnabled(false);
+                setDeviceHeading(null);
+                setMessage("Manual demo heading");
+              } else void enableCompass();
+            }}
+          >
+            {deviceEnabled ? "Use manual heading" : "Use device compass"}
+          </button>
+          <p aria-live="polite">{message}</p>
+          <p className="site-radar__notice">
+            Fictional positions · sweep is a visual simulation, not nearby
+            detection. N is demo north in manual mode. Not for navigation.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

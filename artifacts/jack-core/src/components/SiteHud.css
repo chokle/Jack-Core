@@ -382,6 +382,16 @@
 .site-hud-entry span {
   color: hsl(var(--muted-foreground));
 }
+.site-hud-entry--location {
+  flex-wrap: wrap;
+}
+.site-hud-entry--location div {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.site-hud-entry--location span {
+  overflow-wrap: anywhere;
+}
 .site-hud-entry--page {
   flex: 1;
   justify-content: center;

@@ -18,7 +18,7 @@ import {
 import type { GraphModel } from "../lib/memory-graph";
 import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
-import { SiteHudDemo } from "./SiteHudDemo";
+import { SiteHudLive } from "./SiteHudLive";
 
 export type JackView =
   | "graph"
@@ -38,7 +38,7 @@ interface JackShellProps {
   lastUpdatedLabel: string;
   userLabel?: string;
   userSubLabel?: string;
-  /** Resolved account identity; the demo also requires its build flag and site opt-in. */
+  /** Resolved account identity gates the local radar view. */
   siteHudUserId?: string;
   /** Opens Clerk's secure account profile for password, sessions, and deletion. */
   onOpenSettings?: () => void;
@@ -105,10 +105,9 @@ export function JackShell({
     review: "Review",
     reports: "Pilot Reports",
     closeout: "Closeout",
-    radar: "Site radar demo",
+    radar: "Site radar",
   };
-  const hudEnabled =
-    import.meta.env.VITE_SITE_HUD_DEMO_ENABLED === "true" && !!siteHudUserId;
+  const hudEnabled = !!siteHudUserId;
 
   useEffect(() => {
     const sync = () => syncAskJackComposerState();
@@ -393,11 +392,10 @@ export function JackShell({
                 : "relative shrink-0 bg-background"
             }
           >
-            <SiteHudDemo
+            <SiteHudLive
               key={siteHudUserId}
               expanded={active === "radar"}
               onOpenRadar={() => go("radar")}
-              onExitRadar={() => go("graph")}
             />
           </div>
         )}
