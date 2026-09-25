@@ -130,7 +130,7 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
         domOverlay: { root: overlayRoot.current },
         depthSensing: {
           usagePreference: ["cpu-optimized"],
-          dataFormatPreference: ["luminance-alpha"],
+          dataFormatPreference: ["luminance-alpha", "float32"],
         },
       });
       session = activeSession;

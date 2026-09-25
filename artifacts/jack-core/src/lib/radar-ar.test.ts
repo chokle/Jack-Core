@@ -39,6 +39,13 @@ describe("AR depth samples", () => {
     ).toEqual([{ x: 0, forward: 2, range: 2 }]);
   });
 
+  it("accounts for an off-axis XR camera projection", () => {
+    const offAxis = [1, 0, 0, 0, 0, 1, 0, 0, 0.25, -0.1];
+    expect(
+      observedDepthPoint(0.5, 0.5, 2, offAxis, origin, orientation, 1),
+    ).toEqual({ x: 0.5, y: -0.2, z: -2, seenAt: 1 });
+  });
+
   it("does not invent samples for invalid or out-of-range depth", () => {
     expect(
       observedDepthPoint(0.5, 0.5, 0, projection, origin, orientation, 1),

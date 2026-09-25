@@ -31,6 +31,8 @@ export function observedDepthPoint(
     meters > 50 ||
     !Number.isFinite(projection[0]) ||
     !Number.isFinite(projection[5]) ||
+    !Number.isFinite(projection[8] ?? 0) ||
+    !Number.isFinite(projection[9] ?? 0) ||
     projection[0] === 0 ||
     projection[5] === 0 ||
     ![
@@ -47,8 +49,8 @@ export function observedDepthPoint(
   )
     return null;
   const cameraPoint = new Vector3(
-    ((2 * u - 1) * meters) / projection[0],
-    ((1 - 2 * v) * meters) / projection[5],
+    ((2 * u - 1 + (projection[8] ?? 0)) * meters) / projection[0],
+    ((1 - 2 * v + (projection[9] ?? 0)) * meters) / projection[5],
     -meters,
   );
   cameraPoint.applyQuaternion(

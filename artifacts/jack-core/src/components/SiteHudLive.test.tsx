@@ -130,6 +130,10 @@ describe("live site radar", () => {
       "immersive-ar",
       expect.objectContaining({
         requiredFeatures: ["local", "dom-overlay", "depth-sensing"],
+        depthSensing: {
+          usagePreference: ["cpu-optimized"],
+          dataFormatPreference: ["luminance-alpha", "float32"],
+        },
       }),
     );
     act(() =>
