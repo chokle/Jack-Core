@@ -65,7 +65,7 @@ describe("live site radar", () => {
     expect(screen.queryByRole("button", { name: "Stop AR scan" })).toBeNull();
   });
 
-  it("plots a measured AR surface and clears it when scanning stops", async () => {
+  it("tracks a measured AR surface, shows turns, and holds it on stop", async () => {
     const frames: Array<(time: number, frame: unknown) => void> = [];
     const listeners = new Map<string, () => void>();
     const session = {
@@ -107,7 +107,7 @@ describe("live site radar", () => {
     );
     expect(session.requestReferenceSpace).toHaveBeenCalledOnce();
     await waitFor(() => expect(frames.length).toBe(1));
-    expect(screen.getByText("Waiting for a depth frame…")).toBeTruthy();
+    expect(screen.getByText("Waiting for AR tracking…")).toBeTruthy();
     expect(requestSession).toHaveBeenCalledWith(
       "immersive-ar",
       expect.objectContaining({
@@ -127,16 +127,62 @@ describe("live site radar", () => {
             },
           ],
         }),
+        getDepthInformation: () => null,
+      }),
+    );
+    expect(
+      screen.getByText(/Tracking active · waiting for depth/),
+    ).toBeTruthy();
+    expect(screen.queryAllByLabelText(/Measured surface/)).toHaveLength(0);
+    act(() =>
+      frames.shift()?.(600, {
+        getViewerPose: () => ({
+          views: [
+            {
+              projectionMatrix: [1, 0, 0, 0, 0, 1],
+              transform: {
+                position: { x: 0, y: 0, z: 0 },
+                orientation: { x: 0, y: 0, z: 0, w: 1 },
+              },
+            },
+          ],
+        }),
         getDepthInformation: () => ({ getDepthInMeters: () => 2 }),
       }),
     );
     expect(screen.getByRole("button", { name: "Stop AR scan" })).toBeTruthy();
-    expect(screen.getByText(/local surface samples/)).toBeTruthy();
+    expect(screen.getByText(/measured surfaces · turn the phone/)).toBeTruthy();
     expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
       0,
     );
+    act(() =>
+      frames.shift()?.(900, {
+        getViewerPose: () => ({
+          views: [
+            {
+              projectionMatrix: [1, 0, 0, 0, 0, 1],
+              transform: {
+                position: { x: 0, y: 0, z: 0 },
+                orientation: { x: 0, y: -Math.SQRT1_2, z: 0, w: Math.SQRT1_2 },
+              },
+            },
+          ],
+        }),
+        getDepthInformation: () => ({ getDepthInMeters: () => 2 }),
+      }),
+    );
+    expect(screen.getByText("090°")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop AR scan" }));
     expect(session.end).toHaveBeenCalledOnce();
+    expect(
+      screen.getByText(/Scan stopped · .* measured surfaces/),
+    ).toBeTruthy();
+    expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
+      0,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show 50 m view" }));
+    expect(screen.getByText(/50 M VIEW/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear scan" }));
     expect(screen.getByText("Scan off")).toBeTruthy();
     expect(screen.queryAllByLabelText(/Measured surface/)).toHaveLength(0);
   });

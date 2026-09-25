@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { Quaternion } from "three";
+import { Quaternion, Vector3 } from "three";
 import {
+  arYawDegrees,
   mergeObservedPoints,
   observedDepthPoint,
   pointsInDeviceFrame,
@@ -11,6 +12,14 @@ const origin = { x: 0, y: 0, z: 0 };
 const orientation = { x: 0, y: 0, z: 0, w: 1 };
 
 describe("AR depth samples", () => {
+  it("uses local AR turn rather than claiming geographic north", () => {
+    expect(arYawDegrees(new Quaternion())).toBe(0);
+    expect(
+      arYawDegrees(
+        new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2),
+      ),
+    ).toBeCloseTo(90);
+  });
   it("plots measured camera-plane depth in the local device frame", () => {
     const point = observedDepthPoint(
       0.5,

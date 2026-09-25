@@ -19,9 +19,10 @@ export function SiteHudLive({
   const generation = useRef(0);
   const overlayRoot = useRef<HTMLElement>(null);
   const ar = useRadarAr(overlayRoot);
+  const [arRange, setArRange] = useState<10 | 50>(10);
 
   useEffect(() => {
-    if (!expanded) ar.stop();
+    if (!expanded) ar.clear();
   }, [expanded]);
 
   useEffect(
@@ -104,9 +105,13 @@ export function SiteHudLive({
         crew={[]}
         landmarks={[]}
         floorLabel="No site"
-        active={false}
+        active={ar.state.kind === "running"}
         live
-        ar={ar.state.kind === "running" ? ar.state : undefined}
+        ar={
+          ar.state.kind === "running" || ar.state.kind === "paused"
+            ? { ...ar.state, rangeMeters: arRange }
+            : undefined
+        }
       />
       <div
         className="site-hud-entry site-hud-entry--location site-hud-entry--ar"
@@ -121,11 +126,15 @@ export function SiteHudLive({
           {ar.state.kind === "error" && (
             <span role="alert">{ar.state.message}</span>
           )}
-          {ar.state.kind === "running" && (
+          {(ar.state.kind === "running" || ar.state.kind === "paused") && (
             <span>
-              {ar.state.depthAvailable
-                ? `${ar.state.points.length} local surface samples · camera-relative`
-                : "Waiting for a depth frame…"}
+              {ar.state.kind === "paused"
+                ? `Scan stopped · ${ar.state.points.length} measured surfaces held on this phone`
+                : !ar.state.pose
+                  ? "Waiting for AR tracking…"
+                  : !ar.state.depthAvailable
+                    ? "Tracking active · waiting for depth. Move phone slowly."
+                    : `${ar.state.points.length} measured surfaces · turn the phone to map nearby geometry`}
             </span>
           )}
         </div>
@@ -133,6 +142,15 @@ export function SiteHudLive({
           <button type="button" onClick={ar.stop}>
             Stop AR scan
           </button>
+        ) : ar.state.kind === "paused" ? (
+          <>
+            <button type="button" onClick={() => void ar.start()}>
+              New AR scan
+            </button>
+            <button type="button" onClick={ar.clear}>
+              Clear scan
+            </button>
+          </>
         ) : (
           <button
             type="button"
@@ -140,6 +158,14 @@ export function SiteHudLive({
             onClick={() => void ar.start()}
           >
             Start AR scan
+          </button>
+        )}
+        {(ar.state.kind === "running" || ar.state.kind === "paused") && (
+          <button
+            type="button"
+            onClick={() => setArRange(arRange === 10 ? 50 : 10)}
+          >
+            Show {arRange === 10 ? "50 m" : "10 m"} view
           </button>
         )}
       </div>
@@ -183,8 +209,9 @@ export function SiteHudLive({
       <p>
         Jack does not save or send this location or AR depth. Opening the map
         shares the displayed coordinates with OpenStreetMap. The AR dots are
-        surfaces actually measured during this session; the 50 m grid is a
-        display limit, not a promise of detection or a saved site map.
+        surfaces actually measured during this session. Stop holds the scan in
+        this page until you clear it or leave. The 10 m and 50 m grids are
+        display scales, not detection guarantees or a saved site map.
       </p>
     </section>
   );

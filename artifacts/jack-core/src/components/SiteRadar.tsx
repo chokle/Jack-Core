@@ -22,7 +22,12 @@ interface Props {
   describeMember?: (member: HudCrewMember) => string;
   active?: boolean;
   live?: boolean;
-  ar?: { points: ArPoint[]; pose: ArPose | null };
+  ar?: {
+    points: ArPoint[];
+    pose: ArPose | null;
+    heading: number | null;
+    rangeMeters: 10 | 50;
+  };
 }
 
 export function SiteRadar({
@@ -43,7 +48,7 @@ export function SiteRadar({
   const [sweep, setSweep] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
   const permissionGeneration = useRef(0);
-  const heading = deviceHeading ?? manualHeading;
+  const heading = deviceHeading ?? ar?.heading ?? manualHeading;
 
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -54,7 +59,7 @@ export function SiteRadar({
   }, []);
 
   useEffect(() => {
-    if (!active || reducedMotion) return;
+    if (!active || live || reducedMotion) return;
     let frame = 0;
     let previous = 0;
     const tick = (now: number) => {
@@ -66,7 +71,17 @@ export function SiteRadar({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [active, reducedMotion]);
+  }, [active, live, reducedMotion]);
+
+  useEffect(() => {
+    if (!live || !active || !window.isSecureContext) return;
+    const constructor = window.DeviceOrientationEvent as
+      | (typeof DeviceOrientationEvent & {
+          requestPermission?: (absolute?: boolean) => Promise<string>;
+        })
+      | undefined;
+    if (constructor && !constructor.requestPermission) setDeviceEnabled(true);
+  }, [live, active]);
 
   useEffect(() => {
     if (!active) {
@@ -157,11 +172,13 @@ export function SiteRadar({
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
         <strong>
-          {live ? "—" : `${Math.round(heading).toString().padStart(3, "0")}°`}
+          {live && (!ar || (deviceHeading === null && ar.heading === null))
+            ? "—"
+            : `${Math.round(heading).toString().padStart(3, "0")}°`}
         </strong>
         <span>
           {ar
-            ? "LOCAL AR · 50 M DISPLAY"
+            ? `${deviceHeading !== null ? "DEVICE COMPASS" : "AR TURN FROM START"} · ${ar.rangeMeters} M VIEW`
             : live
               ? "NO SITE MAP"
               : "4 SEC SWEEP · DEMO"}
@@ -173,7 +190,7 @@ export function SiteRadar({
         role="group"
         aria-label={
           ar
-            ? "Local AR depth samples within a 50 metre display radius. Not for navigation."
+            ? `Local AR depth samples within a ${ar.rangeMeters} metre display radius. Not for navigation.`
             : `Schematic radar: ${floorLabel}. Not for navigation.`
         }
       >
@@ -211,7 +228,7 @@ export function SiteRadar({
               className="site-radar__tick"
             />
           ))}
-          {!ar &&
+          {(!ar || deviceHeading !== null) &&
             Array.from({ length: 12 }, (_, index) => {
               const degrees = index * 30;
               const angle = (degrees * Math.PI) / 180;
@@ -231,7 +248,7 @@ export function SiteRadar({
                 </text>
               );
             })}
-          {!ar &&
+          {(!ar || deviceHeading !== null) &&
             (
               [
                 ["N", 200, 20],
@@ -343,6 +360,19 @@ export function SiteRadar({
               );
             })}
         </g>
+        {ar && deviceHeading === null && ar.heading !== null && (
+          <g transform={`rotate(${-ar.heading} 200 200)`}>
+            <text
+              x="200"
+              y="58"
+              textAnchor="middle"
+              transform={`rotate(${ar.heading} 200 58)`}
+              className="site-radar__cardinal"
+            >
+              START
+            </text>
+          </g>
+        )}
         {ar && (
           <>
             <text
@@ -380,16 +410,18 @@ export function SiteRadar({
           </>
         )}
         {ar?.pose &&
-          pointsInDeviceFrame(ar.points, ar.pose).map((point, index) => (
-            <circle
-              key={index}
-              cx={200 + point.x * 3.3}
-              cy={200 - point.forward * 3.3}
-              r="2.5"
-              fill="var(--hud-accent, #67e8f9)"
-              aria-label={`Measured surface ${point.range.toFixed(1)} metres away`}
-            />
-          ))}
+          pointsInDeviceFrame(ar.points, ar.pose)
+            .filter((point) => point.range <= ar.rangeMeters)
+            .map((point, index) => (
+              <circle
+                key={index}
+                cx={200 + (point.x * 165) / ar.rangeMeters}
+                cy={200 - (point.forward * 165) / ar.rangeMeters}
+                r="3.5"
+                fill="var(--hud-accent, #67e8f9)"
+                aria-label={`Measured surface ${point.range.toFixed(1)} metres away`}
+              />
+            ))}
         {!live && !reducedMotion && (
           <g
             data-testid="radar-sweep"
@@ -409,7 +441,7 @@ export function SiteRadar({
             />
           </g>
         )}
-        {!live && (
+        {(!live || ar) && (
           <path
             d="M200 187L208 207L200 202L192 207Z"
             className="site-radar__viewer"
@@ -418,6 +450,23 @@ export function SiteRadar({
           </path>
         )}
       </svg>
+      {live &&
+        ar &&
+        active &&
+        !deviceEnabled &&
+        Boolean(
+          (
+            window.DeviceOrientationEvent as
+              | (typeof DeviceOrientationEvent & {
+                  requestPermission?: (absolute?: boolean) => Promise<string>;
+                })
+              | undefined
+          )?.requestPermission,
+        ) && (
+          <button type="button" onClick={() => void enableCompass()}>
+            Enable device compass
+          </button>
+        )}
       {!live && (
         <div className="site-radar__legend">
           <span>● Crew</span>

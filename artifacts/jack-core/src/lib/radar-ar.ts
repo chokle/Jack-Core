@@ -8,6 +8,13 @@ export type ArPose = {
   orientation: Quaternion;
 };
 
+/** Yaw in local AR coordinates; it is not a geographic compass bearing. */
+export function arYawDegrees(orientation: Quaternion): number | null {
+  const direction = new Vector3(0, 0, -1).applyQuaternion(orientation);
+  if (Math.hypot(direction.x, direction.z) < 0.1) return null;
+  return ((Math.atan2(direction.x, -direction.z) * 180) / Math.PI + 360) % 360;
+}
+
 /** Depth is camera-plane distance, not ray length. Keep only measured geometry. */
 export function observedDepthPoint(
   u: number,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Quaternion } from "three";
 import {
+  arYawDegrees,
   mergeObservedPoints,
   observedDepthPoint,
   type ArPoint,
@@ -32,10 +33,11 @@ type XR = { requestSession(name: string, options: object): Promise<Session> };
 export type RadarArState =
   | { kind: "idle" | "starting" | "error"; message?: string }
   | {
-      kind: "running";
+      kind: "running" | "paused";
       points: ArPoint[];
       pose: ArPose | null;
       depthAvailable: boolean;
+      heading: number | null;
     };
 
 export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
@@ -119,15 +121,21 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
         points: [],
         pose: null,
         depthAvailable: false,
+        heading: null,
       });
       let points: ArPoint[] = [];
       let previousSample = 0;
+      let startYaw: number | null = null;
       const ended = () => {
         scanCanvas.remove();
         if (canvasRef.current === scanCanvas) canvasRef.current = null;
         if (generationAtStart !== generation.current) return;
         sessionRef.current = null;
-        setState({ kind: "idle" });
+        setState((previous) =>
+          previous.kind === "running"
+            ? { ...previous, kind: "paused" }
+            : { kind: "idle" },
+        );
       };
       activeSession.addEventListener("end", ended);
       const tick = (time: number, frame: Frame) => {
@@ -153,6 +161,12 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
               orientation.w,
             ),
           };
+          const yaw = arYawDegrees(pose.orientation);
+          if (yaw !== null && startYaw === null) startYaw = yaw;
+          const heading =
+            yaw !== null && startYaw !== null
+              ? (yaw - startYaw + 360) % 360
+              : null;
           const depth = frame.getDepthInformation(view);
           const samples: ArPoint[] = [];
           if (depth) {
@@ -171,7 +185,13 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
               }
           }
           points = mergeObservedPoints(points, samples, time);
-          setState({ kind: "running", points, pose, depthAvailable: !!depth });
+          setState({
+            kind: "running",
+            points,
+            pose,
+            depthAvailable: !!depth,
+            heading,
+          });
         } catch {
           stop();
           setState({
@@ -202,9 +222,23 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     sessionRef.current = null;
     canvasRef.current?.remove();
     canvasRef.current = null;
+    setState((previous) =>
+      previous.kind === "running"
+        ? { ...previous, kind: "paused" }
+        : { kind: "idle" },
+    );
+    void session?.end().catch(() => undefined);
+  }
+
+  function clear() {
+    generation.current++;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    canvasRef.current?.remove();
+    canvasRef.current = null;
     setState({ kind: "idle" });
     void session?.end().catch(() => undefined);
   }
 
-  return { state, start, stop };
+  return { state, start, stop, clear };
 }
