@@ -87,12 +87,12 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
       const gl = scanCanvas.getContext("webgl", {
         alpha: true,
         antialias: false,
+        xrCompatible: true,
       });
-      if (!gl || !gl.makeXRCompatible) {
+      if (!gl) {
         scanCanvas.remove();
         throw new Error("WebGL XR unavailable");
       }
-      await gl.makeXRCompatible();
       const activeSession = await xr.requestSession("immersive-ar", {
         requiredFeatures: ["local", "dom-overlay", "depth-sensing"],
         domOverlay: { root: overlayRoot.current },

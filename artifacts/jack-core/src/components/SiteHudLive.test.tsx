@@ -100,8 +100,11 @@ describe("live site radar", () => {
     } as unknown as WebGLRenderingContext);
     render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Start AR scan" }));
-    await waitFor(() => expect(requestSession).toHaveBeenCalledOnce());
-    expect(session.updateRenderState).toHaveBeenCalledOnce();
+    // Immersive WebXR must be requested in the same user-activation task.
+    expect(requestSession).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(session.updateRenderState).toHaveBeenCalledOnce(),
+    );
     expect(session.requestReferenceSpace).toHaveBeenCalledOnce();
     await waitFor(() => expect(frames.length).toBe(1));
     expect(screen.getByText("Waiting for a depth frame…")).toBeTruthy();
