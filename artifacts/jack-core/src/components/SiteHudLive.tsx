@@ -119,7 +119,15 @@ export function SiteHudLive({
       >
         <div>
           <strong>Phone AR depth</strong>
-          {ar.state.kind === "idle" && <span>Scan off</span>}
+          {ar.state.kind === "idle" && (
+            <span>
+              {ar.support === "checking"
+                ? "Checking AR support…"
+                : ar.support === "unsupported"
+                  ? "AR depth is unavailable on this device and browser."
+                  : "Scan off"}
+            </span>
+          )}
           {ar.state.kind === "starting" && (
             <span>Starting camera and depth…</span>
           )}
@@ -154,7 +162,11 @@ export function SiteHudLive({
         ) : (
           <button
             type="button"
-            disabled={ar.state.kind === "starting"}
+            disabled={
+              ar.state.kind === "starting" ||
+              ar.support === "checking" ||
+              ar.support === "unsupported"
+            }
             onClick={() => void ar.start()}
           >
             Start AR scan

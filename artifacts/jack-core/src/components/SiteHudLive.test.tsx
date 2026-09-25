@@ -65,6 +65,23 @@ describe("live site radar", () => {
     expect(screen.queryByRole("button", { name: "Stop AR scan" })).toBeNull();
   });
 
+  it("does not request an immersive session on an unsupported desktop", async () => {
+    const isSessionSupported = vi.fn().mockResolvedValue(false);
+    const requestSession = vi.fn();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", { xr: { isSessionSupported, requestSession } });
+    render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
+    expect(isSessionSupported).toHaveBeenCalledWith("immersive-ar");
+    expect(screen.getByText("Checking AR support…")).toBeTruthy();
+    const start = screen.getByRole("button", { name: "Start AR scan" });
+    expect((start as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByText(
+      "AR depth is unavailable on this device and browser.",
+    );
+    expect((start as HTMLButtonElement).disabled).toBe(true);
+    expect(requestSession).not.toHaveBeenCalled();
+  });
+
   it("tracks a measured AR surface, shows turns, and holds it on stop", async () => {
     const frames: Array<(time: number, frame: unknown) => void> = [];
     const listeners = new Map<string, () => void>();

@@ -28,7 +28,10 @@ type Session = {
   removeEventListener(name: string, callback: () => void): void;
   end(): Promise<void>;
 };
-type XR = { requestSession(name: string, options: object): Promise<Session> };
+type XR = {
+  isSessionSupported?(name: string): Promise<boolean>;
+  requestSession(name: string, options: object): Promise<Session>;
+};
 
 export type RadarArState =
   | { kind: "idle" | "starting" | "error"; message?: string }
@@ -42,9 +45,35 @@ export type RadarArState =
 
 export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
   const [state, setState] = useState<RadarArState>({ kind: "idle" });
+  const [support, setSupport] = useState<
+    "unknown" | "checking" | "supported" | "unsupported"
+  >(() =>
+    (navigator as unknown as { xr?: XR }).xr?.isSessionSupported
+      ? "checking"
+      : "unknown",
+  );
   const sessionRef = useRef<Session | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const generation = useRef(0);
+
+  useEffect(() => {
+    const xr = (navigator as unknown as { xr?: XR }).xr;
+    if (!xr?.isSessionSupported) return;
+    let current = true;
+    void xr
+      .isSessionSupported("immersive-ar")
+      .then((supported) => {
+        if (current) setSupport(supported ? "supported" : "unsupported");
+      })
+      .catch(() => {
+        // Some browsers cannot answer the capability query. Let the normal
+        // user-activated request provide the final support/permission result.
+        if (current) setSupport("unknown");
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   useEffect(
     () => () => {
@@ -58,6 +87,7 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
   );
 
   async function start() {
+    if (support === "checking" || support === "unsupported") return;
     const generationAtStart = ++generation.current;
     const xr = (navigator as unknown as { xr?: XR }).xr;
     const Layer = (
@@ -240,5 +270,5 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     void session?.end().catch(() => undefined);
   }
 
-  return { state, start, stop, clear };
+  return { state, support, start, stop, clear };
 }
