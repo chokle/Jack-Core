@@ -422,6 +422,7 @@
   background: #000;
 }
 .site-hud__page:xr-overlay {
+  background: transparent;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;

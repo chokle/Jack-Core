@@ -83,6 +83,7 @@ describe("live site radar", () => {
   });
 
   it("tracks a measured AR surface, shows turns, and holds it on stop", async () => {
+    const getDepthInMeters = vi.fn(() => 2);
     const frames: Array<(time: number, frame: unknown) => void> = [];
     const listeners = new Map<string, () => void>();
     const session = {
@@ -164,9 +165,11 @@ describe("live site radar", () => {
             },
           ],
         }),
-        getDepthInformation: () => ({ getDepthInMeters: () => 2 }),
+        getDepthInformation: () => ({ getDepthInMeters }),
       }),
     );
+    expect(getDepthInMeters).toHaveBeenCalledWith(0.2, 0.3);
+    expect(getDepthInMeters).toHaveBeenCalledWith(0.8, 0.7);
     expect(screen.getByRole("button", { name: "Stop AR scan" })).toBeTruthy();
     expect(screen.getByText(/measured surfaces · turn the phone/)).toBeTruthy();
     expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
