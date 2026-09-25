@@ -1110,7 +1110,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     interview: "Interview",
     review: "Review",
     reports: "Pilot Reports",
-    radar: "Site radar demo",
+    radar: "Site radar",
     closeout: canViewCloseout ? "Closeout" : "Library",
   }[view];
 

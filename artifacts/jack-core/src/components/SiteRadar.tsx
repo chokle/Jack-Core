@@ -7,6 +7,11 @@ import {
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
 import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
+import {
+  pointsInDeviceFrame,
+  type ArPoint,
+  type ArPose,
+} from "../lib/radar-ar";
 
 const SWEEP_PERIOD_MS = 4000;
 
@@ -16,6 +21,13 @@ interface Props {
   floorLabel: string;
   describeMember?: (member: HudCrewMember) => string;
   active?: boolean;
+  live?: boolean;
+  ar?: {
+    points: ArPoint[];
+    pose: ArPose | null;
+    heading: number | null;
+    rangeMeters: 10 | 50;
+  };
 }
 
 export function SiteRadar({
@@ -24,6 +36,8 @@ export function SiteRadar({
   floorLabel,
   describeMember,
   active = true,
+  live = false,
+  ar,
 }: Props) {
   const id = useId();
   const [manualHeading, setManualHeading] = useState(0);
@@ -34,7 +48,7 @@ export function SiteRadar({
   const [sweep, setSweep] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
   const permissionGeneration = useRef(0);
-  const heading = deviceHeading ?? manualHeading;
+  const heading = deviceHeading ?? ar?.heading ?? manualHeading;
 
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -45,7 +59,7 @@ export function SiteRadar({
   }, []);
 
   useEffect(() => {
-    if (!active || reducedMotion) return;
+    if (!active || live || reducedMotion) return;
     let frame = 0;
     let previous = 0;
     const tick = (now: number) => {
@@ -57,7 +71,17 @@ export function SiteRadar({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [active, reducedMotion]);
+  }, [active, live, reducedMotion]);
+
+  useEffect(() => {
+    if (!live || !active || !window.isSecureContext) return;
+    const constructor = window.DeviceOrientationEvent as
+      | (typeof DeviceOrientationEvent & {
+          requestPermission?: (absolute?: boolean) => Promise<string>;
+        })
+      | undefined;
+    if (constructor && !constructor.requestPermission) setDeviceEnabled(true);
+  }, [live, active]);
 
   useEffect(() => {
     if (!active) {
@@ -147,14 +171,28 @@ export function SiteRadar({
     <section className="site-radar" aria-label="Site radar">
       <div className="site-radar__readout">
         <span>{floorLabel}</span>
-        <strong>{Math.round(heading).toString().padStart(3, "0")}°</strong>
-        <span>4 SEC SWEEP · DEMO</span>
+        <strong>
+          {live && (!ar || (deviceHeading === null && ar.heading === null))
+            ? "—"
+            : `${Math.round(heading).toString().padStart(3, "0")}°`}
+        </strong>
+        <span>
+          {ar
+            ? `${deviceHeading !== null ? "DEVICE COMPASS" : "AR TURN FROM START"} · ${ar.rangeMeters} M VIEW`
+            : live
+              ? "NO SITE MAP"
+              : "4 SEC SWEEP · DEMO"}
+        </span>
       </div>
       <svg
         className="site-radar__scope"
         viewBox="0 0 400 400"
         role="group"
-        aria-label={`Schematic radar: ${floorLabel}. Not for navigation.`}
+        aria-label={
+          ar
+            ? `Local AR depth samples within a ${ar.rangeMeters} metre display radius. Not for navigation.`
+            : `Schematic radar: ${floorLabel}. Not for navigation.`
+        }
       >
         <defs>
           <radialGradient id={`${id}-glow`}>
@@ -190,46 +228,48 @@ export function SiteRadar({
               className="site-radar__tick"
             />
           ))}
-          {Array.from({ length: 12 }, (_, index) => {
-            const degrees = index * 30;
-            const angle = (degrees * Math.PI) / 180;
-            const x = 200 + Math.sin(angle) * 150;
-            const y = 200 - Math.cos(angle) * 150;
-            return (
+          {(!ar || deviceHeading !== null) &&
+            Array.from({ length: 12 }, (_, index) => {
+              const degrees = index * 30;
+              const angle = (degrees * Math.PI) / 180;
+              const x = 200 + Math.sin(angle) * 150;
+              const y = 200 - Math.cos(angle) * 150;
+              return (
+                <text
+                  key={`bearing-${degrees}`}
+                  x={x}
+                  y={y}
+                  transform={`rotate(${heading} ${x} ${y})`}
+                  className="site-radar__bearing"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {degrees}
+                </text>
+              );
+            })}
+          {(!ar || deviceHeading !== null) &&
+            (
+              [
+                ["N", 200, 20],
+                ["E", 382, 204],
+                ["S", 200, 387],
+                ["W", 18, 204],
+              ] as const
+            ).map(([label, x, y]) => (
               <text
-                key={`bearing-${degrees}`}
+                key={label}
                 x={x}
                 y={y}
-                transform={`rotate(${heading} ${x} ${y})`}
-                className="site-radar__bearing"
                 textAnchor="middle"
-                dominantBaseline="middle"
+                transform={`rotate(${heading} ${x} ${y})`}
+                className={
+                  label === "N" ? "site-radar__north" : "site-radar__cardinal"
+                }
               >
-                {degrees}
+                {label}
               </text>
-            );
-          })}
-          {(
-            [
-              ["N", 200, 20],
-              ["E", 382, 204],
-              ["S", 200, 387],
-              ["W", 18, 204],
-            ] as const
-          ).map(([label, x, y]) => (
-            <text
-              key={label}
-              x={x}
-              y={y}
-              textAnchor="middle"
-              transform={`rotate(${heading} ${x} ${y})`}
-              className={
-                label === "N" ? "site-radar__north" : "site-radar__cardinal"
-              }
-            >
-              {label}
-            </text>
-          ))}
+            ))}
           {landmarks.map((point) => {
             const Icon = siteSafetyIcon(point.kind);
             const x = 200 + (point.x - 50) * 2.2,
@@ -320,7 +360,69 @@ export function SiteRadar({
               );
             })}
         </g>
-        {!reducedMotion && (
+        {ar && deviceHeading === null && ar.heading !== null && (
+          <g transform={`rotate(${-ar.heading} 200 200)`}>
+            <text
+              x="200"
+              y="58"
+              textAnchor="middle"
+              transform={`rotate(${ar.heading} 200 58)`}
+              className="site-radar__cardinal"
+            >
+              START
+            </text>
+          </g>
+        )}
+        {ar && (
+          <>
+            <text
+              x="200"
+              y="20"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              FORWARD
+            </text>
+            <text
+              x="382"
+              y="204"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              R
+            </text>
+            <text
+              x="18"
+              y="204"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              L
+            </text>
+            <text
+              x="200"
+              y="387"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              BACK
+            </text>
+          </>
+        )}
+        {ar?.pose &&
+          pointsInDeviceFrame(ar.points, ar.pose)
+            .filter((point) => point.range <= ar.rangeMeters)
+            .map((point, index) => (
+              <circle
+                key={index}
+                cx={200 + (point.x * 165) / ar.rangeMeters}
+                cy={200 - (point.forward * 165) / ar.rangeMeters}
+                r="3.5"
+                fill="var(--hud-accent, #67e8f9)"
+                aria-label={`Measured surface ${point.range.toFixed(1)} metres away`}
+              />
+            ))}
+        {!live && !reducedMotion && (
           <g
             data-testid="radar-sweep"
             transform={`rotate(${sweep} 200 200)`}
@@ -339,68 +441,93 @@ export function SiteRadar({
             />
           </g>
         )}
-        <path
-          d="M200 187L208 207L200 202L192 207Z"
-          className="site-radar__viewer"
-        >
-          <title>You · facing forward</title>
-        </path>
+        {(!live || ar) && (
+          <path
+            d="M200 187L208 207L200 202L192 207Z"
+            className="site-radar__viewer"
+          >
+            <title>You · facing forward</title>
+          </path>
+        )}
       </svg>
-      <div className="site-radar__legend">
-        <span>● Crew</span>
-        <span>Safety landmarks</span>
-        <span>◌ Last known</span>
-      </div>
-      <button
-        className="site-radar__settings"
-        type="button"
-        aria-expanded={controlsOpen}
-        aria-controls={`${id}-controls`}
-        onClick={() => setControlsOpen(!controlsOpen)}
-      >
-        Compass controls
-      </button>
-      <div
-        className="site-radar__controls"
-        id={`${id}-controls`}
-        hidden={!controlsOpen}
-      >
-        <label htmlFor={`${id}-heading`}>
-          Turn demo heading <output>{manualHeading}°</output>
-        </label>
-        <input
-          id={`${id}-heading`}
-          type="range"
-          min="0"
-          max="359"
-          value={manualHeading}
-          onChange={(event) => {
-            permissionGeneration.current++;
-            setDeviceEnabled(false);
-            setDeviceHeading(null);
-            setMessage("Manual demo heading");
-            setManualHeading(Number(event.target.value));
-          }}
-        />
+      {live &&
+        ar &&
+        active &&
+        !deviceEnabled &&
+        Boolean(
+          (
+            window.DeviceOrientationEvent as
+              | (typeof DeviceOrientationEvent & {
+                  requestPermission?: (absolute?: boolean) => Promise<string>;
+                })
+              | undefined
+          )?.requestPermission,
+        ) && (
+          <button type="button" onClick={() => void enableCompass()}>
+            Enable device compass
+          </button>
+        )}
+      {!live && (
+        <div className="site-radar__legend">
+          <span>● Crew</span>
+          <span>Safety landmarks</span>
+          <span>◌ Last known</span>
+        </div>
+      )}
+      {!live && (
         <button
+          className="site-radar__settings"
           type="button"
-          onClick={() => {
-            if (deviceEnabled) {
+          aria-expanded={controlsOpen}
+          aria-controls={`${id}-controls`}
+          onClick={() => setControlsOpen(!controlsOpen)}
+        >
+          Compass controls
+        </button>
+      )}
+      {!live && (
+        <div
+          className="site-radar__controls"
+          id={`${id}-controls`}
+          hidden={!controlsOpen}
+        >
+          <label htmlFor={`${id}-heading`}>
+            Turn demo heading <output>{manualHeading}°</output>
+          </label>
+          <input
+            id={`${id}-heading`}
+            type="range"
+            min="0"
+            max="359"
+            value={manualHeading}
+            onChange={(event) => {
               permissionGeneration.current++;
               setDeviceEnabled(false);
               setDeviceHeading(null);
               setMessage("Manual demo heading");
-            } else void enableCompass();
-          }}
-        >
-          {deviceEnabled ? "Use manual heading" : "Use device compass"}
-        </button>
-        <p aria-live="polite">{message}</p>
-        <p className="site-radar__notice">
-          Fictional positions · sweep is a visual simulation, not nearby
-          detection. N is demo north in manual mode. Not for navigation.
-        </p>
-      </div>
+              setManualHeading(Number(event.target.value));
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (deviceEnabled) {
+                permissionGeneration.current++;
+                setDeviceEnabled(false);
+                setDeviceHeading(null);
+                setMessage("Manual demo heading");
+              } else void enableCompass();
+            }}
+          >
+            {deviceEnabled ? "Use manual heading" : "Use device compass"}
+          </button>
+          <p aria-live="polite">{message}</p>
+          <p className="site-radar__notice">
+            Fictional positions · sweep is a visual simulation, not nearby
+            detection. N is demo north in manual mode. Not for navigation.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

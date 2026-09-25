@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { JackShell, type JackView } from "./JackShell";
+import { SiteHudDemo } from "./SiteHudDemo";
 import type { GraphModel } from "../lib/memory-graph";
 import { collectJackUiContext } from "../lib/jack-ui-context";
 
 vi.mock("./SystemHealthWidget", () => ({ SystemHealthWidget: () => null }));
-
 const model = {
   counts: { nodes: 0, connections: 0, knowledge: 0, topics: 0 },
 } as GraphModel;
@@ -30,103 +36,44 @@ function shell(userId?: string, active: JackView = "graph") {
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
-describe("Site HUD demo entry", () => {
-  it("keeps fictional site data out of Jack Everywhere context across panels", () => {
+describe("site radar release gate", () => {
+  it("exposes the empty live radar to a resolved account regardless of demo flag", () => {
     vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    const { rerender } = render(shell("demo-account"));
-    const snapshot = () => ({ ...collectJackUiContext(), capturedAt: null });
-    const baseline = snapshot();
-    expect(baseline.surface).toBe("Living Memory");
-    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
-    expect(snapshot()).toEqual(baseline);
-    expect(screen.queryByRole("group", { name: /Schematic radar/ })).toBeNull();
-    rerender(shell("demo-account", "radar"));
-    const radarContext = snapshot();
-    expect(radarContext.surface).toBe("Site radar demo");
-    for (const name of [
-      "Floor / elevation",
-      "Crew roster",
-      "Safety landmarks",
-      "Site alerts",
-      "Signal / simulation",
-    ]) {
-      fireEvent.click(screen.getByRole("button", { name }));
-      if (name === "Floor / elevation") {
-        fireEvent.click(screen.getByRole("button", { name: "Level 1 4 m" }));
-      }
-      expect(snapshot()).toEqual(radarContext);
-    }
-    rerender(shell("demo-account", "library"));
-    expect(collectJackUiContext().surface).toBe("Library");
-    expect(screen.queryByRole("group", { name: /Schematic radar/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Open radar/ })).toBeTruthy();
-  });
-
-  it.each([undefined, "false", "1"])(
-    "stays absent unless the build flag is exactly true (%s)",
-    (flag) => {
-      vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", flag);
-      render(shell("demo-account"));
-      expect(
-        screen.queryByRole("button", { name: "Open demo site" }),
-      ).toBeNull();
-    },
-  );
-
-  it("requires a resolved account even when enabled", () => {
-    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    render(shell());
+    const { rerender } = render(shell("account-a"));
+    expect(screen.getByRole("button", { name: "Open radar" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open demo site" })).toBeNull();
-  });
-
-  it("requires explicit site selection and preserves it across app surfaces", () => {
-    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    const { rerender } = render(shell("demo-account"));
-    expect(
-      screen.queryByRole("button", { name: "Close demo site" }),
-    ).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
-    rerender(shell("demo-account", "library"));
-    expect(
-      screen.getByRole("button", { name: "Close demo site" }),
-    ).toBeTruthy();
-    expect(screen.getByText("library content")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close demo site" }));
-    expect(screen.getByRole("button", { name: "Open demo site" })).toBeTruthy();
-  });
-  it("keeps the same radar state across app pages without mounting page content behind it", () => {
-    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    const { rerender } = render(shell("demo-account", "radar"));
-    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
-    fireEvent.click(screen.getByRole("button", { name: "Compass controls" }));
-    fireEvent.change(
-      screen.getByRole("slider", { name: /Turn demo heading/ }),
-      { target: { value: "90" } },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Open radar" }));
+    rerender(shell("account-a", "radar"));
+    expect(collectJackUiContext().surface).toBe("Site radar");
+    expect(screen.getByText(/No site connected\. Site scans/)).toBeTruthy();
     expect(screen.queryByText("radar content")).toBeNull();
-    rerender(shell("demo-account", "library"));
-    expect(screen.getByText("library content")).toBeTruthy();
-    rerender(shell("demo-account", "radar"));
-    expect(screen.getByTestId("radar-world").getAttribute("transform")).toBe(
-      "rotate(-90 200 200)",
-    );
   });
 
-  it("discards site state when account identity changes or disappears", () => {
-    vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    const { rerender } = render(shell("first-account"));
+  it("hides radar without an account and clears location on account change", () => {
+    const getCurrentPosition = vi.fn();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
+    const { rerender } = render(shell("account-a", "radar"));
+    fireEvent.click(screen.getByRole("button", { name: "Use my location" }));
+    act(() =>
+      getCurrentPosition.mock.calls[0][0]({
+        coords: { latitude: 1, longitude: 2, accuracy: 5 },
+      }),
+    );
+    expect(screen.getByText(/1\.000000, 2\.000000/)).toBeTruthy();
+    rerender(shell("account-b", "radar"));
+    expect(screen.getByText("Location off")).toBeTruthy();
+    rerender(shell(undefined, "graph"));
+    expect(screen.queryByRole("button", { name: "Open radar" })).toBeNull();
+  });
+
+  it("keeps the original fictional demo component opt-in and separate", () => {
+    render(<SiteHudDemo onOpenRadar={vi.fn()} onExitRadar={vi.fn()} />);
+    expect(screen.getByText("Fictional site · Demo only")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
-    rerender(shell("second-account"));
-    expect(
-      screen.queryByRole("button", { name: "Close demo site" }),
-    ).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open demo site" }));
-    rerender(shell());
-    expect(
-      screen.queryByRole("button", { name: "Close demo site" }),
-    ).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open demo site" })).toBeNull();
+    expect(screen.getByText(/Fictional positions/)).toBeTruthy();
   });
 });
