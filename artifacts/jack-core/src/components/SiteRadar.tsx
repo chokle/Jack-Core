@@ -7,6 +7,11 @@ import {
 } from "../lib/radar-heading";
 import "./SiteRadar.css";
 import { siteSafetyColor, siteSafetyIcon } from "./site-safety-icons";
+import {
+  pointsInDeviceFrame,
+  type ArPoint,
+  type ArPose,
+} from "../lib/radar-ar";
 
 const SWEEP_PERIOD_MS = 4000;
 
@@ -17,6 +22,7 @@ interface Props {
   describeMember?: (member: HudCrewMember) => string;
   active?: boolean;
   live?: boolean;
+  ar?: { points: ArPoint[]; pose: ArPose | null };
 }
 
 export function SiteRadar({
@@ -26,6 +32,7 @@ export function SiteRadar({
   describeMember,
   active = true,
   live = false,
+  ar,
 }: Props) {
   const id = useId();
   const [manualHeading, setManualHeading] = useState(0);
@@ -152,13 +159,23 @@ export function SiteRadar({
         <strong>
           {live ? "—" : `${Math.round(heading).toString().padStart(3, "0")}°`}
         </strong>
-        <span>{live ? "NO SITE MAP" : "4 SEC SWEEP · DEMO"}</span>
+        <span>
+          {ar
+            ? "LOCAL AR · 50 M DISPLAY"
+            : live
+              ? "NO SITE MAP"
+              : "4 SEC SWEEP · DEMO"}
+        </span>
       </div>
       <svg
         className="site-radar__scope"
         viewBox="0 0 400 400"
         role="group"
-        aria-label={`Schematic radar: ${floorLabel}. Not for navigation.`}
+        aria-label={
+          ar
+            ? "Local AR depth samples within a 50 metre display radius. Not for navigation."
+            : `Schematic radar: ${floorLabel}. Not for navigation.`
+        }
       >
         <defs>
           <radialGradient id={`${id}-glow`}>
@@ -194,46 +211,48 @@ export function SiteRadar({
               className="site-radar__tick"
             />
           ))}
-          {Array.from({ length: 12 }, (_, index) => {
-            const degrees = index * 30;
-            const angle = (degrees * Math.PI) / 180;
-            const x = 200 + Math.sin(angle) * 150;
-            const y = 200 - Math.cos(angle) * 150;
-            return (
+          {!ar &&
+            Array.from({ length: 12 }, (_, index) => {
+              const degrees = index * 30;
+              const angle = (degrees * Math.PI) / 180;
+              const x = 200 + Math.sin(angle) * 150;
+              const y = 200 - Math.cos(angle) * 150;
+              return (
+                <text
+                  key={`bearing-${degrees}`}
+                  x={x}
+                  y={y}
+                  transform={`rotate(${heading} ${x} ${y})`}
+                  className="site-radar__bearing"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {degrees}
+                </text>
+              );
+            })}
+          {!ar &&
+            (
+              [
+                ["N", 200, 20],
+                ["E", 382, 204],
+                ["S", 200, 387],
+                ["W", 18, 204],
+              ] as const
+            ).map(([label, x, y]) => (
               <text
-                key={`bearing-${degrees}`}
+                key={label}
                 x={x}
                 y={y}
-                transform={`rotate(${heading} ${x} ${y})`}
-                className="site-radar__bearing"
                 textAnchor="middle"
-                dominantBaseline="middle"
+                transform={`rotate(${heading} ${x} ${y})`}
+                className={
+                  label === "N" ? "site-radar__north" : "site-radar__cardinal"
+                }
               >
-                {degrees}
+                {label}
               </text>
-            );
-          })}
-          {(
-            [
-              ["N", 200, 20],
-              ["E", 382, 204],
-              ["S", 200, 387],
-              ["W", 18, 204],
-            ] as const
-          ).map(([label, x, y]) => (
-            <text
-              key={label}
-              x={x}
-              y={y}
-              textAnchor="middle"
-              transform={`rotate(${heading} ${x} ${y})`}
-              className={
-                label === "N" ? "site-radar__north" : "site-radar__cardinal"
-              }
-            >
-              {label}
-            </text>
-          ))}
+            ))}
           {landmarks.map((point) => {
             const Icon = siteSafetyIcon(point.kind);
             const x = 200 + (point.x - 50) * 2.2,
@@ -324,6 +343,53 @@ export function SiteRadar({
               );
             })}
         </g>
+        {ar && (
+          <>
+            <text
+              x="200"
+              y="20"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              FORWARD
+            </text>
+            <text
+              x="382"
+              y="204"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              R
+            </text>
+            <text
+              x="18"
+              y="204"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              L
+            </text>
+            <text
+              x="200"
+              y="387"
+              textAnchor="middle"
+              className="site-radar__cardinal"
+            >
+              BACK
+            </text>
+          </>
+        )}
+        {ar?.pose &&
+          pointsInDeviceFrame(ar.points, ar.pose).map((point, index) => (
+            <circle
+              key={index}
+              cx={200 + point.x * 3.3}
+              cy={200 - point.forward * 3.3}
+              r="2.5"
+              fill="var(--hud-accent, #67e8f9)"
+              aria-label={`Measured surface ${point.range.toFixed(1)} metres away`}
+            />
+          ))}
         {!live && !reducedMotion && (
           <g
             data-testid="radar-sweep"

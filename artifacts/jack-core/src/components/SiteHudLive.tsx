@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SiteRadar } from "./SiteRadar";
+import { useRadarAr } from "./useRadarAr";
 import "./SiteHud.css";
 
 type LocationState =
@@ -16,6 +17,12 @@ export function SiteHudLive({
 }) {
   const [location, setLocation] = useState<LocationState>({ kind: "idle" });
   const generation = useRef(0);
+  const overlayRoot = useRef<HTMLElement>(null);
+  const ar = useRadarAr(overlayRoot);
+
+  useEffect(() => {
+    if (!expanded) ar.stop();
+  }, [expanded]);
 
   useEffect(
     () => () => {
@@ -83,7 +90,11 @@ export function SiteHudLive({
     );
 
   return (
-    <section className="site-hud__page" aria-label="Site radar">
+    <section
+      ref={overlayRoot}
+      className="site-hud__page"
+      aria-label="Site radar"
+    >
       <h1>Site radar</h1>
       <p>
         No site connected. Site scans, crew positions, and landmarks will appear
@@ -95,7 +106,43 @@ export function SiteHudLive({
         floorLabel="No site"
         active={false}
         live
+        ar={ar.state.kind === "running" ? ar.state : undefined}
       />
+      <div
+        className="site-hud-entry site-hud-entry--location site-hud-entry--ar"
+        aria-live="polite"
+      >
+        <div>
+          <strong>Phone AR depth</strong>
+          {ar.state.kind === "idle" && <span>Scan off</span>}
+          {ar.state.kind === "starting" && (
+            <span>Starting camera and depth…</span>
+          )}
+          {ar.state.kind === "error" && (
+            <span role="alert">{ar.state.message}</span>
+          )}
+          {ar.state.kind === "running" && (
+            <span>
+              {ar.state.depthAvailable
+                ? `${ar.state.points.length} local surface samples · camera-relative`
+                : "Waiting for a depth frame…"}
+            </span>
+          )}
+        </div>
+        {ar.state.kind === "running" ? (
+          <button type="button" onClick={ar.stop}>
+            Stop AR scan
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={ar.state.kind === "starting"}
+            onClick={() => void ar.start()}
+          >
+            Start AR scan
+          </button>
+        )}
+      </div>
       <div
         className="site-hud-entry site-hud-entry--location"
         aria-live="polite"
@@ -134,9 +181,10 @@ export function SiteHudLive({
         </p>
       )}
       <p>
-        Jack does not save or send this location. Opening the map shares the
-        displayed coordinates with OpenStreetMap. The grid is schematic and does
-        not scan or measure a 50 m area.
+        Jack does not save or send this location or AR depth. Opening the map
+        shares the displayed coordinates with OpenStreetMap. The AR dots are
+        surfaces actually measured during this session; the 50 m grid is a
+        display limit, not a promise of detection or a saved site map.
       </p>
     </section>
   );

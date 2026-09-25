@@ -6,12 +6,14 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { SiteHudLive } from "./SiteHudLive";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("live site radar", () => {
@@ -51,5 +53,88 @@ describe("live site radar", () => {
     expect(
       screen.getByRole("link", { name: /geographic map/ }).getAttribute("href"),
     ).toContain("openstreetmap.org");
+  });
+
+  it("requests AR only on action and reports unavailable devices", async () => {
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", {});
+    render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
+    expect(screen.getByText("Scan off")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start AR scan" }));
+    expect(await screen.findByText(/AR depth is unavailable/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop AR scan" })).toBeNull();
+  });
+
+  it("plots a measured AR surface and clears it when scanning stops", async () => {
+    const frames: Array<(time: number, frame: unknown) => void> = [];
+    const listeners = new Map<string, () => void>();
+    const session = {
+      updateRenderState: vi.fn(),
+      requestReferenceSpace: vi.fn().mockResolvedValue({}),
+      requestAnimationFrame: vi.fn(
+        (callback: (time: number, frame: unknown) => void) =>
+          frames.push(callback),
+      ),
+      addEventListener: vi.fn((name: string, callback: () => void) =>
+        listeners.set(name, callback),
+      ),
+      removeEventListener: vi.fn(),
+      end: vi.fn(async () => listeners.get("end")?.()),
+    };
+    const requestSession = vi.fn().mockResolvedValue(session);
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", { xr: { requestSession } });
+    vi.stubGlobal(
+      "XRWebGLLayer",
+      class {
+        framebuffer = null;
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      makeXRCompatible: vi.fn().mockResolvedValue(undefined),
+      bindFramebuffer: vi.fn(),
+      clearColor: vi.fn(),
+      clear: vi.fn(),
+      FRAMEBUFFER: 1,
+      COLOR_BUFFER_BIT: 2,
+    } as unknown as WebGLRenderingContext);
+    render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start AR scan" }));
+    await waitFor(() => expect(requestSession).toHaveBeenCalledOnce());
+    expect(session.updateRenderState).toHaveBeenCalledOnce();
+    expect(session.requestReferenceSpace).toHaveBeenCalledOnce();
+    await waitFor(() => expect(frames.length).toBe(1));
+    expect(screen.getByText("Waiting for a depth frame…")).toBeTruthy();
+    expect(requestSession).toHaveBeenCalledWith(
+      "immersive-ar",
+      expect.objectContaining({
+        requiredFeatures: ["local", "dom-overlay", "depth-sensing"],
+      }),
+    );
+    act(() =>
+      frames.shift()?.(300, {
+        getViewerPose: () => ({
+          views: [
+            {
+              projectionMatrix: [1, 0, 0, 0, 0, 1],
+              transform: {
+                position: { x: 0, y: 0, z: 0 },
+                orientation: { x: 0, y: 0, z: 0, w: 1 },
+              },
+            },
+          ],
+        }),
+        getDepthInformation: () => ({ getDepthInMeters: () => 2 }),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Stop AR scan" })).toBeTruthy();
+    expect(screen.getByText(/local surface samples/)).toBeTruthy();
+    expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
+      0,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop AR scan" }));
+    expect(session.end).toHaveBeenCalledOnce();
+    expect(screen.getByText("Scan off")).toBeTruthy();
+    expect(screen.queryAllByLabelText(/Measured surface/)).toHaveLength(0);
   });
 });
