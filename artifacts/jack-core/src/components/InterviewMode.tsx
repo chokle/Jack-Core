@@ -528,7 +528,7 @@ export function InterviewMode({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="mx-auto w-full max-w-2xl px-5 py-6 md:px-8 md:py-10">
+        <div className="mx-auto w-full max-w-2xl px-5 pt-6 pb-[calc(var(--jack-pill-height,0px)+max(0.75rem,env(safe-area-inset-bottom))+1rem)] md:px-8 md:pt-10">
           {(resuming || (stage === "intake" && interviewProfile.isLoading)) && (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
