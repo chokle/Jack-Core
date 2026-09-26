@@ -134,11 +134,18 @@ export function SiteMappingHub({
     setNotice("");
     try {
       const result = await uploadSiteMappingScan(site.id, file);
-      await refreshScans(site.id);
       if (selectedSiteId.current === site.id)
         setNotice(
           `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
         );
+      try {
+        await refreshScans(site.id);
+      } catch {
+        if (selectedSiteId.current === site.id)
+          setError(
+            "Scan uploaded, but the site capture list could not refresh. Reload this page to see it.",
+          );
+      }
     } catch (cause) {
       setError(requestError(cause, "Could not upload scan."));
     } finally {

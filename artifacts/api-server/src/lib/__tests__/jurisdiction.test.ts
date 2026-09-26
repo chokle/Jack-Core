@@ -230,7 +230,14 @@ describe("Canadian jurisdiction policy", () => {
         "The product goal is a permissioned crew-safety",
       );
       expect(prompt).toContain("Today's unconnected phone view");
-      expect(prompt).toContain("No site is connected yet");
+      expect(prompt).toContain("No site is connected to an unassigned account");
+      expect(prompt).toContain(
+        "never automatically uploads AR depth or location",
+      );
+      expect(prompt).toContain("may explicitly upload a stopped depth PLY");
+      expect(prompt).toContain(
+        "Captures are not aligned into a verified 3D map",
+      );
       expect(prompt).toContain("Do not claim live hazard alerts");
       expect(prompt).toContain(
         "use the server-owned system map to distinguish its product goal from current capabilities",

@@ -72,6 +72,55 @@ describe("shared site mapping", () => {
     expect(captureBlob).toHaveBeenCalledOnce();
   });
 
+  it("acknowledges a committed upload when refreshing the scan list fails", async () => {
+    let scanReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/sites"))
+        return json({
+          sites: [
+            {
+              id: "site-1",
+              organization_id: "org-1",
+              name: "Test site",
+              status: "active",
+              role: "contributor",
+            },
+          ],
+        });
+      if (path.endsWith("/organizations")) return json({ organizations: [] });
+      if (path.endsWith("/sites/site-1/scans/upload"))
+        return json({ scanId: "scan-12345678" }, 201);
+      if (path.endsWith("/sites/site-1/scans"))
+        return ++scanReads === 1
+          ? json({ scans: [] })
+          : json({ error: "Scan list unavailable." }, 503);
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <SiteMappingHub
+        capturedCount={3}
+        captureBlob={() => new Blob(["ply"])}
+      />,
+    );
+    await screen.findByText("No scans uploaded to this site yet.");
+    fireEvent.click(
+      screen.getByRole("button", { name: /Upload this scan to Test site/ }),
+    );
+    expect(
+      await screen.findByText(/Scan uploaded to Test site\. Capture scan-123/),
+    ).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Scan uploaded, but the site capture list could not refresh",
+    );
+    expect(
+      fetchMock.mock.calls.filter(([path]) =>
+        String(path).endsWith("/sites/site-1/scans/upload"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("does not show an uploaded scan under a different site after switching during upload", async () => {
     let finishUpload!: (response: Response) => void;
     const uploadResponse = new Promise<Response>((resolve) => {
