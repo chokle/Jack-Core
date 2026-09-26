@@ -1,30 +1,17 @@
 import { useEffect, useState } from "react";
-
-type Site = {
-  id: string;
-  organization_id: string;
-  name: string;
-  status: "active" | "archived";
-  role: "manager" | "contributor" | "viewer";
-};
-type Organization = { id: string; name: string };
-type Scan = {
-  id: string;
-  point_count: number;
-  byte_size: number;
-  uploaded_at: string;
-};
-
-async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: "include", ...options });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: string;
-    } | null;
-    throw new Error(body?.error || `Request failed (${response.status}).`);
-  }
-  return response.json() as Promise<T>;
-}
+import {
+  createSiteMappingSite,
+  getDownloadSiteMappingScanUrl,
+  listSiteMappingOrganizations,
+  listSiteMappingScans,
+  listSiteMappingSites,
+  recoverSiteMappingManager,
+  uploadSiteMappingScan,
+  type SiteMappingOrganization,
+  type SiteMappingScan,
+  type SiteMappingSite,
+  type SiteMappingSiteRecord,
+} from "@workspace/api-client-react";
 
 /** Explicitly shared site captures. Local AR coordinates are not registered to a site map. */
 export function SiteMappingHub({
@@ -34,10 +21,15 @@ export function SiteMappingHub({
   capturedCount: number;
   captureBlob: () => Blob | null;
 }) {
-  const [sites, setSites] = useState<Site[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [sites, setSites] = useState<SiteMappingSite[]>([]);
+  const [recoverableSites, setRecoverableSites] = useState<
+    SiteMappingSiteRecord[]
+  >([]);
+  const [organizations, setOrganizations] = useState<SiteMappingOrganization[]>(
+    [],
+  );
   const [siteId, setSiteId] = useState("");
-  const [scans, setScans] = useState<Scan[]>([]);
+  const [scans, setScans] = useState<SiteMappingScan[]>([]);
   const [newSiteName, setNewSiteName] = useState("");
   const [newSiteOrg, setNewSiteOrg] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,15 +40,11 @@ export function SiteMappingHub({
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      jsonRequest<{ sites: Site[] }>("/api/site-mapping/sites"),
-      jsonRequest<{ organizations: Organization[] }>(
-        "/api/site-mapping/organizations",
-      ),
-    ])
+    Promise.all([listSiteMappingSites(), listSiteMappingOrganizations()])
       .then(([siteList, organizationList]) => {
         if (!active) return;
         setSites(siteList.sites);
+        setRecoverableSites(siteList.recoverableSites);
         setOrganizations(organizationList.organizations);
         setSiteId((previous) => previous || siteList.sites[0]?.id || "");
         setNewSiteOrg(
@@ -78,9 +66,7 @@ export function SiteMappingHub({
   }, []);
 
   async function refreshScans(selectedId: string) {
-    const result = await jsonRequest<{ scans: Scan[] }>(
-      `/api/site-mapping/sites/${selectedId}/scans`,
-    );
+    const result = await listSiteMappingScans(selectedId);
     setScans(result.scans);
   }
 
@@ -92,7 +78,7 @@ export function SiteMappingHub({
     let active = true;
     setScans([]);
     setScansLoading(true);
-    jsonRequest<{ scans: Scan[] }>(`/api/site-mapping/sites/${siteId}/scans`)
+    listSiteMappingScans(siteId)
       .then((result) => {
         if (active) setScans(result.scans);
       })
@@ -120,17 +106,10 @@ export function SiteMappingHub({
     setError("");
     setNotice("");
     try {
-      const result = await jsonRequest<{ site: Site }>(
-        "/api/site-mapping/sites",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            organizationId: newSiteOrg,
-            name: newSiteName.trim(),
-          }),
-        },
-      );
+      const result = await createSiteMappingSite({
+        organizationId: newSiteOrg,
+        name: newSiteName.trim(),
+      });
       setSites((previous) => [...previous, result.site]);
       setSiteId(result.site.id);
       setNewSiteName("");
@@ -151,14 +130,7 @@ export function SiteMappingHub({
     setError("");
     setNotice("");
     try {
-      const result = await jsonRequest<{ scanId: string }>(
-        `/api/site-mapping/sites/${site.id}/scans/upload`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream" },
-          body: file,
-        },
-      );
+      const result = await uploadSiteMappingScan(site.id, file);
       await refreshScans(site.id);
       setNotice(
         `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
@@ -166,6 +138,36 @@ export function SiteMappingHub({
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not upload scan.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function recoverManager(site: SiteMappingSiteRecord) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await recoverSiteMappingManager(site.id);
+      setSites((previous) =>
+        previous.some((item) => item.id === result.site.id)
+          ? previous.map((item) =>
+              item.id === result.site.id ? result.site : item,
+            )
+          : [...previous, result.site],
+      );
+      setRecoverableSites((previous) =>
+        previous.filter((item) => item.id !== site.id),
+      );
+      setSiteId(site.id);
+      setNotice(`Manager access restored for ${site.name}.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not restore site access.",
       );
     } finally {
       setBusy(false);
@@ -241,6 +243,25 @@ export function SiteMappingHub({
                 </button>
               </div>
             )}
+            {recoverableSites.length > 0 && (
+              <div>
+                <strong>Sites needing a manager</strong>
+                <ul>
+                  {recoverableSites.map((item) => (
+                    <li key={item.id}>
+                      {item.name}{" "}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void recoverManager(item)}
+                      >
+                        Restore manager access
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {site && (
               <>
                 <p>
@@ -274,7 +295,7 @@ export function SiteMappingHub({
                         {scan.point_count.toLocaleString()} points ·{" "}
                         {new Date(scan.uploaded_at).toLocaleString()} ·{" "}
                         <a
-                          href={`/api/site-mapping/sites/${site.id}/scans/${scan.id}/download`}
+                          href={getDownloadSiteMappingScanUrl(site.id, scan.id)}
                         >
                           Download PLY
                         </a>

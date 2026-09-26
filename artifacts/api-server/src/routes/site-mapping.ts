@@ -1,9 +1,15 @@
 import { Router, type Request, type Response } from "express";
 import crypto from "node:crypto";
+import {
+  AuthorizeSiteMappingScanBody,
+  CreateSiteMappingSiteBody,
+  SetSiteMappingMemberBody,
+} from "@workspace/api-zod";
 import { supabase } from "../lib/supabase.js";
 import {
   UUID_RE,
   hasOrganizationAuthority,
+  hasEligibleSiteManager,
   isEligibleSiteMember,
   resolvedSiteCaller,
   resolveSiteScope,
@@ -93,12 +99,13 @@ router.get("/site-mapping/sites", async (req, res) => {
       .eq("active", true);
     if (memberships.error) throw memberships.error;
     const ids = (memberships.data ?? []).map((row) => row.site_id as string);
-    if (!ids.length) return res.json({ sites: [] });
-    const sites = await supabase
-      .from("site_workspaces")
-      .select("id,organization_id,name,status")
-      .in("id", ids)
-      .order("name");
+    const sites = ids.length
+      ? await supabase
+          .from("site_workspaces")
+          .select("id,organization_id,name,status")
+          .in("id", ids)
+          .order("name")
+      : { data: [], error: null };
     if (sites.error) throw sites.error;
     const authorized = await Promise.all(
       (sites.data ?? []).map(async (site) => {
@@ -108,7 +115,46 @@ router.get("/site-mapping/sites", async (req, res) => {
           : null;
       }),
     );
-    return res.json({ sites: authorized.filter((site) => site !== null) });
+    const accessibleSites = authorized.filter((site) => site !== null);
+    const admins = await supabase
+      .from("pilot_memberships")
+      .select("organization_id")
+      .eq("user_id", caller.userId)
+      .eq("role", "organization_admin")
+      .is("pilot_id", null)
+      .eq("active", true);
+    if (admins.error) throw admins.error;
+    const candidateOrgIds = [
+      ...new Set(
+        (admins.data ?? []).map((row) => row.organization_id as string),
+      ),
+    ];
+    const orgAuthority = await Promise.all(
+      candidateOrgIds.map(async (id) =>
+        (await hasOrganizationAuthority(caller.userId, id)) ? id : null,
+      ),
+    );
+    const orgIds = orgAuthority.filter((id) => id !== null);
+    const organizationSites = orgIds.length
+      ? await supabase
+          .from("site_workspaces")
+          .select("id,organization_id,name,status")
+          .in("organization_id", orgIds)
+          .eq("status", "active")
+          .order("name")
+      : { data: [], error: null };
+    if (organizationSites.error) throw organizationSites.error;
+    const recoverable = await Promise.all(
+      (organizationSites.data ?? []).map(async (site) =>
+        (await hasEligibleSiteManager(site.id, site.organization_id))
+          ? null
+          : site,
+      ),
+    );
+    return res.json({
+      sites: accessibleSites,
+      recoverableSites: recoverable.filter((site) => site !== null),
+    });
   } catch (err) {
     return failed(req, res, err);
   }
@@ -121,8 +167,9 @@ router.post("/site-mapping/sites", async (req, res) => {
       return res
         .status(403)
         .json({ error: "Site creation requires a resolved account." });
-    const organizationId = req.body?.organizationId;
-    const name = req.body?.name;
+    const input = CreateSiteMappingSiteBody.safeParse(req.body);
+    const organizationId = input.success ? input.data.organizationId : null;
+    const name = input.success ? input.data.name : null;
     if (
       typeof organizationId !== "string" ||
       !UUID_RE.test(organizationId) ||
@@ -241,9 +288,10 @@ router.put("/site-mapping/sites/:siteId/members/:userId", async (req, res) => {
     if (!scope || scope.role !== "manager" || scope.status !== "active")
       return res.status(404).json({ error: "Site not found." });
     const userId = String(req.params.userId);
-    const role = req.body?.role;
-    if (!USER_ID_RE.test(userId) || !["contributor", "viewer"].includes(role))
+    const input = SetSiteMappingMemberBody.safeParse(req.body);
+    if (!USER_ID_RE.test(userId) || !input.success)
       return res.status(400).json({ error: "Invalid site member or role." });
+    const role = input.data.role;
     if (!(await isEligibleSiteMember(userId, scope.organizationId)))
       return res
         .status(400)
@@ -261,6 +309,51 @@ router.put("/site-mapping/sites/:siteId/members/:userId", async (req, res) => {
     );
     if (membership.error) throw membership.error;
     return res.json({ userId, role });
+  } catch (err) {
+    return failed(req, res, err);
+  }
+});
+
+router.post("/site-mapping/sites/:siteId/recover-manager", async (req, res) => {
+  try {
+    const caller = await resolvedSiteCaller(req);
+    if (!caller)
+      return res
+        .status(403)
+        .json({ error: "Site access requires a resolved account." });
+    const siteId = String(req.params.siteId);
+    if (!UUID_RE.test(siteId))
+      return res.status(404).json({ error: "Site not found." });
+    const site = await supabase
+      .from("site_workspaces")
+      .select("id,organization_id,name,status")
+      .eq("id", siteId)
+      .maybeSingle();
+    if (site.error) throw site.error;
+    if (
+      !site.data ||
+      site.data.status !== "active" ||
+      !(await hasOrganizationAuthority(
+        caller.userId,
+        site.data.organization_id,
+      ))
+    )
+      return res.status(404).json({ error: "Site not found." });
+    if (await hasEligibleSiteManager(siteId, site.data.organization_id))
+      return res.status(409).json({ error: "This site has a manager." });
+    const membership = await supabase.from("site_memberships").upsert(
+      {
+        organization_id: site.data.organization_id,
+        site_id: siteId,
+        user_id: caller.userId,
+        role: "manager",
+        active: true,
+        added_by_user_id: caller.userId,
+      },
+      { onConflict: "site_id,user_id" },
+    );
+    if (membership.error) throw membership.error;
+    return res.json({ site: { ...site.data, role: "manager" } });
   } catch (err) {
     return failed(req, res, err);
   }
@@ -317,7 +410,10 @@ router.post(
       );
       if (!scope || scope.status !== "active" || scope.role === "viewer")
         return res.status(404).json({ error: "Site not found." });
-      const { byteSize, pointCount, sha256 } = req.body ?? {};
+      const metadata = AuthorizeSiteMappingScanBody.safeParse(req.body);
+      if (!metadata.success)
+        return res.status(400).json({ error: "Invalid scan metadata." });
+      const { byteSize, pointCount, sha256 } = metadata.data;
       if (
         !Number.isInteger(byteSize) ||
         byteSize < 1 ||
@@ -365,7 +461,12 @@ router.post(
         String(req.params.siteId),
       );
       const scanId = String(req.params.scanId);
-      if (!scope || !UUID_RE.test(scanId) || scope.status !== "active")
+      if (
+        !scope ||
+        !UUID_RE.test(scanId) ||
+        scope.status !== "active" ||
+        scope.role === "viewer"
+      )
         return res.status(404).json({ error: "Site not found." });
       const existing = await supabase
         .from("site_scans")

@@ -9,6 +9,13 @@ import {
 } from "@testing-library/react";
 import { SiteMappingHub } from "./SiteMappingHub";
 
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -20,26 +27,21 @@ describe("shared site mapping", () => {
       async (input: RequestInfo | URL, options?: RequestInit) => {
         const path = String(input);
         if (path.endsWith("/sites"))
-          return {
-            ok: true,
-            json: async () => ({
-              sites: [
-                {
-                  id: "site-1",
-                  organization_id: "org-1",
-                  name: "Test site",
-                  status: "active",
-                  role: "contributor",
-                },
-              ],
-            }),
-          };
-        if (path.endsWith("/organizations"))
-          return { ok: true, json: async () => ({ organizations: [] }) };
-        if (path.endsWith("/sites/site-1/scans"))
-          return { ok: true, json: async () => ({ scans: [] }) };
+          return json({
+            sites: [
+              {
+                id: "site-1",
+                organization_id: "org-1",
+                name: "Test site",
+                status: "active",
+                role: "contributor",
+              },
+            ],
+          });
+        if (path.endsWith("/organizations")) return json({ organizations: [] });
+        if (path.endsWith("/sites/site-1/scans")) return json({ scans: [] });
         if (path.endsWith("/sites/site-1/scans/upload"))
-          return { ok: true, json: async () => ({ scanId: "scan-1" }) };
+          return json({ scanId: "scan-1" }, 201);
         throw new Error(`Unexpected request ${path}`);
       },
     );
@@ -73,13 +75,13 @@ describe("shared site mapping", () => {
   it("shows an honest no-site state and disables upload without a capture", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => ({
-        ok: true,
-        json: async () =>
+      vi.fn(async (input: RequestInfo | URL) =>
+        json(
           String(input).endsWith("/sites")
-            ? { sites: [] }
+            ? { sites: [], recoverableSites: [] }
             : { organizations: [] },
-      })),
+        ),
+      ),
     );
     render(<SiteMappingHub capturedCount={0} captureBlob={() => null} />);
     expect(
@@ -93,11 +95,7 @@ describe("shared site mapping", () => {
   it("shows a load failure without calling it an empty site", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: false,
-        status: 503,
-        json: async () => ({ error: "Site mapping is unavailable." }),
-      })),
+      vi.fn(async () => json({ error: "Site mapping is unavailable." }, 503)),
     );
     render(<SiteMappingHub capturedCount={0} captureBlob={() => null} />);
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -110,9 +108,8 @@ describe("shared site mapping", () => {
 
   it("does not offer an upload to an archived site", async () => {
     const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, _options?: RequestInit) => ({
-        ok: true,
-        json: async () =>
+      async (input: RequestInfo | URL, _options?: RequestInit) =>
+        json(
           String(input).endsWith("/sites")
             ? {
                 sites: [
@@ -128,7 +125,7 @@ describe("shared site mapping", () => {
             : String(input).endsWith("/organizations")
               ? { organizations: [] }
               : { scans: [] },
-      }),
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const captureBlob = vi.fn(() => new Blob(["ply"]));
@@ -149,6 +146,81 @@ describe("shared site mapping", () => {
     expect(
       fetchMock.mock.calls.every(([, options]) => options?.method !== "POST"),
     ).toBe(true);
+  });
+
+  it("lets an organization admin explicitly restore an orphaned site's manager access", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const site = {
+        id: "site-1",
+        organization_id: "org-1",
+        name: "Field site",
+        status: "active",
+      };
+      return json(
+        path.endsWith("/sites")
+          ? { sites: [], recoverableSites: [site] }
+          : path.endsWith("/organizations")
+            ? { organizations: [{ id: "org-1", name: "Field org" }] }
+            : path.endsWith("/recover-manager")
+              ? { site: { ...site, role: "manager" } }
+              : { scans: [] },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SiteMappingHub capturedCount={0} captureBlob={() => null} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Restore manager access" }),
+    );
+    expect(
+      await screen.findByText("Manager access restored for Field site."),
+    ).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.some(([path]) =>
+        String(path).endsWith("/sites/site-1/recover-manager"),
+      ),
+    ).toBe(true);
+    expect(
+      screen.queryByRole("button", { name: "Restore manager access" }),
+    ).toBeNull();
+  });
+
+  it("replaces an existing viewer site when manager access is restored", async () => {
+    const site = {
+      id: "site-1",
+      organization_id: "org-1",
+      name: "Field site",
+      status: "active",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        return json(
+          path.endsWith("/sites")
+            ? {
+                sites: [{ ...site, role: "viewer" }],
+                recoverableSites: [site],
+              }
+            : path.endsWith("/organizations")
+              ? { organizations: [] }
+              : path.endsWith("/recover-manager")
+                ? { site: { ...site, role: "manager" } }
+                : { scans: [] },
+        );
+      }),
+    );
+    render(<SiteMappingHub capturedCount={0} captureBlob={() => null} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Restore manager access" }),
+    );
+    expect(
+      await screen.findByText("Manager access restored for Field site."),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("option", { name: "Field site" })).toHaveLength(
+      1,
+    );
+    expect(screen.getByText(/Access: manager/)).toBeTruthy();
   });
 
   it("lists an authorized site's uploaded capture", async () => {
@@ -180,7 +252,7 @@ describe("shared site mapping", () => {
                   },
                 ],
               };
-        return { ok: true, json: async () => body };
+        return json(body);
       }),
     );
     render(<SiteMappingHub capturedCount={0} captureBlob={() => null} />);

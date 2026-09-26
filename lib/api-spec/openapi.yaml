@@ -24,6 +24,8 @@ tags:
     description: Park an interrupted thought during a chat or interview and resume it later
   - name: system
     description: Live Systems Health telemetry (heartbeat widget)
+  - name: site-mapping
+    description: Private site-scoped Radar captures and membership
 
 paths:
   /daz-runtime/tasks:
@@ -1026,8 +1028,440 @@ paths:
         "404":
           description: Not found (or a chat-sourced thought owned by a different session)
 
+  /site-mapping/organizations:
+    get:
+      operationId: listSiteMappingOrganizations
+      tags: [site-mapping]
+      summary: List active organizations where the caller may create sites
+      responses:
+        "200":
+          description: Authorized organizations
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingOrganizations" }
+        "403": { description: Resolved account required }
+
+  /site-mapping/sites:
+    get:
+      operationId: listSiteMappingSites
+      tags: [site-mapping]
+      summary: List site memberships and recoverable managerless sites
+      responses:
+        "200":
+          description: Authorized sites
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingSites" }
+        "403": { description: Resolved account required }
+    post:
+      operationId: createSiteMappingSite
+      tags: [site-mapping]
+      summary: Create a private site as an organization admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSiteMappingSiteInput" }
+      responses:
+        "201":
+          description: Created site with caller as manager
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingSiteEnvelope" }
+        "400": { description: Invalid site }
+        "403": { description: Organization authority required }
+
+  /site-mapping/sites/{siteId}/scans:
+    get:
+      operationId: listSiteMappingScans
+      tags: [site-mapping]
+      summary: List uploaded captures visible to a site member
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+      responses:
+        "200":
+          description: Captures for this site
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingScans" }
+        "404": { description: Site unavailable to caller }
+
+  /site-mapping/sites/{siteId}/upload-access:
+    get:
+      operationId: checkSiteMappingUploadAccess
+      tags: [site-mapping]
+      summary: Check current upload permission before accepting bytes
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+      responses:
+        "204": { description: Active manager or contributor may upload }
+        "404": { description: Site unavailable to caller }
+
+  /site-mapping/sites/{siteId}/members/{userId}:
+    put:
+      operationId: setSiteMappingMember
+      tags: [site-mapping]
+      summary: Site manager adds or promotes an eligible organization member
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+        - $ref: "#/components/parameters/SiteMappingUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetSiteMappingMemberInput" }
+      responses:
+        "200":
+          description: Site membership
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingMember" }
+        "400": { description: Invalid or ineligible member }
+        "404": { description: Manager access required }
+    delete:
+      operationId: removeSiteMappingMember
+      tags: [site-mapping]
+      summary: Site manager removes a contributor or viewer
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+        - $ref: "#/components/parameters/SiteMappingUserId"
+      responses:
+        "204": { description: Membership removed }
+        "400": { description: Invalid removal }
+        "404": { description: Manager access required }
+
+  /site-mapping/sites/{siteId}/recover-manager:
+    post:
+      operationId: recoverSiteMappingManager
+      tags: [site-mapping]
+      summary: Organization admin explicitly restores access to a managerless site
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+      responses:
+        "200":
+          description: Site with restored manager membership
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingSiteEnvelope" }
+        "404": { description: Site unavailable to organization admin }
+        "409": { description: Site already has an eligible manager }
+
+  /site-mapping/sites/{siteId}/scans/upload:
+    post:
+      operationId: uploadSiteMappingScan
+      tags: [site-mapping]
+      summary: Upload validated local Radar PLY points to private site storage
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Uploaded private capture
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingUpload" }
+        "400": { description: Invalid PLY capture }
+        "404": { description: Upload access denied }
+        "413": { description: Capture too large }
+
+  /site-mapping/sites/{siteId}/scans/{scanId}/download:
+    get:
+      operationId: downloadSiteMappingScan
+      tags: [site-mapping]
+      summary: Download uploaded PLY bytes as an authorized site member
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+        - $ref: "#/components/parameters/SiteMappingScanId"
+      responses:
+        "200":
+          description: Private PLY capture
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { description: Scan unavailable to caller }
+
+  /site-mapping/internal/sites/{siteId}/scans/authorize:
+    post:
+      operationId: authorizeSiteMappingScan
+      tags: [site-mapping]
+      summary: Worker-only reservation for a validated capture
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SiteMappingScanMetadata" }
+      responses:
+        "201":
+          description: Pending scan and private object key
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/SiteMappingScanReservation" }
+        "403": { description: Worker token required }
+        "404": { description: Site upload access denied }
+
+  /site-mapping/internal/sites/{siteId}/scans/{scanId}/complete:
+    post:
+      operationId: completeSiteMappingScan
+      tags: [site-mapping]
+      summary: Worker-only publication after private object write
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+        - $ref: "#/components/parameters/SiteMappingScanId"
+      responses:
+        "200":
+          description: Uploaded scan metadata
+          content:
+            application/json:
+              schema:
+                {
+                  $ref: "#/components/schemas/SiteMappingCompletedScanEnvelope",
+                }
+        "403": { description: Worker token required }
+        "404": { description: Scan unavailable }
+        "409": { description: Scan no longer pending }
+
+  /site-mapping/internal/sites/{siteId}/scans/{scanId}/download:
+    get:
+      operationId: authorizeSiteMappingDownload
+      tags: [site-mapping]
+      summary: Worker-only object lookup after site authorization
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingSiteId"
+        - $ref: "#/components/parameters/SiteMappingScanId"
+      responses:
+        "200":
+          description: Private object metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingDownloadGrant" }
+        "403": { description: Worker token required }
+        "404": { description: Scan unavailable }
+
+  /site-mapping/internal/scans/cleanup/claim:
+    post:
+      operationId: claimStaleSiteMappingScans
+      tags: [site-mapping]
+      summary: Worker-only claim of stale pending captures
+      responses:
+        "200":
+          description: Object keys claimed for deletion
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteMappingCleanupClaims" }
+        "403": { description: Worker token required }
+
+  /site-mapping/internal/scans/{scanId}/cleanup:
+    delete:
+      operationId: deleteStaleSiteMappingScan
+      tags: [site-mapping]
+      summary: Worker-only deletion of a claimed scan record
+      parameters:
+        - $ref: "#/components/parameters/SiteMappingScanId"
+      responses:
+        "204": { description: Claimed scan record deleted }
+        "403": { description: Worker token required }
+
+  /site-mapping/internal/objects/delete:
+    post:
+      operationId: deleteSiteMappingObject
+      tags: [site-mapping]
+      summary: Worker-only deletion of a private R2 scan object
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/SiteMappingObjectDeleteInput" }
+      responses:
+        "204": { description: Private object deleted }
+        "403": { description: Worker token required }
+
 components:
+  parameters:
+    SiteMappingSiteId:
+      in: path
+      name: siteId
+      required: true
+      schema: { type: string, format: uuid }
+    SiteMappingScanId:
+      in: path
+      name: scanId
+      required: true
+      schema: { type: string, format: uuid }
+    SiteMappingUserId:
+      in: path
+      name: userId
+      required: true
+      schema: { type: string }
   schemas:
+    SiteMappingOrganization:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    SiteMappingOrganizations:
+      type: object
+      required: [organizations]
+      properties:
+        organizations:
+          type: array
+          items: { $ref: "#/components/schemas/SiteMappingOrganization" }
+    SiteMappingSiteRecord:
+      type: object
+      required: [id, organization_id, name, status]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+    SiteMappingSite:
+      allOf:
+        - $ref: "#/components/schemas/SiteMappingSiteRecord"
+        - type: object
+          required: [role]
+          properties:
+            role: { type: string, enum: [manager, contributor, viewer] }
+    SiteMappingSites:
+      type: object
+      required: [sites, recoverableSites]
+      properties:
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/SiteMappingSite" }
+        recoverableSites:
+          type: array
+          items: { $ref: "#/components/schemas/SiteMappingSiteRecord" }
+    SiteMappingSiteEnvelope:
+      type: object
+      required: [site]
+      properties:
+        site: { $ref: "#/components/schemas/SiteMappingSite" }
+    CreateSiteMappingSiteInput:
+      type: object
+      additionalProperties: false
+      required: [organizationId, name]
+      properties:
+        organizationId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 160 }
+    SiteMappingMember:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string }
+        role: { type: string, enum: [manager, contributor, viewer] }
+    SetSiteMappingMemberInput:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [manager, contributor, viewer] }
+    SiteMappingScope:
+      type: object
+      required: [siteId, organizationId, name, role, status]
+      properties:
+        siteId: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string, enum: [manager, contributor, viewer] }
+        status: { type: string, enum: [active, archived] }
+    SiteMappingScan:
+      type: object
+      required:
+        [
+          id,
+          capture_format,
+          status,
+          byte_size,
+          point_count,
+          created_at,
+          uploaded_at,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        capture_format: { type: string, enum: [radar_ply_points_v1] }
+        status: { type: string, enum: [uploaded] }
+        byte_size: { type: integer, minimum: 1 }
+        point_count: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        uploaded_at: { type: string, format: date-time }
+    SiteMappingScans:
+      type: object
+      required: [site, scans, mapStatus]
+      properties:
+        site: { $ref: "#/components/schemas/SiteMappingScope" }
+        scans:
+          type: array
+          items: { $ref: "#/components/schemas/SiteMappingScan" }
+        mapStatus: { type: string }
+    SiteMappingUpload:
+      type: object
+      required: [scanId, pointCount, byteSize, status]
+      properties:
+        scanId: { type: string, format: uuid }
+        pointCount: { type: integer, minimum: 1 }
+        byteSize: { type: integer, minimum: 1 }
+        status: { type: string, enum: [uploaded] }
+    SiteMappingScanMetadata:
+      type: object
+      additionalProperties: false
+      required: [byteSize, pointCount, sha256]
+      properties:
+        byteSize: { type: integer, minimum: 1, maximum: 26214400 }
+        pointCount: { type: integer, minimum: 1, maximum: 2000000 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    SiteMappingScanReservation:
+      type: object
+      required: [scanId, objectKey]
+      properties:
+        scanId: { type: string, format: uuid }
+        objectKey: { type: string }
+    SiteMappingCompletedScan:
+      type: object
+      required: [id, byte_size, point_count, uploaded_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [uploaded] }
+        byte_size: { type: integer }
+        point_count: { type: integer }
+        uploaded_at: { type: string, format: date-time }
+    SiteMappingCompletedScanEnvelope:
+      type: object
+      required: [scan]
+      properties:
+        scan: { $ref: "#/components/schemas/SiteMappingCompletedScan" }
+    SiteMappingDownloadGrant:
+      type: object
+      required: [objectKey, byteSize, sha256]
+      properties:
+        objectKey: { type: string }
+        byteSize: { type: integer }
+        sha256: { type: string }
+    SiteMappingCleanupClaims:
+      type: object
+      required: [scans]
+      properties:
+        scans:
+          type: array
+          items:
+            type: object
+            required: [id, objectKey]
+            properties:
+              id: { type: string, format: uuid }
+              objectKey: { type: string }
+    SiteMappingObjectDeleteInput:
+      type: object
+      additionalProperties: false
+      required: [objectKey]
+      properties:
+        objectKey: { type: string }
     DazTaskInput:
       type: object
       additionalProperties: false

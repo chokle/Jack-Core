@@ -141,3 +141,24 @@ export async function isEligibleSiteMember(
   if (pilots.error) throw pilots.error;
   return (pilots.data ?? []).length > 0;
 }
+
+/** A site can be recovered only after every current manager loses site eligibility. */
+export async function hasEligibleSiteManager(
+  siteId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const managers = await supabase
+    .from("site_memberships")
+    .select("user_id")
+    .eq("site_id", siteId)
+    .eq("organization_id", organizationId)
+    .eq("role", "manager")
+    .eq("active", true);
+  if (managers.error) throw managers.error;
+  const eligible = await Promise.all(
+    (managers.data ?? []).map((row) =>
+      isEligibleSiteMember(row.user_id, organizationId),
+    ),
+  );
+  return eligible.some(Boolean);
+}

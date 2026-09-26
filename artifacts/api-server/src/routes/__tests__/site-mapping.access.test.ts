@@ -3,6 +3,36 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const scope = vi.hoisted(() => vi.fn());
+const organizationAuthority = vi.hoisted(() => vi.fn());
+const eligibleManager = vi.hoisted(() => vi.fn());
+const eligibleMember = vi.hoisted(() => vi.fn());
+const upsertMembership = vi.hoisted(() => vi.fn());
+const siteRecord = vi.hoisted(() => ({
+  current: null as null | {
+    id: string;
+    organization_id: string;
+    name: string;
+    status: string;
+  },
+}));
+const listedAdmins = vi.hoisted(() => ({
+  current: [] as Array<{ organization_id: string }>,
+}));
+const listedMemberships = vi.hoisted(() => ({
+  current: [] as Array<{
+    site_id: string;
+    organization_id: string;
+    role: string;
+  }>,
+}));
+const listedSites = vi.hoisted(() => ({
+  current: [] as Array<{
+    id: string;
+    organization_id: string;
+    name: string;
+    status: string;
+  }>,
+}));
 const databaseTables = vi.hoisted(() => [] as string[]);
 const databaseFilters = vi.hoisted(() => [] as Array<[string, unknown]>);
 
@@ -14,8 +44,9 @@ vi.mock("../../lib/site-mapping-access.js", () => ({
     isPresentation: false,
   }),
   resolveSiteScope: scope,
-  hasOrganizationAuthority: async () => false,
-  isEligibleSiteMember: async () => false,
+  hasOrganizationAuthority: organizationAuthority,
+  hasEligibleSiteManager: eligibleManager,
+  isEligibleSiteMember: eligibleMember,
 }));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
@@ -29,8 +60,25 @@ vi.mock("../../lib/supabase.js", () => ({
         },
         order: () => query,
         limit: () => query,
+        maybeSingle: async () => ({
+          data: table === "site_workspaces" ? siteRecord.current : null,
+          error: null,
+        }),
+        upsert: (...args: unknown[]) => upsertMembership(...args),
         then: (resolve: (value: unknown) => unknown) =>
-          Promise.resolve(resolve({ data: [], error: null })),
+          Promise.resolve(
+            resolve({
+              data:
+                table === "pilot_memberships"
+                  ? listedAdmins.current
+                  : table === "site_memberships"
+                    ? listedMemberships.current
+                    : table === "site_workspaces"
+                      ? listedSites.current
+                      : [],
+              error: null,
+            }),
+          ),
       };
       return query;
     },
@@ -52,11 +100,95 @@ function app() {
 
 beforeEach(() => {
   scope.mockReset();
+  organizationAuthority.mockReset();
+  eligibleManager.mockReset();
+  eligibleMember.mockReset();
+  upsertMembership.mockReset();
+  siteRecord.current = null;
+  listedAdmins.current = [];
+  listedMemberships.current = [];
+  listedSites.current = [];
   databaseTables.length = 0;
   databaseFilters.length = 0;
 });
 
 describe("site scan access", () => {
+  it("lets a site manager transfer manager access to an eligible member", async () => {
+    scope.mockResolvedValue({
+      siteId: "11111111-1111-4111-8111-111111111111",
+      organizationId: "org-a",
+      role: "manager",
+      status: "active",
+    });
+    eligibleMember.mockResolvedValue(true);
+    upsertMembership.mockResolvedValue({ error: null });
+    const result = await request(app())
+      .put(
+        "/api/site-mapping/sites/11111111-1111-4111-8111-111111111111/members/user-b",
+      )
+      .send({ role: "manager" });
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ userId: "user-b", role: "manager" });
+    expect(eligibleMember).toHaveBeenCalledWith("user-b", "org-a");
+    expect(upsertMembership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: "user-b",
+        role: "manager",
+        organization_id: "org-a",
+      }),
+      { onConflict: "site_id,user_id" },
+    );
+  });
+
+  it("lists only orphaned active sites for an organization admin to recover", async () => {
+    listedAdmins.current = [{ organization_id: "org-a" }];
+    listedSites.current = [
+      {
+        id: "site-a",
+        organization_id: "org-a",
+        name: "Field site",
+        status: "active",
+      },
+    ];
+    organizationAuthority.mockResolvedValue(true);
+    eligibleManager.mockResolvedValue(false);
+    const result = await request(app()).get("/api/site-mapping/sites");
+    expect(result.status).toBe(200);
+    expect(result.body.sites).toEqual([]);
+    expect(result.body.recoverableSites).toEqual(listedSites.current);
+    expect(organizationAuthority).toHaveBeenCalledWith("user-a", "org-a");
+    expect(eligibleManager).toHaveBeenCalledWith("site-a", "org-a");
+  });
+
+  it("lists an orphaned site for recovery even when the admin is already a viewer", async () => {
+    listedAdmins.current = [{ organization_id: "org-a" }];
+    listedMemberships.current = [
+      { site_id: "site-a", organization_id: "org-a", role: "viewer" },
+    ];
+    listedSites.current = [
+      {
+        id: "site-a",
+        organization_id: "org-a",
+        name: "Field site",
+        status: "active",
+      },
+    ];
+    scope.mockResolvedValue({
+      siteId: "site-a",
+      organizationId: "org-a",
+      role: "viewer",
+      status: "active",
+    });
+    organizationAuthority.mockResolvedValue(true);
+    eligibleManager.mockResolvedValue(false);
+    const result = await request(app()).get("/api/site-mapping/sites");
+    expect(result.status).toBe(200);
+    expect(result.body.sites).toEqual([
+      { ...listedSites.current[0], role: "viewer" },
+    ]);
+    expect(result.body.recoverableSites).toEqual(listedSites.current);
+  });
+
   it("does not enumerate scans from a site outside the caller's scope", async () => {
     scope.mockResolvedValue(null);
     const result = await request(app()).get(
@@ -107,5 +239,62 @@ describe("site scan access", () => {
     );
     expect(result.status).toBe(403);
     expect(scope).not.toHaveBeenCalled();
+  });
+
+  it("does not let a different organization's user recover a site", async () => {
+    siteRecord.current = {
+      id: "site-a",
+      organization_id: "org-a",
+      name: "Field site",
+      status: "active",
+    };
+    organizationAuthority.mockResolvedValue(false);
+    const result = await request(app()).post(
+      "/api/site-mapping/sites/11111111-1111-4111-8111-111111111111/recover-manager",
+    );
+    expect(result.status).toBe(404);
+    expect(upsertMembership).not.toHaveBeenCalled();
+  });
+
+  it("keeps manager recovery closed while an eligible manager exists", async () => {
+    siteRecord.current = {
+      id: "site-a",
+      organization_id: "org-a",
+      name: "Field site",
+      status: "active",
+    };
+    organizationAuthority.mockResolvedValue(true);
+    eligibleManager.mockResolvedValue(true);
+    const result = await request(app()).post(
+      "/api/site-mapping/sites/11111111-1111-4111-8111-111111111111/recover-manager",
+    );
+    expect(result.status).toBe(409);
+    expect(upsertMembership).not.toHaveBeenCalled();
+  });
+
+  it("lets an active organization admin claim an orphaned site", async () => {
+    siteRecord.current = {
+      id: "site-a",
+      organization_id: "org-a",
+      name: "Field site",
+      status: "active",
+    };
+    organizationAuthority.mockResolvedValue(true);
+    eligibleManager.mockResolvedValue(false);
+    upsertMembership.mockResolvedValue({ error: null });
+    const result = await request(app()).post(
+      "/api/site-mapping/sites/11111111-1111-4111-8111-111111111111/recover-manager",
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.site.role).toBe("manager");
+    expect(upsertMembership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organization_id: "org-a",
+        site_id: "11111111-1111-4111-8111-111111111111",
+        user_id: "user-a",
+        role: "manager",
+      }),
+      { onConflict: "site_id,user_id" },
+    );
   });
 });

@@ -5,6 +5,219 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface SiteMappingOrganization {
+  id: string;
+  name: string;
+}
+
+export interface SiteMappingOrganizations {
+  organizations: SiteMappingOrganization[];
+}
+
+export type SiteMappingSiteRecordStatus = typeof SiteMappingSiteRecordStatus[keyof typeof SiteMappingSiteRecordStatus];
+
+
+export const SiteMappingSiteRecordStatus = {
+  active: 'active',
+  archived: 'archived',
+} as const;
+
+export interface SiteMappingSiteRecord {
+  id: string;
+  organization_id: string;
+  name: string;
+  status: SiteMappingSiteRecordStatus;
+}
+
+export type SiteMappingSiteRole = typeof SiteMappingSiteRole[keyof typeof SiteMappingSiteRole];
+
+
+export const SiteMappingSiteRole = {
+  manager: 'manager',
+  contributor: 'contributor',
+  viewer: 'viewer',
+} as const;
+
+export type SiteMappingSite = SiteMappingSiteRecord & {
+  role: SiteMappingSiteRole;
+};
+
+export interface SiteMappingSites {
+  sites: SiteMappingSite[];
+  recoverableSites: SiteMappingSiteRecord[];
+}
+
+export interface SiteMappingSiteEnvelope {
+  site: SiteMappingSite;
+}
+
+export interface CreateSiteMappingSiteInput {
+  organizationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  name: string;
+}
+
+export type SiteMappingMemberRole = typeof SiteMappingMemberRole[keyof typeof SiteMappingMemberRole];
+
+
+export const SiteMappingMemberRole = {
+  manager: 'manager',
+  contributor: 'contributor',
+  viewer: 'viewer',
+} as const;
+
+export interface SiteMappingMember {
+  userId: string;
+  role: SiteMappingMemberRole;
+}
+
+export type SetSiteMappingMemberInputRole = typeof SetSiteMappingMemberInputRole[keyof typeof SetSiteMappingMemberInputRole];
+
+
+export const SetSiteMappingMemberInputRole = {
+  manager: 'manager',
+  contributor: 'contributor',
+  viewer: 'viewer',
+} as const;
+
+export interface SetSiteMappingMemberInput {
+  role: SetSiteMappingMemberInputRole;
+}
+
+export type SiteMappingScopeRole = typeof SiteMappingScopeRole[keyof typeof SiteMappingScopeRole];
+
+
+export const SiteMappingScopeRole = {
+  manager: 'manager',
+  contributor: 'contributor',
+  viewer: 'viewer',
+} as const;
+
+export type SiteMappingScopeStatus = typeof SiteMappingScopeStatus[keyof typeof SiteMappingScopeStatus];
+
+
+export const SiteMappingScopeStatus = {
+  active: 'active',
+  archived: 'archived',
+} as const;
+
+export interface SiteMappingScope {
+  siteId: string;
+  organizationId: string;
+  name: string;
+  role: SiteMappingScopeRole;
+  status: SiteMappingScopeStatus;
+}
+
+export type SiteMappingScanCaptureFormat = typeof SiteMappingScanCaptureFormat[keyof typeof SiteMappingScanCaptureFormat];
+
+
+export const SiteMappingScanCaptureFormat = {
+  radar_ply_points_v1: 'radar_ply_points_v1',
+} as const;
+
+export type SiteMappingScanStatus = typeof SiteMappingScanStatus[keyof typeof SiteMappingScanStatus];
+
+
+export const SiteMappingScanStatus = {
+  uploaded: 'uploaded',
+} as const;
+
+export interface SiteMappingScan {
+  id: string;
+  capture_format: SiteMappingScanCaptureFormat;
+  status: SiteMappingScanStatus;
+  /** @minimum 1 */
+  byte_size: number;
+  /** @minimum 1 */
+  point_count: number;
+  created_at: string;
+  uploaded_at: string;
+}
+
+export interface SiteMappingScans {
+  site: SiteMappingScope;
+  scans: SiteMappingScan[];
+  mapStatus: string;
+}
+
+export type SiteMappingUploadStatus = typeof SiteMappingUploadStatus[keyof typeof SiteMappingUploadStatus];
+
+
+export const SiteMappingUploadStatus = {
+  uploaded: 'uploaded',
+} as const;
+
+export interface SiteMappingUpload {
+  scanId: string;
+  /** @minimum 1 */
+  pointCount: number;
+  /** @minimum 1 */
+  byteSize: number;
+  status: SiteMappingUploadStatus;
+}
+
+export interface SiteMappingScanMetadata {
+  /**
+     * @minimum 1
+     * @maximum 26214400
+     */
+  byteSize: number;
+  /**
+     * @minimum 1
+     * @maximum 2000000
+     */
+  pointCount: number;
+  /** @pattern ^[0-9a-f]{64}$ */
+  sha256: string;
+}
+
+export interface SiteMappingScanReservation {
+  scanId: string;
+  objectKey: string;
+}
+
+export type SiteMappingCompletedScanStatus = typeof SiteMappingCompletedScanStatus[keyof typeof SiteMappingCompletedScanStatus];
+
+
+export const SiteMappingCompletedScanStatus = {
+  uploaded: 'uploaded',
+} as const;
+
+export interface SiteMappingCompletedScan {
+  id: string;
+  status?: SiteMappingCompletedScanStatus;
+  byte_size: number;
+  point_count: number;
+  uploaded_at: string;
+}
+
+export interface SiteMappingCompletedScanEnvelope {
+  scan: SiteMappingCompletedScan;
+}
+
+export interface SiteMappingDownloadGrant {
+  objectKey: string;
+  byteSize: number;
+  sha256: string;
+}
+
+export type SiteMappingCleanupClaimsScansItem = {
+  id: string;
+  objectKey: string;
+};
+
+export interface SiteMappingCleanupClaims {
+  scans: SiteMappingCleanupClaimsScansItem[];
+}
+
+export interface SiteMappingObjectDeleteInput {
+  objectKey: string;
+}
+
 export type DazTaskInputKind = typeof DazTaskInputKind[keyof typeof DazTaskInputKind];
 
 
