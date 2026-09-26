@@ -4,10 +4,11 @@ import type { MemoryGraphData } from "../lib/use-memory-graph";
 
 interface Props {
   data: MemoryGraphData;
-  onOpenVideo: (id: string) => void;
+  onJumpToTimestamp: (videoId: string, seconds: number) => void;
+  onOpenGraph: (nodeId: string) => void;
 }
 
-export function InsightsView({ data, onOpenVideo }: Props) {
+export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
   const [trade, setTrade] = useState("all");
   const videos = useMemo(
     () =>
@@ -18,28 +19,45 @@ export function InsightsView({ data, onOpenVideo }: Props) {
       ),
     [data.videos],
   );
-  const insights = useMemo(
-    () =>
+  const insights = useMemo(() => {
+    const mentorIds = new Set(
       data.model.nodes
-        .flatMap((node) => {
-          if (
-            !isKnowledgeKind(node.kind) ||
-            node.meta.verificationStatus === "rejected"
-          )
-            return [];
-          const sources = (node.meta.sources ?? []).filter((source) =>
-            videos.has(source.videoId),
-          );
-          if (!sources.length) return [];
-          return [{ node, sources }];
-        })
-        .sort(
-          (a, b) =>
-            (b.node.meta.sourceCount ?? b.sources.length) -
-            (a.node.meta.sourceCount ?? a.sources.length),
-        ),
-    [data.model.nodes, videos],
-  );
+        .filter((node) => node.kind === "mentor")
+        .map((node) => node.id),
+    );
+    const mentorCountByNode = new Map<string, number>();
+    for (const edge of data.model.edges) {
+      const knowledgeId = mentorIds.has(edge.a)
+        ? edge.b
+        : mentorIds.has(edge.b)
+          ? edge.a
+          : null;
+      if (knowledgeId)
+        mentorCountByNode.set(
+          knowledgeId,
+          (mentorCountByNode.get(knowledgeId) ?? 0) + 1,
+        );
+    }
+    return data.model.nodes
+      .flatMap((node) => {
+        if (
+          !isKnowledgeKind(node.kind) ||
+          node.meta.verificationStatus === "rejected"
+        )
+          return [];
+        const sources = (node.meta.sources ?? []).filter((source) =>
+          videos.has(source.videoId),
+        );
+        const mentorSources = mentorCountByNode.get(node.id) ?? 0;
+        if (!sources.length && !mentorSources) return [];
+        return [{ node, sources, mentorSources }];
+      })
+      .sort(
+        (a, b) =>
+          (b.node.meta.sourceCount ?? b.sources.length + b.mentorSources) -
+          (a.node.meta.sourceCount ?? a.sources.length + a.mentorSources),
+      );
+  }, [data.model.nodes, data.model.edges, videos]);
   const trades = [
     ...new Set(
       insights
@@ -93,7 +111,7 @@ export function InsightsView({ data, onOpenVideo }: Props) {
           </p>
         ) : (
           <div className="space-y-3">
-            {visible.map(({ node, sources }) => (
+            {visible.map(({ node, sources, mentorSources }) => (
               <article
                 key={node.id}
                 className="rounded-xl border border-border bg-card/70 p-4 md:p-5"
@@ -103,10 +121,18 @@ export function InsightsView({ data, onOpenVideo }: Props) {
                     {node.kind.replaceAll("_", " ")}
                   </span>
                   {node.meta.trade && <span>· {node.meta.trade}</span>}
-                  <span>
-                    · {sources.length} linked video{" "}
-                    {sources.length === 1 ? "source" : "sources"}
-                  </span>
+                  {sources.length > 0 && (
+                    <span>
+                      · {sources.length} linked video{" "}
+                      {sources.length === 1 ? "source" : "sources"}
+                    </span>
+                  )}
+                  {mentorSources > 0 && (
+                    <span>
+                      · {mentorSources} interview{" "}
+                      {mentorSources === 1 ? "contribution" : "contributions"}
+                    </span>
+                  )}
                   {node.meta.verificationStatus === "verified" && (
                     <span>· Human reviewed</span>
                   )}
@@ -116,13 +142,19 @@ export function InsightsView({ data, onOpenVideo }: Props) {
                 </div>
                 <h2 className="mt-2 text-lg font-semibold">{node.label}</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {sources.length > 1
-                    ? "Why it matters: this finding appears in more than one processed source, so Jack can compare the evidence."
-                    : "Why it matters: this is a traceable finding from one source. Check the evidence before applying it in the field."}
+                  {sources.length + mentorSources > 1
+                    ? "Why it matters: more than one source contributes to this finding. Compare the evidence before using it."
+                    : "Why it matters: this is traceable to one source. Check the evidence before applying it in the field."}
                 </p>
                 <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Evidence
                 </p>
+                {mentorSources > 0 && (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Interview contribution recorded in Living Memory. Open
+                    provenance to review its context.
+                  </p>
+                )}
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {sources.map((source) => {
                     const video = videos.get(source.videoId);
@@ -130,7 +162,12 @@ export function InsightsView({ data, onOpenVideo }: Props) {
                       <li key={source.videoId}>
                         <button
                           type="button"
-                          onClick={() => onOpenVideo(source.videoId)}
+                          onClick={() =>
+                            onJumpToTimestamp(
+                              source.videoId,
+                              source.timestamps[0] ?? 0,
+                            )
+                          }
                           className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-primary"
                         >
                           {video?.title || "Source video"}
@@ -142,6 +179,13 @@ export function InsightsView({ data, onOpenVideo }: Props) {
                     );
                   })}
                 </ul>
+                <button
+                  type="button"
+                  onClick={() => onOpenGraph(node.id)}
+                  className="mt-3 text-sm font-semibold text-primary underline"
+                >
+                  Open provenance in Living Memory
+                </button>
               </article>
             ))}
           </div>

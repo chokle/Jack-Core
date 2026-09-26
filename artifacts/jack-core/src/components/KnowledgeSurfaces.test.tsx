@@ -49,26 +49,72 @@ const data = {
 describe("knowledge surfaces", () => {
   it("connects a Red Seal competency to graph knowledge and processed videos", () => {
     const onOpenVideo = vi.fn();
+    const onOpenGraph = vi.fn();
     render(
       <CompetenciesView
         data={data}
         onOpenVideo={onOpenVideo}
-        onOpenGraph={vi.fn()}
+        onOpenGraph={onOpenGraph}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /Prepare welds/ }));
     expect(screen.getByText("Clean metal before welding")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Weld setup" }));
     expect(onOpenVideo).toHaveBeenCalledWith("video-1");
+    fireEvent.click(screen.getByRole("button", { name: "Open Living Memory" }));
+    expect(onOpenGraph).toHaveBeenCalledWith("comp:W-1");
     expect(screen.getByText(/not a rating of any worker/)).toBeTruthy();
   });
 
   it("shows a finding only with a real source and opens its evidence", () => {
-    const onOpenVideo = vi.fn();
-    render(<InsightsView data={data} onOpenVideo={onOpenVideo} />);
+    const onJumpToTimestamp = vi.fn();
+    const onOpenGraph = vi.fn();
+    render(
+      <InsightsView
+        data={data}
+        onJumpToTimestamp={onJumpToTimestamp}
+        onOpenGraph={onOpenGraph}
+      />,
+    );
     expect(screen.getByText("Clean metal before welding")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Weld setup/ }));
-    expect(onOpenVideo).toHaveBeenCalledWith("video-1");
+    expect(onJumpToTimestamp).toHaveBeenCalledWith("video-1", 63);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open provenance in Living Memory" }),
+    );
+    expect(onOpenGraph).toHaveBeenCalledWith("concept:weld");
+  });
+
+  it("keeps interview-backed knowledge visible without naming or scoring a worker", () => {
+    const mentorData = {
+      ...data,
+      model: {
+        ...data.model,
+        nodes: [
+          {
+            ...data.model.nodes[0],
+            meta: { trade: "Welder", sourceCount: 1, sources: [] },
+          },
+          {
+            id: "mentor:one",
+            kind: "mentor",
+            label: "Private mentor",
+            meta: {},
+          },
+        ],
+        edges: [{ a: "concept:weld", b: "mentor:one", kind: "mentor" }],
+      },
+    } as unknown as MemoryGraphData;
+    render(
+      <InsightsView
+        data={mentorData}
+        onJumpToTimestamp={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Clean metal before welding")).toBeTruthy();
+    expect(screen.getByText(/1 interview contribution/)).toBeTruthy();
+    expect(screen.queryByText("Private mentor")).toBeNull();
   });
 
   it("uses observed counts without invented coverage scores", () => {

@@ -363,6 +363,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (requested === "closeout") return "closeout";
     return "graph";
   });
+  const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const navigationRef = useRef<{
     entries: JackAppLocation[];
@@ -572,6 +573,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleNavigate = (next: JackView) => {
+    if (next === "graph") setGraphFocusNodeId(null);
     const feature = {
       graph: "memory_graph",
       library: "library",
@@ -590,6 +592,11 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
     setFieldNotePreload(undefined);
     navigateToLocation({ view: next, selectedVideoId: null });
+  };
+
+  const handleOpenGraphNode = (nodeId: string) => {
+    handleNavigate("graph");
+    setGraphFocusNodeId(nodeId);
   };
 
   const handleFieldNoteClick = (citation: Citation) => {
@@ -1174,6 +1181,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         ) : view === "graph" ? (
           <MemoryGraphView
             data={graph}
+            focusNodeId={graphFocusNodeId}
             onOpenVideo={handleSelectVideo}
             onJumpToTimestamp={handleCitationClick}
             onResumeInterview={handleResumeInterview}
@@ -1217,10 +1225,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <CompetenciesView
             data={graph}
             onOpenVideo={handleSelectVideo}
-            onOpenGraph={() => handleNavigate("graph")}
+            onOpenGraph={handleOpenGraphNode}
           />
         ) : view === "insights" ? (
-          <InsightsView data={graph} onOpenVideo={handleSelectVideo} />
+          <InsightsView
+            data={graph}
+            onJumpToTimestamp={handleCitationClick}
+            onOpenGraph={handleOpenGraphNode}
+          />
         ) : view === "closeout" && canViewCloseout ? (
           <EndOfShiftCloseout
             key={`closeout:${me?.userId ?? "signed-out"}`}

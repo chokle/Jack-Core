@@ -5,7 +5,7 @@ import { isKnowledgeKind, readCodes } from "../lib/memory-graph";
 interface Props {
   data: MemoryGraphData;
   onOpenVideo: (id: string) => void;
-  onOpenGraph: () => void;
+  onOpenGraph: (nodeId: string) => void;
 }
 
 export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
@@ -144,7 +144,7 @@ export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
                     )}
                     <button
                       type="button"
-                      onClick={onOpenGraph}
+                      onClick={() => onOpenGraph(`comp:${selected.code}`)}
                       className="mt-2 text-sm font-semibold text-primary underline"
                     >
                       Open Living Memory

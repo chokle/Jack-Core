@@ -99,6 +99,7 @@ import {
 
 interface MemoryGraphViewProps {
   data: MemoryGraphData;
+  focusNodeId?: string | null;
   onOpenVideo: (id: string) => void;
   /** Open a source video and seek to a transcript timestamp (seconds). */
   onJumpToTimestamp: (videoId: string, startTime: number) => void;
@@ -268,6 +269,7 @@ function useCountUp(target: number, animate: boolean) {
 
 export function MemoryGraphView({
   data,
+  focusNodeId,
   onOpenVideo,
   onJumpToTimestamp,
   onResumeInterview,
@@ -615,6 +617,21 @@ export function MemoryGraphView({
     },
     [nodeById],
   );
+
+  const lastExternalFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusNodeId) {
+      lastExternalFocusRef.current = null;
+      return;
+    }
+    if (
+      lastExternalFocusRef.current === focusNodeId ||
+      !nodeById.has(focusNodeId)
+    )
+      return;
+    openNodeInCurrentBranch(focusNodeId);
+    lastExternalFocusRef.current = focusNodeId;
+  }, [focusNodeId, nodeById, openNodeInCurrentBranch]);
 
   // Breadcrumb trail for the current selection: Jack › Trade hub › Node. Each
   // crumb is a live node the reviewer can jump back to, so exploration always
