@@ -13,6 +13,16 @@ import {
   type SiteMappingSiteRecord,
 } from "@workspace/api-client-react";
 
+function requestError(cause: unknown, fallback: string): string {
+  const responseError = (cause as { data?: { error?: unknown } } | null)?.data
+    ?.error;
+  return typeof responseError === "string" && responseError.trim()
+    ? responseError
+    : cause instanceof Error
+      ? cause.message
+      : fallback;
+}
+
 /** Explicitly shared site captures. Local AR coordinates are not registered to a site map. */
 export function SiteMappingHub({
   capturedCount,
@@ -44,7 +54,7 @@ export function SiteMappingHub({
       .then(([siteList, organizationList]) => {
         if (!active) return;
         setSites(siteList.sites);
-        setRecoverableSites(siteList.recoverableSites);
+        setRecoverableSites(siteList.recoverableSites ?? []);
         setOrganizations(organizationList.organizations);
         setSiteId((previous) => previous || siteList.sites[0]?.id || "");
         setNewSiteOrg(
@@ -52,10 +62,7 @@ export function SiteMappingHub({
         );
       })
       .catch((cause: unknown) => {
-        if (active)
-          setError(
-            cause instanceof Error ? cause.message : "Could not load sites.",
-          );
+        if (active) setError(requestError(cause, "Could not load sites."));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -83,12 +90,7 @@ export function SiteMappingHub({
         if (active) setScans(result.scans);
       })
       .catch((cause: unknown) => {
-        if (active)
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "Could not load site scans.",
-          );
+        if (active) setError(requestError(cause, "Could not load site scans."));
       })
       .finally(() => {
         if (active) setScansLoading(false);
@@ -115,9 +117,7 @@ export function SiteMappingHub({
       setNewSiteName("");
       setNotice(`Site ${result.site.name} is ready for authorized scans.`);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Could not create site.",
-      );
+      setError(requestError(cause, "Could not create site."));
     } finally {
       setBusy(false);
     }
@@ -136,9 +136,7 @@ export function SiteMappingHub({
         `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
       );
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Could not upload scan.",
-      );
+      setError(requestError(cause, "Could not upload scan."));
     } finally {
       setBusy(false);
     }
@@ -164,11 +162,7 @@ export function SiteMappingHub({
       setSiteId(site.id);
       setNotice(`Manager access restored for ${site.name}.`);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not restore site access.",
-      );
+      setError(requestError(cause, "Could not restore site access."));
     } finally {
       setBusy(false);
     }
