@@ -28,6 +28,7 @@ import type {
   ChatMessage,
   ChatResponse,
   Competency,
+  CreateSiteMappingSiteInput,
   CurrentInterviewProfile,
   CurrentUser,
   DazTaskEnvelope,
@@ -61,6 +62,19 @@ import type {
   RestoreEvidenceInput,
   SearchInput,
   SearchResults,
+  SetSiteMappingMemberInput,
+  SiteMappingCleanupClaims,
+  SiteMappingCompletedScanEnvelope,
+  SiteMappingDownloadGrant,
+  SiteMappingMember,
+  SiteMappingObjectDeleteInput,
+  SiteMappingOrganizations,
+  SiteMappingScanMetadata,
+  SiteMappingScanReservation,
+  SiteMappingScans,
+  SiteMappingSiteEnvelope,
+  SiteMappingSites,
+  SiteMappingUpload,
   StartInterviewInput,
   SubmitAnswerInput,
   SystemHealthSnapshot,
@@ -3737,5 +3751,1186 @@ export const useArchiveParkedThought = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getArchiveParkedThoughtMutationOptions(options));
+    }
+
+export const getListSiteMappingOrganizationsUrl = () => {
+
+
+
+
+  return `/api/site-mapping/organizations`
+}
+
+/**
+ * @summary List active organizations where the caller may create sites
+ */
+export const listSiteMappingOrganizations = async ( options?: RequestInit): Promise<SiteMappingOrganizations> => {
+
+  return customFetch<SiteMappingOrganizations>(getListSiteMappingOrganizationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSiteMappingOrganizationsQueryKey = () => {
+    return [
+    `/api/site-mapping/organizations`
+    ] as const;
+    }
+
+
+export const getListSiteMappingOrganizationsQueryOptions = <TData = Awaited<ReturnType<typeof listSiteMappingOrganizations>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingOrganizations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSiteMappingOrganizationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSiteMappingOrganizations>>> = ({ signal }) => listSiteMappingOrganizations({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingOrganizations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSiteMappingOrganizationsQueryResult = NonNullable<Awaited<ReturnType<typeof listSiteMappingOrganizations>>>
+export type ListSiteMappingOrganizationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List active organizations where the caller may create sites
+ */
+
+export function useListSiteMappingOrganizations<TData = Awaited<ReturnType<typeof listSiteMappingOrganizations>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingOrganizations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSiteMappingOrganizationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListSiteMappingSitesUrl = () => {
+
+
+
+
+  return `/api/site-mapping/sites`
+}
+
+/**
+ * @summary List site memberships and recoverable managerless sites
+ */
+export const listSiteMappingSites = async ( options?: RequestInit): Promise<SiteMappingSites> => {
+
+  return customFetch<SiteMappingSites>(getListSiteMappingSitesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSiteMappingSitesQueryKey = () => {
+    return [
+    `/api/site-mapping/sites`
+    ] as const;
+    }
+
+
+export const getListSiteMappingSitesQueryOptions = <TData = Awaited<ReturnType<typeof listSiteMappingSites>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingSites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSiteMappingSitesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSiteMappingSites>>> = ({ signal }) => listSiteMappingSites({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingSites>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSiteMappingSitesQueryResult = NonNullable<Awaited<ReturnType<typeof listSiteMappingSites>>>
+export type ListSiteMappingSitesQueryError = ErrorType<void>
+
+
+/**
+ * @summary List site memberships and recoverable managerless sites
+ */
+
+export function useListSiteMappingSites<TData = Awaited<ReturnType<typeof listSiteMappingSites>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingSites>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSiteMappingSitesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateSiteMappingSiteUrl = () => {
+
+
+
+
+  return `/api/site-mapping/sites`
+}
+
+/**
+ * @summary Create a private site as an organization admin
+ */
+export const createSiteMappingSite = async (createSiteMappingSiteInput: CreateSiteMappingSiteInput, options?: RequestInit): Promise<SiteMappingSiteEnvelope> => {
+
+  return customFetch<SiteMappingSiteEnvelope>(getCreateSiteMappingSiteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createSiteMappingSiteInput)
+  }
+);}
+
+
+
+
+export const getCreateSiteMappingSiteMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingSite>>, TError,{data: BodyType<CreateSiteMappingSiteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingSite>>, TError,{data: BodyType<CreateSiteMappingSiteInput>}, TContext> => {
+
+const mutationKey = ['createSiteMappingSite'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSiteMappingSite>>, {data: BodyType<CreateSiteMappingSiteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSiteMappingSite(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSiteMappingSiteMutationResult = NonNullable<Awaited<ReturnType<typeof createSiteMappingSite>>>
+    export type CreateSiteMappingSiteMutationBody = BodyType<CreateSiteMappingSiteInput>
+    export type CreateSiteMappingSiteMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a private site as an organization admin
+ */
+export const useCreateSiteMappingSite = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingSite>>, TError,{data: BodyType<CreateSiteMappingSiteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSiteMappingSite>>,
+        TError,
+        {data: BodyType<CreateSiteMappingSiteInput>},
+        TContext
+      > => {
+      return useMutation(getCreateSiteMappingSiteMutationOptions(options));
+    }
+
+export const getListSiteMappingScansUrl = (siteId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/scans`
+}
+
+/**
+ * @summary List uploaded captures visible to a site member
+ */
+export const listSiteMappingScans = async (siteId: string, options?: RequestInit): Promise<SiteMappingScans> => {
+
+  return customFetch<SiteMappingScans>(getListSiteMappingScansUrl(siteId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSiteMappingScansQueryKey = (siteId: string,) => {
+    return [
+    `/api/site-mapping/sites/${siteId}/scans`
+    ] as const;
+    }
+
+
+export const getListSiteMappingScansQueryOptions = <TData = Awaited<ReturnType<typeof listSiteMappingScans>>, TError = ErrorType<void>>(siteId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingScans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSiteMappingScansQueryKey(siteId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSiteMappingScans>>> = ({ signal }) => listSiteMappingScans(siteId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: siteId !== null && siteId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingScans>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSiteMappingScansQueryResult = NonNullable<Awaited<ReturnType<typeof listSiteMappingScans>>>
+export type ListSiteMappingScansQueryError = ErrorType<void>
+
+
+/**
+ * @summary List uploaded captures visible to a site member
+ */
+
+export function useListSiteMappingScans<TData = Awaited<ReturnType<typeof listSiteMappingScans>>, TError = ErrorType<void>>(
+ siteId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSiteMappingScans>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSiteMappingScansQueryOptions(siteId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCheckSiteMappingUploadAccessUrl = (siteId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/upload-access`
+}
+
+/**
+ * @summary Check current upload permission before accepting bytes
+ */
+export const checkSiteMappingUploadAccess = async (siteId: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getCheckSiteMappingUploadAccessUrl(siteId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getCheckSiteMappingUploadAccessQueryKey = (siteId: string,) => {
+    return [
+    `/api/site-mapping/sites/${siteId}/upload-access`
+    ] as const;
+    }
+
+
+export const getCheckSiteMappingUploadAccessQueryOptions = <TData = Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>, TError = ErrorType<void>>(siteId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getCheckSiteMappingUploadAccessQueryKey(siteId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>> = ({ signal }) => checkSiteMappingUploadAccess(siteId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: siteId !== null && siteId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type CheckSiteMappingUploadAccessQueryResult = NonNullable<Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>>
+export type CheckSiteMappingUploadAccessQueryError = ErrorType<void>
+
+
+/**
+ * @summary Check current upload permission before accepting bytes
+ */
+
+export function useCheckSiteMappingUploadAccess<TData = Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>, TError = ErrorType<void>>(
+ siteId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof checkSiteMappingUploadAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getCheckSiteMappingUploadAccessQueryOptions(siteId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetSiteMappingMemberUrl = (siteId: string,
+    userId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/members/${userId}`
+}
+
+/**
+ * @summary Site manager adds or promotes an eligible organization member
+ */
+export const setSiteMappingMember = async (siteId: string,
+    userId: string,
+    setSiteMappingMemberInput: SetSiteMappingMemberInput, options?: RequestInit): Promise<SiteMappingMember> => {
+
+  return customFetch<SiteMappingMember>(getSetSiteMappingMemberUrl(siteId,userId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setSiteMappingMemberInput)
+  }
+);}
+
+
+
+
+export const getSetSiteMappingMemberMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteMappingMember>>, TError,{siteId: string;userId: string;data: BodyType<SetSiteMappingMemberInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSiteMappingMember>>, TError,{siteId: string;userId: string;data: BodyType<SetSiteMappingMemberInput>}, TContext> => {
+
+const mutationKey = ['setSiteMappingMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSiteMappingMember>>, {siteId: string;userId: string;data: BodyType<SetSiteMappingMemberInput>}> = (props) => {
+          const {siteId,userId,data} = props ?? {};
+
+          return  setSiteMappingMember(siteId,userId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetSiteMappingMemberMutationResult = NonNullable<Awaited<ReturnType<typeof setSiteMappingMember>>>
+    export type SetSiteMappingMemberMutationBody = BodyType<SetSiteMappingMemberInput>
+    export type SetSiteMappingMemberMutationError = ErrorType<void>
+
+    /**
+ * @summary Site manager adds or promotes an eligible organization member
+ */
+export const useSetSiteMappingMember = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSiteMappingMember>>, TError,{siteId: string;userId: string;data: BodyType<SetSiteMappingMemberInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setSiteMappingMember>>,
+        TError,
+        {siteId: string;userId: string;data: BodyType<SetSiteMappingMemberInput>},
+        TContext
+      > => {
+      return useMutation(getSetSiteMappingMemberMutationOptions(options));
+    }
+
+export const getRemoveSiteMappingMemberUrl = (siteId: string,
+    userId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/members/${userId}`
+}
+
+/**
+ * @summary Site manager removes a contributor or viewer
+ */
+export const removeSiteMappingMember = async (siteId: string,
+    userId: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRemoveSiteMappingMemberUrl(siteId,userId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRemoveSiteMappingMemberMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSiteMappingMember>>, TError,{siteId: string;userId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeSiteMappingMember>>, TError,{siteId: string;userId: string}, TContext> => {
+
+const mutationKey = ['removeSiteMappingMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeSiteMappingMember>>, {siteId: string;userId: string}> = (props) => {
+          const {siteId,userId} = props ?? {};
+
+          return  removeSiteMappingMember(siteId,userId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveSiteMappingMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removeSiteMappingMember>>>
+
+    export type RemoveSiteMappingMemberMutationError = ErrorType<void>
+
+    /**
+ * @summary Site manager removes a contributor or viewer
+ */
+export const useRemoveSiteMappingMember = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSiteMappingMember>>, TError,{siteId: string;userId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeSiteMappingMember>>,
+        TError,
+        {siteId: string;userId: string},
+        TContext
+      > => {
+      return useMutation(getRemoveSiteMappingMemberMutationOptions(options));
+    }
+
+export const getRecoverSiteMappingManagerUrl = (siteId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/recover-manager`
+}
+
+/**
+ * @summary Organization admin explicitly restores access to a managerless site
+ */
+export const recoverSiteMappingManager = async (siteId: string, options?: RequestInit): Promise<SiteMappingSiteEnvelope> => {
+
+  return customFetch<SiteMappingSiteEnvelope>(getRecoverSiteMappingManagerUrl(siteId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRecoverSiteMappingManagerMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recoverSiteMappingManager>>, TError,{siteId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recoverSiteMappingManager>>, TError,{siteId: string}, TContext> => {
+
+const mutationKey = ['recoverSiteMappingManager'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recoverSiteMappingManager>>, {siteId: string}> = (props) => {
+          const {siteId} = props ?? {};
+
+          return  recoverSiteMappingManager(siteId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecoverSiteMappingManagerMutationResult = NonNullable<Awaited<ReturnType<typeof recoverSiteMappingManager>>>
+
+    export type RecoverSiteMappingManagerMutationError = ErrorType<void>
+
+    /**
+ * @summary Organization admin explicitly restores access to a managerless site
+ */
+export const useRecoverSiteMappingManager = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recoverSiteMappingManager>>, TError,{siteId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recoverSiteMappingManager>>,
+        TError,
+        {siteId: string},
+        TContext
+      > => {
+      return useMutation(getRecoverSiteMappingManagerMutationOptions(options));
+    }
+
+export const getUploadSiteMappingScanUrl = (siteId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/scans/upload`
+}
+
+/**
+ * @summary Upload validated local Radar PLY points to private site storage
+ */
+export const uploadSiteMappingScan = async (siteId: string,
+    uploadSiteMappingScanBody: Blob, options?: RequestInit): Promise<SiteMappingUpload> => {
+
+  return customFetch<SiteMappingUpload>(getUploadSiteMappingScanUrl(siteId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...options?.headers },
+    body: uploadSiteMappingScanBody
+  }
+);}
+
+
+
+
+export const getUploadSiteMappingScanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadSiteMappingScan>>, TError,{siteId: string;data: BodyType<Blob>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadSiteMappingScan>>, TError,{siteId: string;data: BodyType<Blob>}, TContext> => {
+
+const mutationKey = ['uploadSiteMappingScan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadSiteMappingScan>>, {siteId: string;data: BodyType<Blob>}> = (props) => {
+          const {siteId,data} = props ?? {};
+
+          return  uploadSiteMappingScan(siteId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadSiteMappingScanMutationResult = NonNullable<Awaited<ReturnType<typeof uploadSiteMappingScan>>>
+    export type UploadSiteMappingScanMutationBody = BodyType<Blob>
+    export type UploadSiteMappingScanMutationError = ErrorType<void>
+
+    /**
+ * @summary Upload validated local Radar PLY points to private site storage
+ */
+export const useUploadSiteMappingScan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadSiteMappingScan>>, TError,{siteId: string;data: BodyType<Blob>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadSiteMappingScan>>,
+        TError,
+        {siteId: string;data: BodyType<Blob>},
+        TContext
+      > => {
+      return useMutation(getUploadSiteMappingScanMutationOptions(options));
+    }
+
+export const getDownloadSiteMappingScanUrl = (siteId: string,
+    scanId: string,) => {
+
+
+
+
+  return `/api/site-mapping/sites/${siteId}/scans/${scanId}/download`
+}
+
+/**
+ * @summary Download uploaded PLY bytes as an authorized site member
+ */
+export const downloadSiteMappingScan = async (siteId: string,
+    scanId: string, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getDownloadSiteMappingScanUrl(siteId,scanId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadSiteMappingScanQueryKey = (siteId: string,
+    scanId: string,) => {
+    return [
+    `/api/site-mapping/sites/${siteId}/scans/${scanId}/download`
+    ] as const;
+    }
+
+
+export const getDownloadSiteMappingScanQueryOptions = <TData = Awaited<ReturnType<typeof downloadSiteMappingScan>>, TError = ErrorType<void>>(siteId: string,
+    scanId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadSiteMappingScan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadSiteMappingScanQueryKey(siteId,scanId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadSiteMappingScan>>> = ({ signal }) => downloadSiteMappingScan(siteId,scanId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: siteId !== null && siteId !== undefined && scanId !== null && scanId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadSiteMappingScan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadSiteMappingScanQueryResult = NonNullable<Awaited<ReturnType<typeof downloadSiteMappingScan>>>
+export type DownloadSiteMappingScanQueryError = ErrorType<void>
+
+
+/**
+ * @summary Download uploaded PLY bytes as an authorized site member
+ */
+
+export function useDownloadSiteMappingScan<TData = Awaited<ReturnType<typeof downloadSiteMappingScan>>, TError = ErrorType<void>>(
+ siteId: string,
+    scanId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadSiteMappingScan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadSiteMappingScanQueryOptions(siteId,scanId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAuthorizeSiteMappingScanUrl = (siteId: string,) => {
+
+
+
+
+  return `/api/site-mapping/internal/sites/${siteId}/scans/authorize`
+}
+
+/**
+ * @summary Worker-only reservation for a validated capture
+ */
+export const authorizeSiteMappingScan = async (siteId: string,
+    siteMappingScanMetadata: SiteMappingScanMetadata, options?: RequestInit): Promise<SiteMappingScanReservation> => {
+
+  return customFetch<SiteMappingScanReservation>(getAuthorizeSiteMappingScanUrl(siteId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(siteMappingScanMetadata)
+  }
+);}
+
+
+
+
+export const getAuthorizeSiteMappingScanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeSiteMappingScan>>, TError,{siteId: string;data: BodyType<SiteMappingScanMetadata>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authorizeSiteMappingScan>>, TError,{siteId: string;data: BodyType<SiteMappingScanMetadata>}, TContext> => {
+
+const mutationKey = ['authorizeSiteMappingScan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authorizeSiteMappingScan>>, {siteId: string;data: BodyType<SiteMappingScanMetadata>}> = (props) => {
+          const {siteId,data} = props ?? {};
+
+          return  authorizeSiteMappingScan(siteId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthorizeSiteMappingScanMutationResult = NonNullable<Awaited<ReturnType<typeof authorizeSiteMappingScan>>>
+    export type AuthorizeSiteMappingScanMutationBody = BodyType<SiteMappingScanMetadata>
+    export type AuthorizeSiteMappingScanMutationError = ErrorType<void>
+
+    /**
+ * @summary Worker-only reservation for a validated capture
+ */
+export const useAuthorizeSiteMappingScan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeSiteMappingScan>>, TError,{siteId: string;data: BodyType<SiteMappingScanMetadata>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authorizeSiteMappingScan>>,
+        TError,
+        {siteId: string;data: BodyType<SiteMappingScanMetadata>},
+        TContext
+      > => {
+      return useMutation(getAuthorizeSiteMappingScanMutationOptions(options));
+    }
+
+export const getCompleteSiteMappingScanUrl = (siteId: string,
+    scanId: string,) => {
+
+
+
+
+  return `/api/site-mapping/internal/sites/${siteId}/scans/${scanId}/complete`
+}
+
+/**
+ * @summary Worker-only publication after private object write
+ */
+export const completeSiteMappingScan = async (siteId: string,
+    scanId: string, options?: RequestInit): Promise<SiteMappingCompletedScanEnvelope> => {
+
+  return customFetch<SiteMappingCompletedScanEnvelope>(getCompleteSiteMappingScanUrl(siteId,scanId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCompleteSiteMappingScanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSiteMappingScan>>, TError,{siteId: string;scanId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof completeSiteMappingScan>>, TError,{siteId: string;scanId: string}, TContext> => {
+
+const mutationKey = ['completeSiteMappingScan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof completeSiteMappingScan>>, {siteId: string;scanId: string}> = (props) => {
+          const {siteId,scanId} = props ?? {};
+
+          return  completeSiteMappingScan(siteId,scanId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CompleteSiteMappingScanMutationResult = NonNullable<Awaited<ReturnType<typeof completeSiteMappingScan>>>
+
+    export type CompleteSiteMappingScanMutationError = ErrorType<void>
+
+    /**
+ * @summary Worker-only publication after private object write
+ */
+export const useCompleteSiteMappingScan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSiteMappingScan>>, TError,{siteId: string;scanId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof completeSiteMappingScan>>,
+        TError,
+        {siteId: string;scanId: string},
+        TContext
+      > => {
+      return useMutation(getCompleteSiteMappingScanMutationOptions(options));
+    }
+
+export const getAuthorizeSiteMappingDownloadUrl = (siteId: string,
+    scanId: string,) => {
+
+
+
+
+  return `/api/site-mapping/internal/sites/${siteId}/scans/${scanId}/download`
+}
+
+/**
+ * @summary Worker-only object lookup after site authorization
+ */
+export const authorizeSiteMappingDownload = async (siteId: string,
+    scanId: string, options?: RequestInit): Promise<SiteMappingDownloadGrant> => {
+
+  return customFetch<SiteMappingDownloadGrant>(getAuthorizeSiteMappingDownloadUrl(siteId,scanId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAuthorizeSiteMappingDownloadQueryKey = (siteId: string,
+    scanId: string,) => {
+    return [
+    `/api/site-mapping/internal/sites/${siteId}/scans/${scanId}/download`
+    ] as const;
+    }
+
+
+export const getAuthorizeSiteMappingDownloadQueryOptions = <TData = Awaited<ReturnType<typeof authorizeSiteMappingDownload>>, TError = ErrorType<void>>(siteId: string,
+    scanId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof authorizeSiteMappingDownload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAuthorizeSiteMappingDownloadQueryKey(siteId,scanId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof authorizeSiteMappingDownload>>> = ({ signal }) => authorizeSiteMappingDownload(siteId,scanId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: siteId !== null && siteId !== undefined && scanId !== null && scanId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof authorizeSiteMappingDownload>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AuthorizeSiteMappingDownloadQueryResult = NonNullable<Awaited<ReturnType<typeof authorizeSiteMappingDownload>>>
+export type AuthorizeSiteMappingDownloadQueryError = ErrorType<void>
+
+
+/**
+ * @summary Worker-only object lookup after site authorization
+ */
+
+export function useAuthorizeSiteMappingDownload<TData = Awaited<ReturnType<typeof authorizeSiteMappingDownload>>, TError = ErrorType<void>>(
+ siteId: string,
+    scanId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof authorizeSiteMappingDownload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAuthorizeSiteMappingDownloadQueryOptions(siteId,scanId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getClaimStaleSiteMappingScansUrl = () => {
+
+
+
+
+  return `/api/site-mapping/internal/scans/cleanup/claim`
+}
+
+/**
+ * @summary Worker-only claim of stale pending captures
+ */
+export const claimStaleSiteMappingScans = async ( options?: RequestInit): Promise<SiteMappingCleanupClaims> => {
+
+  return customFetch<SiteMappingCleanupClaims>(getClaimStaleSiteMappingScansUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getClaimStaleSiteMappingScansMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimStaleSiteMappingScans>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimStaleSiteMappingScans>>, TError,void, TContext> => {
+
+const mutationKey = ['claimStaleSiteMappingScans'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimStaleSiteMappingScans>>, void> = () => {
+
+
+          return  claimStaleSiteMappingScans(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimStaleSiteMappingScansMutationResult = NonNullable<Awaited<ReturnType<typeof claimStaleSiteMappingScans>>>
+
+    export type ClaimStaleSiteMappingScansMutationError = ErrorType<void>
+
+    /**
+ * @summary Worker-only claim of stale pending captures
+ */
+export const useClaimStaleSiteMappingScans = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimStaleSiteMappingScans>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof claimStaleSiteMappingScans>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getClaimStaleSiteMappingScansMutationOptions(options));
+    }
+
+export const getDeleteStaleSiteMappingScanUrl = (scanId: string,) => {
+
+
+
+
+  return `/api/site-mapping/internal/scans/${scanId}/cleanup`
+}
+
+/**
+ * @summary Worker-only deletion of a claimed scan record
+ */
+export const deleteStaleSiteMappingScan = async (scanId: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteStaleSiteMappingScanUrl(scanId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteStaleSiteMappingScanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>, TError,{scanId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>, TError,{scanId: string}, TContext> => {
+
+const mutationKey = ['deleteStaleSiteMappingScan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>, {scanId: string}> = (props) => {
+          const {scanId} = props ?? {};
+
+          return  deleteStaleSiteMappingScan(scanId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteStaleSiteMappingScanMutationResult = NonNullable<Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>>
+
+    export type DeleteStaleSiteMappingScanMutationError = ErrorType<void>
+
+    /**
+ * @summary Worker-only deletion of a claimed scan record
+ */
+export const useDeleteStaleSiteMappingScan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>, TError,{scanId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteStaleSiteMappingScan>>,
+        TError,
+        {scanId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteStaleSiteMappingScanMutationOptions(options));
+    }
+
+export const getDeleteSiteMappingObjectUrl = () => {
+
+
+
+
+  return `/api/site-mapping/internal/objects/delete`
+}
+
+/**
+ * @summary Worker-only deletion of a private R2 scan object
+ */
+export const deleteSiteMappingObject = async (siteMappingObjectDeleteInput: SiteMappingObjectDeleteInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteSiteMappingObjectUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(siteMappingObjectDeleteInput)
+  }
+);}
+
+
+
+
+export const getDeleteSiteMappingObjectMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSiteMappingObject>>, TError,{data: BodyType<SiteMappingObjectDeleteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSiteMappingObject>>, TError,{data: BodyType<SiteMappingObjectDeleteInput>}, TContext> => {
+
+const mutationKey = ['deleteSiteMappingObject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSiteMappingObject>>, {data: BodyType<SiteMappingObjectDeleteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteSiteMappingObject(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSiteMappingObjectMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSiteMappingObject>>>
+    export type DeleteSiteMappingObjectMutationBody = BodyType<SiteMappingObjectDeleteInput>
+    export type DeleteSiteMappingObjectMutationError = ErrorType<void>
+
+    /**
+ * @summary Worker-only deletion of a private R2 scan object
+ */
+export const useDeleteSiteMappingObject = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSiteMappingObject>>, TError,{data: BodyType<SiteMappingObjectDeleteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSiteMappingObject>>,
+        TError,
+        {data: BodyType<SiteMappingObjectDeleteInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteSiteMappingObjectMutationOptions(options));
     }
 

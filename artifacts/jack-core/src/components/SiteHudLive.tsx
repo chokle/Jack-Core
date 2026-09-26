@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SiteRadar } from "./SiteRadar";
 import { useRadarAr } from "./useRadarAr";
 import { useToast } from "@/hooks/use-toast";
+import { SiteMappingHub } from "./SiteMappingHub";
 import "./SiteHud.css";
 
 type LocationState =
@@ -128,13 +129,14 @@ export function SiteHudLive({
     >
       <h1>Site radar</h1>
       <p>
-        No site connected. Site scans, crew positions, and landmarks will appear
-        only after a site is connected.
+        Phone depth is live in this session. Shared site captures are listed
+        below; crew positions and landmarks appear only when their production
+        sources are connected.
       </p>
       <SiteRadar
         crew={[]}
         landmarks={[]}
-        floorLabel="No site"
+        floorLabel="Local scan"
         active={ar.state.kind === "running"}
         live
         ar={
@@ -220,6 +222,10 @@ export function SiteHudLive({
           </button>
         )}
       </div>
+      <SiteMappingHub
+        capturedCount={ar.state.kind === "paused" ? ar.state.capturedCount : 0}
+        captureBlob={ar.captureBlob}
+      />
       <div
         className="site-hud-entry site-hud-entry--location"
         aria-live="polite"
@@ -258,13 +264,14 @@ export function SiteHudLive({
         </p>
       )}
       <p>
-        Jack does not automatically save or send this location or AR depth. Jack
-        does not upload a depth download; your device handles the file. It is
-        not a verified site map. Opening the map shares the displayed
-        coordinates with OpenStreetMap. The AR dots are surfaces actually
-        measured during this session. Stop holds the scan in this page until you
-        clear it or leave. The 10 m and 50 m grids are display scales, not
-        detection guarantees or a saved site map.
+        Jack does not automatically save or send this location or AR depth. A
+        site scan is uploaded only if you choose an authorized site and tap
+        Upload. Downloading depth points stays on your device. It is not a
+        verified site map. Opening the map shares the displayed coordinates with
+        OpenStreetMap. The AR dots are surfaces actually measured during this
+        session. Stop holds the scan in this page until you clear it or leave.
+        The 10 m and 50 m grids are display scales, not detection guarantees or
+        a saved site map.
       </p>
     </section>
   );

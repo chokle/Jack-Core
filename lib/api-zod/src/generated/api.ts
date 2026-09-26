@@ -1401,3 +1401,270 @@ export const ArchiveParkedThoughtResponse = zod.object({
 })
 
 
+/**
+ * @summary List active organizations where the caller may create sites
+ */
+export const ListSiteMappingOrganizationsResponse = zod.object({
+  "organizations": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary List site memberships and recoverable managerless sites
+ */
+export const ListSiteMappingSitesResponse = zod.object({
+  "sites": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "organization_id": zod.string().uuid(),
+  "name": zod.string(),
+  "status": zod.enum(['active', 'archived'])
+}).and(zod.object({
+  "role": zod.enum(['manager', 'contributor', 'viewer'])
+}))),
+  "recoverableSites": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "organization_id": zod.string().uuid(),
+  "name": zod.string(),
+  "status": zod.enum(['active', 'archived'])
+}))
+})
+
+
+/**
+ * @summary Create a private site as an organization admin
+ */
+export const createSiteMappingSiteBodyNameMax = 160;
+
+
+
+export const CreateSiteMappingSiteBody = zod.object({
+  "organizationId": zod.string().uuid(),
+  "name": zod.string().min(1).max(createSiteMappingSiteBodyNameMax)
+})
+
+export const CreateSiteMappingSiteResponse = zod.object({
+  "site": zod.object({
+  "id": zod.string().uuid(),
+  "organization_id": zod.string().uuid(),
+  "name": zod.string(),
+  "status": zod.enum(['active', 'archived'])
+}).and(zod.object({
+  "role": zod.enum(['manager', 'contributor', 'viewer'])
+}))
+})
+
+
+/**
+ * @summary List uploaded captures visible to a site member
+ */
+export const ListSiteMappingScansParams = zod.object({
+  "siteId": zod.coerce.string().uuid()
+})
+
+
+
+
+
+export const ListSiteMappingScansResponse = zod.object({
+  "site": zod.object({
+  "siteId": zod.string().uuid(),
+  "organizationId": zod.string().uuid(),
+  "name": zod.string(),
+  "role": zod.enum(['manager', 'contributor', 'viewer']),
+  "status": zod.enum(['active', 'archived'])
+}),
+  "scans": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "capture_format": zod.enum(['radar_ply_points_v1']),
+  "status": zod.enum(['uploaded']),
+  "byte_size": zod.number().min(1),
+  "point_count": zod.number().min(1),
+  "created_at": zod.coerce.date(),
+  "uploaded_at": zod.coerce.date()
+})),
+  "mapStatus": zod.string()
+})
+
+
+/**
+ * @summary Check current upload permission before accepting bytes
+ */
+export const CheckSiteMappingUploadAccessParams = zod.object({
+  "siteId": zod.coerce.string().uuid()
+})
+
+export const CheckSiteMappingUploadAccessResponse = zod.void()
+
+
+/**
+ * @summary Site manager adds or promotes an eligible organization member
+ */
+export const SetSiteMappingMemberParams = zod.object({
+  "siteId": zod.coerce.string().uuid(),
+  "userId": zod.coerce.string()
+})
+
+export const SetSiteMappingMemberBody = zod.object({
+  "role": zod.enum(['manager', 'contributor', 'viewer'])
+})
+
+export const SetSiteMappingMemberResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'contributor', 'viewer'])
+})
+
+
+/**
+ * @summary Site manager removes a contributor or viewer
+ */
+export const RemoveSiteMappingMemberParams = zod.object({
+  "siteId": zod.coerce.string().uuid(),
+  "userId": zod.coerce.string()
+})
+
+export const RemoveSiteMappingMemberResponse = zod.void()
+
+
+/**
+ * @summary Organization admin explicitly restores access to a managerless site
+ */
+export const RecoverSiteMappingManagerParams = zod.object({
+  "siteId": zod.coerce.string().uuid()
+})
+
+export const RecoverSiteMappingManagerResponse = zod.object({
+  "site": zod.object({
+  "id": zod.string().uuid(),
+  "organization_id": zod.string().uuid(),
+  "name": zod.string(),
+  "status": zod.enum(['active', 'archived'])
+}).and(zod.object({
+  "role": zod.enum(['manager', 'contributor', 'viewer'])
+}))
+})
+
+
+/**
+ * @summary Upload validated local Radar PLY points to private site storage
+ */
+export const UploadSiteMappingScanParams = zod.object({
+  "siteId": zod.coerce.string().uuid()
+})
+
+
+
+
+
+export const UploadSiteMappingScanResponse = zod.object({
+  "scanId": zod.string().uuid(),
+  "pointCount": zod.number().min(1),
+  "byteSize": zod.number().min(1),
+  "status": zod.enum(['uploaded'])
+})
+
+
+/**
+ * @summary Download uploaded PLY bytes as an authorized site member
+ */
+export const DownloadSiteMappingScanParams = zod.object({
+  "siteId": zod.coerce.string().uuid(),
+  "scanId": zod.coerce.string().uuid()
+})
+
+export const DownloadSiteMappingScanResponse = zod.unknown()
+
+
+/**
+ * @summary Worker-only reservation for a validated capture
+ */
+export const AuthorizeSiteMappingScanParams = zod.object({
+  "siteId": zod.coerce.string().uuid()
+})
+
+export const authorizeSiteMappingScanBodyByteSizeMax = 26214400;
+
+export const authorizeSiteMappingScanBodyPointCountMax = 2000000;
+
+export const authorizeSiteMappingScanBodySha256RegExp = new RegExp('^[0-9a-f]{64}$');
+
+
+export const AuthorizeSiteMappingScanBody = zod.object({
+  "byteSize": zod.number().min(1).max(authorizeSiteMappingScanBodyByteSizeMax),
+  "pointCount": zod.number().min(1).max(authorizeSiteMappingScanBodyPointCountMax),
+  "sha256": zod.string().regex(authorizeSiteMappingScanBodySha256RegExp)
+})
+
+export const AuthorizeSiteMappingScanResponse = zod.object({
+  "scanId": zod.string().uuid(),
+  "objectKey": zod.string()
+})
+
+
+/**
+ * @summary Worker-only publication after private object write
+ */
+export const CompleteSiteMappingScanParams = zod.object({
+  "siteId": zod.coerce.string().uuid(),
+  "scanId": zod.coerce.string().uuid()
+})
+
+export const CompleteSiteMappingScanResponse = zod.object({
+  "scan": zod.object({
+  "id": zod.string().uuid(),
+  "status": zod.enum(['uploaded']).optional(),
+  "byte_size": zod.number(),
+  "point_count": zod.number(),
+  "uploaded_at": zod.coerce.date()
+})
+})
+
+
+/**
+ * @summary Worker-only object lookup after site authorization
+ */
+export const AuthorizeSiteMappingDownloadParams = zod.object({
+  "siteId": zod.coerce.string().uuid(),
+  "scanId": zod.coerce.string().uuid()
+})
+
+export const AuthorizeSiteMappingDownloadResponse = zod.object({
+  "objectKey": zod.string(),
+  "byteSize": zod.number(),
+  "sha256": zod.string()
+})
+
+
+/**
+ * @summary Worker-only claim of stale pending captures
+ */
+export const ClaimStaleSiteMappingScansResponse = zod.object({
+  "scans": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "objectKey": zod.string()
+}))
+})
+
+
+/**
+ * @summary Worker-only deletion of a claimed scan record
+ */
+export const DeleteStaleSiteMappingScanParams = zod.object({
+  "scanId": zod.coerce.string().uuid()
+})
+
+export const DeleteStaleSiteMappingScanResponse = zod.void()
+
+
+/**
+ * @summary Worker-only deletion of a private R2 scan object
+ */
+export const DeleteSiteMappingObjectBody = zod.object({
+  "objectKey": zod.string()
+})
+
+export const DeleteSiteMappingObjectResponse = zod.void()
+
+

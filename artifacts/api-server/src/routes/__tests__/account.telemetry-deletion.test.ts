@@ -1,6 +1,6 @@
 import express, { type Express } from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const deletedTables = vi.hoisted(() => [] as string[]);
 const rpcCalls = vi.hoisted(
@@ -11,14 +11,32 @@ const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
 const updates = vi.hoisted(
-  () => [] as Array<{ table: string; values: Record<string, unknown>; column: string; value: unknown }>,
+  () =>
+    [] as Array<{
+      table: string;
+      values: Record<string, unknown>;
+      column: string;
+      value: unknown;
+    }>,
 );
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
-  () => [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
+  () =>
+    [] as Array<{ id: string; tester_user_id: string; storage_path: string }>,
+);
+const siteScanRows = vi.hoisted(
+  () =>
+    [] as Array<{
+      id: string;
+      object_key: string;
+      uploaded_by_user_id: string;
+      status: "pending" | "uploaded" | "deleting";
+    }>,
 );
 const removeRecordingObjects = vi.hoisted(() =>
-  vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({ error: null })),
+  vi.fn<(paths: string[]) => Promise<{ error: unknown }>>(async () => ({
+    error: null,
+  })),
 );
 const removeVideoGraph = vi.hoisted(() => vi.fn(async () => {}));
 const removeContributorGraph = vi.hoisted(() => vi.fn(async () => {}));
@@ -33,7 +51,9 @@ vi.mock("../../lib/memory-graph.js", () => ({
   removeContributorGraph,
   withdrawMentor,
 }));
-vi.mock("../../lib/video-storage.js", () => ({ removeVideoAssets: vi.fn(async () => {}) }));
+vi.mock("../../lib/video-storage.js", () => ({
+  removeVideoAssets: vi.fn(async () => {}),
+}));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: {
     rpc: async (name: string, params: Record<string, unknown>) => {
@@ -80,20 +100,42 @@ vi.mock("../../lib/supabase.js", () => ({
         then: (
           resolve: (value: { data: unknown[]; error: null }) => unknown,
         ) => {
+          if (table === "site_scans") {
+            if (operation === "delete") {
+              for (let index = siteScanRows.length - 1; index >= 0; index--) {
+                if (
+                  !equals ||
+                  siteScanRows[index]?.uploaded_by_user_id === equals.value
+                )
+                  siteScanRows.splice(index, 1);
+              }
+              return Promise.resolve(resolve({ data: [], error: null }));
+            }
+            return Promise.resolve(
+              resolve({ data: siteScanRows.slice(0, limit), error: null }),
+            );
+          }
           if (table !== "test_recordings") {
             return Promise.resolve(resolve({ data: [], error: null }));
           }
           if (operation === "delete") {
-            const ids = new Set(included?.column === "id" ? included.values : []);
+            const ids = new Set(
+              included?.column === "id" ? included.values : [],
+            );
             for (let index = recordingRows.length - 1; index >= 0; index -= 1) {
-              if (ids.has(recordingRows[index]!.id)) recordingRows.splice(index, 1);
+              if (ids.has(recordingRows[index]!.id))
+                recordingRows.splice(index, 1);
             }
             return Promise.resolve(resolve({ data: [], error: null }));
           }
           const rows = recordingRows.filter(
-            (row) => !equals || row[equals.column as keyof typeof row] === equals.value,
+            (row) =>
+              !equals ||
+              row[equals.column as keyof typeof row] === equals.value,
           );
-          return Promise.resolve(resolve({ data: rows.slice(0, limit), error: null }));
+          return Promise.resolve(
+            resolve({ data: rows.slice(0, limit), error: null }),
+          );
         },
       };
       return query;
@@ -123,6 +165,7 @@ beforeEach(() => {
   deletions.length = 0;
   updates.length = 0;
   recordingRows.length = 0;
+  siteScanRows.length = 0;
   deleteUser.mockClear();
   removeRecordingObjects.mockReset();
   removeRecordingObjects.mockResolvedValue({ error: null });
@@ -132,6 +175,12 @@ beforeEach(() => {
   removeContributorGraph.mockResolvedValue(undefined);
   withdrawMentor.mockReset();
   withdrawMentor.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env["RADAR_WORKER_TOKEN"];
+  delete process.env["PUBLIC_SITE_URL"];
 });
 
 describe("account deletion telemetry coverage", () => {
@@ -158,6 +207,7 @@ describe("account deletion telemetry coverage", () => {
         "admin_access_audit",
         "test_sessions",
         "pilot_memberships",
+        "site_memberships",
         "platform_roles",
       ]),
     );
@@ -172,10 +222,12 @@ describe("account deletion telemetry coverage", () => {
       },
     ]);
     expect(operationOrder[0]).toBe("rpc:begin_telemetry_account_deletion");
-    expect(operationOrder.indexOf("rpc:finish_telemetry_account_deletion")).toBeGreaterThan(
-      operationOrder.indexOf("from:test_sessions"),
-    );
-    expect(deletions.filter(({ table }) => table === "activity_report_runs")).toEqual([]);
+    expect(
+      operationOrder.indexOf("rpc:finish_telemetry_account_deletion"),
+    ).toBeGreaterThan(operationOrder.indexOf("from:test_sessions"));
+    expect(
+      deletions.filter(({ table }) => table === "activity_report_runs"),
+    ).toEqual([]);
     expect(
       updates.filter(({ table }) => table === "activity_report_runs"),
     ).toEqual([
@@ -196,9 +248,7 @@ describe("account deletion telemetry coverage", () => {
         value: "user-1",
       },
     ]);
-    expect(
-      updates.filter(({ table }) => table === "platform_roles"),
-    ).toEqual([
+    expect(updates.filter(({ table }) => table === "platform_roles")).toEqual([
       {
         table: "platform_roles",
         values: { created_by_user_id: null },
@@ -210,8 +260,69 @@ describe("account deletion telemetry coverage", () => {
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 
+  it("removes owned private scan bytes before deleting the account", async () => {
+    siteScanRows.push({
+      id: "scan-1",
+      object_key: "organizations/org/sites/site/scans/scan.ply",
+      uploaded_by_user_id: "user-1",
+      status: "uploaded",
+    });
+    process.env["RADAR_WORKER_TOKEN"] = "x".repeat(32);
+    process.env["PUBLIC_SITE_URL"] = "https://jack.example.test";
+    const deleteObject = vi.fn(async () => {
+      operationOrder.push("r2:delete");
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", deleteObject);
+    const response = await request(app()).delete("/api/account");
+    expect(response.status).toBe(204);
+    expect(deleteObject).toHaveBeenCalledOnce();
+    expect(operationOrder.indexOf("r2:delete")).toBeLessThan(
+      operationOrder.indexOf("from:videos"),
+    );
+    expect(siteScanRows).toEqual([]);
+    expect(deleteUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("keeps the account when private scan storage cannot be cleaned", async () => {
+    siteScanRows.push({
+      id: "scan-1",
+      object_key: "organizations/org/sites/site/scans/scan.ply",
+      uploaded_by_user_id: "user-1",
+      status: "uploaded",
+    });
+    process.env["RADAR_WORKER_TOKEN"] = "x".repeat(32);
+    process.env["PUBLIC_SITE_URL"] = "https://jack.example.test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 503 })),
+    );
+    const response = await request(app()).delete("/api/account");
+    expect(response.status).toBe(500);
+    expect(siteScanRows).toHaveLength(1);
+    expect(deleteUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps an in-flight scan record until stale upload cleanup finishes", async () => {
+    siteScanRows.push({
+      id: "scan-pending",
+      object_key: "organizations/org/sites/site/scans/scan-pending.ply",
+      uploaded_by_user_id: "user-1",
+      status: "pending",
+    });
+    const deleteObject = vi.fn();
+    vi.stubGlobal("fetch", deleteObject);
+    const response = await request(app()).delete("/api/account");
+    expect(response.status).toBe(500);
+    expect(siteScanRows).toHaveLength(1);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(deleteUser).not.toHaveBeenCalled();
+  });
+
   it("keeps the identity when strict contributor graph cleanup fails", async () => {
-    removeContributorGraph.mockRejectedValueOnce(new Error("graph unavailable"));
+    removeContributorGraph.mockRejectedValueOnce(
+      new Error("graph unavailable"),
+    );
 
     const failed = await request(app()).delete("/api/account");
 
@@ -239,7 +350,9 @@ describe("account deletion telemetry coverage", () => {
 
     expect(response.status).toBe(204);
     expect(recordingRows).toHaveLength(0);
-    expect(removeRecordingObjects.mock.calls.map(([paths]) => paths.length)).toEqual([500, 500, 1]);
+    expect(
+      removeRecordingObjects.mock.calls.map(([paths]) => paths.length),
+    ).toEqual([500, 500, 1]);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
   });
 

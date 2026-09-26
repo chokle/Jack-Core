@@ -309,10 +309,14 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     void session?.end().catch(() => undefined);
   }
 
+  function captureBlob() {
+    if (state.kind !== "paused" || captureRef.current.size === 0) return null;
+    return capturePly([...captureRef.current.values()]);
+  }
+
   function downloadCapture() {
-    if (state.kind !== "paused" || captureRef.current.size === 0)
-      return Promise.resolve(null);
-    const file = capturePly([...captureRef.current.values()]);
+    const file = captureBlob();
+    if (!file) return Promise.resolve(null);
     const filename = `radar-depth-${new Date().toISOString().replace(/[:.]/g, "-")}.ply`;
     const picker = (
       window as Window & { showSaveFilePicker?: SaveFilePicker }
@@ -320,5 +324,5 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     return saveCaptureFile(file, filename, picker);
   }
 
-  return { state, support, start, stop, clear, downloadCapture };
+  return { state, support, start, stop, clear, downloadCapture, captureBlob };
 }

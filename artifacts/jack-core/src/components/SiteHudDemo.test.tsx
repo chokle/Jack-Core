@@ -48,7 +48,9 @@ describe("site radar release gate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open radar" }));
     rerender(shell("account-a", "radar"));
     expect(collectJackUiContext().surface).toBe("Site radar");
-    expect(screen.getByText(/No site connected\. Site scans/)).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Shared site mapping" }),
+    ).toBeTruthy();
     expect(screen.queryByText("radar content")).toBeNull();
   });
 

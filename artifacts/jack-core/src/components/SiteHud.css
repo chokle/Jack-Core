@@ -392,6 +392,49 @@
 .site-hud-entry--location span {
   overflow-wrap: anywhere;
 }
+.site-mapping-hub > div {
+  display: block;
+  width: 100%;
+}
+.site-mapping-hub > div > div {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.site-mapping-hub p,
+.site-mapping-hub li {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.site-mapping-hub label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+.site-mapping-hub select,
+.site-mapping-hub input {
+  max-width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: #000;
+  color: hsl(var(--foreground));
+}
+.site-mapping-hub button {
+  margin-left: 0;
+}
+.site-mapping-hub button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.site-mapping-hub a {
+  color: var(--hud-accent, #67e8f9);
+  text-decoration: underline;
+}
 .site-hud-entry--page {
   flex: 1;
   justify-content: center;

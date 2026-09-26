@@ -9,6 +9,9 @@ import { clerkMiddleware } from "@clerk/express";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
+import siteMappingRouter, {
+  siteMappingCleanupRouter,
+} from "./routes/site-mapping.js";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -122,16 +125,15 @@ app.get(/^\/sign-up(?:\/.*)?$/, (_req, res) => {
 // can issue a valid Clerk session URL before the standard authorization boundary.
 app.use("/api/pilot-direct-access", pilotDirectAccessRouter);
 
+// The scheduled Worker has no Clerk session. These two maintenance routes
+// require the private Worker token before touching pending scan metadata.
+app.use("/api", siteMappingCleanupRouter);
+
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
-// unauthorized requests never register as load, and before the router so a
+// anonymous requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
 app.use("/api", requireAuth);
-
-// Authentication alone does not authorize the controlled production pilot.
-// Require a current tester membership, or explicit server-resolved admin role,
-// before any protected API route can read or write real Jack data.
-app.use("/api", requirePilotAccess);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
@@ -156,6 +158,15 @@ app.use((req, res, next) => {
   res.on("close", end);
   next();
 });
+
+// Site mapping has its own resolved-identity, organization, and site membership
+// checks. Mount it here so an organization admin need not also be a pilot tester.
+app.use("/api", siteMappingRouter);
+
+// Authentication alone does not authorize the controlled production pilot.
+// Require a current tester membership, or explicit server-resolved admin role,
+// before any protected API route can read or write real Jack data.
+app.use("/api", requirePilotAccess);
 
 app.use("/api", router);
 
