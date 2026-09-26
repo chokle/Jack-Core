@@ -200,6 +200,54 @@ describe("FloatingJack submission lifecycle", () => {
     expect(screen.getByText(/queued for transcription/)).toBeTruthy();
   });
 
+  it("requires the explicit upload action even when a video is selected during voice input", async () => {
+    attachmentClassifier.mockResolvedValue("video");
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        { target: { files: [new File(["ftyp"], "sweep.mp4")] } },
+      );
+    });
+    fireEvent.click(screen.getByLabelText("Talk to Jack"));
+    await act(async () => {
+      FakeSpeechRecognition.latest?.onresult?.({
+        results: [{ 0: { transcript: "What is here?" }, isFinal: true }],
+      });
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Ask Jack") as HTMLInputElement).value).toBe(
+      "What is here?",
+    );
+    expect(
+      screen.getByLabelText("Upload video to shared Library"),
+    ).toBeTruthy();
+  });
+
+  it("does not allow a mic turn to retry an in-flight video upload", async () => {
+    attachmentClassifier.mockResolvedValue("video");
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(() => {}));
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        { target: { files: [new File(["ftyp"], "sweep.mp4")] } },
+      );
+    });
+    fireEvent.click(screen.getByLabelText("Upload video to shared Library"));
+    const mic = screen.getByLabelText("Talk to Jack") as HTMLButtonElement;
+    expect(mic.disabled).toBe(true);
+    fireEvent.click(mic);
+    expect(FakeSpeechRecognition.latest).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("queues failed questions without content and supplies the telemetry session", async () => {
     cacheTestSession({
       id: "test-session",
