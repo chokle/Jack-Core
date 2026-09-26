@@ -58,6 +58,8 @@ vi.mock("../../lib/supabase.js", () => ({
           databaseFilters.push([column, value]);
           return query;
         },
+        in: () => query,
+        is: () => query,
         order: () => query,
         limit: () => query,
         maybeSingle: async () => ({
