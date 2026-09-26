@@ -18,6 +18,21 @@ afterEach(() => {
 });
 
 describe("live site radar", () => {
+  it("does not claim a site is disconnected or depth is active before checking", () => {
+    const { rerender } = render(
+      <SiteHudLive expanded={false} onOpenRadar={vi.fn()} />,
+    );
+    expect(
+      screen.getByText("Open to view your site and scan status"),
+    ).toBeTruthy();
+    expect(screen.queryByText("No site connected")).toBeNull();
+    rerender(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
+    expect(
+      screen.getByText(/Phone depth can map measured surfaces/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Phone depth is live/)).toBeNull();
+  });
+
   it("starts empty without requesting location or showing fictional contacts", () => {
     const getCurrentPosition = vi.fn();
     vi.stubGlobal("isSecureContext", true);
