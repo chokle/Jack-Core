@@ -23,7 +23,9 @@ describe("live site radar", () => {
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
     render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
-    expect(screen.getByText(/No site connected\. Site scans/)).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Shared site mapping" }),
+    ).toBeTruthy();
     expect(screen.getByText("Location off")).toBeTruthy();
     expect(screen.queryByTestId("radar-sweep")).toBeNull();
     expect(screen.queryByText("● Crew")).toBeNull();
