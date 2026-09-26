@@ -201,6 +201,22 @@ describe("live site radar", () => {
     expect(
       screen.getByText(/Scan stopped · .* measured surfaces/),
     ).toBeTruthy();
+    const download = screen.getByRole("button", {
+      name: /Download depth points/,
+    });
+    expect((download as HTMLButtonElement).disabled).toBe(false);
+    const NativeURL = URL;
+    class DownloadURL extends NativeURL {
+      static createObjectURL = vi.fn(() => "blob:local-depth");
+      static revokeObjectURL = vi.fn();
+    }
+    vi.stubGlobal("URL", DownloadURL);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    fireEvent.click(download);
+    expect(DownloadURL.createObjectURL).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
     expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
       0,
     );

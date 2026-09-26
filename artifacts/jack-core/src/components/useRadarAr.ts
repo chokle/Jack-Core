@@ -7,6 +7,11 @@ import {
   type ArPoint,
   type ArPose,
 } from "../lib/radar-ar";
+import {
+  addCapturePoints,
+  capturePly,
+  MAX_CAPTURE_POINTS,
+} from "../lib/radar-capture";
 
 type Depth = { getDepthInMeters(x: number, y: number): number };
 type View = {
@@ -41,6 +46,7 @@ export type RadarArState =
       pose: ArPose | null;
       depthAvailable: boolean;
       heading: number | null;
+      capturedCount: number;
     };
 
 export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
@@ -55,6 +61,7 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
   const sessionRef = useRef<Session | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const generation = useRef(0);
+  const captureRef = useRef(new Map<string, ArPoint>());
 
   useEffect(() => {
     const xr = (navigator as unknown as { xr?: XR }).xr;
@@ -106,6 +113,7 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
       return;
     }
     setState({ kind: "starting" });
+    captureRef.current.clear();
     let session: Session | null = null;
     let canvas: HTMLCanvasElement | null = null;
     try {
@@ -152,9 +160,11 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
         pose: null,
         depthAvailable: false,
         heading: null,
+        capturedCount: 0,
       });
       let points: ArPoint[] = [];
       let previousSample = 0;
+      let previousCapture = 0;
       let startYaw: number | null = null;
       const ended = () => {
         scanCanvas.remove();
@@ -213,6 +223,31 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
                 );
                 if (point) samples.push(point);
               }
+            if (
+              time - previousCapture >= 500 &&
+              captureRef.current.size < MAX_CAPTURE_POINTS
+            ) {
+              previousCapture = time;
+              const dense: ArPoint[] = [];
+              for (let row = 0; row < 15; row++)
+                for (let column = 0; column < 20; column++) {
+                  const u = (column + 0.5) / 20;
+                  const v = (row + 0.5) / 15;
+                  const meters = depth.getDepthInMeters(u, v);
+                  if (meters < 0.5 || meters > 10) continue;
+                  const point = observedDepthPoint(
+                    u,
+                    v,
+                    meters,
+                    view.projectionMatrix,
+                    position,
+                    orientation,
+                    time,
+                  );
+                  if (point) dense.push(point);
+                }
+              addCapturePoints(captureRef.current, dense);
+            }
           }
           points = mergeObservedPoints(points, samples, time);
           setState({
@@ -221,6 +256,7 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
             pose,
             depthAvailable: !!depth,
             heading,
+            capturedCount: captureRef.current.size,
           });
         } catch {
           stop();
@@ -266,9 +302,24 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     sessionRef.current = null;
     canvasRef.current?.remove();
     canvasRef.current = null;
+    captureRef.current.clear();
     setState({ kind: "idle" });
     void session?.end().catch(() => undefined);
   }
 
-  return { state, support, start, stop, clear };
+  function downloadCapture(): boolean {
+    if (state.kind !== "paused" || captureRef.current.size === 0) return false;
+    const file = capturePly([...captureRef.current.values()]);
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `radar-depth-${new Date().toISOString().replace(/[:.]/g, "-")}.ply`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
+  }
+
+  return { state, support, start, stop, clear, downloadCapture };
 }
