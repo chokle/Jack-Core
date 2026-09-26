@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Mic, Send, Volume2, X } from "lucide-react";
+import { Loader2, Mic, Paperclip, Send, Volume2, X } from "lucide-react";
 import {
   getCachedTestSession,
   trackTestEvent,
@@ -19,6 +19,10 @@ import {
   unavailableJackLocalCommand,
 } from "../lib/jack-local-command";
 import { JackSpeechPlayer, type JackVoiceState } from "../lib/jack-speech";
+import {
+  classifyJackAttachment,
+  type JackAttachmentKind,
+} from "../lib/jack-attachment";
 import { resolveJackVideoDestination } from "../lib/jack-video-destination";
 
 interface SpeechRecognitionEventLike extends Event {
@@ -74,7 +78,12 @@ function sameUiContext(a: JackUiContext | null, b: JackUiContext) {
 export function FloatingJack() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
+  const [attachment, setAttachment] = useState<{
+    file: File;
+    kind: JackAttachmentKind;
+  } | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
+  const [answerOrigin, setAnswerOrigin] = useState<string | null>(null);
   const [sources, setSources] = useState<
     Array<{
       videoId: string;
@@ -95,6 +104,7 @@ export function FloatingJack() {
   const contextEpochRef = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const speechPlayerRef = useRef<JackSpeechPlayer | null>(null);
   if (!speechPlayerRef.current)
     speechPlayerRef.current = new JackSpeechPlayer(setVoiceState);
@@ -153,6 +163,7 @@ export function FloatingJack() {
         setPending(false);
         setListening(false);
         setAnswer(null);
+        setAnswerOrigin(null);
         setSources([]);
         setError(
           interruptedVoice
@@ -232,9 +243,11 @@ export function FloatingJack() {
       recognitionRef.current = null;
       cancelSpeech();
       setAnswer(null);
+      setAnswerOrigin(null);
       setSources([]);
       setError(null);
       setInput("");
+      setAttachment(null);
       setPending(false);
       setListening(false);
     }
@@ -255,7 +268,9 @@ export function FloatingJack() {
 
   const submit = async (message: string) => {
     const trimmed = message.trim();
-    if (!authorized || !trimmed || submissionInFlightRef.current) return;
+    const file = attachment?.file;
+    if (!authorized || (!trimmed && !file) || submissionInFlightRef.current)
+      return;
 
     const context = refreshContext();
     const epoch = contextEpochRef.current;
@@ -267,6 +282,7 @@ export function FloatingJack() {
     setSources([]);
     setError(null);
     setAnswer(null);
+    setAnswerOrigin(null);
     setInput("");
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
@@ -275,7 +291,7 @@ export function FloatingJack() {
     cancelSpeech();
 
     try {
-      const localCommand = resolveJackLocalCommand(trimmed);
+      const localCommand = file ? null : resolveJackLocalCommand(trimmed);
       if (localCommand) {
         if (localCommand.kind === "destination") {
           const destination = await resolveJackVideoDestination(
@@ -319,23 +335,78 @@ export function FloatingJack() {
         return;
       }
       const telemetrySession = getCachedTestSession();
-      const response = await askJack(
-        { message: trimmed },
-        {
-          credentials: "include",
-          signal: controller.signal,
-          headers: {
-            ...(telemetrySession
-              ? { "X-Jack-Test-Session-Id": telemetrySession.id }
-              : {}),
-            "X-Jack-Surface": encodeURIComponent(context.surface),
-            "X-Jack-Context": encodeJackUiContextHeader(context),
+      let response: Awaited<ReturnType<typeof askJack>>;
+      if (file) {
+        const video = attachment?.kind === "video";
+        const form = new FormData();
+        form.append("file", file);
+        if (video) form.append("title", file.name.replace(/\.[^.]+$/, ""));
+        else form.append("message", trimmed);
+        const uploaded = await fetch(
+          video ? "/api/videos/ingest" : "/api/chat/attachment",
+          {
+            method: "POST",
+            credentials: "include",
+            signal: controller.signal,
+            headers: {
+              ...(telemetrySession
+                ? { "X-Jack-Test-Session-Id": telemetrySession.id }
+                : {}),
+              "X-Jack-Surface": encodeURIComponent(context.surface),
+              "X-Jack-Context": encodeJackUiContextHeader(context),
+            },
+            body: form,
           },
-        },
-      );
+        );
+        const body = (await uploaded.json().catch(() => ({}))) as {
+          answer?: string;
+          error?: string;
+          citations?: Awaited<ReturnType<typeof askJack>>["citations"];
+          attachment?: { truncated?: boolean };
+        };
+        if (!uploaded.ok)
+          throw new Error(body.error || `Upload failed (${uploaded.status}).`);
+        response = video
+          ? {
+              answer:
+                "Video uploaded to the shared Library and queued for transcription. Ask Jack about it after processing finishes.",
+              citations: [],
+              usedInternalKnowledge: false,
+              learning: { status: "discarded", extractedCount: 0 },
+            }
+          : {
+              answer: `${body.answer || "Jack could not read enough to answer."}${body.attachment?.truncated ? "\n\nOnly part of this document was read (up to 20 pages and 16,000 characters)." : ""}`,
+              citations: body.citations || [],
+              usedInternalKnowledge: false,
+              learning: { status: "discarded", extractedCount: 0 },
+            };
+      } else {
+        response = await askJack(
+          { message: trimmed },
+          {
+            credentials: "include",
+            signal: controller.signal,
+            headers: {
+              ...(telemetrySession
+                ? { "X-Jack-Test-Session-Id": telemetrySession.id }
+                : {}),
+              "X-Jack-Surface": encodeURIComponent(context.surface),
+              "X-Jack-Context": encodeJackUiContextHeader(context),
+            },
+          },
+        );
+      }
       refreshContext();
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
+      if (file) setAttachment(null);
+      setAnswerOrigin(
+        file
+          ? attachment?.kind === "video"
+            ? `Shared Library contribution · ${file.name}`
+            : `Current-turn attachment · ${file.name} · not added to Library`
+          : null,
+      );
       setAnswer(response.answer);
       setSources(
         (response.citations ?? [])
@@ -345,7 +416,7 @@ export function FloatingJack() {
           .slice(0, 6),
       );
       speak(response.answer);
-    } catch {
+    } catch (cause) {
       refreshContext();
       if (controller.signal.aborted || contextEpochRef.current !== epoch)
         return;
@@ -353,7 +424,15 @@ export function FloatingJack() {
         error_code: "ask_jack_failed",
       });
       setInput(trimmed);
-      setError("Couldn’t reach Jack. Try that again.");
+      setError(
+        file &&
+          attachment?.kind === "video" &&
+          !(cause instanceof Error && cause.message.startsWith("Upload failed"))
+          ? "Upload status is uncertain. Check Library before trying again."
+          : cause instanceof Error && file
+            ? cause.message
+            : "Couldn’t reach Jack. Try that again.",
+      );
     } finally {
       if (requestRef.current === controller) {
         requestRef.current = null;
@@ -386,6 +465,7 @@ export function FloatingJack() {
     submissionInFlightRef.current = false;
     setPending(false);
     setAnswer(null);
+    setAnswerOrigin(null);
     setSources([]);
     cancelSpeech();
     const recognition = new Recognition();
@@ -459,6 +539,11 @@ export function FloatingJack() {
           <div className="mb-2 max-h-[min(40dvh,18rem)] overflow-y-auto rounded-2xl border border-border/80 bg-card/95 p-3 shadow-2xl backdrop-blur-xl">
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+                {answerOrigin && answer && (
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    {answerOrigin}
+                  </p>
+                )}
                 {answer || error}
               </div>
               {answer && (
@@ -475,6 +560,7 @@ export function FloatingJack() {
                 type="button"
                 onClick={() => {
                   setAnswer(null);
+                  setAnswerOrigin(null);
                   setSources([]);
                   setError(null);
                   cancelSpeech();
@@ -572,6 +658,28 @@ export function FloatingJack() {
           </details>
         )}
 
+        {attachment && (
+          <div
+            className="mb-1.5 flex items-center gap-2 rounded-xl bg-card/95 px-3 py-2 text-xs text-foreground"
+            role="status"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {attachment.file.name}
+            </span>
+            <span className="text-muted-foreground">
+              {attachment.kind === "video"
+                ? "Uploads to shared Library"
+                : "Used for this answer only"}
+            </span>
+            <button
+              type="button"
+              aria-label="Remove attachment"
+              onClick={() => setAttachment(null)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -579,6 +687,48 @@ export function FloatingJack() {
           }}
           className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 p-1.5 pl-4 shadow-2xl backdrop-blur-xl"
         >
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,.pdf,.docx,.txt,video/mp4,video/quicktime,video/webm,.m4v"
+            className="hidden"
+            aria-label="Choose a photo, video, or document for Jack"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              if (!file) return;
+              void classifyJackAttachment(file)
+                .then((kind) => {
+                  const limit = (kind === "video" ? 500 : 16) * 1024 * 1024;
+                  if (file.size > limit) {
+                    setError(
+                      kind === "video"
+                        ? "Video must be 500 MB or smaller."
+                        : "Photo or document must be 16 MiB or smaller.",
+                    );
+                    return;
+                  }
+                  setError(null);
+                  setAttachment({ file, kind });
+                })
+                .catch((error: unknown) => {
+                  setError(
+                    error instanceof Error
+                      ? error.message
+                      : "Jack could not read that file.",
+                  );
+                });
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => attachmentInputRef.current?.click()}
+            disabled={pending}
+            className="rounded-full p-2.5 text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+            aria-label="Attach photo, video, or document"
+          >
+            <Paperclip className="h-5 w-5" />
+          </button>
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -600,9 +750,18 @@ export function FloatingJack() {
           </button>
           <button
             type="submit"
-            disabled={!input.trim() || pending}
+            disabled={(!input.trim() && !attachment) || pending}
             className="rounded-full bg-primary p-2.5 text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Send to Jack"
+            aria-label={
+              attachment?.kind === "video"
+                ? "Upload video to shared Library"
+                : "Send to Jack"
+            }
+            title={
+              attachment?.kind === "video"
+                ? "Upload video to shared Library"
+                : undefined
+            }
           >
             {pending ? (
               <Loader2 className="h-5 w-5 animate-spin" />

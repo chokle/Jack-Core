@@ -21,9 +21,11 @@ import type {
 
 import type {
   AnalyticsEventAccepted,
+  AnalyzeJackAttachmentBody,
   AnswerContributionList,
   CandidateResolutionConflict,
   CandidateResolutionInput,
+  ChatAttachmentResponse,
   ChatInput,
   ChatMessage,
   ChatResponse,
@@ -1742,6 +1744,82 @@ export const useAskJack = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAskJackMutationOptions(options));
+    }
+
+export const getAnalyzeJackAttachmentUrl = () => {
+
+
+
+
+  return `/api/chat/attachment`
+}
+
+/**
+ * Requires the existing signed-in pilot access gate. The file is read for this answer only; it is not added to Library or Living Memory. Video contributions use the existing authenticated /videos/ingest pipeline.
+ * @summary Analyze one photo or document for this turn without retaining it
+ */
+export const analyzeJackAttachment = async (analyzeJackAttachmentBody: AnalyzeJackAttachmentBody, options?: RequestInit): Promise<ChatAttachmentResponse> => {
+    const formData = new FormData();
+formData.append(`file`, analyzeJackAttachmentBody.file);
+if(analyzeJackAttachmentBody.message !== undefined) {
+ formData.append(`message`, analyzeJackAttachmentBody.message);
+ }
+
+  return customFetch<ChatAttachmentResponse>(getAnalyzeJackAttachmentUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+);}
+
+
+
+
+export const getAnalyzeJackAttachmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeJackAttachment>>, TError,{data: BodyType<AnalyzeJackAttachmentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyzeJackAttachment>>, TError,{data: BodyType<AnalyzeJackAttachmentBody>}, TContext> => {
+
+const mutationKey = ['analyzeJackAttachment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyzeJackAttachment>>, {data: BodyType<AnalyzeJackAttachmentBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  analyzeJackAttachment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyzeJackAttachmentMutationResult = NonNullable<Awaited<ReturnType<typeof analyzeJackAttachment>>>
+    export type AnalyzeJackAttachmentMutationBody = BodyType<AnalyzeJackAttachmentBody>
+    export type AnalyzeJackAttachmentMutationError = ErrorType<void>
+
+    /**
+ * @summary Analyze one photo or document for this turn without retaining it
+ */
+export const useAnalyzeJackAttachment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeJackAttachment>>, TError,{data: BodyType<AnalyzeJackAttachmentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof analyzeJackAttachment>>,
+        TError,
+        {data: BodyType<AnalyzeJackAttachmentBody>},
+        TContext
+      > => {
+      return useMutation(getAnalyzeJackAttachmentMutationOptions(options));
     }
 
 export const getGetChatHistoryUrl = () => {

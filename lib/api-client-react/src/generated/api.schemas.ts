@@ -823,6 +823,27 @@ export interface ChatResponse {
   codeSafety?: CodeSafetyResult;
 }
 
+export type ChatAttachmentResponseAttachmentKind = typeof ChatAttachmentResponseAttachmentKind[keyof typeof ChatAttachmentResponseAttachmentKind];
+
+
+export const ChatAttachmentResponseAttachmentKind = {
+  photo: 'photo',
+  document: 'document',
+} as const;
+
+export type ChatAttachmentResponseAttachment = {
+  kind: ChatAttachmentResponseAttachmentKind;
+  retained: false;
+  truncated: boolean;
+};
+
+export interface ChatAttachmentResponse {
+  answer: string;
+  citations: Citation[];
+  usedInternalKnowledge: false;
+  attachment: ChatAttachmentResponseAttachment;
+}
+
 export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
 
 
@@ -1546,6 +1567,13 @@ export const ListVideosStatus = {
   failed: 'failed',
   retrying: 'retrying',
 } as const;
+
+export type AnalyzeJackAttachmentBody = {
+  /** JPG, PNG, WebP, PDF, DOCX, or TXT; at most 16 MiB. */
+  file: Blob;
+  /** @maxLength 2000 */
+  message?: string;
+};
 
 export type ListKnowledgeCandidatesParams = {
 /**
