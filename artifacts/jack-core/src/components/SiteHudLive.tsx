@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SiteRadar } from "./SiteRadar";
 import { useRadarAr } from "./useRadarAr";
+import { useToast } from "@/hooks/use-toast";
 import "./SiteHud.css";
 
 type LocationState =
@@ -20,6 +21,8 @@ export function SiteHudLive({
   const overlayRoot = useRef<HTMLElement>(null);
   const ar = useRadarAr(overlayRoot);
   const [arRange, setArRange] = useState<10 | 50>(10);
+  const [savingDepth, setSavingDepth] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!expanded) ar.clear();
@@ -75,6 +78,33 @@ export function SiteHudLive({
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
     );
+  }
+
+  async function downloadDepth() {
+    if (savingDepth) return;
+    setSavingDepth(true);
+    try {
+      const result = await ar.downloadCapture();
+      if (result === "saved") {
+        toast({
+          title: "Depth file saved",
+          description: "Your PLY file was saved to the location you chose.",
+        });
+      } else if (result === "started") {
+        toast({
+          title: "Download started",
+          description: "Check your device's Downloads for the PLY file.",
+        });
+      }
+    } catch {
+      toast({
+        title: "Could not save depth file",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingDepth(false);
+    }
   }
 
   if (!expanded)
@@ -160,10 +190,12 @@ export function SiteHudLive({
             </button>
             <button
               type="button"
-              disabled={ar.state.capturedCount === 0}
-              onClick={ar.downloadCapture}
+              disabled={ar.state.capturedCount === 0 || savingDepth}
+              onClick={() => void downloadDepth()}
             >
-              Download depth points ({ar.state.capturedCount})
+              {savingDepth
+                ? "Saving depth file…"
+                : `Download depth points (${ar.state.capturedCount})`}
             </button>
           </>
         ) : (

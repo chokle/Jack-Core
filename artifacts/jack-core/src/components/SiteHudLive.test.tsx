@@ -9,6 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { SiteHudLive } from "./SiteHudLive";
+import { Toaster } from "./ui/toaster";
 
 afterEach(() => {
   cleanup();
@@ -116,7 +117,12 @@ describe("live site radar", () => {
       FRAMEBUFFER: 1,
       COLOR_BUFFER_BIT: 2,
     } as unknown as WebGLRenderingContext);
-    render(<SiteHudLive expanded onOpenRadar={vi.fn()} />);
+    render(
+      <>
+        <SiteHudLive expanded onOpenRadar={vi.fn()} />
+        <Toaster />
+      </>,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start AR scan" }));
     // Immersive WebXR must be requested in the same user-activation task.
     expect(requestSession).toHaveBeenCalledOnce();
@@ -217,6 +223,40 @@ describe("live site radar", () => {
     fireEvent.click(download);
     expect(DownloadURL.createObjectURL).toHaveBeenCalledOnce();
     expect(click).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Download started")).toBeTruthy();
+    expect(screen.queryByText("Depth file saved")).toBeNull();
+    await waitFor(() =>
+      expect((download as HTMLButtonElement).disabled).toBe(false),
+    );
+    const write = vi.fn(async () => {});
+    const close = vi.fn(async () => {});
+    const picker = vi.fn(async () => ({
+      createWritable: async () => ({
+        write,
+        close,
+        abort: vi.fn(async () => {}),
+      }),
+    }));
+    vi.stubGlobal("showSaveFilePicker", picker);
+    fireEvent.click(download);
+    expect(await screen.findByText("Depth file saved")).toBeTruthy();
+    expect(picker).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect((download as HTMLButtonElement).disabled).toBe(false),
+    );
+    vi.stubGlobal("showSaveFilePicker", async () => ({
+      createWritable: async () => ({
+        write: async () => {
+          throw new Error("No space");
+        },
+        close: vi.fn(async () => {}),
+        abort: vi.fn(async () => {}),
+      }),
+    }));
+    fireEvent.click(download);
+    expect(await screen.findByText("Could not save depth file")).toBeTruthy();
     expect(screen.getAllByLabelText(/Measured surface/).length).toBeGreaterThan(
       0,
     );

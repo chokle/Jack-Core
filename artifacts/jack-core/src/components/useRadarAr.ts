@@ -11,6 +11,8 @@ import {
   addCapturePoints,
   capturePly,
   MAX_CAPTURE_POINTS,
+  saveCaptureFile,
+  type SaveFilePicker,
 } from "../lib/radar-capture";
 
 type Depth = { getDepthInMeters(x: number, y: number): number };
@@ -307,18 +309,15 @@ export function useRadarAr(overlayRoot: React.RefObject<HTMLElement | null>) {
     void session?.end().catch(() => undefined);
   }
 
-  function downloadCapture(): boolean {
-    if (state.kind !== "paused" || captureRef.current.size === 0) return false;
+  function downloadCapture() {
+    if (state.kind !== "paused" || captureRef.current.size === 0)
+      return Promise.resolve(null);
     const file = capturePly([...captureRef.current.values()]);
-    const url = URL.createObjectURL(file);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `radar-depth-${new Date().toISOString().replace(/[:.]/g, "-")}.ply`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    return true;
+    const filename = `radar-depth-${new Date().toISOString().replace(/[:.]/g, "-")}.ply`;
+    const picker = (
+      window as Window & { showSaveFilePicker?: SaveFilePicker }
+    ).showSaveFilePicker?.bind(window);
+    return saveCaptureFile(file, filename, picker);
   }
 
   return { state, support, start, stop, clear, downloadCapture };
