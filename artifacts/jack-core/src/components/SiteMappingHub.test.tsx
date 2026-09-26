@@ -72,6 +72,79 @@ describe("shared site mapping", () => {
     expect(captureBlob).toHaveBeenCalledOnce();
   });
 
+  it("does not show an uploaded scan under a different site after switching during upload", async () => {
+    let finishUpload!: (response: Response) => void;
+    const uploadResponse = new Promise<Response>((resolve) => {
+      finishUpload = resolve;
+    });
+    const sites = [
+      {
+        id: "site-1",
+        organization_id: "org-1",
+        name: "First site",
+        status: "active",
+        role: "contributor",
+      },
+      {
+        id: "site-2",
+        organization_id: "org-1",
+        name: "Second site",
+        status: "active",
+        role: "contributor",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/sites")) return json({ sites });
+        if (path.endsWith("/organizations")) return json({ organizations: [] });
+        if (path.endsWith("/sites/site-1/scans/upload")) return uploadResponse;
+        if (path.endsWith("/sites/site-1/scans"))
+          return json({
+            scans: [
+              {
+                id: "scan-first",
+                point_count: 7391,
+                byte_size: 90000,
+                uploaded_at: "2026-09-26T00:00:00Z",
+              },
+            ],
+          });
+        if (path.endsWith("/sites/site-2/scans")) return json({ scans: [] });
+        throw new Error(`Unexpected request ${path}`);
+      }),
+    );
+    render(
+      <SiteMappingHub
+        capturedCount={3}
+        captureBlob={() => new Blob(["ply"])}
+      />,
+    );
+    const selector = (await screen.findByRole("combobox", {
+      name: "Site",
+    })) as HTMLSelectElement;
+    fireEvent.click(
+      screen.getByRole("button", { name: /Upload this scan to First site/ }),
+    );
+    fireEvent.change(selector, { target: { value: "site-2" } });
+    expect(
+      await screen.findByText(/Upload this scan to Second site/),
+    ).toBeTruthy();
+    finishUpload(json({ scanId: "scan-first" }, 201));
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: /Upload this scan to Second site/,
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
+    expect(screen.queryByText(/7,391 points/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download PLY" })).toBeNull();
+  });
+
   it("shows an honest no-site state and disables upload without a capture", async () => {
     vi.stubGlobal(
       "fetch",

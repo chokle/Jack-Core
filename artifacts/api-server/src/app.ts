@@ -9,7 +9,9 @@ import { clerkMiddleware } from "@clerk/express";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
-import { siteMappingCleanupRouter } from "./routes/site-mapping.js";
+import siteMappingRouter, {
+  siteMappingCleanupRouter,
+} from "./routes/site-mapping.js";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -132,6 +134,10 @@ app.use("/api", siteMappingCleanupRouter);
 // unauthorized requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
 app.use("/api", requireAuth);
+
+// Site mapping has its own resolved-identity, organization, and site membership
+// checks. Mount it here so an organization admin need not also be a pilot tester.
+app.use("/api", siteMappingRouter);
 
 // Authentication alone does not authorize the controlled production pilot.
 // Require a current tester membership, or explicit server-resolved admin role,

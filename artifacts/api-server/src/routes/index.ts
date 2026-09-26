@@ -21,7 +21,6 @@ import endOfShiftCloseoutRouter from "./end-of-shift-closeout.js";
 import accountRouter from "./account.js";
 import pilotEnrollmentsRouter from "./pilot-enrollments.js";
 import dazRuntimeRouter from "./daz-runtime.js";
-import siteMappingRouter from "./site-mapping.js";
 import { jackUiRequestContextMiddleware } from "../lib/jack-ui-request-context.js";
 import { askJackTelemetrySessionMiddleware } from "../lib/ask-jack-telemetry-session.js";
 
@@ -51,6 +50,5 @@ router.use(endOfShiftCloseoutRouter);
 router.use(accountRouter);
 router.use(pilotEnrollmentsRouter);
 router.use(dazRuntimeRouter);
-router.use(siteMappingRouter);
 
 export default router;

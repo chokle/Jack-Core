@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createSiteMappingSite,
   getDownloadSiteMappingScanUrl,
@@ -39,6 +39,7 @@ export function SiteMappingHub({
     [],
   );
   const [siteId, setSiteId] = useState("");
+  const selectedSiteId = useRef("");
   const [scans, setScans] = useState<SiteMappingScan[]>([]);
   const [newSiteName, setNewSiteName] = useState("");
   const [newSiteOrg, setNewSiteOrg] = useState("");
@@ -74,10 +75,11 @@ export function SiteMappingHub({
 
   async function refreshScans(selectedId: string) {
     const result = await listSiteMappingScans(selectedId);
-    setScans(result.scans);
+    if (selectedSiteId.current === selectedId) setScans(result.scans);
   }
 
   useEffect(() => {
+    selectedSiteId.current = siteId;
     if (!siteId) {
       setScans([]);
       return;
@@ -113,6 +115,7 @@ export function SiteMappingHub({
         name: newSiteName.trim(),
       });
       setSites((previous) => [...previous, result.site]);
+      selectedSiteId.current = result.site.id;
       setSiteId(result.site.id);
       setNewSiteName("");
       setNotice(`Site ${result.site.name} is ready for authorized scans.`);
@@ -132,9 +135,10 @@ export function SiteMappingHub({
     try {
       const result = await uploadSiteMappingScan(site.id, file);
       await refreshScans(site.id);
-      setNotice(
-        `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
-      );
+      if (selectedSiteId.current === site.id)
+        setNotice(
+          `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
+        );
     } catch (cause) {
       setError(requestError(cause, "Could not upload scan."));
     } finally {
@@ -159,6 +163,7 @@ export function SiteMappingHub({
       setRecoverableSites((previous) =>
         previous.filter((item) => item.id !== site.id),
       );
+      selectedSiteId.current = site.id;
       setSiteId(site.id);
       setNotice(`Manager access restored for ${site.name}.`);
     } catch (cause) {
@@ -192,6 +197,7 @@ export function SiteMappingHub({
                   value={siteId}
                   onChange={(event) => {
                     setError("");
+                    selectedSiteId.current = event.target.value;
                     setSiteId(event.target.value);
                   }}
                 >

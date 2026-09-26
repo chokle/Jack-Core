@@ -29,6 +29,14 @@ vi.mock("../routes/index.js", async () => {
   router.get("/healthz", (_req, res) => res.json({ ok: true }));
   return { default: router };
 });
+vi.mock("../routes/site-mapping.js", async () => {
+  const express = await import("express");
+  const router = express.Router();
+  router.get("/site-mapping/sites", (req, res) =>
+    res.json({ userId: req.userId, sites: [] }),
+  );
+  return { default: router, siteMappingCleanupRouter: express.Router() };
+});
 vi.mock("../lib/logger.js", () => ({
   logger: {
     child: () => ({
@@ -117,6 +125,34 @@ describe("app-wide authentication composition", () => {
     const unrelated = await request(app).get("/api/private");
     expect(unrelated.status).toBe(403);
     expect(unrelated.body.error).toContain("active Torch pilot membership");
+  });
+
+  it("lets a signed-in organization admin reach only the separately authorized site routes", async () => {
+    getAuth.mockReturnValue({ userId: "user_org_admin" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
+    resolveIdentity.mockResolvedValue({
+      userId: "user_org_admin",
+      isAdmin: false,
+      isPresentation: false,
+      classification: "resolved",
+    });
+
+    const sites = await request(app).get("/api/site-mapping/sites");
+    expect(sites.status).toBe(200);
+    expect(sites.body.userId).toBe("user_org_admin");
+    expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+
+    const unrelated = await request(app).get("/api/private");
+    expect(unrelated.status).toBe(403);
+    expect(resolveActiveTesterScope).toHaveBeenCalledWith("user_org_admin");
+
+    getAuth.mockReturnValue({ userId: null });
+    expect((await request(app).get("/api/site-mapping/sites")).status).toBe(
+      401,
+    );
   });
 
   it("allows the health probe without a session", async () => {
