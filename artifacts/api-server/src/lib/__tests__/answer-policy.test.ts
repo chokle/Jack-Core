@@ -186,6 +186,25 @@ describe("sanitizeJackAnswer", () => {
     );
   });
 
+  it("removes the whole conditional offer instead of leaving a cut-off ending", () => {
+    expect(
+      sanitizeJackAnswer(
+        "The Radar shows measured surfaces. If you need to dive deeper into specific aspects, let me know.",
+      ),
+    ).toBe("The Radar shows measured surfaces.");
+    expect(
+      sanitizeJackAnswer(
+        "The Radar shows measured surfaces. If you need to dive deeper into specific aspects",
+      ),
+    ).toBe("The Radar shows measured surfaces.");
+  });
+
+  it("keeps substantive conditional guidance with a follow-up request", () => {
+    const raw =
+      "If you need a different gap, check the procedure first and let me know if the document is missing.";
+    expect(sanitizeJackAnswer(raw, "How do I change the root gap?")).toBe(raw);
+  });
+
   it("does not rewrite a field answer that merely mentions navigation", () => {
     const raw =
       "I can't navigate the torch around that corner without changing the travel angle.";

@@ -225,6 +225,16 @@ describe("Canadian jurisdiction policy", () => {
         expect(prompt).toContain(system.role);
       }
       expect(prompt).toContain(JACK_CORE_SYSTEM_MAP_PROMPT);
+      expect(prompt).toContain("Site Radar");
+      expect(prompt).toContain(
+        "The product goal is a permissioned crew-safety",
+      );
+      expect(prompt).toContain("Today's unconnected phone view");
+      expect(prompt).toContain("No site is connected yet");
+      expect(prompt).toContain("Do not claim live hazard alerts");
+      expect(prompt).toContain(
+        "use the server-owned system map to distinguish its product goal from current capabilities",
+      );
       expect(prompt).toMatch(/not an isolated generic chatbot/i);
       expect(prompt).toMatch(
         /supersedes any contradictory assistant statement in conversation history/i,
