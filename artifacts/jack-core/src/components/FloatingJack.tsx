@@ -447,6 +447,9 @@ export function FloatingJack() {
       recognitionRef.current?.stop();
       return;
     }
+    // A video may already have reached Library when the browser aborts its
+    // request. Do not let a mic turn restart that persistent contribution.
+    if (submissionInFlightRef.current && attachment?.kind === "video") return;
 
     const Recognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -493,7 +496,9 @@ export function FloatingJack() {
         recognition.onresult = null;
         recognition.stop();
         setListening(false);
-        void submit(finalTranscript);
+        // Uploading a video is an explicit button action, not a side effect of
+        // dictating a question while a video is selected.
+        if (attachment?.kind !== "video") void submit(finalTranscript);
       }
     };
     recognition.onerror = () => {
@@ -739,6 +744,7 @@ export function FloatingJack() {
           <button
             type="button"
             onClick={toggleListening}
+            disabled={pending && attachment?.kind === "video"}
             className={`rounded-full p-2.5 transition ${
               listening
                 ? "bg-primary text-primary-foreground"
