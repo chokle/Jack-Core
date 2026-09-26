@@ -113,7 +113,7 @@ export function SiteHudLive({
       <div className="site-hud-entry">
         <div>
           <strong>Site radar</strong>
-          <span>No site connected</span>
+          <span>Open to view your site and scan status</span>
         </div>
         <button type="button" onClick={onOpenRadar}>
           Open radar
@@ -129,9 +129,9 @@ export function SiteHudLive({
     >
       <h1>Site radar</h1>
       <p>
-        Phone depth is live in this session. Shared site captures are listed
-        below; crew positions and landmarks appear only when their production
-        sources are connected.
+        Phone depth can map measured surfaces during a supported AR scan. Shared
+        site captures are listed below. Crew positions and safety landmarks
+        appear only when their production sources are connected.
       </p>
       <SiteRadar
         crew={[]}
