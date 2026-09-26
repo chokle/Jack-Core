@@ -132,7 +132,7 @@ describe("knowledge surfaces", () => {
         ...data.model,
         nodes: [
           {
-            ...data.model.nodes[0],
+            ...data.model.nodes.find((node) => node.id === "concept:weld")!,
             meta: { trade: "Welder", sourceCount: 1, sources: [] },
           },
           {
