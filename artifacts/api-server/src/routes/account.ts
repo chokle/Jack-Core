@@ -11,6 +11,43 @@ import { removeVideoAssets } from "../lib/video-storage.js";
 const router = Router();
 const RECORDING_DELETE_BATCH_SIZE = 500;
 
+async function deleteAccountSiteScans(userId: string): Promise<void> {
+  while (true) {
+    const scans = await supabase
+      .from("site_scans")
+      .select("id,object_key")
+      .eq("uploaded_by_user_id", userId)
+      .limit(100);
+    if (scans.error) throw scans.error;
+    if (!scans.data?.length) return;
+    const token = process.env["RADAR_WORKER_TOKEN"];
+    const origin = process.env["PUBLIC_SITE_URL"];
+    if (!token || token.length < 32 || !origin)
+      throw new Error("Radar scan cleanup is unavailable");
+    for (const scan of scans.data) {
+      const response = await fetch(
+        new URL("/api/site-mapping/internal/objects/delete", origin),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-jack-radar-worker-token": token,
+          },
+          body: JSON.stringify({ objectKey: scan.object_key }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!response.ok) throw new Error("Radar scan object cleanup failed");
+      const removed = await supabase
+        .from("site_scans")
+        .delete()
+        .eq("id", scan.id)
+        .eq("uploaded_by_user_id", userId);
+      if (removed.error) throw removed.error;
+    }
+  }
+}
+
 async function deleteAccountRecordings(userId: string): Promise<void> {
   while (true) {
     const { data: recordings, error: recordingReadError } = await supabase
@@ -23,9 +60,13 @@ async function deleteAccountRecordings(userId: string): Promise<void> {
 
     const paths = recordings
       .map((row) => (row as Record<string, unknown>)["storage_path"])
-      .filter((path): path is string => typeof path === "string" && path.length > 0);
+      .filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      );
     if (paths.length > 0) {
-      const { error } = await supabase.storage.from("jack-test-recordings").remove(paths);
+      const { error } = await supabase.storage
+        .from("jack-test-recordings")
+        .remove(paths);
       if (error) throw error;
     }
 
@@ -33,7 +74,9 @@ async function deleteAccountRecordings(userId: string): Promise<void> {
       .map((row) => (row as Record<string, unknown>)["id"])
       .filter((id): id is string => typeof id === "string");
     if (ids.length === 0) {
-      throw new Error("Recording rows are missing identifiers required for safe deletion.");
+      throw new Error(
+        "Recording rows are missing identifiers required for safe deletion.",
+      );
     }
     const { error: recordingDeleteError } = await supabase
       .from("test_recordings")
@@ -56,7 +99,10 @@ router.delete("/account", async (req, res) => {
     } catch {
       userId = null;
     }
-    if (!userId) return res.status(401).json({ error: "Sign in is required to delete an account." });
+    if (!userId)
+      return res
+        .status(401)
+        .json({ error: "Sign in is required to delete an account." });
 
     // Establish a permanent hashed write fence before any cleanup. This
     // serializes account deletion with stale consent/activity requests while
@@ -66,6 +112,23 @@ router.delete("/account", async (req, res) => {
       { p_actor_user_id: userId },
     );
     if (deletionFenceError) throw deletionFenceError;
+
+    await deleteAccountSiteScans(userId);
+    const { error: siteCreatorScrubError } = await supabase
+      .from("site_workspaces")
+      .update({ created_by_user_id: null })
+      .eq("created_by_user_id", userId);
+    if (siteCreatorScrubError) throw siteCreatorScrubError;
+    const { error: siteMemberDeleteError } = await supabase
+      .from("site_memberships")
+      .delete()
+      .eq("user_id", userId);
+    if (siteMemberDeleteError) throw siteMemberDeleteError;
+    const { error: siteMemberAdderScrubError } = await supabase
+      .from("site_memberships")
+      .update({ added_by_user_id: null })
+      .eq("added_by_user_id", userId);
+    if (siteMemberAdderScrubError) throw siteMemberAdderScrubError;
 
     const { data: videos, error: videoReadError } = await supabase
       .from("videos")
@@ -78,7 +141,10 @@ router.delete("/account", async (req, res) => {
     }
     await removeContributorGraph(userId);
     await removeVideoAssets((videos ?? []) as Array<Record<string, unknown>>);
-    const { error: videoDeleteError } = await supabase.from("videos").delete().eq("uploader_user_id", userId);
+    const { error: videoDeleteError } = await supabase
+      .from("videos")
+      .delete()
+      .eq("uploader_user_id", userId);
     if (videoDeleteError) throw videoDeleteError;
 
     const { data: mentors, error: mentorReadError } = await supabase
@@ -115,7 +181,10 @@ router.delete("/account", async (req, res) => {
     if (chatDeleteError) throw chatDeleteError;
 
     await deleteAccountRecordings(userId);
-    const { error: feedbackDeleteError } = await supabase.from("test_feedback").delete().eq("tester_user_id", userId);
+    const { error: feedbackDeleteError } = await supabase
+      .from("test_feedback")
+      .delete()
+      .eq("tester_user_id", userId);
     if (feedbackDeleteError) throw feedbackDeleteError;
 
     // Pilot activity is first-party account data. Delete attributable raw
@@ -123,9 +192,15 @@ router.delete("/account", async (req, res) => {
     // requests before removing the Clerk identity. Aggregate snapshots contain
     // no participant identity and may remain only in genuinely de-identified form.
     const attributableDeletes = [
-      supabase.from("end_of_shift_closeouts").delete().eq("actor_user_id", userId),
+      supabase
+        .from("end_of_shift_closeouts")
+        .delete()
+        .eq("actor_user_id", userId),
       supabase.from("pilot_access_handoffs").delete().eq("user_id", userId),
-      supabase.from("activity_ingest_failures").delete().eq("actor_user_id", userId),
+      supabase
+        .from("activity_ingest_failures")
+        .delete()
+        .eq("actor_user_id", userId),
       supabase.from("test_events").delete().eq("actor_user_id", userId),
       supabase.from("admin_access_audit").delete().eq("actor_user_id", userId),
       supabase.from("admin_access_audit").delete().eq("target_user_id", userId),
@@ -177,7 +252,10 @@ router.delete("/account", async (req, res) => {
     return res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "deleteAccount error");
-    return res.status(500).json({ error: "Couldn't delete your account. Nothing was removed from your sign-in until cleanup completes." });
+    return res.status(500).json({
+      error:
+        "Couldn't delete your account. Nothing was removed from your sign-in until cleanup completes.",
+    });
   }
 });
 

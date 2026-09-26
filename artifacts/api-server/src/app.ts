@@ -9,6 +9,7 @@ import { clerkMiddleware } from "@clerk/express";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
+import { siteMappingCleanupRouter } from "./routes/site-mapping.js";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { publish } from "./lib/vitality";
@@ -121,6 +122,10 @@ app.get(/^\/sign-up(?:\/.*)?$/, (_req, res) => {
 // Direct pilot entry is intentionally outside the auth gate so the token endpoint
 // can issue a valid Clerk session URL before the standard authorization boundary.
 app.use("/api/pilot-direct-access", pilotDirectAccessRouter);
+
+// The scheduled Worker has no Clerk session. These two maintenance routes
+// require the private Worker token before touching pending scan metadata.
+app.use("/api", siteMappingCleanupRouter);
 
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so

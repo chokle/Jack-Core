@@ -3,6 +3,9 @@
   "main": "./worker.mjs",
   "compatibility_date": "2026-08-25",
   "workers_dev": true,
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
   "observability": {
     "enabled": true
   },
@@ -17,13 +20,20 @@
     "PILOT_AUTH_BYPASS": "false",
     "PILOT_DIRECT_ACCESS_EMAILS": "rob-plumbing-05@torchlabs.ca"
   },
+  "r2_buckets": [
+    {
+      "binding": "RADAR_SCANS",
+      "bucket_name": "jack-site-scans-private"
+    }
+  ],
   "secrets": {
     "required": [
       "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
       "CLERK_SECRET_KEY",
       "OPENAI_API_KEY",
-      "ADMIN_EMAILS"
+      "ADMIN_EMAILS",
+      "RADAR_WORKER_TOKEN"
     ]
   },
   "containers": [
