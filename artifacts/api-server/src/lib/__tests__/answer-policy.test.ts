@@ -186,6 +186,14 @@ describe("sanitizeJackAnswer", () => {
     );
   });
 
+  it("removes the whole conditional offer instead of leaving a cut-off ending", () => {
+    expect(
+      sanitizeJackAnswer(
+        "The Radar shows measured surfaces. If you need to dive deeper into specific aspects, let me know.",
+      ),
+    ).toBe("The Radar shows measured surfaces.");
+  });
+
   it("does not rewrite a field answer that merely mentions navigation", () => {
     const raw =
       "I can't navigate the torch around that corner without changing the travel angle.";

@@ -16,44 +16,63 @@ export const JACK_CORE_SYSTEMS: readonly JackCoreSystem[] = [
   {
     name: "Ask Jack",
     role: "Retrieves internal knowledge and Living Memory, answers with sources and confidence, and captures the signed-in user's conversation.",
-    persistsIn: "chat messages plus durable knowledge distilled from useful user contributions",
-    accessRule: "Only the signed-in user's conversation history is returned to that user.",
+    persistsIn:
+      "chat messages plus durable knowledge distilled from useful user contributions",
+    accessRule:
+      "Only the signed-in user's conversation history is returned to that user.",
   },
   {
     name: "Living Memory / Knowledge Graph",
     role: "Connects trades, contributors, videos, concepts, procedures, hazards, competencies, evidence, and verification state.",
     persistsIn: "Jack Core knowledge nodes and edges",
-    accessRule: "Retrieved memories are ranked by relevance, evidence, and review state.",
+    accessRule:
+      "Retrieved memories are ranked by relevance, evidence, and review state.",
   },
   {
     name: "Interview Mode",
     role: "Collects contributor-owned field knowledge one question at a time and distills reusable evidence into Living Memory.",
-    persistsIn: "interview sessions, verbatim answers, contributor records, and reviewed graph knowledge",
-    accessRule: "Only the interview's contributor may resume or answer that interview; administrators cannot impersonate them.",
+    persistsIn:
+      "interview sessions, verbatim answers, contributor records, and reviewed graph knowledge",
+    accessRule:
+      "Only the interview's contributor may resume or answer that interview; administrators cannot impersonate them.",
   },
   {
     name: "Library",
     role: "Ingests media, preserves uploads, transcribes and analyzes content, creates embeddings, and links extracted knowledge to the graph.",
-    persistsIn: "media storage, video records, transcripts, analyses, embeddings, and graph links",
-    accessRule: "Jack may use retrieved Library evidence; ownership and review rules still apply.",
+    persistsIn:
+      "media storage, video records, transcripts, analyses, embeddings, and graph links",
+    accessRule:
+      "Jack may use retrieved Library evidence; ownership and review rules still apply.",
   },
   {
     name: "Review / Confidence Engine",
     role: "Preserves raw evidence while reviewers validate, reject, merge, correct, and score extracted claims.",
-    persistsIn: "verification state, confidence, provenance, corrections, and audit records",
-    accessRule: "Unreviewed evidence must not be described as verified, especially for safety-critical knowledge.",
+    persistsIn:
+      "verification state, confidence, provenance, corrections, and audit records",
+    accessRule:
+      "Unreviewed evidence must not be described as verified, especially for safety-critical knowledge.",
   },
   {
     name: "User Memory",
     role: "Maintains account-scoped profile, conversation context, saved thoughts, and learning progress when those records are available.",
-    persistsIn: "account-scoped profiles, chat history, saved context, and progress records",
+    persistsIn:
+      "account-scoped profiles, chat history, saved context, and progress records",
     accessRule: "Never expose one user's private memory to another user.",
+  },
+  {
+    name: "Site Radar",
+    role: "Shows a phone compass, optional own location and geographic map link, and measured AR depth surface dots when the device supports them. Its 10 m and 50 m grids are display scales, not detection range.",
+    persistsIn:
+      "the current phone's temporary AR session; a PLY depth file only when the user explicitly saves it",
+    accessRule:
+      "No site is connected yet. Jack does not upload the AR depth or location. Do not claim live hazard alerts, work progress, tool inventory, crew positions, or a verified 3D site map; those are not current Radar features. Demo fixtures are not live site data.",
   },
   {
     name: "Torch Command Centre / Torch Engine",
     role: "Turns Jack's starving points and intelligence into reviewed operational work such as hunts, interviews, outreach, tasks, and knowledge acquisition.",
     persistsIn: "Torch operational records and auditable playbook runs",
-    accessRule: "Jack is the intelligence source; the Command Centre is the separate admin execution layer.",
+    accessRule:
+      "Jack is the intelligence source; the Command Centre is the separate admin execution layer.",
   },
 ] as const;
 

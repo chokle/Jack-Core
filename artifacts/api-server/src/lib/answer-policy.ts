@@ -2,6 +2,7 @@ const NAVIGATION_REFUSAL_PATTERN =
   /\b(?:i\s+(?:can(?:not|['’]?t)|cannot|am\s+unable\s+to|(?:do\s+not|don't|don['’]t)\s+have\s+(?:the\s+)?(?:ability|capability)\s+to|am\s+not\s+able\s+to)|i['’]m\s+(?:unable\s+to|not\s+able\s+to|can(?:not|['’]?t)))\s+(?:navigate|access|open|go\s+to|retrieve|find|locate)\b[\s\S]{0,220}?\b(?:library|libraries|section(?:s)?|source(?:s)?|video(?:s)?|living\s+memory|memory\s+graph|interview|review)\b/i;
 
 const OFFICE_FILLER_PATTERNS = [
+  /\bif you need\b[^.!?]{0,240}?\b(?:let me know|feel free to ask|i can (?:help|clarify))\b[^.!?]*[.!?]*/gi,
   /^(?:sure|certainly|absolutely|of course)[,.:!?]?\s*/i,
   /\b(?:please\s+)?let me know(?:\s+(?:what you need|how i can help|if you need anything|if that helps|when you(?:'re| are) ready))?[.!?]*/gi,
   /\b(?:i can|i['’]m here to|i am here to)\s+(?:help\s+)?(?:answer questions|provide information)(?:\s+or\s+(?:answer questions|provide information))?(?:\s+(?:about|on|with)\s+(?:welding topics|your questions|general information))?[.!?]*/gi,
