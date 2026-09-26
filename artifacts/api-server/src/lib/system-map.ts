@@ -61,11 +61,11 @@ export const JACK_CORE_SYSTEMS: readonly JackCoreSystem[] = [
   },
   {
     name: "Site Radar",
-    role: "Shows a phone compass, optional own location and geographic map link, and measured AR depth surface dots when the device supports them. Its 10 m and 50 m grids are display scales, not detection range.",
+    role: "The product goal is a permissioned crew-safety and situational-awareness HUD: authorized own-crew proximity, floor/elevation, site safety landmarks, connectivity, and explicit last-known or signal-lost states. Today's unconnected phone view shows a compass, optional own location and geographic map link, and measured AR depth surface dots when supported. Its 10 m and 50 m grids are display scales, not detection range.",
     persistsIn:
       "the current phone's temporary AR session; a PLY depth file only when the user explicitly saves it",
     accessRule:
-      "No site is connected yet. Jack does not upload the AR depth or location. Do not claim live hazard alerts, work progress, tool inventory, crew positions, or a verified 3D site map; those are not current Radar features. Demo fixtures are not live site data.",
+      "No site is connected yet. Jack does not upload the AR depth or location. Do not claim live hazard alerts, work progress, tool inventory, crew positions, or a verified 3D site map; those are not current Radar features. Future site-connected crew visibility must respect site and crew permissions; other contractors are anonymous proximity only unless separately authorized. Demo fixtures are not live site data.",
   },
   {
     name: "Torch Command Centre / Torch Engine",
