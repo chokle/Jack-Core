@@ -192,6 +192,17 @@ describe("sanitizeJackAnswer", () => {
         "The Radar shows measured surfaces. If you need to dive deeper into specific aspects, let me know.",
       ),
     ).toBe("The Radar shows measured surfaces.");
+    expect(
+      sanitizeJackAnswer(
+        "The Radar shows measured surfaces. If you need to dive deeper into specific aspects",
+      ),
+    ).toBe("The Radar shows measured surfaces.");
+  });
+
+  it("keeps substantive conditional guidance with a follow-up request", () => {
+    const raw =
+      "If you need a different gap, check the procedure first and let me know if the document is missing.";
+    expect(sanitizeJackAnswer(raw, "How do I change the root gap?")).toBe(raw);
   });
 
   it("does not rewrite a field answer that merely mentions navigation", () => {
