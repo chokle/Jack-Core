@@ -131,18 +131,9 @@ app.use("/api", siteMappingCleanupRouter);
 
 // Server-enforced authentication boundary: every /api route except health
 // probes requires a signed-in user. Runs before the vitality signal so
-// unauthorized requests never register as load, and before the router so a
+// anonymous requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
 app.use("/api", requireAuth);
-
-// Site mapping has its own resolved-identity, organization, and site membership
-// checks. Mount it here so an organization admin need not also be a pilot tester.
-app.use("/api", siteMappingRouter);
-
-// Authentication alone does not authorize the controlled production pilot.
-// Require a current tester membership, or explicit server-resolved admin role,
-// before any protected API route can read or write real Jack data.
-app.use("/api", requirePilotAccess);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
@@ -167,6 +158,15 @@ app.use((req, res, next) => {
   res.on("close", end);
   next();
 });
+
+// Site mapping has its own resolved-identity, organization, and site membership
+// checks. Mount it here so an organization admin need not also be a pilot tester.
+app.use("/api", siteMappingRouter);
+
+// Authentication alone does not authorize the controlled production pilot.
+// Require a current tester membership, or explicit server-resolved admin role,
+// before any protected API route can read or write real Jack data.
+app.use("/api", requirePilotAccess);
 
 app.use("/api", router);
 

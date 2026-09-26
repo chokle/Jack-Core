@@ -148,6 +148,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
   assert.match(workflow, /PILOT_AUTH_BYPASS: "false"/);
   assert.doesNotMatch(workflow, /PILOT_AUTH_USER_ID:/);
   assert.match(workflow, /--secrets-file/);
+  assert.match(workflow, /RADAR_WORKER_TOKEN\.length < 32/);
   assert.match(workflow, /cloudflare-secrets\.json/);
   assert.match(workflow, /X-Jack-Diagnostic:ci-smoke/);
   assert.match(

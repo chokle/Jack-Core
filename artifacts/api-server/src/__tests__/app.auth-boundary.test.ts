@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
 const resolveIdentity = vi.hoisted(() => vi.fn());
+const publish = vi.hoisted(() => vi.fn());
 const clerkMiddleware = vi.hoisted(() =>
   vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
 );
@@ -35,6 +36,9 @@ vi.mock("../routes/site-mapping.js", async () => {
   router.get("/site-mapping/sites", (req, res) =>
     res.json({ userId: req.userId, sites: [] }),
   );
+  router.post("/site-mapping/sites", (_req, res) =>
+    res.status(201).json({ created: true }),
+  );
   return { default: router, siteMappingCleanupRouter: express.Router() };
 });
 vi.mock("../lib/logger.js", () => ({
@@ -51,7 +55,7 @@ vi.mock("../lib/logger.js", () => ({
     debug: vi.fn(),
   },
 }));
-vi.mock("../lib/vitality.js", () => ({ publish: vi.fn() }));
+vi.mock("../lib/vitality.js", () => ({ publish }));
 
 import app from "../app.js";
 
@@ -59,6 +63,7 @@ beforeEach(() => {
   getAuth.mockReset();
   resolveActiveTesterScope.mockReset();
   resolveIdentity.mockReset();
+  publish.mockReset();
   resolveActiveTesterScope.mockResolvedValue({
     scope: {
       organizationId: "40817dd6-d2b8-4087-a6f2-f416500ab4e6",
@@ -144,6 +149,11 @@ describe("app-wide authentication composition", () => {
     expect(sites.status).toBe(200);
     expect(sites.body.userId).toBe("user_org_admin");
     expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+
+    const created = await request(app).post("/api/site-mapping/sites").send({});
+    expect(created.status).toBe(201);
+    expect(publish).toHaveBeenCalledWith({ type: "request:start" });
+    expect(publish).toHaveBeenCalledWith({ type: "request:end" });
 
     const unrelated = await request(app).get("/api/private");
     expect(unrelated.status).toBe(403);
