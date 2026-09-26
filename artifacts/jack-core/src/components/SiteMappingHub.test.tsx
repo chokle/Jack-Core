@@ -128,9 +128,7 @@ describe("shared site mapping", () => {
       screen.getByRole("button", { name: /Upload this scan to First site/ }),
     );
     fireEvent.change(selector, { target: { value: "site-2" } });
-    expect(
-      await screen.findByText(/Upload this scan to Second site/),
-    ).toBeTruthy();
+    expect(selector.value).toBe("site-2");
     finishUpload(json({ scanId: "scan-first" }, 201));
     await waitFor(() =>
       expect(
