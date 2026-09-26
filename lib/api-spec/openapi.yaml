@@ -451,6 +451,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatResponse"
 
+  /chat/attachment:
+    post:
+      operationId: analyzeJackAttachment
+      tags: [chat]
+      summary: Analyze one photo or document for this turn without retaining it
+      description: >-
+        Requires the existing signed-in pilot access gate. The file is read for
+        this answer only; it is not added to Library or Living Memory. Video
+        contributions use the existing authenticated /videos/ingest pipeline.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPG, PNG, WebP, PDF, DOCX, or TXT; at most 16 MiB.
+                message:
+                  type: string
+                  maxLength: 2000
+      responses:
+        "200":
+          description: Current-turn attachment answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatAttachmentResponse"
+        "400":
+          description: Invalid attachment or question
+        "401":
+          description: Sign-in required
+        "413":
+          description: Attachment is too large
+        "415":
+          description: Unsupported or mismatched file type
+
   /chat/history:
     get:
       operationId: getChatHistory
@@ -1957,6 +1997,32 @@ components:
               type: string
         codeSafety:
           $ref: "#/components/schemas/CodeSafetyResult"
+
+    ChatAttachmentResponse:
+      type: object
+      required: [answer, citations, usedInternalKnowledge, attachment]
+      properties:
+        answer:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Citation"
+        usedInternalKnowledge:
+          type: boolean
+          enum: [false]
+        attachment:
+          type: object
+          required: [kind, retained, truncated]
+          properties:
+            kind:
+              type: string
+              enum: [photo, document]
+            retained:
+              type: boolean
+              enum: [false]
+            truncated:
+              type: boolean
 
     CodeSafetyResult:
       type: object

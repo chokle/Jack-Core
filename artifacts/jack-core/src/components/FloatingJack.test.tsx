@@ -19,6 +19,11 @@ const api = vi.hoisted(() => ({
   getMe: vi.fn(),
   listVideos: vi.fn(),
 }));
+const attachmentClassifier = vi.hoisted(() => vi.fn());
+
+vi.mock("../lib/jack-attachment", () => ({
+  classifyJackAttachment: attachmentClassifier,
+}));
 
 vi.mock("@workspace/api-client-react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@workspace/api-client-react")>()),
@@ -56,6 +61,8 @@ beforeEach(() => {
   api.listVideos.mockResolvedValue({ videos: [], total: 0 });
   api.getMe.mockResolvedValue({});
   api.askJack.mockImplementation(() => new Promise(() => {}));
+  attachmentClassifier.mockReset();
+  attachmentClassifier.mockResolvedValue("document");
   FakeSpeechRecognition.latest = null;
   window.history.replaceState({}, "", "/app");
   document.title = "Jack";
@@ -82,6 +89,165 @@ afterEach(() => {
 });
 
 describe("FloatingJack submission lifecycle", () => {
+  it("analyzes a photo for this turn without adding it to Library", async () => {
+    attachmentClassifier.mockResolvedValue("photo");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ answer: "A ladder is visible.", citations: [] }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        {
+          target: {
+            files: [new File(["photo"], "ladder.jpg", { type: "image/jpeg" })],
+          },
+        },
+      );
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/chat/attachment",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(screen.getByText("A ladder is visible.")).toBeTruthy();
+    expect(
+      screen.getByText(/Current-turn attachment.*not added to Library/),
+    ).toBeTruthy();
+  });
+
+  it("uses a document only for the current answer", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          answer: "The procedure says isolate power.",
+          citations: [],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const file = new File(["procedure"], "procedure.txt", {
+      type: "text/plain",
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        {
+          target: { files: [file] },
+        },
+      );
+    });
+    expect(screen.getByText("Used for this answer only")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Send to Jack"));
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/chat/attachment",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(api.askJack).not.toHaveBeenCalled();
+    expect(screen.getByText("The procedure says isolate power.")).toBeTruthy();
+    expect(screen.queryByText("Used for this answer only")).toBeNull();
+  });
+
+  it("sends a real video through the authenticated Library ingestion path", async () => {
+    attachmentClassifier.mockResolvedValue("video");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "video-1", status: "transcribing" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    const file = new File(["ftyp"], "sweep.mp4", { type: "video/mp4" });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        {
+          target: { files: [file] },
+        },
+      );
+    });
+    expect(screen.getByText("Uploads to shared Library")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Upload video to shared Library"));
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/videos/ingest",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(screen.getByText(/queued for transcription/)).toBeTruthy();
+  });
+
+  it("requires the explicit upload action even when a video is selected during voice input", async () => {
+    attachmentClassifier.mockResolvedValue("video");
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        { target: { files: [new File(["ftyp"], "sweep.mp4")] } },
+      );
+    });
+    fireEvent.click(screen.getByLabelText("Talk to Jack"));
+    await act(async () => {
+      FakeSpeechRecognition.latest?.onresult?.({
+        results: [{ 0: { transcript: "What is here?" }, isFinal: true }],
+      });
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Ask Jack") as HTMLInputElement).value).toBe(
+      "What is here?",
+    );
+    expect(
+      screen.getByLabelText("Upload video to shared Library"),
+    ).toBeTruthy();
+  });
+
+  it("does not allow a mic turn to retry an in-flight video upload", async () => {
+    attachmentClassifier.mockResolvedValue("video");
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(() => {}));
+    render(<FloatingJack />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    await act(async () => {
+      fireEvent.change(
+        screen.getByLabelText("Choose a photo, video, or document for Jack"),
+        { target: { files: [new File(["ftyp"], "sweep.mp4")] } },
+      );
+    });
+    fireEvent.click(screen.getByLabelText("Upload video to shared Library"));
+    const mic = screen.getByLabelText("Talk to Jack") as HTMLButtonElement;
+    expect(mic.disabled).toBe(true);
+    fireEvent.click(mic);
+    expect(FakeSpeechRecognition.latest).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("queues failed questions without content and supplies the telemetry session", async () => {
     cacheTestSession({
       id: "test-session",
