@@ -396,7 +396,13 @@ export function JackShell({
         </div>
       </aside>
 
-      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+        style={{
+          paddingBottom:
+            "calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
+        }}
+      >
         {hudEnabled && (
           <div
             className={
