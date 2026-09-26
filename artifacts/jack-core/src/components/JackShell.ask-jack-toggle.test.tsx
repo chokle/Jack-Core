@@ -45,10 +45,10 @@ function Harness() {
 }
 
 describe("Ask Jack shell toggle", () => {
-  it("reserves the measured floating pill height below app content", () => {
+  it("reserves the floating pill height and phone safe area below app content", () => {
     render(<Harness />);
     expect(document.querySelector("main")?.getAttribute("style")).toContain(
-      "padding-bottom: var(--jack-pill-height, 0px)",
+      "padding-bottom: calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
     );
   });
 
