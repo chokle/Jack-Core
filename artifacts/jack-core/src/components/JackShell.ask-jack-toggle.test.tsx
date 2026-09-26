@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JackShell } from "./JackShell";
 import type { GraphModel } from "../lib/memory-graph";
@@ -39,6 +45,13 @@ function Harness() {
 }
 
 describe("Ask Jack shell toggle", () => {
+  it("reserves the measured floating pill height below app content", () => {
+    render(<Harness />);
+    expect(document.querySelector("main")?.getAttribute("style")).toContain(
+      "padding-bottom: var(--jack-pill-height, 0px)",
+    );
+  });
+
   it("uses the same trigger to open and close Ask Jack and suppresses the floating composer while open", async () => {
     render(<Harness />);
 
@@ -50,14 +63,22 @@ describe("Ask Jack shell toggle", () => {
 
     fireEvent.click(trigger);
 
-    await waitFor(() => expect(screen.getByLabelText("Close Ask Jack")).toBeTruthy());
-    await waitFor(() => expect(floatingComposer.hasAttribute("hidden")).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Close Ask Jack")).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(floatingComposer.hasAttribute("hidden")).toBe(true),
+    );
     expect(floatingComposer.getAttribute("aria-hidden")).toBe("true");
 
     fireEvent.click(trigger);
 
-    await waitFor(() => expect(screen.queryByLabelText("Close Ask Jack")).toBeNull());
-    await waitFor(() => expect(floatingComposer.hasAttribute("hidden")).toBe(false));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Close Ask Jack")).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(floatingComposer.hasAttribute("hidden")).toBe(false),
+    );
     expect(floatingComposer.getAttribute("aria-hidden")).toBe("false");
   });
 });
