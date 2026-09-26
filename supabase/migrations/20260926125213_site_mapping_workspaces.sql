@@ -48,6 +48,7 @@ create table if not exists public.site_scans (
   point_count integer check (point_count between 1 and 2000000),
   created_at timestamptz not null default now(),
   uploaded_at timestamptz,
+  -- Keep metadata until its private R2 object is removed explicitly.
   foreign key (organization_id, site_id)
     references public.site_workspaces (organization_id, id) on delete restrict,
   check (

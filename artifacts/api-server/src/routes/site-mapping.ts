@@ -63,6 +63,7 @@ router.get("/site-mapping/organizations", async (req, res) => {
       .eq("status", "active")
       .order("name");
     if (organizations.error) throw organizations.error;
+    // Candidate memberships still need their validity windows checked.
     const authorized = await Promise.all(
       (organizations.data ?? []).map(async (org) =>
         (await hasOrganizationAuthority(caller.userId, org.id))
