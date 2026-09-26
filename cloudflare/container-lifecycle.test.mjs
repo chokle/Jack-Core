@@ -25,8 +25,9 @@ test("Cloudflare production uses the supported Container readiness lifecycle", a
   assert.match(worker, /this\.envVars = containerEnv\(env\)/);
   assert.match(
     worker,
-    /getContainer\(env\.JACK_CONTAINER, CONTAINER_NAME\)\.fetch\(request\)/,
+    /const container = getContainer\(env\.JACK_CONTAINER, CONTAINER_NAME\)/,
   );
+  assert.match(worker, /return container\.fetch\(request\)/);
 
   assert.doesNotMatch(worker, /getTcpPort/);
   assert.doesNotMatch(worker, /ctx\.container\.start/);

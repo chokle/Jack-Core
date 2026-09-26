@@ -71,11 +71,11 @@ jobs:
             "SUPABASE_URL",
             "SUPABASE_SERVICE_ROLE_KEY",
             "CLERK_SECRET_KEY",
-              "OPENAI_API_KEY",
-              "ADMIN_EMAILS",
-              "DAZ_RUNTIME_URL",
-              "DAZ_RUNTIME_TOKEN",
-              "RADAR_WORKER_TOKEN",
+            "OPENAI_API_KEY",
+            "ADMIN_EMAILS",
+            "DAZ_RUNTIME_URL",
+            "DAZ_RUNTIME_TOKEN",
+            "RADAR_WORKER_TOKEN",
           ];
           const missingRuntimeSecrets = requiredRuntimeSecrets.filter(
             (name) => !process.env[name],
@@ -186,10 +186,10 @@ jobs:
             "OPENAI_API_KEY",
             "ELEVENLABS_API_KEY",
             "JACK_VOICE_ID",
-              "ADMIN_EMAILS",
-              "DAZ_RUNTIME_URL",
-              "DAZ_RUNTIME_TOKEN",
-              "RADAR_WORKER_TOKEN",
+            "ADMIN_EMAILS",
+            "DAZ_RUNTIME_URL",
+            "DAZ_RUNTIME_TOKEN",
+            "RADAR_WORKER_TOKEN",
           ];
           const secrets = Object.fromEntries(
             names.map((name) => [name, process.env[name]]),

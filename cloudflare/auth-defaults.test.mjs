@@ -6,7 +6,11 @@ import path from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
-const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const read = async (path) =>
+  (await readFile(new URL(`../${path}`, import.meta.url), "utf8")).replace(
+    /\r\n/g,
+    "\n",
+  );
 
 test("Site HUD flag reaches the actual Wrangler container build and defaults off", async () => {
   const workflow = await read(
@@ -134,6 +138,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     "CLERK_SECRET_KEY",
     "OPENAI_API_KEY",
     "ADMIN_EMAILS",
+    "RADAR_WORKER_TOKEN",
   ]);
 
   assert.match(generator, /PILOT_AUTH_BYPASS === "true"/);
@@ -171,6 +176,7 @@ test("Cloudflare production defaults require authenticated Clerk users", async (
     "CLERK_SECRET_KEY",
     "OPENAI_API_KEY",
     "ADMIN_EMAILS",
+    "RADAR_WORKER_TOKEN",
   ]) {
     assert.doesNotMatch(
       jobHeader,
