@@ -50,6 +50,9 @@ import { PilotActivityReports } from "./components/PilotActivityReports";
 import { DazRuntimeCheck } from "./components/DazRuntimeCheck";
 import { EndOfShiftCloseout } from "./components/EndOfShiftCloseout";
 import { MemoryGraphView } from "./components/MemoryGraphView";
+import { Dashboard } from "./components/Dashboard";
+import { CompetenciesView } from "./components/CompetenciesView";
+import { InsightsView } from "./components/InsightsView";
 import { Landing } from "./components/Landing";
 import {
   TestingOverlay,
@@ -577,6 +580,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       reports: null,
       closeout: null,
       radar: null,
+      dashboard: null,
+      competencies: null,
+      insights: null,
     } as const;
     if (feature[next]) {
       feedbackRef.current?.markFeature(feature[next]);
@@ -1111,6 +1117,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     review: "Review",
     reports: "Pilot Reports",
     radar: "Site radar",
+    dashboard: "Dashboard",
+    competencies: "Competencies",
+    insights: "Insights",
     closeout: canViewCloseout ? "Closeout" : "Library",
   }[view];
 
@@ -1186,6 +1195,32 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <KnowledgeReview />
         ) : view === "reports" ? (
           <PilotActivityReports />
+        ) : view === "dashboard" ? (
+          graph.isLoading ? (
+            <p role="status" className="p-6">
+              Loading dashboard…
+            </p>
+          ) : graph.hasError && !graph.model.counts.nodes ? (
+            <p role="alert" className="p-6">
+              Dashboard data could not be loaded. Try again shortly.
+            </p>
+          ) : (
+            <Dashboard
+              model={graph.model}
+              readyCount={graph.readyCount}
+              lastUpdatedLabel={
+                graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"
+              }
+            />
+          )
+        ) : view === "competencies" ? (
+          <CompetenciesView
+            data={graph}
+            onOpenVideo={handleSelectVideo}
+            onOpenGraph={() => handleNavigate("graph")}
+          />
+        ) : view === "insights" ? (
+          <InsightsView data={graph} onOpenVideo={handleSelectVideo} />
         ) : view === "closeout" && canViewCloseout ? (
           <EndOfShiftCloseout
             key={`closeout:${me?.userId ?? "signed-out"}`}

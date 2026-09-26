@@ -27,6 +27,9 @@ export type JackView =
   | "review"
   | "reports"
   | "radar"
+  | "dashboard"
+  | "competencies"
+  | "insights"
   | "closeout";
 
 interface JackShellProps {
@@ -64,10 +67,12 @@ function syncAskJackComposerState(): boolean {
     'button[aria-label="Close Ask Jack"]',
   );
   const drawerOpen = !!closeButton;
-  document.querySelectorAll<HTMLElement>("[data-floating-jack]").forEach((pill) => {
-    pill.hidden = drawerOpen;
-    pill.setAttribute("aria-hidden", drawerOpen ? "true" : "false");
-  });
+  document
+    .querySelectorAll<HTMLElement>("[data-floating-jack]")
+    .forEach((pill) => {
+      pill.hidden = drawerOpen;
+      pill.setAttribute("aria-hidden", drawerOpen ? "true" : "false");
+    });
   if (drawerOpen) {
     document.documentElement.style.removeProperty("--jack-pill-height");
   }
@@ -106,6 +111,9 @@ export function JackShell({
     reports: "Pilot Reports",
     closeout: "Closeout",
     radar: "Site radar",
+    dashboard: "Dashboard",
+    competencies: "Competencies",
+    insights: "Insights",
   };
   const hudEnabled = !!siteHudUserId;
 
@@ -116,10 +124,12 @@ export function JackShell({
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
-      document.querySelectorAll<HTMLElement>("[data-floating-jack]").forEach((pill) => {
-        pill.hidden = false;
-        pill.removeAttribute("aria-hidden");
-      });
+      document
+        .querySelectorAll<HTMLElement>("[data-floating-jack]")
+        .forEach((pill) => {
+          pill.hidden = false;
+          pill.removeAttribute("aria-hidden");
+        });
     };
   }, []);
 
@@ -285,17 +295,20 @@ export function JackShell({
           <NavItem
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
-            soon
+            active={active === "dashboard"}
+            onClick={() => go("dashboard")}
           />
           <NavItem
             icon={<GraduationCap className="h-4 w-4" />}
             label="Competencies"
-            soon
+            active={active === "competencies"}
+            onClick={() => go("competencies")}
           />
           <NavItem
             icon={<Lightbulb className="h-4 w-4" />}
             label="Insights"
-            soon
+            active={active === "insights"}
+            onClick={() => go("insights")}
           />
           <NavItem
             icon={<Settings className="h-4 w-4" />}

@@ -45,6 +45,7 @@ export interface MemoryGraphData {
   readyCount: number;
   lastUpdated?: string;
   isLoading: boolean;
+  hasError?: boolean;
   /** Whole-graph vitality read-out for the ambient health indicator. */
   vitality: MemoryVitality;
   /** What changed since the previous /graph snapshot (births, strengthening). */
@@ -61,7 +62,11 @@ export interface MemoryGraphData {
  * fall back to deriving the graph client-side if the server graph is unavailable.
  */
 export function useMemoryGraphData(): MemoryGraphData {
-  const { data: videoList, isLoading } = useListVideos(
+  const {
+    data: videoList,
+    isLoading,
+    isError: videosError,
+  } = useListVideos(
     { limit: 200 },
     {
       query: {
@@ -69,13 +74,16 @@ export function useMemoryGraphData(): MemoryGraphData {
         refetchInterval: (q) => {
           const vids =
             (q.state.data as { videos?: RawVideo[] } | undefined)?.videos ?? [];
-          const processing = vids.some((v) => IN_FLIGHT_STATUSES.has(v.status ?? ""));
+          const processing = vids.some((v) =>
+            IN_FLIGHT_STATUSES.has(v.status ?? ""),
+          );
           return processing ? 4000 : 8000;
         },
       },
     },
   );
-  const { data: competencyList } = useListCompetencies();
+  const { data: competencyList, isError: competenciesError } =
+    useListCompetencies();
   const { data: recentList } = useGetRecentVideos({
     query: { queryKey: getGetRecentVideosQueryKey(), refetchInterval: 8000 },
   });
@@ -87,7 +95,7 @@ export function useMemoryGraphData(): MemoryGraphData {
   // Poll the graph faster while anything is still processing so newly ingested
   // memories visibly appear (and pick up competency edges) as Jack finishes.
   const processing = videos.some((v) => IN_FLIGHT_STATUSES.has(v.status ?? ""));
-  const { data: graph } = useGetGraph({
+  const { data: graph, isError: graphError } = useGetGraph({
     query: {
       queryKey: getGetGraphQueryKey(),
       refetchInterval: processing ? 4000 : 8000,
@@ -152,6 +160,7 @@ export function useMemoryGraphData(): MemoryGraphData {
     readyCount,
     lastUpdated,
     isLoading,
+    hasError: videosError || competenciesError || graphError,
     vitality,
     delta,
     generatedAt,

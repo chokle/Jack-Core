@@ -9,35 +9,25 @@ interface DashboardProps {
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-border bg-card/70 p-5 backdrop-blur-sm">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-      <div className="mt-2 text-3xl font-black tracking-tight text-foreground">{value}</div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-2 text-3xl font-black tracking-tight text-foreground">
+        {value}
+      </div>
     </div>
   );
 }
 
-export function Dashboard({ model, readyCount, lastUpdatedLabel }: DashboardProps) {
+export function Dashboard({
+  model,
+  readyCount,
+  lastUpdatedLabel,
+}: DashboardProps) {
   const nodes = model.counts.nodes.toLocaleString("en-US");
   const connections = model.counts.connections.toLocaleString("en-US");
   const knowledge = model.counts.knowledge.toLocaleString("en-US");
   const topics = model.counts.topics.toLocaleString("en-US");
-
-  const conceptDensity = model.counts.nodes
-    ? Math.round((model.counts.knowledge / model.counts.nodes) * 100)
-    : 0;
-  const connectionDensity = model.counts.nodes
-    ? Math.min(
-        100,
-        Math.round(
-          (model.counts.connections / Math.max(1, model.counts.nodes * 2)) * 100,
-        ),
-      )
-    : 0;
-  const sourceCoverage = model.counts.topics
-    ? Math.min(
-        100,
-        Math.round((readyCount / Math.max(1, model.counts.topics * 3)) * 100),
-      )
-    : 0;
 
   return (
     <section
@@ -53,8 +43,8 @@ export function Dashboard({ model, readyCount, lastUpdatedLabel }: DashboardProp
             Dashboard
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            A live readout of Jack&apos;s current memory footprint and indexed trade
-            knowledge.
+            A live readout of Jack&apos;s current memory footprint and indexed
+            trade knowledge.
           </p>
         </header>
 
@@ -71,37 +61,31 @@ export function Dashboard({ model, readyCount, lastUpdatedLabel }: DashboardProp
 
         <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-2xl border border-border bg-card/70 p-5">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-bold">Memory coverage</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Current graph density across indexed knowledge.
-                </p>
-              </div>
-              <div className="font-mono text-xs text-muted-foreground">
-                Updated {lastUpdatedLabel}
-              </div>
-            </div>
-            <div className="mt-5 space-y-4">
-              {[
-                ["Concept density", conceptDensity],
-                ["Connection density", connectionDensity],
-                ["Processed source coverage", sourceCoverage],
-              ].map(([label, pct]) => (
-                <div key={String(label)}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span>{label}</span>
-                    <span className="font-mono text-muted-foreground">{pct}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-[width]"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <h2 className="text-lg font-bold">Trade knowledge</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Knowledge and processed video counts by trade. These counts do not
+              measure worker competency or site safety.
+            </p>
+            {model.topics.length ? (
+              <ul className="mt-4 space-y-3">
+                {model.topics.map((topic) => (
+                  <li
+                    key={topic.id}
+                    className="flex items-center justify-between gap-3 border-b border-border pb-2 text-sm"
+                  >
+                    <span className="font-medium">{topic.label}</span>
+                    <span className="font-mono text-muted-foreground">
+                      {topic.metrics.knowledge} concepts ·{" "}
+                      {topic.metrics.videos} videos
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm text-muted-foreground">
+                No trade knowledge has been indexed yet.
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-border bg-card/70 p-5">
@@ -109,10 +93,14 @@ export function Dashboard({ model, readyCount, lastUpdatedLabel }: DashboardProp
             <div className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">Graph state</span>
-                <span className="font-semibold text-foreground">Live</span>
+                <span className="font-semibold text-foreground">
+                  {model.counts.nodes ? "Available" : "Empty"}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Last memory refresh</span>
+                <span className="text-muted-foreground">
+                  Last memory refresh
+                </span>
                 <span className="font-mono text-xs text-foreground">
                   {lastUpdatedLabel}
                 </span>
