@@ -49,7 +49,7 @@ create table if not exists public.site_scans (
   created_at timestamptz not null default now(),
   uploaded_at timestamptz,
   foreign key (organization_id, site_id)
-    references public.site_workspaces (organization_id, id) on delete cascade,
+    references public.site_workspaces (organization_id, id) on delete restrict,
   check (
     (status in ('pending', 'deleting') and uploaded_at is null)
     or (status = 'uploaded' and uploaded_at is not null)
@@ -64,9 +64,11 @@ create index if not exists site_scans_pending_cleanup_idx
 
 -- Account deletion uses the existing permanent write fence, so an in-flight
 -- capture or membership invite cannot recreate attribution after cleanup.
+-- A stale pending scan can still be marked deleting by the storage reaper.
 create trigger site_scans_account_deletion_fence
   before insert or update on public.site_scans
-  for each row execute function public.enforce_telemetry_account_deletion_fence('uploaded_by_user_id');
+  for each row when (new.status <> 'deleting')
+  execute function public.enforce_telemetry_account_deletion_fence('uploaded_by_user_id');
 create trigger site_memberships_account_deletion_fence
   before insert or update on public.site_memberships
   for each row execute function public.enforce_telemetry_account_deletion_fence('user_id');

@@ -30,6 +30,7 @@ const siteScanRows = vi.hoisted(
       id: string;
       object_key: string;
       uploaded_by_user_id: string;
+      status: "pending" | "uploaded" | "deleting";
     }>,
 );
 const removeRecordingObjects = vi.hoisted(() =>
@@ -264,6 +265,7 @@ describe("account deletion telemetry coverage", () => {
       id: "scan-1",
       object_key: "organizations/org/sites/site/scans/scan.ply",
       uploaded_by_user_id: "user-1",
+      status: "uploaded",
     });
     process.env["RADAR_WORKER_TOKEN"] = "x".repeat(32);
     process.env["PUBLIC_SITE_URL"] = "https://jack.example.test";
@@ -287,6 +289,7 @@ describe("account deletion telemetry coverage", () => {
       id: "scan-1",
       object_key: "organizations/org/sites/site/scans/scan.ply",
       uploaded_by_user_id: "user-1",
+      status: "uploaded",
     });
     process.env["RADAR_WORKER_TOKEN"] = "x".repeat(32);
     process.env["PUBLIC_SITE_URL"] = "https://jack.example.test";
@@ -297,6 +300,22 @@ describe("account deletion telemetry coverage", () => {
     const response = await request(app()).delete("/api/account");
     expect(response.status).toBe(500);
     expect(siteScanRows).toHaveLength(1);
+    expect(deleteUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps an in-flight scan record until stale upload cleanup finishes", async () => {
+    siteScanRows.push({
+      id: "scan-pending",
+      object_key: "organizations/org/sites/site/scans/scan-pending.ply",
+      uploaded_by_user_id: "user-1",
+      status: "pending",
+    });
+    const deleteObject = vi.fn();
+    vi.stubGlobal("fetch", deleteObject);
+    const response = await request(app()).delete("/api/account");
+    expect(response.status).toBe(500);
+    expect(siteScanRows).toHaveLength(1);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(deleteUser).not.toHaveBeenCalled();
   });
 

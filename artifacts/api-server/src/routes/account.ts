@@ -15,11 +15,15 @@ async function deleteAccountSiteScans(userId: string): Promise<void> {
   while (true) {
     const scans = await supabase
       .from("site_scans")
-      .select("id,object_key")
+      .select("id,object_key,status")
       .eq("uploaded_by_user_id", userId)
       .limit(100);
     if (scans.error) throw scans.error;
     if (!scans.data?.length) return;
+    // A Worker may still be writing a pending object's bytes. Keep its row
+    // until the stale-scan cleanup has safely claimed and removed it.
+    if (scans.data.some((scan) => scan.status !== "uploaded"))
+      throw new Error("Radar scan upload cleanup is still in progress");
     const token = process.env["RADAR_WORKER_TOKEN"];
     const origin = process.env["PUBLIC_SITE_URL"];
     if (!token || token.length < 32 || !origin)
