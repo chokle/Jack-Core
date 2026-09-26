@@ -158,6 +158,13 @@ export function SiteHudLive({
             <button type="button" onClick={ar.clear}>
               Clear scan
             </button>
+            <button
+              type="button"
+              disabled={ar.state.capturedCount === 0}
+              onClick={ar.downloadCapture}
+            >
+              Download depth points ({ar.state.capturedCount})
+            </button>
           </>
         ) : (
           <button
@@ -219,11 +226,13 @@ export function SiteHudLive({
         </p>
       )}
       <p>
-        Jack does not save or send this location or AR depth. Opening the map
-        shares the displayed coordinates with OpenStreetMap. The AR dots are
-        surfaces actually measured during this session. Stop holds the scan in
-        this page until you clear it or leave. The 10 m and 50 m grids are
-        display scales, not detection guarantees or a saved site map.
+        Jack does not automatically save or send this location or AR depth. Jack
+        does not upload a depth download; your device handles the file. It is
+        not a verified site map. Opening the map shares the displayed
+        coordinates with OpenStreetMap. The AR dots are surfaces actually
+        measured during this session. Stop holds the scan in this page until you
+        clear it or leave. The 10 m and 50 m grids are display scales, not
+        detection guarantees or a saved site map.
       </p>
     </section>
   );
