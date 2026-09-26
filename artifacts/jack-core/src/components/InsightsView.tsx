@@ -13,11 +13,13 @@ export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
   const videos = useMemo(
     () =>
       new Map(
-        data.videos
-          .filter((video) => video.status === "completed")
-          .map((video) => [video.id, video]),
+        data.model.nodes
+          .filter(
+            (node) => node.kind === "video" && node.status === "completed",
+          )
+          .map((node) => [node.id.slice("video:".length), node]),
       ),
-    [data.videos],
+    [data.model.nodes],
   );
   const insights = useMemo(() => {
     const mentorIds = new Set(
@@ -103,6 +105,8 @@ export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
         </label>
         {data.isLoading ? (
           <p role="status">Loading insights…</p>
+        ) : data.graphError ? (
+          <p role="alert">Insights could not be loaded. Try again shortly.</p>
         ) : data.hasError && !insights.length ? (
           <p role="alert">Insights could not be loaded. Try again shortly.</p>
         ) : !visible.length ? (
@@ -170,7 +174,7 @@ export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
                           }
                           className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-primary"
                         >
-                          {video?.title || "Source video"}
+                          {video?.label || "Source video"}
                           {source.timestamps.length
                             ? ` · ${Math.floor(source.timestamps[0] / 60)}:${String(Math.floor(source.timestamps[0] % 60)).padStart(2, "0")}`
                             : ""}

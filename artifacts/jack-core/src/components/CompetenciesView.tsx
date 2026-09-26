@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { MemoryGraphData } from "../lib/use-memory-graph";
-import { isKnowledgeKind, readCodes } from "../lib/memory-graph";
+import { isKnowledgeKind } from "../lib/memory-graph";
 
 interface Props {
   data: MemoryGraphData;
@@ -21,13 +21,6 @@ export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
     [data.competencies, query],
   );
   const selected = data.competencies.find((item) => item.code === selectedCode);
-  const videos = selected
-    ? data.videos.filter(
-        (video) =>
-          video.status === "completed" &&
-          readCodes(video).includes(selected.code),
-      )
-    : [];
   const linkedIds = new Set(
     selected
       ? data.model.edges
@@ -43,6 +36,12 @@ export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
     (node) =>
       isKnowledgeKind(node.kind) &&
       node.meta.verificationStatus !== "rejected" &&
+      linkedIds.has(node.id),
+  );
+  const videos = data.model.nodes.filter(
+    (node) =>
+      node.kind === "video" &&
+      node.status === "completed" &&
       linkedIds.has(node.id),
   );
 
@@ -106,7 +105,11 @@ export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
               )}
             </div>
             <div className="rounded-xl border border-border bg-card/70 p-4">
-              {selected ? (
+              {selected && data.graphError ? (
+                <p role="alert">
+                  Living Memory links could not be loaded. Try again shortly.
+                </p>
+              ) : selected ? (
                 <div className="space-y-5">
                   <div>
                     <p className="text-xs text-primary">
@@ -160,10 +163,12 @@ export function CompetenciesView({ data, onOpenVideo, onOpenGraph }: Props) {
                           <li key={video.id}>
                             <button
                               type="button"
-                              onClick={() => onOpenVideo(video.id)}
+                              onClick={() =>
+                                onOpenVideo(video.id.slice("video:".length))
+                              }
                               className="w-full rounded-lg border border-border p-3 text-left text-sm hover:border-primary"
                             >
-                              {video.title || "Untitled video"}
+                              {video.label || "Untitled video"}
                             </button>
                           </li>
                         ))}

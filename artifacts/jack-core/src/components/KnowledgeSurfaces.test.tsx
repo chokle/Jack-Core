@@ -30,8 +30,18 @@ const data = {
         metrics: { knowledge: 1, videos: 1 },
       },
     ],
-    edges: [{ a: "concept:weld", b: "comp:W-1", kind: "competency" }],
+    edges: [
+      { a: "concept:weld", b: "comp:W-1", kind: "competency" },
+      { a: "video:video-1", b: "comp:W-1", kind: "competency" },
+    ],
     nodes: [
+      {
+        id: "video:video-1",
+        kind: "video",
+        label: "Weld setup",
+        status: "completed",
+        meta: {},
+      },
       {
         id: "concept:weld",
         kind: "concept",
@@ -83,6 +93,36 @@ describe("knowledge surfaces", () => {
       screen.getByRole("button", { name: "Open provenance in Living Memory" }),
     );
     expect(onOpenGraph).toHaveBeenCalledWith("concept:weld");
+  });
+
+  it("uses persisted graph evidence beyond the first video page", () => {
+    const graphOnly = { ...data, videos: [] } as MemoryGraphData;
+    render(
+      <InsightsView
+        data={graphOnly}
+        onJumpToTimestamp={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Clean metal before welding")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Weld setup/ })).toBeTruthy();
+  });
+
+  it("reports graph failure without presenting missing links as an empty result", () => {
+    render(
+      <CompetenciesView
+        data={{ ...data, graphError: true }}
+        onOpenVideo={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Prepare welds/ }));
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /could not be loaded/,
+    );
+    expect(
+      screen.queryByText("No Living Memory knowledge is linked yet."),
+    ).toBeNull();
   });
 
   it("keeps interview-backed knowledge visible without naming or scoring a worker", () => {
