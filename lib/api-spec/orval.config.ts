@@ -15,6 +15,11 @@ const titleTransformer: InputTransformerFn = (config) => {
 
 const zodRuntimeStringDateTransformer: InputTransformerFn = (config) => {
   titleTransformer(config);
+  // Multipart bytes are validated by Multer plus magic-byte parsing at the
+  // route. Orval's server Zod target emits z.instanceof(File), but Node's
+  // production runtime has no browser File global.
+  const attachmentPost = config.paths?.["/chat/attachment"]?.post;
+  if (attachmentPost) delete attachmentPost.requestBody;
   const authorityContext = config.components?.schemas?.["AuthorityContext"];
   if (authorityContext && "properties" in authorityContext) {
     const permitApplicationDate =
