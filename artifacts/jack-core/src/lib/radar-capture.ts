@@ -51,9 +51,16 @@ export async function saveCaptureFile(
   picker?: SaveFilePicker,
 ): Promise<CaptureSaveResult> {
   if (picker) {
+    let handle: Awaited<ReturnType<SaveFilePicker>>;
+    try {
+      handle = await picker({ suggestedName: filename });
+    } catch (error) {
+      if ((error as { name?: string })?.name === "AbortError")
+        return "cancelled";
+      throw error;
+    }
     let writable: WritableFile | undefined;
     try {
-      const handle = await picker({ suggestedName: filename });
       writable = await handle.createWritable();
       await writable.write(file);
       await writable.close();
@@ -66,8 +73,6 @@ export async function saveCaptureFile(
           // The original save error is the one to report.
         }
       }
-      if ((error as { name?: string })?.name === "AbortError")
-        return "cancelled";
       throw error;
     }
   }

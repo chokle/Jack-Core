@@ -62,4 +62,22 @@ describe("local AR depth capture", () => {
       saveCaptureFile(capturePly([]), "radar-depth.ply", picker),
     ).resolves.toBe("cancelled");
   });
+
+  it("reports a failed write after file selection even when it is an AbortError", async () => {
+    const error = new DOMException("Write failed", "AbortError");
+    const abort = vi.fn(async () => {});
+    const picker = vi.fn(async () => ({
+      createWritable: async () => ({
+        write: async () => {
+          throw error;
+        },
+        close: vi.fn(async () => {}),
+        abort,
+      }),
+    }));
+    await expect(
+      saveCaptureFile(capturePly([point(1)]), "radar-depth.ply", picker),
+    ).rejects.toBe(error);
+    expect(abort).toHaveBeenCalledOnce();
+  });
 });
