@@ -28,6 +28,7 @@ describe("shared site mapping", () => {
                   id: "site-1",
                   organization_id: "org-1",
                   name: "Test site",
+                  status: "active",
                   role: "contributor",
                 },
               ],
@@ -107,6 +108,49 @@ describe("shared site mapping", () => {
     ).toBeNull();
   });
 
+  it("does not offer an upload to an archived site", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _options?: RequestInit) => ({
+        ok: true,
+        json: async () =>
+          String(input).endsWith("/sites")
+            ? {
+                sites: [
+                  {
+                    id: "site-1",
+                    organization_id: "org-1",
+                    name: "Archived site",
+                    status: "archived",
+                    role: "contributor",
+                  },
+                ],
+              }
+            : String(input).endsWith("/organizations")
+              ? { organizations: [] }
+              : { scans: [] },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const captureBlob = vi.fn(() => new Blob(["ply"]));
+    render(<SiteMappingHub capturedCount={3} captureBlob={captureBlob} />);
+    expect(
+      await screen.findByText(
+        "This site is archived and cannot accept new scans.",
+      ),
+    ).toBeTruthy();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /Upload this scan/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(captureBlob).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.every(([, options]) => options?.method !== "POST"),
+    ).toBe(true);
+  });
+
   it("lists an authorized site's uploaded capture", async () => {
     vi.stubGlobal(
       "fetch",
@@ -119,6 +163,7 @@ describe("shared site mapping", () => {
                   id: "site-1",
                   organization_id: "org-1",
                   name: "Test site",
+                  status: "active",
                   role: "viewer",
                 },
               ],

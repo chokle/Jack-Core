@@ -4,6 +4,7 @@ type Site = {
   id: string;
   organization_id: string;
   name: string;
+  status: "active" | "archived";
   role: "manager" | "contributor" | "viewer";
 };
 type Organization = { id: string; name: string };
@@ -246,10 +247,16 @@ export function SiteMappingHub({
                   Access: {site.role}. Upload only scans you intend to share
                   with this site.
                 </p>
+                {site.status === "archived" && (
+                  <p>This site is archived and cannot accept new scans.</p>
+                )}
                 <button
                   type="button"
                   disabled={
-                    busy || site.role === "viewer" || capturedCount === 0
+                    busy ||
+                    site.status !== "active" ||
+                    site.role === "viewer" ||
+                    capturedCount === 0
                   }
                   onClick={() => void uploadScan()}
                 >
