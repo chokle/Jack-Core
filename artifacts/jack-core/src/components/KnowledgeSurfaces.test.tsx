@@ -162,6 +162,10 @@ describe("knowledge surfaces", () => {
       <Dashboard model={data.model} readyCount={1} lastUpdatedLabel="now" />,
     );
     expect(screen.getByText("Trade knowledge")).toBeTruthy();
+    expect(screen.getByText("Site spatial state")).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Shared site mapping" }),
+    ).toBeTruthy();
     expect(screen.queryByText(/Concept density/)).toBeNull();
     expect(screen.queryByText(/Processed source coverage/)).toBeNull();
   });

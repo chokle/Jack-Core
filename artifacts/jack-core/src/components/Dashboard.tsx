@@ -1,4 +1,5 @@
 import type { GraphModel } from "../lib/memory-graph";
+import { SiteMappingHub } from "./SiteMappingHub";
 
 interface DashboardProps {
   model: GraphModel;
@@ -47,6 +48,15 @@ export function Dashboard({
             trade knowledge.
           </p>
         </header>
+
+        <div className="rounded-2xl border border-border bg-card/70 p-5">
+          <h2 className="text-lg font-bold">Site spatial state</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Private measured depth for sites you can access. Radar shows the
+            same capture; local AR coordinates are not surveyed or aligned.
+          </p>
+          <SiteMappingHub />
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Memory nodes" value={nodes} />

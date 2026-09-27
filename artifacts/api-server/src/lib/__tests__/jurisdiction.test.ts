@@ -236,6 +236,9 @@ describe("Canadian jurisdiction policy", () => {
       );
       expect(prompt).toContain("may explicitly upload a stopped depth PLY");
       expect(prompt).toContain(
+        "Dashboard and Radar read the same private scan",
+      );
+      expect(prompt).toContain(
         "Captures are not aligned into a verified 3D map",
       );
       expect(prompt).toContain("Do not claim live hazard alerts");

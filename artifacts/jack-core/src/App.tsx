@@ -1204,15 +1204,13 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         ) : view === "reports" ? (
           <PilotActivityReports />
         ) : view === "dashboard" ? (
-          graph.isLoading ? (
-            <p role="status" className="p-6">
-              Loading dashboard…
-            </p>
-          ) : graph.hasError && !graph.model.counts.nodes ? (
-            <p role="alert" className="p-6">
-              Dashboard data could not be loaded. Try again shortly.
-            </p>
-          ) : (
+          <>
+            {graph.hasError && !graph.model.counts.nodes && (
+              <p role="alert" className="p-6">
+                Dashboard knowledge data could not be loaded. Site scans can
+                still be viewed.
+              </p>
+            )}
             <Dashboard
               model={graph.model}
               readyCount={graph.readyCount}
@@ -1220,7 +1218,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                 graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"
               }
             />
-          )
+          </>
         ) : view === "competencies" ? (
           <CompetenciesView
             data={graph}

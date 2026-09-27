@@ -12,6 +12,7 @@ import {
   type SiteMappingSite,
   type SiteMappingSiteRecord,
 } from "@workspace/api-client-react";
+import { SiteScanViewer } from "./SiteScanViewer";
 
 function requestError(cause: unknown, fallback: string): string {
   const responseError = (cause as { data?: { error?: unknown } } | null)?.data
@@ -25,11 +26,13 @@ function requestError(cause: unknown, fallback: string): string {
 
 /** Explicitly shared site captures. Local AR coordinates are not registered to a site map. */
 export function SiteMappingHub({
-  capturedCount,
+  capturedCount = 0,
   captureBlob,
+  showPreview = true,
 }: {
-  capturedCount: number;
-  captureBlob: () => Blob | null;
+  capturedCount?: number;
+  captureBlob?: () => Blob | null;
+  showPreview?: boolean;
 }) {
   const [sites, setSites] = useState<SiteMappingSite[]>([]);
   const [recoverableSites, setRecoverableSites] = useState<
@@ -40,7 +43,9 @@ export function SiteMappingHub({
   );
   const [siteId, setSiteId] = useState("");
   const selectedSiteId = useRef("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [scans, setScans] = useState<SiteMappingScan[]>([]);
+  const [scansSiteId, setScansSiteId] = useState("");
   const [newSiteName, setNewSiteName] = useState("");
   const [newSiteOrg, setNewSiteOrg] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,6 +53,8 @@ export function SiteMappingHub({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [selectedScanId, setSelectedScanId] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -75,24 +82,36 @@ export function SiteMappingHub({
 
   async function refreshScans(selectedId: string) {
     const result = await listSiteMappingScans(selectedId);
-    if (selectedSiteId.current === selectedId) setScans(result.scans);
+    if (selectedSiteId.current === selectedId) {
+      setScansSiteId(selectedId);
+      setScans(result.scans);
+    }
   }
 
   useEffect(() => {
     selectedSiteId.current = siteId;
     if (!siteId) {
       setScans([]);
+      setScansSiteId("");
       return;
     }
     let active = true;
     setScans([]);
+    setScansSiteId("");
+    setSelectedScanId("");
     setScansLoading(true);
     listSiteMappingScans(siteId)
       .then((result) => {
-        if (active) setScans(result.scans);
+        if (active) {
+          setScansSiteId(siteId);
+          setScans(result.scans);
+        }
       })
       .catch((cause: unknown) => {
-        if (active) setError(requestError(cause, "Could not load site scans."));
+        if (active) {
+          setScansSiteId(siteId);
+          setError(requestError(cause, "Could not load site scans."));
+        }
       })
       .finally(() => {
         if (active) setScansLoading(false);
@@ -126,18 +145,20 @@ export function SiteMappingHub({
     }
   }
 
-  async function uploadScan() {
-    const file = captureBlob();
-    if (!site || !file || busy) return;
+  async function uploadScan(source: Blob) {
+    if (!site || !source || busy) return;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const result = await uploadSiteMappingScan(site.id, file);
+      const result = await uploadSiteMappingScan(site.id, source);
       if (selectedSiteId.current === site.id)
         setNotice(
           `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
         );
+      if (selectedSiteId.current === site.id) setSelectedScanId(result.scanId);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       try {
         await refreshScans(site.id);
       } catch {
@@ -152,6 +173,11 @@ export function SiteMappingHub({
       setBusy(false);
     }
   }
+
+  const visibleScans = scansSiteId === siteId ? scans : [];
+  const scansPending = !!siteId && (scansLoading || scansSiteId !== siteId);
+  const selectedScan =
+    visibleScans.find((scan) => scan.id === selectedScanId) ?? visibleScans[0];
 
   async function recoverManager(site: SiteMappingSiteRecord) {
     if (busy) return;
@@ -188,9 +214,8 @@ export function SiteMappingHub({
       <div>
         <strong>Shared site scans</strong>
         <p>
-          Choose an authorized site to upload measured depth points. Captures
-          stay separate until they can be aligned and reviewed. No combined 3D
-          map is published yet.
+          Choose an authorized site to upload measured depth points. The 3D view
+          shows one private, unaligned capture. It is not a surveyed site map.
         </p>
         {loading && <p role="status">Loading sites…</p>}
         {error && <p role="alert">{error}</p>}
@@ -204,6 +229,8 @@ export function SiteMappingHub({
                   value={siteId}
                   onChange={(event) => {
                     setError("");
+                    setFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
                     selectedSiteId.current = event.target.value;
                     setSiteId(event.target.value);
                   }}
@@ -278,29 +305,68 @@ export function SiteMappingHub({
                 {site.status === "archived" && (
                   <p>This site is archived and cannot accept new scans.</p>
                 )}
-                <button
-                  type="button"
-                  disabled={
-                    busy ||
-                    site.status !== "active" ||
-                    site.role === "viewer" ||
-                    capturedCount === 0
-                  }
-                  onClick={() => void uploadScan()}
-                >
-                  {busy
-                    ? "Uploading scan…"
-                    : `Upload this scan to ${site.name} (${capturedCount} points)`}
-                </button>
+                {captureBlob && (
+                  <button
+                    type="button"
+                    disabled={
+                      busy ||
+                      site.status !== "active" ||
+                      site.role === "viewer" ||
+                      capturedCount === 0
+                    }
+                    onClick={() => {
+                      const source = captureBlob?.();
+                      if (source) void uploadScan(source);
+                    }}
+                  >
+                    {busy
+                      ? "Uploading scan…"
+                      : `Upload this scan to ${site.name} (${capturedCount} points)`}
+                  </button>
+                )}
+                {site.status === "active" && site.role !== "viewer" && (
+                  <div>
+                    <label>
+                      Upload a saved PLY
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".ply,application/octet-stream"
+                        disabled={busy}
+                        onChange={(event) =>
+                          setFile(event.target.files?.[0] ?? null)
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy || !file || file.size > 25 * 1024 * 1024}
+                      onClick={() => file && void uploadScan(file)}
+                    >
+                      {busy ? "Uploading scan…" : "Upload selected PLY"}
+                    </button>
+                    {file && file.size > 25 * 1024 * 1024 && (
+                      <p role="alert">PLY exceeds the 25 MB limit.</p>
+                    )}
+                  </div>
+                )}
                 <h3>Site captures</h3>
-                {scansLoading ? (
+                {scansPending ? (
                   <p role="status">Loading captures…</p>
-                ) : scans.length ? (
+                ) : visibleScans.length ? (
                   <ul>
-                    {scans.map((scan) => (
+                    {visibleScans.map((scan) => (
                       <li key={scan.id}>
                         {scan.point_count.toLocaleString()} points ·{" "}
                         {new Date(scan.uploaded_at).toLocaleString()} ·{" "}
+                        <button
+                          type="button"
+                          aria-pressed={selectedScan?.id === scan.id}
+                          disabled={!showPreview}
+                          onClick={() => setSelectedScanId(scan.id)}
+                        >
+                          {showPreview ? "View 3D" : "Stop AR to view 3D"}
+                        </button>{" "}
                         <a
                           href={getDownloadSiteMappingScanUrl(site.id, scan.id)}
                         >
@@ -312,6 +378,13 @@ export function SiteMappingHub({
                 ) : !error ? (
                   <p>No scans uploaded to this site yet.</p>
                 ) : null}
+                {selectedScan && showPreview && (
+                  <SiteScanViewer
+                    key={`${site.id}:${selectedScan.id}`}
+                    siteId={site.id}
+                    scan={selectedScan}
+                  />
+                )}
               </>
             )}
           </>
