@@ -35,4 +35,14 @@ describe("private site scan view", () => {
     expect(() => parseSiteScan(ply([]))).toThrow();
     expect(() => parseSiteScan(ply([[Number.NaN, 0, 0]]))).toThrow();
   });
+
+  it("materializes at most 50,000 points from a larger valid scan", () => {
+    const scan = parseSiteScan(
+      ply(Array.from({ length: 100_001 }, (_, index) => [index, 0, 0])),
+    );
+    expect(scan.pointCount).toBe(100_001);
+    expect(scan.displayedPoints).toBe(33_334);
+    expect(scan.geometry.getAttribute("position").count).toBe(33_334);
+    scan.geometry.dispose();
+  });
 });

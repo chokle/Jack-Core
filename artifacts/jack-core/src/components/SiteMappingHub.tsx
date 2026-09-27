@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   createSiteMappingSite,
   getDownloadSiteMappingScanUrl,
@@ -12,7 +12,11 @@ import {
   type SiteMappingSite,
   type SiteMappingSiteRecord,
 } from "@workspace/api-client-react";
-import { SiteScanViewer } from "./SiteScanViewer";
+const SiteScanViewer = lazy(() =>
+  import("./SiteScanViewer").then(({ SiteScanViewer }) => ({
+    default: SiteScanViewer,
+  })),
+);
 
 function requestError(cause: unknown, fallback: string): string {
   const responseError = (cause as { data?: { error?: unknown } } | null)?.data
@@ -378,11 +382,13 @@ export function SiteMappingHub({
                   <p>No scans uploaded to this site yet.</p>
                 ) : null}
                 {selectedScan && showPreview && (
-                  <SiteScanViewer
-                    key={`${site.id}:${selectedScan.id}`}
-                    siteId={site.id}
-                    scan={selectedScan}
-                  />
+                  <Suspense fallback={<p role="status">Loading 3D viewer…</p>}>
+                    <SiteScanViewer
+                      key={`${site.id}:${selectedScan.id}`}
+                      siteId={site.id}
+                      scan={selectedScan}
+                    />
+                  </Suspense>
                 )}
               </>
             )}
