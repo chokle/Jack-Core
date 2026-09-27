@@ -428,7 +428,7 @@ describe("shared site mapping", () => {
     expect(screen.getByText(/Access: manager/)).toBeTruthy();
   });
 
-  it("lists an authorized site's uploaded capture", async () => {
+  it("lists an authorized capture without loading it until View 3D is tapped", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -470,6 +470,8 @@ describe("shared site mapping", () => {
         .getByRole("button", { name: /Upload this scan/ })
         .hasAttribute("disabled"),
     ).toBe(true);
+    expect(screen.queryByTestId("shared-scan-view")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View 3D" }));
     expect(screen.getByTestId("shared-scan-view").textContent).toBe(
       "site-1/scan-1",
     );

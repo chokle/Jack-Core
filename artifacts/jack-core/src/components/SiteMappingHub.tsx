@@ -176,8 +176,7 @@ export function SiteMappingHub({
 
   const visibleScans = scansSiteId === siteId ? scans : [];
   const scansPending = !!siteId && (scansLoading || scansSiteId !== siteId);
-  const selectedScan =
-    visibleScans.find((scan) => scan.id === selectedScanId) ?? visibleScans[0];
+  const selectedScan = visibleScans.find((scan) => scan.id === selectedScanId);
 
   async function recoverManager(site: SiteMappingSiteRecord) {
     if (busy) return;
