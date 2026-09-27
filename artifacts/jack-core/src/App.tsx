@@ -49,6 +49,7 @@ import { JackShell, type JackView } from "./components/JackShell";
 import { PilotActivityReports } from "./components/PilotActivityReports";
 import { DazRuntimeCheck } from "./components/DazRuntimeCheck";
 import { EndOfShiftCloseout } from "./components/EndOfShiftCloseout";
+import { PilotOrientation } from "./components/PilotOrientation";
 import { MemoryGraphView } from "./components/MemoryGraphView";
 import { Dashboard } from "./components/Dashboard";
 import { CompetenciesView } from "./components/CompetenciesView";
@@ -363,6 +364,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (requested === "closeout") return "closeout";
     return "graph";
   });
+  const orientationDecisionOwnerRef = useRef<string | null>(null);
   const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const navigationRef = useRef<{
@@ -575,6 +577,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   const handleNavigate = (next: JackView) => {
     if (next === "graph") setGraphFocusNodeId(null);
     const feature = {
+      orientation: null,
       graph: "memory_graph",
       library: "library",
       interview: "interview_mode",
@@ -592,6 +595,46 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     }
     setFieldNotePreload(undefined);
     navigateToLocation({ view: next, selectedVideoId: null });
+  };
+
+  useEffect(() => {
+    if (!me?.userId || orientationDecisionOwnerRef.current === me.userId)
+      return;
+    orientationDecisionOwnerRef.current = me.userId;
+    const requested = new URLSearchParams(window.location.search);
+    if (
+      view !== "graph" ||
+      selectedVideoId ||
+      interviewPreload ||
+      requested.has("view") ||
+      requested.get("test") === "true"
+    )
+      return;
+    try {
+      if (
+        window.localStorage.getItem(`jack-orientation-v1:${me.userId}`) ===
+        "seen"
+      )
+        return;
+    } catch {
+      // A browser that blocks storage can still use the guide this session.
+    }
+    handleNavigate("orientation");
+  }, [me?.userId]);
+
+  const markOrientationSeen = () => {
+    if (me?.userId) {
+      try {
+        window.localStorage.setItem(`jack-orientation-v1:${me.userId}`, "seen");
+      } catch {
+        // Orientation remains optional when browser storage is unavailable.
+      }
+    }
+  };
+
+  const finishOrientation = (destination: JackView) => {
+    markOrientationSeen();
+    handleNavigate(destination);
   };
 
   const handleOpenGraphNode = (nodeId: string) => {
@@ -1118,6 +1161,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // The Closeout API resolves and enforces active pilot membership server-side.
   const canViewCloseout = me?.isAdmin === false;
   const videoOriginLabel = {
+    orientation: "Start here",
     graph: "Living Memory",
     library: "Library",
     interview: "Interview",
@@ -1177,6 +1221,17 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             originLabel={videoOriginLabel}
             onOpenChat={handleOpenChat}
             seek={seek}
+          />
+        ) : view === "orientation" ? (
+          <PilotOrientation
+            onAskJack={(prompt) => {
+              markOrientationSeen();
+              handleOpenChat(prompt);
+            }}
+            onOpenRadar={() => finishOrientation("radar")}
+            onOpenCloseout={() => finishOrientation("closeout")}
+            onFinish={() => finishOrientation("graph")}
+            canOpenCloseout={canViewCloseout}
           />
         ) : view === "graph" ? (
           <MemoryGraphView

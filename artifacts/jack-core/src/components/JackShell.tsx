@@ -14,6 +14,7 @@ import {
   LogOut,
   Radio,
   ClipboardList,
+  Compass,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import type { JackUiActionName } from "../lib/jack-ui-context";
@@ -21,6 +22,7 @@ import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
 
 export type JackView =
+  | "orientation"
   | "graph"
   | "library"
   | "interview"
@@ -104,6 +106,7 @@ export function JackShell({
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const avatarInitial = (userLabel?.trim()?.charAt(0) || "J").toUpperCase();
   const surfaceLabel: Record<JackView, string> = {
+    orientation: "Start here",
     graph: "Living Memory",
     library: "Library",
     interview: "Interview",
@@ -232,6 +235,12 @@ export function JackShell({
 
         {/* Nav */}
         <nav className="flex flex-col gap-1 px-3 py-2">
+          <NavItem
+            icon={<Compass className="h-4 w-4" />}
+            label="Start here"
+            active={active === "orientation"}
+            onClick={() => go("orientation")}
+          />
           <NavItem
             icon={<Bot className="h-4 w-4" />}
             label="Ask Jack"
