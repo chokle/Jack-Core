@@ -99,18 +99,44 @@ export function SiteScanViewer({
   >({ kind: "loading" });
   const [expanded, setExpanded] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  const openedRef = useRef(false);
+
+  useEffect(() => {
+    if (!expanded && openedRef.current) {
+      openButtonRef.current?.focus();
+      openedRef.current = false;
+    }
+  }, [expanded]);
 
   useEffect(() => {
     if (!expanded) return;
     const oldOverflow = document.body.style.overflow;
+    const overlay = closeButtonRef.current?.parentElement;
+    const background = Array.from(document.body.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== overlay,
+      )
+      .map((element) => ({ element, wasInert: element.inert }));
+    background.forEach(({ element }) => {
+      element.inert = true;
+    });
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setExpanded(false);
+      if (event.key === "Tab") {
+        event.preventDefault();
+        closeButtonRef.current?.focus();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = oldOverflow;
+      background.forEach(({ element, wasInert }) => {
+        element.inert = wasInert;
+      });
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [expanded]);
@@ -189,10 +215,14 @@ export function SiteScanViewer({
         </Canvas>
         {!expanded && (
           <button
+            ref={openButtonRef}
             type="button"
             className="site-scan-viewer__open"
             aria-label="Open 3D scan full screen"
-            onClick={() => setExpanded(true)}
+            onClick={() => {
+              openedRef.current = true;
+              setExpanded(true);
+            }}
           >
             <span>Open full screen</span>
           </button>
