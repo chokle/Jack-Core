@@ -193,7 +193,7 @@ export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
                     onClick={() => onOpenGraph(node.id)}
                     className="mt-3 text-sm font-semibold text-primary underline"
                   >
-                    Open provenance in Living Memory
+                    Review evidence for {node.label} in Living Memory
                   </button>
                 </article>
               );

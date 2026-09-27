@@ -90,7 +90,9 @@ describe("knowledge surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: /Weld setup/ }));
     expect(onJumpToTimestamp).toHaveBeenCalledWith("video-1", 63);
     fireEvent.click(
-      screen.getByRole("button", { name: "Open provenance in Living Memory" }),
+      screen.getByRole("button", {
+        name: "Review evidence for Clean metal before welding in Living Memory",
+      }),
     );
     expect(onOpenGraph).toHaveBeenCalledWith("concept:weld");
   });
