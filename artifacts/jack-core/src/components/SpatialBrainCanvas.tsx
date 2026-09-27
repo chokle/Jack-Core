@@ -1004,10 +1004,7 @@ export const SpatialBrainCanvas = forwardRef<MemoryGraphHandle, Props>(
         const adj = adjacencyRef.current;
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const bg = ctx.createLinearGradient(0, 0, 0, h);
-        bg.addColorStop(0, "rgb(8, 12, 24)");
-        bg.addColorStop(1, "rgb(6, 9, 18)");
-        ctx.fillStyle = bg;
+        ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, w, h);
 
         ctx.save();
