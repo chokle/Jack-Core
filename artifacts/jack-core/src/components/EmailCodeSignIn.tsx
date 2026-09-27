@@ -23,6 +23,10 @@ function messageFrom(error: unknown): string {
 }
 
 export function EmailCodeSignIn() {
+  const phoneSignInUrl =
+    window.location.hostname === "jack.torchlabs.ca"
+      ? `https://accounts.torchlabs.ca/sign-in?redirect_url=${encodeURIComponent(`${window.location.origin}${appPath}`)}`
+      : null;
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { isLoaded: signInLoaded, signIn, setActive } = useSignIn();
   const [, setLocation] = useLocation();
@@ -159,6 +163,14 @@ export function EmailCodeSignIn() {
 
         {mode === "pilot" ? (
           <>
+            {phoneSignInUrl && (
+              <a
+                href={phoneSignInUrl}
+                className="block rounded-lg bg-primary px-4 py-3 text-center text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+              >
+                Sign in with a phone code
+              </a>
+            )}
             <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm leading-6 text-muted-foreground">
               <p className="font-semibold text-foreground">Not part of the pilot?</p>
               <p>

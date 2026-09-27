@@ -105,6 +105,29 @@ async function reachAdminCodeStep() {
 }
 
 describe("EmailCodeSignIn", () => {
+  it("offers production phone sign-in through Clerk and returns to Jack", () => {
+    Object.defineProperty(window, "location", {
+      value: {
+        ...window.location,
+        hostname: "jack.torchlabs.ca",
+        origin: "https://jack.torchlabs.ca",
+        assign: h.assign,
+      },
+      configurable: true,
+    });
+
+    render(<EmailCodeSignIn />);
+
+    expect(
+      screen
+        .getByRole("link", { name: "Sign in with a phone code" })
+        .getAttribute("href"),
+    ).toBe(
+      "https://accounts.torchlabs.ca/sign-in?redirect_url=https%3A%2F%2Fjack.torchlabs.ca%2Fapp",
+    );
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
   it("starts direct pilot sign-in from email and redirects to Clerk session URL", async () => {
     render(<EmailCodeSignIn />);
 
