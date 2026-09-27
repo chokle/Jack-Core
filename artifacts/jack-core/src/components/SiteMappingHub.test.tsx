@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { SiteMappingHub } from "./SiteMappingHub";
 
+const viewerState = vi.hoisted(() => ({ fail: false }));
+
 vi.mock("./SiteScanViewer", () => ({
   SiteScanViewer: ({
     siteId,
@@ -16,11 +18,14 @@ vi.mock("./SiteScanViewer", () => ({
   }: {
     siteId: string;
     scan: { id: string };
-  }) => (
-    <div data-testid="shared-scan-view">
-      {siteId}/{scan.id}
-    </div>
-  ),
+  }) => {
+    if (viewerState.fail) throw new Error("WebGL unavailable");
+    return (
+      <div data-testid="shared-scan-view">
+        {siteId}/{scan.id}
+      </div>
+    );
+  },
 }));
 
 function json(value: unknown, status = 200): Response {
@@ -31,8 +36,10 @@ function json(value: unknown, status = 200): Response {
 }
 
 afterEach(() => {
+  viewerState.fail = false;
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("shared site mapping", () => {
@@ -475,5 +482,46 @@ describe("shared site mapping", () => {
     expect(screen.getByTestId("shared-scan-view").textContent).toBe(
       "site-1/scan-1",
     );
+  });
+
+  it("keeps the site panel usable when the optional 3D viewer fails", async () => {
+    viewerState.fail = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/sites"))
+          return json({
+            sites: [
+              {
+                id: "site-1",
+                organization_id: "org-1",
+                name: "Test site",
+                status: "active",
+                role: "viewer",
+              },
+            ],
+          });
+        if (path.endsWith("/organizations")) return json({ organizations: [] });
+        return json({
+          scans: [
+            {
+              id: "scan-1",
+              point_count: 1,
+              byte_size: 100,
+              uploaded_at: "2026-09-26T00:00:00Z",
+            },
+          ],
+        });
+      }),
+    );
+    render(<SiteMappingHub />);
+    fireEvent.click(await screen.findByRole("button", { name: "View 3D" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not open this 3D preview",
+    );
+    expect(screen.getByText("Shared site scans")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download PLY" })).toBeTruthy();
   });
 });

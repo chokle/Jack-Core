@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   createSiteMappingSite,
   getDownloadSiteMappingScanUrl,
@@ -17,6 +18,28 @@ const SiteScanViewer = lazy(() =>
     default: SiteScanViewer,
   })),
 );
+
+class SiteScanErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? (
+      <p role="alert">
+        Could not open this 3D preview. The private PLY is still available to
+        download.
+      </p>
+    ) : (
+      this.props.children
+    );
+  }
+}
 
 function requestError(cause: unknown, fallback: string): string {
   const responseError = (cause as { data?: { error?: unknown } } | null)?.data
@@ -382,13 +405,13 @@ export function SiteMappingHub({
                   <p>No scans uploaded to this site yet.</p>
                 ) : null}
                 {selectedScan && showPreview && (
-                  <Suspense fallback={<p role="status">Loading 3D viewer…</p>}>
-                    <SiteScanViewer
-                      key={`${site.id}:${selectedScan.id}`}
-                      siteId={site.id}
-                      scan={selectedScan}
-                    />
-                  </Suspense>
+                  <SiteScanErrorBoundary key={`${site.id}:${selectedScan.id}`}>
+                    <Suspense
+                      fallback={<p role="status">Loading 3D viewer…</p>}
+                    >
+                      <SiteScanViewer siteId={site.id} scan={selectedScan} />
+                    </Suspense>
+                  </SiteScanErrorBoundary>
                 )}
               </>
             )}
