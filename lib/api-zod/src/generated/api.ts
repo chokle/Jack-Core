@@ -1408,7 +1408,27 @@ export const ListSiteMappingOrganizationsResponse = zod.object({
   "organizations": zod.array(zod.object({
   "id": zod.string().uuid(),
   "name": zod.string()
-}))
+})),
+  "canCreateOrganization": zod.boolean()
+})
+
+
+/**
+ * @summary Create a private pilot organization as a trusted Jack admin
+ */
+export const createSiteMappingOrganizationBodyNameMax = 160;
+
+
+
+export const CreateSiteMappingOrganizationBody = zod.object({
+  "name": zod.string().min(1).max(createSiteMappingOrganizationBodyNameMax)
+})
+
+export const CreateSiteMappingOrganizationResponse = zod.object({
+  "organization": zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string()
+})
 })
 
 

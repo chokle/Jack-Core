@@ -1040,6 +1040,27 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SiteMappingOrganizations" }
         "403": { description: Resolved account required }
+    post:
+      operationId: createSiteMappingOrganization
+      tags: [site-mapping]
+      summary: Create a private pilot organization as a trusted Jack admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              {
+                $ref: "#/components/schemas/CreateSiteMappingOrganizationInput",
+              }
+      responses:
+        "201":
+          description: Created organization with caller as organization admin
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/SiteMappingOrganizationEnvelope" }
+        "400": { description: Invalid organization name }
+        "403": { description: Trusted admin required }
 
   /site-mapping/sites:
     get:
@@ -1309,11 +1330,23 @@ components:
         name: { type: string }
     SiteMappingOrganizations:
       type: object
-      required: [organizations]
+      required: [organizations, canCreateOrganization]
       properties:
         organizations:
           type: array
           items: { $ref: "#/components/schemas/SiteMappingOrganization" }
+        canCreateOrganization: { type: boolean }
+    SiteMappingOrganizationEnvelope:
+      type: object
+      required: [organization]
+      properties:
+        organization: { $ref: "#/components/schemas/SiteMappingOrganization" }
+    CreateSiteMappingOrganizationInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
     SiteMappingSiteRecord:
       type: object
       required: [id, organization_id, name, status]

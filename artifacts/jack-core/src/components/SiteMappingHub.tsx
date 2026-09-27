@@ -1,6 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  createSiteMappingOrganization,
   createSiteMappingSite,
   getDownloadSiteMappingScanUrl,
   listSiteMappingOrganizations,
@@ -81,6 +82,8 @@ export function SiteMappingHub({
   const [scansSiteId, setScansSiteId] = useState("");
   const [newSiteName, setNewSiteName] = useState("");
   const [newSiteOrg, setNewSiteOrg] = useState("");
+  const [newOrganizationName, setNewOrganizationName] = useState("");
+  const [canCreateOrganization, setCanCreateOrganization] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scansLoading, setScansLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -109,6 +112,7 @@ export function SiteMappingHub({
         setSites(siteList.sites);
         setRecoverableSites(siteList.recoverableSites ?? []);
         setOrganizations(organizationList.organizations);
+        setCanCreateOrganization(organizationList.canCreateOrganization);
         setSiteId((previous) => previous || siteList.sites[0]?.id || "");
         setNewSiteOrg(
           (previous) => previous || organizationList.organizations[0]?.id || "",
@@ -167,6 +171,28 @@ export function SiteMappingHub({
   }, [siteId]);
 
   const site = sites.find((item) => item.id === siteId);
+
+  async function createOrganization() {
+    if (!newOrganizationName.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await createSiteMappingOrganization({
+        name: newOrganizationName.trim(),
+      });
+      setOrganizations((previous) => [...previous, result.organization]);
+      setNewSiteOrg(result.organization.id);
+      setNewOrganizationName("");
+      setNotice(
+        `Private pilot space ${result.organization.name} is ready. Create a site to begin.`,
+      );
+    } catch (cause) {
+      setError(requestError(cause, "Could not create pilot space."));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function createSite() {
     if (!newSiteName.trim() || !newSiteOrg || busy) return;
@@ -289,6 +315,32 @@ export function SiteMappingHub({
             ) : !error ? (
               <p>No site is connected to your account.</p>
             ) : null}
+            {canCreateOrganization && (
+              <details open={organizations.length === 0}>
+                <summary>Create a private pilot space</summary>
+                <p>
+                  Start here for a new pilot. Only people added to its sites can
+                  see scans.
+                </p>
+                <label>
+                  Pilot organization name{" "}
+                  <input
+                    value={newOrganizationName}
+                    maxLength={160}
+                    onChange={(event) =>
+                      setNewOrganizationName(event.target.value)
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || !newOrganizationName.trim()}
+                  onClick={() => void createOrganization()}
+                >
+                  Create pilot space
+                </button>
+              </details>
+            )}
             {organizations.length > 0 && (
               <div>
                 <label>
