@@ -65,7 +65,7 @@ export const JACK_CORE_SYSTEMS: readonly JackCoreSystem[] = [
     persistsIn:
       "the current phone's temporary AR session; a PLY depth file only when the user explicitly downloads it, or a private site capture when an authorized member explicitly uploads it",
     accessRule:
-      "No site is connected to an unassigned account. Jack never automatically uploads AR depth or location. An authorized site contributor or manager may explicitly upload a stopped depth PLY or a saved PLY to that private site; site members can list, view one capture in 3D on Dashboard and Radar, and download its raw points. Dashboard and Radar read the same private scan. Captures are not aligned into a verified 3D map. Do not claim live hazard alerts, work progress, tool inventory, or crew positions; those are not current Radar features. Future site-connected crew visibility must respect site and crew permissions; other contractors are anonymous proximity only unless separately authorized. Demo fixtures are not live site data.",
+      "No site is connected to an unassigned account. Jack never automatically uploads AR depth or location. An authorized site contributor or manager may explicitly upload a stopped depth PLY to that private site; site members can list and download its raw captures. Captures are not aligned into a verified 3D map. Do not claim live hazard alerts, work progress, tool inventory, or crew positions; those are not current Radar features. Future site-connected crew visibility must respect site and crew permissions; other contractors are anonymous proximity only unless separately authorized. Demo fixtures are not live site data.",
   },
   {
     name: "Torch Command Centre / Torch Engine",
