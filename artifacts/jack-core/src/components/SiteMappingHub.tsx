@@ -13,14 +13,15 @@ import {
   type SiteMappingSite,
   type SiteMappingSiteRecord,
 } from "@workspace/api-client-react";
-const SiteScanViewer = lazy(() =>
-  import("./SiteScanViewer").then(({ SiteScanViewer }) => ({
-    default: SiteScanViewer,
-  })),
-);
+const makeSiteScanViewer = () =>
+  lazy(() =>
+    import("./SiteScanViewer").then(({ SiteScanViewer }) => ({
+      default: SiteScanViewer,
+    })),
+  );
 
 class SiteScanErrorBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; onRetry: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -31,10 +32,15 @@ class SiteScanErrorBoundary extends Component<
 
   render() {
     return this.state.failed ? (
-      <p role="alert">
-        Could not open this 3D preview. The private PLY is still available to
-        download.
-      </p>
+      <div>
+        <p role="alert">
+          Could not open this 3D preview. The private PLY is still available to
+          download.
+        </p>
+        <button type="button" onClick={this.props.onRetry}>
+          Retry 3D preview
+        </button>
+      </div>
     ) : (
       this.props.children
     );
@@ -82,6 +88,18 @@ export function SiteMappingHub({
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [selectedScanId, setSelectedScanId] = useState("");
+  const [SiteScanViewer, setSiteScanViewer] = useState(makeSiteScanViewer);
+  const [viewerAttempt, setViewerAttempt] = useState(0);
+
+  function retryPreview() {
+    setSiteScanViewer(makeSiteScanViewer());
+    setViewerAttempt((attempt) => attempt + 1);
+  }
+
+  function openPreview(scanId: string) {
+    setSelectedScanId(scanId);
+    retryPreview();
+  }
 
   useEffect(() => {
     let active = true;
@@ -183,7 +201,7 @@ export function SiteMappingHub({
         setNotice(
           `Scan uploaded to ${site.name}. Capture ${result.scanId.slice(0, 8)} is private to site members.`,
         );
-      if (selectedSiteId.current === site.id) setSelectedScanId(result.scanId);
+      if (selectedSiteId.current === site.id) openPreview(result.scanId);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       try {
@@ -389,7 +407,7 @@ export function SiteMappingHub({
                           type="button"
                           aria-pressed={selectedScan?.id === scan.id}
                           disabled={!showPreview}
-                          onClick={() => setSelectedScanId(scan.id)}
+                          onClick={() => openPreview(scan.id)}
                         >
                           {showPreview ? "View 3D" : "Stop AR to view 3D"}
                         </button>{" "}
@@ -405,7 +423,10 @@ export function SiteMappingHub({
                   <p>No scans uploaded to this site yet.</p>
                 ) : null}
                 {selectedScan && showPreview && (
-                  <SiteScanErrorBoundary key={`${site.id}:${selectedScan.id}`}>
+                  <SiteScanErrorBoundary
+                    key={`${site.id}:${selectedScan.id}:${viewerAttempt}`}
+                    onRetry={retryPreview}
+                  >
                     <Suspense
                       fallback={<p role="status">Loading 3D viewer…</p>}
                     >

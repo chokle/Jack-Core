@@ -479,7 +479,7 @@ describe("shared site mapping", () => {
     ).toBe(true);
     expect(screen.queryByTestId("shared-scan-view")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View 3D" }));
-    expect(screen.getByTestId("shared-scan-view").textContent).toBe(
+    expect((await screen.findByTestId("shared-scan-view")).textContent).toBe(
       "site-1/scan-1",
     );
   });
@@ -523,5 +523,10 @@ describe("shared site mapping", () => {
     );
     expect(screen.getByText("Shared site scans")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download PLY" })).toBeTruthy();
+    viewerState.fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry 3D preview" }));
+    expect((await screen.findByTestId("shared-scan-view")).textContent).toBe(
+      "site-1/scan-1",
+    );
   });
 });
