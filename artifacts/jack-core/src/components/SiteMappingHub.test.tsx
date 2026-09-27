@@ -304,6 +304,59 @@ describe("shared site mapping", () => {
     ).toBeNull();
   });
 
+  it("lets a trusted admin set up a pilot space then create its first site", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, options?: RequestInit) => {
+        const path = String(input);
+        if (path.endsWith("/organizations") && options?.method === "POST")
+          return json(
+            { organization: { id: "org-1", name: "Field pilot" } },
+            201,
+          );
+        if (path.endsWith("/organizations"))
+          return json({ organizations: [], canCreateOrganization: true });
+        if (path.endsWith("/sites") && options?.method === "POST")
+          return json(
+            {
+              site: {
+                id: "site-1",
+                organization_id: "org-1",
+                name: "Back alley",
+                role: "manager",
+                status: "active",
+              },
+            },
+            201,
+          );
+        if (path.endsWith("/sites"))
+          return json({ sites: [], recoverableSites: [] });
+        if (path.endsWith("/sites/site-1/scans")) return json({ scans: [] });
+        throw new Error(`Unexpected request ${path}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SiteMappingHub />);
+    fireEvent.change(await screen.findByLabelText("Pilot organization name"), {
+      target: { value: "Field pilot" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create pilot space" }));
+    expect(
+      await screen.findByText(/Private pilot space Field pilot is ready/),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("New site name"), {
+      target: { value: "Back alley" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create site" }));
+    expect(await screen.findByText(/Site Back alley is ready/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/sites"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"organizationId":"org-1"'),
+      }),
+    );
+  });
+
   it("shows a load failure without calling it an empty site", async () => {
     vi.stubGlobal(
       "fetch",

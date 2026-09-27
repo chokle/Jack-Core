@@ -7,7 +7,6 @@
  */
 import type { SiteMappingOrganization } from './siteMappingOrganization';
 
-export interface SiteMappingOrganizations {
-  organizations: SiteMappingOrganization[];
-  canCreateOrganization: boolean;
+export interface SiteMappingOrganizationEnvelope {
+  organization: SiteMappingOrganization;
 }

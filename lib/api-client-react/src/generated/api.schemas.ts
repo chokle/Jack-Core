@@ -12,6 +12,19 @@ export interface SiteMappingOrganization {
 
 export interface SiteMappingOrganizations {
   organizations: SiteMappingOrganization[];
+  canCreateOrganization: boolean;
+}
+
+export interface SiteMappingOrganizationEnvelope {
+  organization: SiteMappingOrganization;
+}
+
+export interface CreateSiteMappingOrganizationInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  name: string;
 }
 
 export type SiteMappingSiteRecordStatus = typeof SiteMappingSiteRecordStatus[keyof typeof SiteMappingSiteRecordStatus];

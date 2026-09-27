@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import crypto from "node:crypto";
 import {
   AuthorizeSiteMappingScanBody,
+  CreateSiteMappingOrganizationBody,
   CreateSiteMappingSiteBody,
   SetSiteMappingMemberBody,
 } from "@workspace/api-zod";
@@ -61,7 +62,11 @@ router.get("/site-mapping/organizations", async (req, res) => {
         (memberships.data ?? []).map((row) => row.organization_id as string),
       ),
     ];
-    if (!ids.length) return res.json({ organizations: [] });
+    if (!ids.length)
+      return res.json({
+        organizations: [],
+        canCreateOrganization: caller.isAdmin,
+      });
     const organizations = await supabase
       .from("organizations")
       .select("id,name,status")
@@ -79,7 +84,53 @@ router.get("/site-mapping/organizations", async (req, res) => {
     );
     return res.json({
       organizations: authorized.filter((org) => org !== null),
+      canCreateOrganization: caller.isAdmin,
     });
+  } catch (err) {
+    return failed(req, res, err);
+  }
+});
+
+router.post("/site-mapping/organizations", async (req, res) => {
+  try {
+    const caller = await resolvedSiteCaller(req);
+    if (!caller?.isAdmin)
+      return res.status(403).json({ error: "Jack admin access required." });
+    const input = CreateSiteMappingOrganizationBody.safeParse(req.body);
+    const name = input.success ? input.data.name.trim() : "";
+    if (!name || name.length > 160)
+      return res.status(400).json({ error: "Invalid organization name." });
+    const organizationId = crypto.randomUUID();
+    const created = await supabase
+      .from("organizations")
+      .insert({
+        id: organizationId,
+        slug: `pilot-${organizationId}`,
+        name,
+      })
+      .select("id,name")
+      .single();
+    if (created.error) throw created.error;
+    const membership = await supabase.from("pilot_memberships").insert({
+      organization_id: organizationId,
+      pilot_id: null,
+      user_id: caller.userId,
+      role: "organization_admin",
+      created_by_user_id: caller.userId,
+    });
+    if (membership.error) {
+      const rollback = await supabase
+        .from("organizations")
+        .delete()
+        .eq("id", organizationId);
+      if (rollback.error)
+        req.log.error(
+          { err: rollback.error, organizationId },
+          "organization creation rollback failed",
+        );
+      throw membership.error;
+    }
+    return res.status(201).json({ organization: created.data });
   } catch (err) {
     return failed(req, res, err);
   }

@@ -28,6 +28,7 @@ import type {
   ChatMessage,
   ChatResponse,
   Competency,
+  CreateSiteMappingOrganizationInput,
   CreateSiteMappingSiteInput,
   CurrentInterviewProfile,
   CurrentUser,
@@ -68,6 +69,7 @@ import type {
   SiteMappingDownloadGrant,
   SiteMappingMember,
   SiteMappingObjectDeleteInput,
+  SiteMappingOrganizationEnvelope,
   SiteMappingOrganizations,
   SiteMappingScanMetadata,
   SiteMappingScanReservation,
@@ -3829,6 +3831,76 @@ export function useListSiteMappingOrganizations<TData = Awaited<ReturnType<typeo
 
 
 
+
+export const getCreateSiteMappingOrganizationUrl = () => {
+
+
+
+
+  return `/api/site-mapping/organizations`
+}
+
+/**
+ * @summary Create a private pilot organization as a trusted Jack admin
+ */
+export const createSiteMappingOrganization = async (createSiteMappingOrganizationInput: CreateSiteMappingOrganizationInput, options?: RequestInit): Promise<SiteMappingOrganizationEnvelope> => {
+
+  return customFetch<SiteMappingOrganizationEnvelope>(getCreateSiteMappingOrganizationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createSiteMappingOrganizationInput)
+  }
+);}
+
+
+
+
+export const getCreateSiteMappingOrganizationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingOrganization>>, TError,{data: BodyType<CreateSiteMappingOrganizationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingOrganization>>, TError,{data: BodyType<CreateSiteMappingOrganizationInput>}, TContext> => {
+
+const mutationKey = ['createSiteMappingOrganization'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSiteMappingOrganization>>, {data: BodyType<CreateSiteMappingOrganizationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSiteMappingOrganization(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSiteMappingOrganizationMutationResult = NonNullable<Awaited<ReturnType<typeof createSiteMappingOrganization>>>
+    export type CreateSiteMappingOrganizationMutationBody = BodyType<CreateSiteMappingOrganizationInput>
+    export type CreateSiteMappingOrganizationMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a private pilot organization as a trusted Jack admin
+ */
+export const useCreateSiteMappingOrganization = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSiteMappingOrganization>>, TError,{data: BodyType<CreateSiteMappingOrganizationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSiteMappingOrganization>>,
+        TError,
+        {data: BodyType<CreateSiteMappingOrganizationInput>},
+        TContext
+      > => {
+      return useMutation(getCreateSiteMappingOrganizationMutationOptions(options));
+    }
 
 export const getListSiteMappingSitesUrl = () => {
 
