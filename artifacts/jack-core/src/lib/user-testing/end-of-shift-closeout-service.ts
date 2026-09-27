@@ -23,6 +23,12 @@ export interface CloseoutRecord {
   crew: string | null;
   trade: string | null;
   answers: CloseoutQuestionErrorMap;
+  originalAnswers?: CloseoutQuestionErrorMap;
+  corrections?: Array<{
+    at: string;
+    reason: string;
+    answers: CloseoutQuestionErrorMap;
+  }>;
   status: "draft" | "submitted";
   submittedAt: string | null;
   createdAt: string;
@@ -87,5 +93,24 @@ export async function saveCloseout(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return parseJson<SaveCloseoutResponse>(response);
+}
+
+export async function correctCloseout(payload: {
+  workDate: string;
+  shift: CloseoutShift;
+  answers: CloseoutQuestionErrorMap;
+  reason: string;
+  expectedUpdatedAt: string;
+}): Promise<SaveCloseoutResponse> {
+  const response = await authenticatedFetch(
+    "/api/testing/closeouts/corrections",
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
   return parseJson<SaveCloseoutResponse>(response);
 }

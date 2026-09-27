@@ -29,6 +29,13 @@ const closeoutPayload = {
 
 let state: "not_started" | "draft" | "submitted" = "not_started";
 let storedAnswers: Record<string, string> = {};
+let originalAnswers: Record<string, string> = {};
+let corrections: Array<{
+  at: string;
+  reason: string;
+  answers: Record<string, string>;
+}> = [];
+let updatedAt = "2026-07-25T10:05:00.000Z";
 
 const draftResponse = () => ({
   ...closeoutPayload,
@@ -48,21 +55,46 @@ const draftResponse = () => ({
           crew: "Crew A",
           trade: "Electrical",
           answers: storedAnswers,
+          originalAnswers,
+          corrections,
           status: state === "submitted" ? "submitted" : "draft",
           submittedAt:
             state === "submitted" ? "2026-07-25T12:00:00.000Z" : null,
           createdAt: "2026-07-25T10:00:00.000Z",
-          updatedAt: "2026-07-25T10:05:00.000Z",
+          updatedAt,
         },
 });
 
 beforeEach(() => {
   state = "not_started";
   storedAnswers = {};
+  originalAnswers = {};
+  corrections = [];
+  updatedAt = "2026-07-25T10:05:00.000Z";
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/corrections") && init?.method === "POST") {
+        const body = JSON.parse(init.body as string) as {
+          answers: Record<string, string>;
+          reason: string;
+        };
+        storedAnswers = body.answers;
+        corrections.push({
+          at: "2026-07-25T12:30:00.000Z",
+          reason: body.reason,
+          answers: body.answers,
+        });
+        updatedAt = "2026-07-25T12:30:00.000Z";
+        return new Response(
+          JSON.stringify({ state, closeout: draftResponse().closeout }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
       if (url.startsWith("/api/testing/closeouts") && init?.method === "POST") {
         const body = JSON.parse(init.body as string) as {
           status: "draft" | "submitted";
@@ -70,6 +102,7 @@ beforeEach(() => {
         };
         state = body.status === "submitted" ? "submitted" : "draft";
         storedAnswers = body.answers;
+        if (state === "submitted") originalAnswers = body.answers;
         return new Response(
           JSON.stringify({
             state,
@@ -163,5 +196,34 @@ describe("EndOfShiftCloseout", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
     expect(screen.getByDisplayValue("Baseline notes")).toBeTruthy();
+  });
+
+  it("lets a participant correct a submitted closeout and shows its history", async () => {
+    state = "submitted";
+    storedAnswers = {
+      tasksCompleted: "Original task",
+      safetyConcerns: "None",
+      handoverReadiness: "Ready",
+      teamCoordination: "Aligned",
+      materialAndTools: "No missing tools",
+      nextShiftPriorities: "Morning checks",
+    };
+    originalAnswers = { ...storedAnswers };
+    render(<EndOfShiftCloseout participantId="participant-1" />);
+    expect(await screen.findByText("Closeout status: Submitted")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Correct submitted closeout" }),
+    );
+    fireEvent.change(screen.getByLabelText("Any missing materials or tools?"), {
+      target: { value: "One missing wrench" },
+    });
+    fireEvent.change(screen.getByLabelText("Reason for correction"), {
+      target: { value: "Found after handover" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+    expect(await screen.findByText(/Correction saved/)).toBeTruthy();
+    expect(screen.getByDisplayValue("One missing wrench")).toBeTruthy();
+    expect(screen.getByText(/Submission history \(2\)/)).toBeTruthy();
+    expect(corrections).toHaveLength(1);
   });
 });

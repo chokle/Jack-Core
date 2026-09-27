@@ -40,11 +40,17 @@ interface CloseoutRow {
   shift: CloseoutShift;
   crew: string | null;
   trade: string | null;
-  answers: Record<string, string>;
+  answers: Record<string, unknown>;
   status: CloseoutStatus;
   submitted_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface CloseoutCorrection {
+  at: string;
+  reason: string;
+  answers: Record<string, string>;
 }
 
 interface CloseoutPayload {
@@ -73,6 +79,8 @@ interface CloseoutResponse {
     crew: string | null;
     trade: string | null;
     answers: Record<string, string>;
+    originalAnswers: Record<string, string>;
+    corrections: CloseoutCorrection[];
     status: CloseoutStatus;
     submittedAt: string | null;
     createdAt: string;
@@ -172,6 +180,40 @@ function isDraftComplete(answers: Record<string, string>): boolean {
   return CLOSEOUT_QUESTIONS.every((question) => isText(answers[question]));
 }
 
+function originalAnswers(
+  stored: Record<string, unknown>,
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  for (const question of CLOSEOUT_QUESTIONS) {
+    if (typeof stored[question] === "string")
+      answers[question] = stored[question];
+  }
+  return answers;
+}
+
+function closeoutCorrections(
+  stored: Record<string, unknown>,
+): CloseoutCorrection[] {
+  const raw = stored["__corrections"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is CloseoutCorrection =>
+      !!item &&
+      typeof item === "object" &&
+      typeof item.at === "string" &&
+      typeof item.reason === "string" &&
+      !!item.answers &&
+      typeof item.answers === "object" &&
+      isDraftComplete(item.answers as Record<string, string>),
+  );
+}
+
+function effectiveAnswers(
+  stored: Record<string, unknown>,
+): Record<string, string> {
+  return closeoutCorrections(stored).at(-1)?.answers ?? originalAnswers(stored);
+}
+
 function serializeCloseout(row: CloseoutRow) {
   return {
     id: row.id,
@@ -182,7 +224,9 @@ function serializeCloseout(row: CloseoutRow) {
     shift: row.shift,
     crew: row.crew,
     trade: row.trade,
-    answers: row.answers,
+    answers: effectiveAnswers(row.answers),
+    originalAnswers: originalAnswers(row.answers),
+    corrections: closeoutCorrections(row.answers),
     status: row.status,
     submittedAt: row.submitted_at,
     createdAt: row.created_at,
@@ -278,7 +322,7 @@ async function saveCloseout(scope: ParticipantScope, payload: CloseoutPayload) {
   if (existing?.status === "submitted") {
     if (
       payload.status === "submitted" &&
-      answersMatch(existing.answers, payload.answers)
+      answersMatch(effectiveAnswers(existing.answers), payload.answers)
     ) {
       return {
         status: 200,
@@ -361,7 +405,7 @@ async function saveCloseout(scope: ParticipantScope, payload: CloseoutPayload) {
       if (
         duplicate.status === "submitted" &&
         duplicate.status === payload.status &&
-        answersMatch(duplicate.answers, payload.answers)
+        answersMatch(effectiveAnswers(duplicate.answers), payload.answers)
       ) {
         return { status: 200, row: duplicate, state: "submitted" };
       }
@@ -435,6 +479,83 @@ router.post("/testing/closeouts", async (req, res) => {
   } catch (error) {
     req.log.error({ err: error }, "could not save closeout");
     return res.status(503).json({ error: "Failed to save closeout." });
+  }
+});
+
+router.post("/testing/closeouts/corrections", async (req, res) => {
+  try {
+    const scope = await requireParticipantScope(req, res);
+    if (!scope) return;
+    const body = req.body as Record<string, unknown> | null;
+    const workDate = parseWorkDateOrNull(body?.["workDate"]);
+    const shift = asShift(body?.["shift"]);
+    const answers = payloadAnswers(body?.["answers"]);
+    const reason = isText(body?.["reason"]) ? body["reason"].trim() : "";
+    const expectedUpdatedAt = isText(body?.["expectedUpdatedAt"])
+      ? body["expectedUpdatedAt"].trim()
+      : "";
+    if (
+      !workDate ||
+      !shift ||
+      !answers ||
+      !isDraftComplete(answers) ||
+      !reason ||
+      reason.length > 500 ||
+      !expectedUpdatedAt ||
+      !Number.isFinite(Date.parse(expectedUpdatedAt))
+    )
+      return res.status(400).json({ error: "Invalid closeout correction." });
+
+    const existing = await loadCloseout(scope, workDate, shift);
+    if (!existing)
+      return res.status(404).json({ error: "Closeout not found." });
+    if (existing.status !== "submitted")
+      return res
+        .status(409)
+        .json({ error: "Submit this closeout before correcting it." });
+    if (answersMatch(effectiveAnswers(existing.answers), answers))
+      return res.json({
+        state: "submitted",
+        closeout: serializeCloseout(existing),
+      });
+    if (existing.updated_at !== expectedUpdatedAt)
+      return res
+        .status(409)
+        .json({ error: "Closeout changed; reload and try again." });
+
+    const now = new Date(
+      Math.max(Date.now(), Date.parse(existing.updated_at) + 1),
+    ).toISOString();
+    const correction: CloseoutCorrection = { at: now, reason, answers };
+    const updated = await activityDb
+      .from("end_of_shift_closeouts")
+      .update({
+        answers: {
+          ...existing.answers,
+          __corrections: [...closeoutCorrections(existing.answers), correction],
+        },
+        updated_at: now,
+      })
+      .eq("id", existing.id)
+      .eq("actor_user_id", scope.actorUserId)
+      .eq("organization_id", scope.organizationId)
+      .eq("pilot_id", scope.pilotId)
+      .eq("status", "submitted")
+      .eq("updated_at", expectedUpdatedAt)
+      .select("*")
+      .maybeSingle();
+    if (updated.error) throw updated.error;
+    if (!updated.data)
+      return res
+        .status(409)
+        .json({ error: "Closeout changed; reload and try again." });
+    return res.json({
+      state: "submitted",
+      closeout: serializeCloseout(updated.data as unknown as CloseoutRow),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "could not correct closeout");
+    return res.status(503).json({ error: "Failed to correct closeout." });
   }
 });
 

@@ -185,6 +185,95 @@ describe("end-of-shift closeout", () => {
     expect(overwrite.status).toBe(409);
   });
 
+  it("keeps the original submission and supports repeated dated corrections", async () => {
+    seedMemberships();
+    const first = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validSubmit());
+    expect(first.status).toBe(201);
+    const original = first.body.closeout.answers;
+    const correctedAnswers = {
+      ...original,
+      materialAndTools: "One missing wrench",
+    };
+    const firstCorrection = await request(app())
+      .post("/api/testing/closeouts/corrections")
+      .send({
+        workDate: WORK_DATE,
+        shift: "day",
+        answers: correctedAnswers,
+        reason: "Found the missing tool after submitting",
+        expectedUpdatedAt: first.body.closeout.updatedAt,
+      });
+    expect(firstCorrection.status).toBe(200);
+    expect(firstCorrection.body.closeout.answers).toEqual(correctedAnswers);
+    expect(firstCorrection.body.closeout.originalAnswers).toEqual(original);
+    expect(firstCorrection.body.closeout.corrections).toHaveLength(1);
+    expect(firstCorrection.body.closeout.submittedAt).toBe(
+      first.body.closeout.submittedAt,
+    );
+
+    const secondAnswers = {
+      ...correctedAnswers,
+      nextShiftPriorities: "Check wrench and hydraulics",
+    };
+    const secondCorrection = await request(app())
+      .post("/api/testing/closeouts/corrections")
+      .send({
+        workDate: WORK_DATE,
+        shift: "day",
+        answers: secondAnswers,
+        reason: "Updated handover after crew check",
+        expectedUpdatedAt: firstCorrection.body.closeout.updatedAt,
+      });
+    expect(secondCorrection.status).toBe(200);
+    expect(secondCorrection.body.closeout.corrections).toHaveLength(2);
+    expect(secondCorrection.body.closeout.originalAnswers).toEqual(original);
+    expect(fake.tables.end_of_shift_closeouts).toHaveLength(1);
+
+    const loaded = await request(app()).get(
+      `/api/testing/closeouts?workDate=${WORK_DATE}&shift=day`,
+    );
+    expect(loaded.body.closeout.answers).toEqual(secondAnswers);
+    expect(loaded.body.closeout.corrections[0].reason).toBe(
+      "Found the missing tool after submitting",
+    );
+  });
+
+  it("rejects unreasoned or stale corrections without losing the current closeout", async () => {
+    seedMemberships();
+    const first = await request(app())
+      .post("/api/testing/closeouts")
+      .send(validSubmit());
+    const changed = {
+      ...first.body.closeout.answers,
+      safetyConcerns: "New concern",
+    };
+    const missingReason = await request(app())
+      .post("/api/testing/closeouts/corrections")
+      .send({
+        workDate: WORK_DATE,
+        shift: "day",
+        answers: changed,
+        reason: "",
+        expectedUpdatedAt: first.body.closeout.updatedAt,
+      });
+    expect(missingReason.status).toBe(400);
+    const stale = await request(app())
+      .post("/api/testing/closeouts/corrections")
+      .send({
+        workDate: WORK_DATE,
+        shift: "day",
+        answers: changed,
+        reason: "Found later",
+        expectedUpdatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    expect(stale.status).toBe(409);
+    expect(fake.tables.end_of_shift_closeouts[0]?.answers).toEqual(
+      first.body.closeout.answers,
+    );
+  });
+
   it("supports strict payload validation for date and answer schema", async () => {
     seedMemberships();
     const invalidDate = await request(app())
@@ -228,6 +317,10 @@ describe("end-of-shift closeout", () => {
     });
     const denied = await request(app()).get("/api/testing/closeouts");
     expect(denied.status).toBe(403);
+    const deniedCorrection = await request(app())
+      .post("/api/testing/closeouts/corrections")
+      .send({ workDate: WORK_DATE, shift: "day" });
+    expect(deniedCorrection.status).toBe(403);
   });
 
   it.each(["missing", "inactive", "expired"])(
@@ -251,6 +344,9 @@ describe("end-of-shift closeout", () => {
         await request(server)
           .post("/api/testing/closeouts")
           .send(validSubmit()),
+        await request(server)
+          .post("/api/testing/closeouts/corrections")
+          .send({ workDate: WORK_DATE, shift: "day" }),
       ];
       for (const response of responses) {
         expect(response.status).toBe(403);
