@@ -115,83 +115,89 @@ export function InsightsView({ data, onJumpToTimestamp, onOpenGraph }: Props) {
           </p>
         ) : (
           <div className="space-y-3">
-            {visible.map(({ node, sources, mentorSources }) => (
-              <article
-                key={node.id}
-                className="rounded-xl border border-border bg-card/70 p-4 md:p-5"
-              >
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="capitalize text-primary">
-                    {node.kind.replaceAll("_", " ")}
-                  </span>
-                  {node.meta.trade && <span>· {node.meta.trade}</span>}
-                  {sources.length > 0 && (
-                    <span>
-                      · {sources.length} linked video{" "}
-                      {sources.length === 1 ? "source" : "sources"}
-                    </span>
-                  )}
-                  {mentorSources > 0 && (
-                    <span>
-                      · {mentorSources} interview{" "}
-                      {mentorSources === 1 ? "contribution" : "contributions"}
-                    </span>
-                  )}
-                  {node.meta.verificationStatus === "verified" && (
-                    <span>· Human reviewed</span>
-                  )}
-                  {node.meta.verificationStatus !== "verified" && (
-                    <span>· Not human reviewed</span>
-                  )}
-                </div>
-                <h2 className="mt-2 text-lg font-semibold">{node.label}</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {sources.length + mentorSources > 1
-                    ? "Why it matters: more than one source contributes to this finding. Compare the evidence before using it."
-                    : "Why it matters: this is traceable to one source. Check the evidence before applying it in the field."}
-                </p>
-                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Evidence
-                </p>
-                {mentorSources > 0 && (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Interview contribution recorded in Living Memory. Open
-                    provenance to review its context.
-                  </p>
-                )}
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {sources.map((source) => {
-                    const video = videos.get(source.videoId);
-                    return (
-                      <li key={source.videoId}>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onJumpToTimestamp(
-                              source.videoId,
-                              source.timestamps[0] ?? 0,
-                            )
-                          }
-                          className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-primary"
-                        >
-                          {video?.label || "Source video"}
-                          {source.timestamps.length
-                            ? ` · ${Math.floor(source.timestamps[0] / 60)}:${String(Math.floor(source.timestamps[0] % 60)).padStart(2, "0")}`
-                            : ""}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <button
-                  type="button"
-                  onClick={() => onOpenGraph(node.id)}
-                  className="mt-3 text-sm font-semibold text-primary underline"
+            {visible.map(({ node, sources, mentorSources }) => {
+              const description = node.meta.description?.trim();
+              const distinctDescription =
+                description &&
+                description.toLocaleLowerCase() !==
+                  node.label.trim().toLocaleLowerCase();
+              return (
+                <article
+                  key={node.id}
+                  className="rounded-xl border border-border bg-card/70 p-4 md:p-5"
                 >
-                  Open provenance in Living Memory
-                </button>
-              </article>
-            ))}
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="capitalize text-primary">
+                      {node.kind.replaceAll("_", " ")}
+                    </span>
+                    {node.meta.trade && <span>· {node.meta.trade}</span>}
+                    {sources.length > 0 && (
+                      <span>
+                        · {sources.length} linked video{" "}
+                        {sources.length === 1 ? "source" : "sources"}
+                      </span>
+                    )}
+                    {mentorSources > 0 && (
+                      <span>
+                        · {mentorSources} interview{" "}
+                        {mentorSources === 1 ? "contribution" : "contributions"}
+                      </span>
+                    )}
+                    {node.meta.verificationStatus === "verified" && (
+                      <span>· Human reviewed</span>
+                    )}
+                    {node.meta.verificationStatus !== "verified" && (
+                      <span>· Not human reviewed</span>
+                    )}
+                  </div>
+                  <h2 className="mt-2 text-lg font-semibold">{node.label}</h2>
+                  {distinctDescription && (
+                    <div className="mt-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        What Jack captured
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {description}
+                      </p>
+                    </div>
+                  )}
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Evidence
+                  </p>
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {sources.map((source) => {
+                      const video = videos.get(source.videoId);
+                      return (
+                        <li key={source.videoId}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onJumpToTimestamp(
+                                source.videoId,
+                                source.timestamps[0] ?? 0,
+                              )
+                            }
+                            className="rounded-lg border border-border px-3 py-2 text-left text-sm hover:border-primary"
+                          >
+                            {video?.label || "Source video"}
+                            {source.timestamps.length
+                              ? ` · ${Math.floor(source.timestamps[0] / 60)}:${String(Math.floor(source.timestamps[0] % 60)).padStart(2, "0")}`
+                              : ""}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => onOpenGraph(node.id)}
+                    className="mt-3 text-sm font-semibold text-primary underline"
+                  >
+                    Open provenance in Living Memory
+                  </button>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1472,7 +1472,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             {(
               [
                 ["graph", "Living Memory"],
+                ["orientation", "Start here"],
                 ["library", "Library"],
+                ...(isSignedIn ? [["radar", "Site radar"]] : []),
+                ["dashboard", "Dashboard"],
+                ["competencies", "Competencies"],
+                ["insights", "Insights"],
                 ["interview", "Interview"],
                 ["review", "Review"],
                 ...(me?.canViewPilotReports === true

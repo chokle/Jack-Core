@@ -1,9 +1,4 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-} from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
   CORE_ID,
   isKnowledgeKind,
@@ -175,7 +170,12 @@ const PULSE_STATE_RGB: Record<string, RGB> = {
   red: [248, 113, 113], // error
 };
 
-function hexPath(c: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+function hexPath(
+  c: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+) {
   c.beginPath();
   for (let i = 0; i < 6; i++) {
     const a = (Math.PI / 3) * i - Math.PI / 2;
@@ -226,7 +226,9 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const searchRef = useRef("");
     const activeMatchRef = useRef<string | null>(null);
     const hoverRef = useRef<string | null>(null);
-    const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>([]);
+    const starsRef = useRef<{ x: number; y: number; r: number; a: number }[]>(
+      [],
+    );
     // Per-color pre-rasterized radial-glow sprites, blitted with drawImage in the
     // node-glow pass instead of building a gradient + filling a large arc per node
     // per frame — the dominant cost that stalls a dense graph at full zoom. Scoped
@@ -253,7 +255,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
     const { snapshot, isOffline } = useSystemHealth();
     const pulseColor: RGB = isOffline
       ? PULSE_STATE_RGB.green
-      : PULSE_STATE_RGB[snapshot.pulseColor] ?? PULSE_STATE_RGB.green;
+      : (PULSE_STATE_RGB[snapshot.pulseColor] ?? PULSE_STATE_RGB.green);
     const pulseColorRef = useRef<RGB>(pulseColor);
     pulseColorRef.current = pulseColor;
     const pulseCtrlRef = useRef<MemoryGraphPulseController | null>(null);
@@ -357,7 +359,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
         if (rect.width > 1 && rect.height > 1) {
-          sizeRef.current = { ...sizeRef.current, w: rect.width, h: rect.height };
+          sizeRef.current = {
+            ...sizeRef.current,
+            w: rect.width,
+            h: rect.height,
+          };
         }
       }
 
@@ -399,7 +405,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       const ringR = Math.min(w, h) * 0.32;
       const anchorByTopic = new Map<string, { x: number; y: number }>();
       topics.forEach((t, i) => {
-        const ang = (i / Math.max(1, topics.length)) * Math.PI * 2 - Math.PI / 2;
+        const ang =
+          (i / Math.max(1, topics.length)) * Math.PI * 2 - Math.PI / 2;
         anchorByTopic.set(t.id, {
           x: cx + Math.cos(ang) * ringR,
           y: cy + Math.sin(ang) * ringR,
@@ -417,7 +424,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           existing.status = n.status;
           existing.topicId = n.topicId;
           existing.kind = n.kind;
-          existing.populated = n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
+          existing.populated =
+            n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
           // Ease toward the new size in step(); corroboration growth animates.
           existing.targetRadius = target;
           if (n.kind === "topic") {
@@ -432,7 +440,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const node = makeNode(n, anchorByTopic, cx, cy, map, now);
         node.radius = target;
         node.targetRadius = target;
-        node.populated = n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
+        node.populated =
+          n.kind !== "topic" || (topicPopulated.get(n.id) ?? true);
         map.set(n.id, node);
       }
       for (const id of [...map.keys()]) {
@@ -460,7 +469,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       if (!delta) return;
       const reduced = !ambientMotionEnabled();
       if (reduced || lockedRef.current) return;
-      if (!delta.addedNodeIds.length && !delta.strengthenedEdgeKeys.length) return;
+      if (!delta.addedNodeIds.length && !delta.strengthenedEdgeKeys.length)
+        return;
       const now = performance.now();
       for (const id of delta.addedNodeIds) birthGlowRef.current.set(id, now);
       for (const key of delta.strengthenedEdgeKeys)
@@ -580,8 +590,10 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         return { x: e.clientX - rect.left, y: e.clientY - rect.top };
       };
 
-      const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-        Math.hypot(a.x - b.x, a.y - b.y);
+      const dist2 = (
+        a: { x: number; y: number },
+        b: { x: number; y: number },
+      ) => Math.hypot(a.x - b.x, a.y - b.y);
 
       const onPointerDown = (e: PointerEvent) => {
         if (locked) return;
@@ -602,7 +614,10 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const pts = [...activePointers.values()];
           pinchStartDist = dist2(pts[0]!, pts[1]!);
           pinchStartScale = camRef.current.scale;
-          pinchMid = { x: (pts[0]!.x + pts[1]!.x) / 2, y: (pts[0]!.y + pts[1]!.y) / 2 };
+          pinchMid = {
+            x: (pts[0]!.x + pts[1]!.x) / 2,
+            y: (pts[0]!.y + pts[1]!.y) / 2,
+          };
           return;
         }
         if (activePointers.size > 2) return;
@@ -630,14 +645,18 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
       };
       const onPointerMove = (e: PointerEvent) => {
         const pos = localXY(e);
-        if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, pos);
+        if (activePointers.has(e.pointerId))
+          activePointers.set(e.pointerId, pos);
 
         if (activePointers.size === 2 && !locked) {
           const pts = [...activePointers.values()];
           const d = dist2(pts[0]!, pts[1]!);
           if (pinchStartDist > 1) {
             const factor = d / pinchStartDist;
-            const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchStartScale * factor));
+            const next = Math.min(
+              MAX_SCALE,
+              Math.max(MIN_SCALE, pinchStartScale * factor),
+            );
             const cam = camRef.current;
             const wx = (pinchMid.x - cam.tx) / cam.scale;
             const wy = (pinchMid.y - cam.ty) / cam.scale;
@@ -814,7 +833,11 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             node.vy = 0;
             continue;
           }
-          if (node.kind === "topic" && node.anchorX != null && node.anchorY != null) {
+          if (
+            node.kind === "topic" &&
+            node.anchorX != null &&
+            node.anchorY != null
+          ) {
             node.vx += (node.anchorX - node.x) * 0.02;
             node.vy += (node.anchorY - node.y) * 0.02;
           } else if (node.topicId) {
@@ -846,7 +869,8 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           // Ease the rendered radius toward its knowledge-weighted target so
           // corroboration growth (and shrink-back) animates smoothly.
           if (node.radius !== node.targetRadius) {
-            node.radius += (node.targetRadius - node.radius) * Math.min(1, 0.08 * dt);
+            node.radius +=
+              (node.targetRadius - node.radius) * Math.min(1, 0.08 * dt);
             if (Math.abs(node.targetRadius - node.radius) < 0.02) {
               node.radius = node.targetRadius;
             }
@@ -865,10 +889,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const adj = adjacencyRef.current;
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const bg = ctx.createLinearGradient(0, 0, 0, h);
-        bg.addColorStop(0, "rgb(8, 12, 24)");
-        bg.addColorStop(1, "rgb(6, 9, 18)");
-        ctx.fillStyle = bg;
+        ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, w, h);
 
         // Faint static starfield for depth (decorative, not data).
@@ -894,8 +915,7 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
         const dimmed = (id: string, topicId?: string): boolean => {
           if (q) {
             const node = map.get(id);
-            const match =
-              node && node.label.toLowerCase().includes(q);
+            const match = node && node.label.toLowerCase().includes(q);
             return !match;
           }
           if (sel) return id !== sel && !(related?.has(id) ?? false);
@@ -908,7 +928,14 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const hub = map.get(t.id);
           if (!hub) continue;
           const haloR = 120;
-          const g = ctx.createRadialGradient(hub.x, hub.y, 0, hub.x, hub.y, haloR);
+          const g = ctx.createRadialGradient(
+            hub.x,
+            hub.y,
+            0,
+            hub.x,
+            hub.y,
+            haloR,
+          );
           const fade = dimmed(t.id) ? 0.04 : 0.12;
           g.addColorStop(0, rgba(t.color, fade));
           g.addColorStop(1, rgba(t.color, 0));
@@ -927,14 +954,17 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
           const b = map.get(e.b);
           if (!a || !b) continue;
           if (offscreen(a) && offscreen(b)) continue;
-          const isSel =
-            sel && (e.a === sel || e.b === sel);
+          const isSel = sel && (e.a === sel || e.b === sel);
           const faded = dimmed(e.a, a.topicId) && dimmed(e.b, b.topicId);
           const col = b.color;
           // Provenance (video -> knowledge) edges get a touch more presence so
           // the atomic-knowledge web is legible against the scaffold.
           let alpha =
-            e.kind === "competency" ? 0.08 : e.kind === "knowledge" ? 0.16 : 0.14;
+            e.kind === "competency"
+              ? 0.08
+              : e.kind === "knowledge"
+                ? 0.16
+                : 0.14;
           if (isSel) alpha = 0.55;
           else if (faded) alpha = 0.03;
           // Fade freshly-added connections in, and grow the line toward the target.
@@ -950,7 +980,10 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             if (sp >= 1) strengthenMap.delete(key);
             else boost = (1 - sp) * (0.5 + 0.5 * Math.sin(time * 0.02));
           }
-          ctx.strokeStyle = rgba(col, Math.min(0.85, (alpha + boost * 0.5) * grow));
+          ctx.strokeStyle = rgba(
+            col,
+            Math.min(0.85, (alpha + boost * 0.5) * grow),
+          );
           ctx.lineWidth = ((isSel ? 1.4 : 0.7) + boost * 1.8) / cam.scale;
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
@@ -1047,7 +1080,14 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             ctx.stroke();
             // Soft glowing head.
             const headR = isPrimary ? 3.4 : 2.1;
-            const glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, headR * 2.4);
+            const glow = ctx.createRadialGradient(
+              hx,
+              hy,
+              0,
+              hx,
+              hy,
+              headR * 2.4,
+            );
             glow.addColorStop(0, rgba(pcol, isPrimary ? 0.6 : 0.42));
             glow.addColorStop(1, rgba(pcol, 0));
             ctx.fillStyle = glow;
@@ -1087,7 +1127,9 @@ export const MemoryGraphCanvas = forwardRef<MemoryGraphHandle, Props>(
             const m = t.metrics;
             const parts: string[] = [];
             if (m.knowledge)
-              parts.push(`${m.knowledge} concept${m.knowledge === 1 ? "" : "s"}`);
+              parts.push(
+                `${m.knowledge} concept${m.knowledge === 1 ? "" : "s"}`,
+              );
             if (m.videos)
               parts.push(`${m.videos} video${m.videos === 1 ? "" : "s"}`);
             if (m.conversations)

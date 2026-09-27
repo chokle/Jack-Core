@@ -238,6 +238,7 @@ export function JackShell({
           <NavItem
             icon={<Compass className="h-4 w-4" />}
             label="Start here"
+            action="orientation"
             active={active === "orientation"}
             onClick={() => go("orientation")}
           />
@@ -265,6 +266,7 @@ export function JackShell({
             <NavItem
               icon={<Radio className="h-4 w-4" />}
               label="Site radar"
+              action="radar"
               active={active === "radar"}
               onClick={() => go("radar")}
             />
@@ -304,18 +306,21 @@ export function JackShell({
           <NavItem
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
+            action="dashboard"
             active={active === "dashboard"}
             onClick={() => go("dashboard")}
           />
           <NavItem
             icon={<GraduationCap className="h-4 w-4" />}
             label="Competencies"
+            action="competencies"
             active={active === "competencies"}
             onClick={() => go("competencies")}
           />
           <NavItem
             icon={<Lightbulb className="h-4 w-4" />}
             label="Insights"
+            action="insights"
             active={active === "insights"}
             onClick={() => go("insights")}
           />

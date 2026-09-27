@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { BufferAttribute, BufferGeometry } from "three";
@@ -96,6 +97,23 @@ export function SiteScanViewer({
         radius: number;
       }
   >({ kind: "loading" });
+  const [expanded, setExpanded] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [expanded]);
 
   useEffect(() => {
     let active = true;
@@ -134,28 +152,60 @@ export function SiteScanViewer({
 
   if (view.kind === "loading") return <p role="status">Loading 3D scan…</p>;
   if (view.kind === "error") return <p role="alert">{view.message}</p>;
-  return (
-    <div className="site-scan-viewer" aria-label={`3D scan ${scan.id}`}>
-      <Canvas
-        key={scan.id}
-        camera={{
-          position: [view.radius, view.radius * 0.6, view.radius * 2.5],
-          near: 0.01,
-          far: Math.max(100, view.radius * 10),
-        }}
-        dpr={[1, 2]}
-      >
-        <color attach="background" args={["#07131b"]} />
-        <points geometry={view.geometry}>
-          <pointsMaterial color="#67e8f9" size={0.035} sizeAttenuation />
-        </points>
-        <OrbitControls makeDefault enableDamping />
-      </Canvas>
+  const viewer = (
+    <div
+      className={`site-scan-viewer${expanded ? " site-scan-viewer--expanded" : ""}`}
+      aria-label={
+        expanded ? `Full-screen 3D scan ${scan.id}` : `3D scan ${scan.id}`
+      }
+      role={expanded ? "dialog" : undefined}
+      aria-modal={expanded ? true : undefined}
+    >
+      {expanded && (
+        <button
+          ref={closeButtonRef}
+          type="button"
+          className="site-scan-viewer__close"
+          onClick={() => setExpanded(false)}
+        >
+          Close full-screen 3D view
+        </button>
+      )}
+      <div className="site-scan-viewer__canvas">
+        <Canvas
+          key={scan.id}
+          camera={{
+            position: [view.radius, view.radius * 0.6, view.radius * 2.5],
+            near: 0.01,
+            far: Math.max(100, view.radius * 10),
+          }}
+          dpr={[1, 2]}
+        >
+          <color attach="background" args={["#07131b"]} />
+          <points geometry={view.geometry} dispose={null}>
+            <pointsMaterial color="#67e8f9" size={0.035} sizeAttenuation />
+          </points>
+          <OrbitControls makeDefault enableDamping />
+        </Canvas>
+        {!expanded && (
+          <button
+            type="button"
+            className="site-scan-viewer__open"
+            aria-label="Open 3D scan full screen"
+            onClick={() => setExpanded(true)}
+          >
+            <span>Open full screen</span>
+          </button>
+        )}
+      </div>
       <p>
         {view.displayedPoints.toLocaleString()} of{" "}
-        {scan.point_count.toLocaleString()} measured points shown. Drag to
-        rotate; pinch or scroll to zoom.
+        {scan.point_count.toLocaleString()} measured points shown.{" "}
+        {expanded
+          ? "Drag to rotate; pinch or scroll to zoom."
+          : "Tap the model to open it full screen."}
       </p>
     </div>
   );
+  return expanded ? createPortal(viewer, document.body) : viewer;
 }

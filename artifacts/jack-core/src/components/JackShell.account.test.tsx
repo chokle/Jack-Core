@@ -9,6 +9,7 @@ import {
 } from "../lib/jack-local-command";
 
 vi.mock("./SystemHealthWidget", () => ({ SystemHealthWidget: () => null }));
+vi.mock("./SiteHudLive", () => ({ SiteHudLive: () => null }));
 
 const model = {
   counts: { nodes: 0, connections: 0, knowledge: 0, topics: 0 },
@@ -16,6 +17,32 @@ const model = {
 
 describe("JackShell account management", () => {
   afterEach(cleanup);
+
+  it("opens Site Radar by voice only when the signed-in HUD control is present", () => {
+    const onNavigate = vi.fn();
+    const props = {
+      active: "graph" as const,
+      onNavigate,
+      onOpenChat: vi.fn(),
+      model,
+      readyCount: 0,
+      lastUpdatedLabel: "now",
+    };
+    const view = render(
+      <JackShell {...props}>
+        <div />
+      </JackShell>,
+    );
+    const command = resolveJackLocalCommand("go to site radar");
+    expect(resolveJackLocalAction(command!)).toBeNull();
+    view.rerender(
+      <JackShell {...props} siteHudUserId="user-1">
+        <div />
+      </JackShell>,
+    );
+    fireEvent.click(resolveJackLocalAction(command!)!);
+    expect(onNavigate).toHaveBeenCalledWith("radar");
+  });
 
   it.each([
     "graph",
