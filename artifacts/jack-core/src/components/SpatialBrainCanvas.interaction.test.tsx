@@ -32,6 +32,7 @@ const canvasRect = { left: 0, top: 0, width: 412, height: 640 } as DOMRect;
 let frames: Map<number, FrameRequestCallback>;
 let nextFrameId: number;
 let frameTime: number;
+let paintedBackgrounds: Array<string | CanvasGradient | CanvasPattern>;
 
 function modelWithChild(label?: string): GraphModel {
   return buildGraphModelFromServer({
@@ -90,6 +91,7 @@ function pointer(
 
 beforeEach(() => {
   frames = new Map();
+  paintedBackgrounds = [];
   nextFrameId = 0;
   frameTime = performance.now();
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -107,11 +109,12 @@ beforeEach(() => {
   );
   const noop = () => {};
   const gradient = () => ({ addColorStop: noop });
-  const context = {
+  let context: CanvasRenderingContext2D;
+  context = {
     setTransform: noop,
     createLinearGradient: gradient,
     createRadialGradient: gradient,
-    fillRect: noop,
+    fillRect: () => paintedBackgrounds.push(context.fillStyle),
     save: noop,
     restore: noop,
     beginPath: noop,
@@ -138,6 +141,20 @@ afterEach(() => {
 });
 
 describe("SpatialBrainCanvas rendered pointer lifecycle", () => {
+  it("paints the live Living Memory stage pitch black before its stars", () => {
+    render(
+      <SpatialBrainCanvas
+        model={modelWithChild()}
+        selectedId={null}
+        onSelect={() => {}}
+        search=""
+        locked={false}
+        onZoomChange={() => {}}
+      />,
+    );
+    settleGraph();
+    expect(paintedBackgrounds[0]).toBe("#000");
+  });
   it.each(["touch", "mouse"])(
     "selects hydrated children and refreshed node data with %s without remounting",
     (pointerType) => {
