@@ -443,13 +443,64 @@
   min-width: 0;
   margin-top: 12px;
 }
-.site-hud-entry .site-scan-viewer > div {
+.site-scan-viewer__canvas,
+.site-hud-entry .site-scan-viewer > .site-scan-viewer__canvas {
   display: block;
+  position: relative;
   width: 100%;
   height: clamp(240px, 45vh, 480px);
   border: 1px solid var(--hud-line, #24525b);
   border-radius: 8px;
   overflow: hidden;
+}
+.site-scan-viewer__open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.site-scan-viewer__open span {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #000c;
+  color: #fff;
+}
+.site-scan-viewer__open:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: -3px;
+}
+.site-scan-viewer--expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: max(12px, env(safe-area-inset-top)) 12px
+    max(12px, env(safe-area-inset-bottom));
+  background: #000;
+  color: #fff;
+}
+.site-scan-viewer--expanded .site-scan-viewer__canvas {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.site-scan-viewer__close {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #67e8f9;
+  border-radius: 6px;
+  background: #07131b;
+  color: #fff;
+  cursor: pointer;
 }
 .site-scan-viewer p {
   font-size: 12px;

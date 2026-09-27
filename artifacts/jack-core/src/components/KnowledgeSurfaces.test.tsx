@@ -90,9 +90,64 @@ describe("knowledge surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: /Weld setup/ }));
     expect(onJumpToTimestamp).toHaveBeenCalledWith("video-1", 63);
     fireEvent.click(
-      screen.getByRole("button", { name: "Open provenance in Living Memory" }),
+      screen.getByRole("button", {
+        name: "Review evidence for Clean metal before welding in Living Memory",
+      }),
     );
     expect(onOpenGraph).toHaveBeenCalledWith("concept:weld");
+  });
+
+  it("shows each finding's captured context without a repeated impact claim", () => {
+    const withContext = {
+      ...data,
+      model: {
+        ...data.model,
+        nodes: [
+          ...data.model.nodes.map((node) =>
+            node.id === "concept:weld"
+              ? {
+                  ...node,
+                  meta: {
+                    ...node.meta,
+                    description: "Remove mill scale before fitting the weld.",
+                  },
+                }
+              : node,
+          ),
+          {
+            id: "procedure:fitup",
+            kind: "procedure",
+            label: "Check fit-up before welding",
+            meta: {
+              trade: "Welder",
+              description: "Check the gap and alignment before tacking.",
+              sources: [
+                { videoId: "video-1", timestamps: [91], confidence: 0.8 },
+              ],
+            },
+          },
+        ],
+      },
+    } as unknown as MemoryGraphData;
+    render(
+      <InsightsView
+        data={withContext}
+        onJumpToTimestamp={vi.fn()}
+        onOpenGraph={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("Remove mill scale before fitting the weld."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Check the gap and alignment before tacking."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/Why it matters: more than one source/),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Weld setup · 1:31/ }),
+    ).toBeTruthy();
   });
 
   it("uses persisted graph evidence beyond the first video page", () => {

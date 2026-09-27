@@ -24,6 +24,12 @@ describe("Jack local commands", () => {
     ["navigate to the memory graph", "graph"],
     ["Interview mode", "interview"],
     ["go to Knowledge Review", "review"],
+    ["go to Site radar", "radar"],
+    ["open radar", "radar"],
+    ["open the dashboard", "dashboard"],
+    ["show competencies", "competencies"],
+    ["go to insights", "insights"],
+    ["go to Start here", "orientation"],
   ])("resolves %s to the app-owned %s action", (message, action) => {
     expect(resolveJackLocalCommand(message)).toMatchObject({
       kind: "app",
@@ -182,6 +188,21 @@ describe("Jack local commands", () => {
 
     expect(libraryClick).toHaveBeenCalledTimes(1);
     expect(videoClick).not.toHaveBeenCalled();
+  });
+
+  it("uses only an available app-owned Radar action", () => {
+    const click = vi.fn();
+    const command = resolveJackLocalCommand("go to site radar");
+    expect(command).toMatchObject({ kind: "app", action: "radar" });
+    expect(resolveJackLocalAction(command!)).toBeNull();
+    document.body.innerHTML =
+      '<button data-jack-action="radar" style="display:none">Site radar</button>';
+    expect(resolveJackLocalAction(command!)).toBeNull();
+    document.body.innerHTML =
+      '<button data-jack-action="radar">Site radar</button>';
+    document.querySelector("button")!.addEventListener("click", click);
+    resolveJackLocalAction(command!)?.click();
+    expect(click).toHaveBeenCalledOnce();
   });
 
   it("does not open an unrelated video when a named title is missing", () => {
