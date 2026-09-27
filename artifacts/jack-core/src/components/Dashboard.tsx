@@ -1,4 +1,5 @@
 import type { GraphModel } from "../lib/memory-graph";
+import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingHub } from "./SiteMappingHub";
 
 interface DashboardProps {
@@ -6,6 +7,9 @@ interface DashboardProps {
   readyCount: number;
   lastUpdatedLabel: string;
   knowledgeState?: "loading" | "error" | "ready";
+  siteHudUserId?: string;
+  onOpenCompetencies?: () => void;
+  onOpenInsights?: () => void;
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -26,6 +30,9 @@ export function Dashboard({
   readyCount,
   lastUpdatedLabel,
   knowledgeState = "ready",
+  siteHudUserId,
+  onOpenCompetencies,
+  onOpenInsights,
 }: DashboardProps) {
   const nodes = model.counts.nodes.toLocaleString("en-US");
   const connections = model.counts.connections.toLocaleString("en-US");
@@ -46,8 +53,8 @@ export function Dashboard({
             Dashboard
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            A live readout of Jack&apos;s current memory footprint and indexed
-            trade knowledge.
+            Jack&apos;s primary site workspace: live field awareness, private
+            measured geometry, and the knowledge connected to the work.
           </p>
         </header>
 
