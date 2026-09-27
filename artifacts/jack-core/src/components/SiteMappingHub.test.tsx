@@ -9,6 +9,25 @@ import {
 } from "@testing-library/react";
 import { SiteMappingHub } from "./SiteMappingHub";
 
+const viewerState = vi.hoisted(() => ({ fail: false }));
+
+vi.mock("./SiteScanViewer", () => ({
+  SiteScanViewer: ({
+    siteId,
+    scan,
+  }: {
+    siteId: string;
+    scan: { id: string };
+  }) => {
+    if (viewerState.fail) throw new Error("WebGL unavailable");
+    return (
+      <div data-testid="shared-scan-view">
+        {siteId}/{scan.id}
+      </div>
+    );
+  },
+}));
+
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
@@ -17,11 +36,84 @@ function json(value: unknown, status = 200): Response {
 }
 
 afterEach(() => {
+  viewerState.fail = false;
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("shared site mapping", () => {
+  it("uploads a saved PLY through the existing private site path and selects that scan", async () => {
+    let uploaded = false;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, options?: RequestInit) => {
+        const path = String(input);
+        if (path.endsWith("/sites"))
+          return json({
+            sites: [
+              {
+                id: "site-1",
+                organization_id: "org-1",
+                name: "Test site",
+                status: "active",
+                role: "contributor",
+              },
+            ],
+          });
+        if (path.endsWith("/organizations")) return json({ organizations: [] });
+        if (path.endsWith("/sites/site-1/scans/upload")) {
+          uploaded = true;
+          expect(options?.body).toBeInstanceOf(File);
+          return json(
+            {
+              scanId: "scan-1",
+              pointCount: 1,
+              byteSize: 100,
+              status: "uploaded",
+            },
+            201,
+          );
+        }
+        if (path.endsWith("/sites/site-1/scans"))
+          return json({
+            scans: uploaded
+              ? [
+                  {
+                    id: "scan-1",
+                    point_count: 1,
+                    byte_size: 100,
+                    uploaded_at: "2026-09-26T00:00:00Z",
+                  },
+                ]
+              : [],
+          });
+        throw new Error(`Unexpected request ${path}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SiteMappingHub />);
+    const input = await screen.findByLabelText("Upload a saved PLY");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(["ply"], "scan.ply", { type: "application/octet-stream" }),
+        ],
+      },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Upload selected PLY" }),
+    );
+    expect(await screen.findByTestId("shared-scan-view")).toHaveProperty(
+      "textContent",
+      "site-1/scan-1",
+    );
+    expect(
+      fetchMock.mock.calls.filter(([path]) =>
+        String(path).endsWith("/sites/site-1/scans/upload"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("keeps a phone capture local until an authorized site upload is tapped", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, options?: RequestInit) => {
@@ -343,7 +435,7 @@ describe("shared site mapping", () => {
     expect(screen.getByText(/Access: manager/)).toBeTruthy();
   });
 
-  it("lists an authorized site's uploaded capture", async () => {
+  it("lists an authorized capture without loading it until View 3D is tapped", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -385,5 +477,56 @@ describe("shared site mapping", () => {
         .getByRole("button", { name: /Upload this scan/ })
         .hasAttribute("disabled"),
     ).toBe(true);
+    expect(screen.queryByTestId("shared-scan-view")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View 3D" }));
+    expect((await screen.findByTestId("shared-scan-view")).textContent).toBe(
+      "site-1/scan-1",
+    );
+  });
+
+  it("keeps the site panel usable when the optional 3D viewer fails", async () => {
+    viewerState.fail = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/sites"))
+          return json({
+            sites: [
+              {
+                id: "site-1",
+                organization_id: "org-1",
+                name: "Test site",
+                status: "active",
+                role: "viewer",
+              },
+            ],
+          });
+        if (path.endsWith("/organizations")) return json({ organizations: [] });
+        return json({
+          scans: [
+            {
+              id: "scan-1",
+              point_count: 1,
+              byte_size: 100,
+              uploaded_at: "2026-09-26T00:00:00Z",
+            },
+          ],
+        });
+      }),
+    );
+    render(<SiteMappingHub />);
+    fireEvent.click(await screen.findByRole("button", { name: "View 3D" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not open this 3D preview",
+    );
+    expect(screen.getByText("Shared site scans")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download PLY" })).toBeTruthy();
+    viewerState.fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry 3D preview" }));
+    expect((await screen.findByTestId("shared-scan-view")).textContent).toBe(
+      "site-1/scan-1",
+    );
   });
 });

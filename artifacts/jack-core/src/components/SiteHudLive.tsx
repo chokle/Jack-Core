@@ -130,7 +130,7 @@ export function SiteHudLive({
       <h1>Site radar</h1>
       <p>
         Phone depth can map measured surfaces during a supported AR scan. Shared
-        site captures are listed below. Crew positions and safety landmarks
+        site captures can be viewed below. Crew positions and safety landmarks
         appear only when their production sources are connected.
       </p>
       <SiteRadar
@@ -225,6 +225,7 @@ export function SiteHudLive({
       <SiteMappingHub
         capturedCount={ar.state.kind === "paused" ? ar.state.capturedCount : 0}
         captureBlob={ar.captureBlob}
+        showPreview={ar.state.kind !== "running"}
       />
       <div
         className="site-hud-entry site-hud-entry--location"
