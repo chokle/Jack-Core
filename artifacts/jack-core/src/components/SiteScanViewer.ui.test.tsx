@@ -35,6 +35,24 @@ afterEach(() => {
 });
 
 describe("authorized 3D scan", () => {
+  it("aborts a private download when the viewer closes", async () => {
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, options?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<SiteScanViewer siteId="site-1" scan={scan} />);
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const signal = fetchMock.mock.calls[0]?.[1]?.signal;
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("loads the private PLY and renders its measured point after a page load", async () => {
     vi.stubGlobal(
       "fetch",

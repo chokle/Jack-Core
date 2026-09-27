@@ -72,10 +72,13 @@ export function SiteScanViewer({
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setView({ kind: "loading" });
-    downloadSiteMappingScan(siteId, scan.id)
+    downloadSiteMappingScan(siteId, scan.id, { signal: controller.signal })
       .then(async (blob) => {
-        const parsed = parseSiteScan(await blob.arrayBuffer());
+        const buffer = await blob.arrayBuffer();
+        if (!active || controller.signal.aborted) return;
+        const parsed = parseSiteScan(buffer);
         if (parsed.pointCount !== scan.point_count) {
           parsed.geometry.dispose();
           throw new Error("Scan metadata does not match the file.");
@@ -84,7 +87,7 @@ export function SiteScanViewer({
         else parsed.geometry.dispose();
       })
       .catch(() => {
-        if (active)
+        if (active && !controller.signal.aborted)
           setView({
             kind: "error",
             message: "Could not load this private scan.",
@@ -92,6 +95,7 @@ export function SiteScanViewer({
       });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [siteId, scan.id, scan.point_count]);
 

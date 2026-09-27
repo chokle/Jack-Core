@@ -169,4 +169,32 @@ describe("knowledge surfaces", () => {
     expect(screen.queryByText(/Concept density/)).toBeNull();
     expect(screen.queryByText(/Processed source coverage/)).toBeNull();
   });
+
+  it("keeps site scans available without presenting unavailable knowledge as empty", () => {
+    const view = render(
+      <Dashboard
+        model={data.model}
+        readyCount={0}
+        lastUpdatedLabel="—"
+        knowledgeState="loading"
+      />,
+    );
+    expect(screen.getByText("Site spatial state")).toBeTruthy();
+    expect(screen.getByText("Loading dashboard knowledge…")).toBeTruthy();
+    expect(screen.queryByText("Memory nodes")).toBeNull();
+    view.rerender(
+      <Dashboard
+        model={data.model}
+        readyCount={0}
+        lastUpdatedLabel="—"
+        knowledgeState="error"
+      />,
+    );
+    expect(
+      screen.getByText(/Dashboard knowledge data could not be loaded/),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("No trade knowledge has been indexed yet."),
+    ).toBeNull();
+  });
 });

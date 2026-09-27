@@ -5,6 +5,7 @@ interface DashboardProps {
   model: GraphModel;
   readyCount: number;
   lastUpdatedLabel: string;
+  knowledgeState?: "loading" | "error" | "ready";
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -24,6 +25,7 @@ export function Dashboard({
   model,
   readyCount,
   lastUpdatedLabel,
+  knowledgeState = "ready",
 }: DashboardProps) {
   const nodes = model.counts.nodes.toLocaleString("en-US");
   const connections = model.counts.connections.toLocaleString("en-US");
@@ -58,74 +60,91 @@ export function Dashboard({
           <SiteMappingHub />
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <StatCard label="Memory nodes" value={nodes} />
-          <StatCard label="Connections" value={connections} />
-          <StatCard label="Concepts" value={knowledge} />
-          <StatCard label="Trade topics" value={topics} />
-          <StatCard
-            label="Videos processed"
-            value={readyCount.toLocaleString("en-US")}
-          />
-        </div>
+        {knowledgeState === "loading" ? (
+          <p role="status">Loading dashboard knowledge…</p>
+        ) : knowledgeState === "error" ? (
+          <p role="alert">
+            Dashboard knowledge data could not be loaded. Site scans can still
+            be viewed.
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <StatCard label="Memory nodes" value={nodes} />
+              <StatCard label="Connections" value={connections} />
+              <StatCard label="Concepts" value={knowledge} />
+              <StatCard label="Trade topics" value={topics} />
+              <StatCard
+                label="Videos processed"
+                value={readyCount.toLocaleString("en-US")}
+              />
+            </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-2xl border border-border bg-card/70 p-5">
-            <h2 className="text-lg font-bold">Trade knowledge</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Knowledge and processed video counts by trade. These counts do not
-              measure worker competency or site safety.
-            </p>
-            {model.topics.length ? (
-              <ul className="mt-4 space-y-3">
-                {model.topics.map((topic) => (
-                  <li
-                    key={topic.id}
-                    className="flex items-center justify-between gap-3 border-b border-border pb-2 text-sm"
-                  >
-                    <span className="font-medium">{topic.label}</span>
-                    <span className="font-mono text-muted-foreground">
-                      {topic.metrics.knowledge} concepts ·{" "}
-                      {topic.metrics.videos} videos
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-2xl border border-border bg-card/70 p-5">
+                <h2 className="text-lg font-bold">Trade knowledge</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Knowledge and processed video counts by trade. These counts do
+                  not measure worker competency or site safety.
+                </p>
+                {model.topics.length ? (
+                  <ul className="mt-4 space-y-3">
+                    {model.topics.map((topic) => (
+                      <li
+                        key={topic.id}
+                        className="flex items-center justify-between gap-3 border-b border-border pb-2 text-sm"
+                      >
+                        <span className="font-medium">{topic.label}</span>
+                        <span className="font-mono text-muted-foreground">
+                          {topic.metrics.knowledge} concepts ·{" "}
+                          {topic.metrics.videos} videos
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-4 text-sm text-muted-foreground">
+                    No trade knowledge has been indexed yet.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card/70 p-5">
+                <h2 className="text-lg font-bold">System snapshot</h2>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Graph state</span>
+                    <span className="font-semibold text-foreground">
+                      {model.counts.nodes ? "Available" : "Empty"}
                     </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-4 text-sm text-muted-foreground">
-                No trade knowledge has been indexed yet.
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card/70 p-5">
-            <h2 className="text-lg font-bold">System snapshot</h2>
-            <div className="mt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Graph state</span>
-                <span className="font-semibold text-foreground">
-                  {model.counts.nodes ? "Available" : "Empty"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">
-                  Last memory refresh
-                </span>
-                <span className="font-mono text-xs text-foreground">
-                  {lastUpdatedLabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Indexed topics</span>
-                <span className="font-mono text-foreground">{topics}</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Knowledge links</span>
-                <span className="font-mono text-foreground">{connections}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">
+                      Last memory refresh
+                    </span>
+                    <span className="font-mono text-xs text-foreground">
+                      {lastUpdatedLabel}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">
+                      Indexed topics
+                    </span>
+                    <span className="font-mono text-foreground">{topics}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">
+                      Knowledge links
+                    </span>
+                    <span className="font-mono text-foreground">
+                      {connections}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </section>
   );
