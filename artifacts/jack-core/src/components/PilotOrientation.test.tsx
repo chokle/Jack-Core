@@ -58,9 +58,7 @@ describe("PilotOrientation", () => {
       canOpenCloseout: true,
     };
     const firstVisit = render(<PilotOrientation {...props} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Next: get familiar with the site" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(
       screen.getByRole("button", { name: "Open Site Radar" }),
     ).toBeTruthy();
