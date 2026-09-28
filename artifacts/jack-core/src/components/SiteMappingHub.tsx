@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useSiteMappingSelection } from "./SiteMappingSelection";
 import {
   createSiteMappingOrganization,
   createSiteMappingSite,
@@ -75,8 +76,16 @@ export function SiteMappingHub({
   const [organizations, setOrganizations] = useState<SiteMappingOrganization[]>(
     [],
   );
-  const [siteId, setSiteId] = useState("");
-  const selectedSiteId = useRef("");
+  const { selection, setSelection } = useSiteMappingSelection();
+  const { siteId, scanId: selectedScanId } = selection;
+  const selectedSiteId = useRef(siteId);
+  function setSiteId(nextSiteId: string) {
+    setSelection((previous) =>
+      previous.siteId === nextSiteId
+        ? previous
+        : { siteId: nextSiteId, scanId: "" },
+    );
+  }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scans, setScans] = useState<SiteMappingScan[]>([]);
   const [scansSiteId, setScansSiteId] = useState("");
@@ -90,7 +99,6 @@ export function SiteMappingHub({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [selectedScanId, setSelectedScanId] = useState("");
   const [SiteScanViewer, setSiteScanViewer] = useState(makeSiteScanViewer);
   const [viewerAttempt, setViewerAttempt] = useState(0);
 
@@ -100,7 +108,9 @@ export function SiteMappingHub({
   }
 
   function openPreview(scanId: string) {
-    setSelectedScanId(scanId);
+    setSelection((previous) =>
+      previous.siteId === siteId ? { siteId, scanId } : previous,
+    );
     retryPreview();
   }
 
@@ -113,7 +123,11 @@ export function SiteMappingHub({
         setRecoverableSites(siteList.recoverableSites ?? []);
         setOrganizations(organizationList.organizations);
         setCanCreateOrganization(organizationList.canCreateOrganization);
-        setSiteId((previous) => previous || siteList.sites[0]?.id || "");
+        setSelection((previous) =>
+          siteList.sites.some((item) => item.id === previous.siteId)
+            ? previous
+            : { siteId: siteList.sites[0]?.id || "", scanId: "" },
+        );
         setNewSiteOrg(
           (previous) => previous || organizationList.organizations[0]?.id || "",
         );
@@ -127,7 +141,9 @@ export function SiteMappingHub({
     return () => {
       active = false;
     };
-  }, []);
+  }, [setSelection]);
+
+  const site = sites.find((item) => item.id === siteId);
 
   async function refreshScans(selectedId: string) {
     const result = await listSiteMappingScans(selectedId);
@@ -139,15 +155,10 @@ export function SiteMappingHub({
 
   useEffect(() => {
     selectedSiteId.current = siteId;
-    if (!siteId) {
-      setScans([]);
-      setScansSiteId("");
-      return;
-    }
+    if (loading || !site) return;
     let active = true;
     setScans([]);
     setScansSiteId("");
-    setSelectedScanId("");
     setScansLoading(true);
     listSiteMappingScans(siteId)
       .then((result) => {
@@ -168,9 +179,7 @@ export function SiteMappingHub({
     return () => {
       active = false;
     };
-  }, [siteId]);
-
-  const site = sites.find((item) => item.id === siteId);
+  }, [siteId, site, loading]);
 
   async function createOrganization() {
     if (!newOrganizationName.trim() || busy) return;
@@ -475,16 +484,25 @@ export function SiteMappingHub({
                   <p>No scans uploaded to this site yet.</p>
                 ) : null}
                 {selectedScan && showPreview && (
-                  <SiteScanErrorBoundary
-                    key={`${site.id}:${selectedScan.id}:${viewerAttempt}`}
-                    onRetry={retryPreview}
-                  >
-                    <Suspense
-                      fallback={<p role="status">Loading 3D viewer…</p>}
+                  <div>
+                    <p>
+                      Showing {site.name} · Capture{" "}
+                      {selectedScan.id.slice(0, 8)}
+                      {" · "}
+                      {selectedScan.point_count.toLocaleString()} measured
+                      points
+                    </p>
+                    <SiteScanErrorBoundary
+                      key={`${site.id}:${selectedScan.id}:${viewerAttempt}`}
+                      onRetry={retryPreview}
                     >
-                      <SiteScanViewer siteId={site.id} scan={selectedScan} />
-                    </Suspense>
-                  </SiteScanErrorBoundary>
+                      <Suspense
+                        fallback={<p role="status">Loading 3D viewer…</p>}
+                      >
+                        <SiteScanViewer siteId={site.id} scan={selectedScan} />
+                      </Suspense>
+                    </SiteScanErrorBoundary>
+                  </div>
                 )}
               </>
             )}

@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { SiteMappingHub } from "./SiteMappingHub";
+import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
 
 const viewerState = vi.hoisted(() => ({ fail: false }));
 
@@ -38,11 +39,110 @@ function json(value: unknown, status = 200): Response {
 afterEach(() => {
   viewerState.fail = false;
   cleanup();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("shared site mapping", () => {
+  it("retains the exact chosen site/capture across Dashboard, Radar and reload; resets for another user", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/sites"))
+        return json({
+          sites: ["old", "new"].map((id) => ({
+            id,
+            organization_id: "org-1",
+            name: `${id} site`,
+            status: "active",
+            role: "viewer",
+          })),
+        });
+      if (path.endsWith("/organizations")) return json({ organizations: [] });
+      const site = path.includes("/sites/new/") ? "new" : "old";
+      return json({
+        scans: [
+          {
+            id: `${site}-scan`,
+            point_count: 750,
+            byte_size: 9000,
+            uploaded_at: "2026-09-27T00:00:00Z",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const surface = (name: string, actorId = "actor-1") => (
+      <SiteMappingSelectionProvider key={actorId} actorId={actorId}>
+        <SiteMappingHub key={name} />
+      </SiteMappingSelectionProvider>
+    );
+    const view = render(surface("Dashboard"));
+    fireEvent.change(await screen.findByLabelText("Site"), {
+      target: { value: "new" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "View 3D" }));
+    expect(await screen.findByTestId("shared-scan-view")).toHaveProperty(
+      "textContent",
+      "new/new-scan",
+    );
+    view.rerender(surface("Radar"));
+    expect(await screen.findByTestId("shared-scan-view")).toHaveProperty(
+      "textContent",
+      "new/new-scan",
+    );
+    expect(screen.getByLabelText("Site")).toHaveProperty("value", "new");
+    view.unmount();
+    const reloaded = render(surface("Dashboard"));
+    expect(await screen.findByTestId("shared-scan-view")).toHaveProperty(
+      "textContent",
+      "new/new-scan",
+    );
+    reloaded.rerender(surface("Radar", "actor-2"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Site")).toHaveProperty("value", "old"),
+    );
+    await screen.findByRole("button", { name: "View 3D" });
+    expect(screen.queryByTestId("shared-scan-view")).toBeNull();
+  });
+
+  it("revalidates a remembered site before requesting its private captures", async () => {
+    sessionStorage.setItem(
+      "jack.site-mapping.selection.v1:actor-1",
+      JSON.stringify({ siteId: "revoked", scanId: "private-scan" }),
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/sites"))
+        return json({
+          sites: [
+            {
+              id: "allowed",
+              organization_id: "org-1",
+              name: "Allowed site",
+              status: "active",
+              role: "viewer",
+            },
+          ],
+        });
+      if (path.endsWith("/organizations")) return json({ organizations: [] });
+      if (path.endsWith("/sites/allowed/scans")) return json({ scans: [] });
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <SiteMappingSelectionProvider actorId="actor-1">
+        <SiteMappingHub />
+      </SiteMappingSelectionProvider>,
+    );
+    await screen.findByText("No scans uploaded to this site yet.");
+    expect(screen.getByLabelText("Site")).toHaveProperty("value", "allowed");
+    expect(
+      fetchMock.mock.calls.some(([path]) => String(path).includes("revoked")),
+    ).toBe(false);
+    expect(screen.queryByTestId("shared-scan-view")).toBeNull();
+  });
+
   it("uploads a saved PLY through the existing private site path and selects that scan", async () => {
     let uploaded = false;
     const fetchMock = vi.fn(
@@ -91,7 +191,11 @@ describe("shared site mapping", () => {
       },
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<SiteMappingHub />);
+    const view = render(
+      <SiteMappingSelectionProvider actorId="upload-actor">
+        <SiteMappingHub key="Radar" />
+      </SiteMappingSelectionProvider>,
+    );
     const input = await screen.findByLabelText("Upload a saved PLY");
     fireEvent.change(input, {
       target: {
@@ -112,6 +216,15 @@ describe("shared site mapping", () => {
         String(path).endsWith("/sites/site-1/scans/upload"),
       ),
     ).toHaveLength(1);
+    view.rerender(
+      <SiteMappingSelectionProvider actorId="upload-actor">
+        <SiteMappingHub key="Dashboard" />
+      </SiteMappingSelectionProvider>,
+    );
+    expect(await screen.findByTestId("shared-scan-view")).toHaveProperty(
+      "textContent",
+      "site-1/scan-1",
+    );
   });
 
   it("keeps a phone capture local until an authorized site upload is tapped", async () => {
