@@ -20,8 +20,18 @@ describe("PilotOrientation", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Ask Jack" }));
+    expect(
+      screen.queryByRole("button", { name: "Open Site Radar" }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Next: get familiar with the site" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Open Site Radar" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Next: hand over your shift" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Open Closeout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
     expect(onAskJack).toHaveBeenCalledWith(
       expect.stringContaining("What is Torch"),
     );
