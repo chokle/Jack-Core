@@ -142,6 +142,7 @@ export async function readAskJackAttachment(file: {
   }
 
   let text: string;
+  let pdfTruncated = false;
   if (name.endsWith(".pdf")) {
     if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-")
       throw new AttachmentError(415, "That is not a readable PDF.");
@@ -164,10 +165,17 @@ export async function readAskJackAttachment(file: {
             .map((item) => ("str" in item ? item.str : ""))
             .join(" ")}`,
         );
-        if (pages.join("\n").length >= MAX_DOCUMENT_CHARS) break;
+        if (pages.join("\n").length >= MAX_DOCUMENT_CHARS) {
+          pdfTruncated =
+            pageNumber < pdf.numPages || pdf.numPages > MAX_PDF_PAGES;
+          break;
+        }
       }
       text = pages.join("\n");
-      if (pdf.numPages > MAX_PDF_PAGES) text += "\n[More pages were not read.]";
+      if (pdf.numPages > MAX_PDF_PAGES) {
+        pdfTruncated = true;
+        text += "\n[More pages were not read.]";
+      }
     } catch {
       throw new AttachmentError(
         422,
@@ -216,6 +224,7 @@ export async function readAskJackAttachment(file: {
     text: clean.slice(0, MAX_DOCUMENT_CHARS),
     truncated:
       clean.length > MAX_DOCUMENT_CHARS ||
+      pdfTruncated ||
       text.includes("[More pages were not read.]"),
   };
 }

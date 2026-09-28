@@ -364,8 +364,13 @@ export function FloatingJack() {
           citations?: Awaited<ReturnType<typeof askJack>>["citations"];
           attachment?: { truncated?: boolean };
         };
-        if (!uploaded.ok)
-          throw new Error(body.error || `Upload failed (${uploaded.status}).`);
+        if (!uploaded.ok) {
+          const failure = new Error(
+            body.error || `Upload failed (${uploaded.status}).`,
+          ) as Error & { status: number };
+          failure.status = uploaded.status;
+          throw failure;
+        }
         response = video
           ? {
               answer:
@@ -397,8 +402,15 @@ export function FloatingJack() {
         );
       }
       refreshContext();
-      if (controller.signal.aborted || contextEpochRef.current !== epoch)
+      if (controller.signal.aborted || contextEpochRef.current !== epoch) {
+        if (file && attachment?.kind === "video") {
+          setAttachment(null);
+          setError(
+            "Upload status is uncertain. Check Library before trying again.",
+          );
+        }
         return;
+      }
       if (file) setAttachment(null);
       setAnswerOrigin(
         file
@@ -418,8 +430,15 @@ export function FloatingJack() {
       speak(response.answer);
     } catch (cause) {
       refreshContext();
-      if (controller.signal.aborted || contextEpochRef.current !== epoch)
+      if (controller.signal.aborted || contextEpochRef.current !== epoch) {
+        if (file && attachment?.kind === "video") {
+          setAttachment(null);
+          setError(
+            "Upload status is uncertain. Check Library before trying again.",
+          );
+        }
         return;
+      }
       void trackTestEvent("reliability_error", {
         error_code: "ask_jack_failed",
       });
@@ -427,7 +446,8 @@ export function FloatingJack() {
       setError(
         file &&
           attachment?.kind === "video" &&
-          !(cause instanceof Error && cause.message.startsWith("Upload failed"))
+          (!(cause instanceof Error) ||
+            !((cause as Error & { status?: number }).status! < 500))
           ? "Upload status is uncertain. Check Library before trying again."
           : cause instanceof Error && file
             ? cause.message
