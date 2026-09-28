@@ -20,6 +20,7 @@ import type { GraphModel } from "../lib/memory-graph";
 import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
+import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
 
 export type JackView =
   | "orientation"
@@ -165,7 +166,7 @@ export function JackShell({
     { label: "Videos Processed", value: fmt(readyCount) },
   ];
 
-  return (
+  const shell = (
     <div className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row">
       <header className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar/85 px-4 py-3 backdrop-blur-md md:hidden">
         <button
@@ -482,6 +483,14 @@ export function JackShell({
         </nav>
       </main>
     </div>
+  );
+  return (
+    <SiteMappingSelectionProvider
+      key={siteHudUserId ?? "signed-out"}
+      actorId={siteHudUserId ?? "signed-out"}
+    >
+      {shell}
+    </SiteMappingSelectionProvider>
   );
 }
 
