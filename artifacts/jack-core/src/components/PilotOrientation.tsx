@@ -78,7 +78,7 @@ export function PilotOrientation({
           Ask Jack
         </Button>
       ),
-      nextLabel: "Next: get familiar with the site",
+      nextLabel: "Next",
     },
     {
       title: "Get familiar with the site",
@@ -103,7 +103,7 @@ export function PilotOrientation({
           </Button>
         </div>
       ),
-      nextLabel: "Next: hand over your shift",
+      nextLabel: "Next",
     },
     {
       title: "Hand over your shift",
@@ -253,8 +253,9 @@ export function PilotOrientation({
                           {step.guidance}
                         </p>
                       </div>
-                      <div className="mt-5 flex items-end justify-between gap-3">
+                      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                         <Button
+                          className="w-full sm:w-auto"
                           disabled={activeStep === 0}
                           onClick={() =>
                             setActiveStep((value) => Math.max(value - 1, 0))
@@ -263,9 +264,14 @@ export function PilotOrientation({
                         >
                           Back
                         </Button>
-                        <div className="flex flex-col items-center">
+                        <div className="flex w-full flex-col items-center sm:w-auto">
                           <JackHand />
-                          <Button onClick={advance}>{step.nextLabel}</Button>
+                          <Button
+                            className="w-full whitespace-normal text-center sm:w-auto"
+                            onClick={advance}
+                          >
+                            {step.nextLabel}
+                          </Button>
                         </div>
                       </div>
                     </div>
