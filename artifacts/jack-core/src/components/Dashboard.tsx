@@ -1,4 +1,5 @@
 import type { GraphModel } from "../lib/memory-graph";
+import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingHub } from "./SiteMappingHub";
 
 interface DashboardProps {
@@ -6,6 +7,9 @@ interface DashboardProps {
   readyCount: number;
   lastUpdatedLabel: string;
   knowledgeState?: "loading" | "error" | "ready";
+  siteHudUserId?: string;
+  onOpenCompetencies?: () => void;
+  onOpenInsights?: () => void;
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -26,6 +30,9 @@ export function Dashboard({
   readyCount,
   lastUpdatedLabel,
   knowledgeState = "ready",
+  siteHudUserId,
+  onOpenCompetencies,
+  onOpenInsights,
 }: DashboardProps) {
   const nodes = model.counts.nodes.toLocaleString("en-US");
   const connections = model.counts.connections.toLocaleString("en-US");
@@ -46,18 +53,47 @@ export function Dashboard({
             Dashboard
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            A live readout of Jack&apos;s current memory footprint and indexed
-            trade knowledge.
+            Jack&apos;s primary site workspace: live field awareness, private
+            measured geometry, and the knowledge connected to the work.
           </p>
         </header>
 
         <div className="rounded-2xl border border-border bg-card/70 p-5">
           <h2 className="text-lg font-bold">Site spatial state</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Private measured depth for sites you can access. Radar shows the
-            same capture; local AR coordinates are not surveyed or aligned.
+            Live field awareness and private measured depth share one spatial
+            state. Local AR coordinates are not surveyed or aligned.
           </p>
-          <SiteMappingHub />
+          {siteHudUserId ? (
+            <SiteHudLive expanded onOpenRadar={() => undefined} />
+          ) : (
+            <SiteMappingHub />
+          )}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={onOpenCompetencies}
+            disabled={!onOpenCompetencies}
+            className="rounded-2xl border border-border bg-card/70 p-5 text-left transition-colors enabled:hover:bg-muted/60 disabled:cursor-default"
+          >
+            <span className="text-base font-bold">Competencies</span>
+            <span className="mt-1 block text-sm text-muted-foreground">
+              Open trade competencies connected to Living Memory evidence.
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenInsights}
+            disabled={!onOpenInsights}
+            className="rounded-2xl border border-border bg-card/70 p-5 text-left transition-colors enabled:hover:bg-muted/60 disabled:cursor-default"
+          >
+            <span className="text-base font-bold">Insights</span>
+            <span className="mt-1 block text-sm text-muted-foreground">
+              Open evidence-backed findings connected to the current memory.
+            </span>
+          </button>
         </div>
 
         {knowledgeState === "loading" ? (
