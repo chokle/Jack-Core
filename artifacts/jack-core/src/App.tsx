@@ -1224,6 +1224,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           />
         ) : view === "orientation" ? (
           <PilotOrientation
+            userId={me?.userId}
             onAskJack={(prompt) => {
               markOrientationSeen();
               handleOpenChat(prompt);

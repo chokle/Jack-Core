@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 interface PilotOrientationProps {
+  userId?: string;
   onAskJack: (prompt: string) => void;
   onOpenRadar: () => void;
   onOpenCloseout: () => void;
@@ -41,13 +42,23 @@ function JackHand() {
 }
 
 export function PilotOrientation({
+  userId,
   onAskJack,
   onOpenRadar,
   onOpenCloseout,
   onFinish,
   canOpenCloseout,
 }: PilotOrientationProps) {
-  const [activeStep, setActiveStep] = useState(0);
+  const progressKey = userId ? `jack-orientation-step-v2:${userId}` : null;
+  const [activeStep, setActiveStep] = useState(() => {
+    if (!progressKey || typeof window === "undefined") return 0;
+    try {
+      const saved = Number(window.sessionStorage.getItem(progressKey));
+      return Number.isInteger(saved) && saved >= 0 && saved < 3 ? saved : 0;
+    } catch {
+      return 0;
+    }
+  });
   const steps = [
     {
       title: "Meet Jack",
@@ -123,9 +134,29 @@ export function PilotOrientation({
     },
   ];
 
+  useEffect(() => {
+    if (!progressKey) return;
+    try {
+      window.sessionStorage.setItem(progressKey, String(activeStep));
+    } catch {
+      // The tour still works when browser storage is unavailable.
+    }
+  }, [activeStep, progressKey]);
+
+  const finishGuide = () => {
+    if (progressKey) {
+      try {
+        window.sessionStorage.removeItem(progressKey);
+      } catch {
+        // Finishing the guide does not depend on browser storage.
+      }
+    }
+    onFinish();
+  };
+
   const advance = () => {
     if (activeStep === steps.length - 1) {
-      onFinish();
+      finishGuide();
       return;
     }
     setActiveStep((step) => Math.min(step + 1, steps.length - 1));
@@ -143,7 +174,7 @@ export function PilotOrientation({
             Torch preserves skilled-trades knowledge and makes it useful in the
             field. Follow each highlighted step at your own pace.
           </p>
-          <Button className="px-0" variant="link" onClick={onFinish}>
+          <Button className="px-0" variant="link" onClick={finishGuide}>
             Skip guide
           </Button>
         </header>
