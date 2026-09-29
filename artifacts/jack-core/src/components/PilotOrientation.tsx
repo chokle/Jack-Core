@@ -235,7 +235,7 @@ export function PilotOrientation({
                         </Button>
                         <div className="flex w-full flex-col items-center sm:w-auto">
                           <img
-                            alt="Jack mascot"
+                            alt="Jack mascot guides you to the next step"
                             className="h-[4.5rem] w-auto object-contain motion-safe:animate-bounce"
                             height="82"
                             src="/jack-onboarding-mascot.webp"
