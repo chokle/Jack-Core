@@ -51,12 +51,12 @@ export function PilotOrientation({
     {
       key: "site-radar",
       title: "Site Radar",
-      destination: "radar" as JackView,
-      destinationName: "Site Radar",
+      destination: "dashboard" as JackView,
+      destinationName: "Dashboard",
       description:
-        "This is Site Radar. Your connected site and recent scans appear here when your account has access. If none are connected, Jack will say so.",
+        "Dashboard is your site workspace. Connected sites and recent scans appear here when your account has access. If none are connected, Jack will say so.",
       guidance:
-        "You’re on Site Radar. The menu entry stays outlined so you can find it again. Next I’ll take you to Closeout.",
+        "You’re on Dashboard. Site Radar lives in the site workspace outlined above. Next I’ll take you to Closeout.",
       action: null,
       nextLabel: canOpenCloseout ? "Next" : "Finish guide",
     },

@@ -17,7 +17,7 @@ const baseProps = {
 };
 
 describe("PilotOrientation", () => {
-  it("uses Jack and routes the tour through the real Radar and closeout views", () => {
+  it("uses Jack and routes the tour through Dashboard and closeout", () => {
     const props = {
       ...baseProps,
       onOpenRadar: vi.fn(),
@@ -30,15 +30,17 @@ describe("PilotOrientation", () => {
     expect(screen.queryByRole("button", { name: "Ask Jack" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(props.onOpenRadar).toHaveBeenCalledOnce();
-    rerender(<PilotOrientation {...props} activeView="radar" />);
+    rerender(<PilotOrientation {...props} activeView="dashboard" />);
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
-    expect(screen.getByText(/This is Site Radar/)).toBeTruthy();
+    expect(screen.getByText(/Dashboard is your site workspace/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(props.onOpenCloseout).toHaveBeenCalledOnce();
 
     rerender(<PilotOrientation {...props} activeView="closeout" />);
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
-    expect(screen.getByText(/real form is open/)).toBeTruthy();
+    expect(
+      screen.getByText(/where you leave your shift handover/),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
     expect(props.onFinish).toHaveBeenCalledOnce();
   });
@@ -51,7 +53,7 @@ describe("PilotOrientation", () => {
     };
     const { rerender } = render(<PilotOrientation {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    rerender(<PilotOrientation {...props} activeView="radar" />);
+    rerender(<PilotOrientation {...props} activeView="dashboard" />);
     fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
     expect(props.onOpenCloseout).not.toHaveBeenCalled();
   });
@@ -60,7 +62,7 @@ describe("PilotOrientation", () => {
     const first = render(<PilotOrientation {...baseProps} />);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     first.unmount();
-    render(<PilotOrientation {...baseProps} activeView="radar" />);
+    render(<PilotOrientation {...baseProps} activeView="dashboard" />);
     expect(screen.getByText(/This is Site Radar/)).toBeTruthy();
   });
 });
