@@ -63,6 +63,6 @@ describe("PilotOrientation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     first.unmount();
     render(<PilotOrientation {...baseProps} activeView="dashboard" />);
-    expect(screen.getByText(/This is Site Radar/)).toBeTruthy();
+    expect(screen.getByText(/Dashboard is your site workspace/)).toBeTruthy();
   });
 });
