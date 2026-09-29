@@ -18,7 +18,7 @@ const model = {
 describe("JackShell account management", () => {
   afterEach(cleanup);
 
-  it("opens Site Radar by voice only when the signed-in HUD control is present", () => {
+  it("routes Site Radar voice intent into Dashboard only when the signed-in HUD control is present", () => {
     const onNavigate = vi.fn();
     const props = {
       active: "graph" as const,
@@ -41,7 +41,7 @@ describe("JackShell account management", () => {
       </JackShell>,
     );
     fireEvent.click(resolveJackLocalAction(command!)!);
-    expect(onNavigate).toHaveBeenCalledWith("radar");
+    expect(onNavigate).toHaveBeenCalledWith("dashboard");
   });
 
   it.each([
