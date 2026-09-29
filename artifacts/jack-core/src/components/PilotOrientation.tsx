@@ -10,37 +10,6 @@ interface PilotOrientationProps {
   canOpenCloseout: boolean;
 }
 
-function JackHand() {
-  return (
-    <svg
-      aria-label="Jack's hand pointing to Next"
-      className="motion-safe:animate-bounce"
-      fill="none"
-      height="42"
-      role="img"
-      viewBox="0 0 56 64"
-      width="38"
-    >
-      <g transform="rotate(180 28 32)">
-        <path
-          d="M24 36V11a5 5 0 0 1 10 0v20l4-7a5 5 0 0 1 9 4l-4 11 3-3a5 5 0 0 1 8 6L44 55a12 12 0 0 1-10 5H24a13 13 0 0 1-13-13V36a5 5 0 0 1 9-3l4 5Z"
-          fill="white"
-          stroke="#183b39"
-          strokeLinejoin="round"
-          strokeWidth="3"
-        />
-        <path
-          d="M13 47h11v9h-4a9 9 0 0 1-7-4v-5Z"
-          fill="#55d6be"
-          stroke="#183b39"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-      </g>
-    </svg>
-  );
-}
-
 export function PilotOrientation({
   userId,
   onAskJack,
@@ -265,7 +234,13 @@ export function PilotOrientation({
                           Back
                         </Button>
                         <div className="flex w-full flex-col items-center sm:w-auto">
-                          <JackHand />
+                          <img
+                            alt="Jack mascot guides you to the next step"
+                            className="h-[4.5rem] w-auto object-contain motion-safe:animate-bounce"
+                            height="82"
+                            src="/jack-onboarding-mascot.webp"
+                            width="77"
+                          />
                           <Button
                             className="w-full whitespace-normal text-center sm:w-auto"
                             onClick={advance}
