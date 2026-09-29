@@ -4,6 +4,8 @@ import {
   Network,
   LayoutGrid,
   LayoutDashboard,
+  GraduationCap,
+  Lightbulb,
   Mic,
   Settings,
   Menu,
@@ -19,6 +21,7 @@ import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
+import { JackPresence, buildJackPresenceState } from "./JackPresence";
 
 export type JackView =
   | "orientation"
@@ -52,6 +55,9 @@ interface JackShellProps {
   userTestStarting?: boolean;
   canViewPilotReports?: boolean;
   canUseParticipantCloseout?: boolean;
+  isAskJackOpen?: boolean;
+  memoryLoading?: boolean;
+  tourTarget?: "ask-jack" | "radar" | "closeout";
   canHistoryBack?: boolean;
   canHistoryForward?: boolean;
   onHistoryBack?: () => void;
@@ -96,6 +102,9 @@ export function JackShell({
   userTestStarting,
   canViewPilotReports,
   canUseParticipantCloseout,
+  isAskJackOpen = false,
+  memoryLoading = false,
+  tourTarget,
   canHistoryBack = false,
   canHistoryForward = false,
   onHistoryBack,
@@ -118,6 +127,11 @@ export function JackShell({
     insights: "Insights",
   };
   const hudEnabled = !!siteHudUserId;
+
+  useEffect(() => {
+    if (tourTarget && tourTarget !== "ask-jack" && window.innerWidth < 768)
+      setIsPanelOpen(true);
+  }, [tourTarget]);
 
   useEffect(() => {
     const sync = () => syncAskJackComposerState();
@@ -165,7 +179,10 @@ export function JackShell({
   ];
 
   const shell = (
-    <div className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row">
+    <div
+      data-guided-tour-target={tourTarget}
+      className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row"
+    >
       <header className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar/85 px-4 py-3 backdrop-blur-md md:hidden">
         <button
           onClick={() => go("graph")}
@@ -261,6 +278,16 @@ export function JackShell({
             active={active === "library"}
             onClick={() => go("library")}
           />
+          {hudEnabled && (
+            <NavItem
+              icon={<Radio className="h-4 w-4" />}
+              label="Site radar"
+              action="radar"
+              active={active === "radar"}
+              tourTarget="radar"
+              onClick={() => go("radar")}
+            />
+          )}
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
@@ -290,6 +317,7 @@ export function JackShell({
               label="Closeout"
               action="closeout"
               active={active === "closeout"}
+              tourTarget="closeout"
               onClick={() => go("closeout")}
             />
           )}
@@ -297,13 +325,22 @@ export function JackShell({
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
             action="dashboard"
-            active={
-              active === "dashboard" ||
-              active === "radar" ||
-              active === "competencies" ||
-              active === "insights"
-            }
+            active={active === "dashboard"}
             onClick={() => go("dashboard")}
+          />
+          <NavItem
+            icon={<GraduationCap className="h-4 w-4" />}
+            label="Competencies"
+            action="competencies"
+            active={active === "competencies"}
+            onClick={() => go("competencies")}
+          />
+          <NavItem
+            icon={<Lightbulb className="h-4 w-4" />}
+            label="Insights"
+            action="insights"
+            active={active === "insights"}
+            onClick={() => go("insights")}
           />
           <NavItem
             icon={<Settings className="h-4 w-4" />}
@@ -327,6 +364,14 @@ export function JackShell({
             />
           )}
         </nav>
+
+        <JackPresence
+          state={buildJackPresenceState({
+            workspace: surfaceLabel[active],
+            memoryLoading,
+            askJackOpen: isAskJackOpen,
+          })}
+        />
 
         {/* Graph stats */}
         <div className="mx-4 mt-4 rounded-xl border border-sidebar-border/80 bg-card/40 p-4">
@@ -398,20 +443,30 @@ export function JackShell({
             "calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
         }}
       >
-        {hudEnabled && active !== "dashboard" && (
-          <div className="relative shrink-0 bg-background">
+        {hudEnabled && (
+          <div
+            className={
+              active === "radar"
+                ? "relative flex min-h-0 flex-1 flex-col bg-background"
+                : "relative shrink-0 bg-background"
+            }
+          >
             <SiteHudLive
               key={siteHudUserId}
-              expanded={false}
-              onOpenRadar={() => go("dashboard")}
+              expanded={active === "radar"}
+              onOpenRadar={() => go("radar")}
             />
           </div>
         )}
         <div
-          className="relative flex min-h-0 flex-1 overflow-hidden"
+          className={
+            active === "radar"
+              ? "sr-only"
+              : "relative flex min-h-0 flex-1 overflow-hidden"
+          }
           data-jack-surface={surfaceLabel[active]}
         >
-          {children}
+          {active !== "radar" && children}
         </div>
         {/* These app-owned targets give Jack a bounded page/video history. The
             controls stay out of the visual layout; graph and video surfaces
@@ -421,29 +476,6 @@ export function JackShell({
           data-jack-command-index
           className="sr-only"
         >
-          {hudEnabled && (
-            <button
-              type="button"
-              data-jack-action="radar"
-              onClick={() => go("dashboard")}
-            >
-              Site radar in Dashboard
-            </button>
-          )}
-          <button
-            type="button"
-            data-jack-action="competencies"
-            onClick={() => go("competencies")}
-          >
-            Dashboard competencies
-          </button>
-          <button
-            type="button"
-            data-jack-action="insights"
-            onClick={() => go("insights")}
-          >
-            Dashboard insights
-          </button>
           <button
             type="button"
             data-jack-action="account"
@@ -495,6 +527,7 @@ function NavItem({
   action,
   onClick,
   testId,
+  tourTarget,
 }: {
   icon: ReactNode;
   label: string;
@@ -503,6 +536,7 @@ function NavItem({
   action?: JackUiActionName;
   onClick?: () => void;
   testId?: string;
+  tourTarget?: string;
 }) {
   if (soon) {
     return (
@@ -524,6 +558,7 @@ function NavItem({
     <button
       onClick={onClick}
       data-testid={testId}
+      data-tour-target={tourTarget}
       data-jack-action={action}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
