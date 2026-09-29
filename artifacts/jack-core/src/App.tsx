@@ -575,7 +575,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   };
 
   const handleNavigate = (next: JackView) => {
-    if (next === "graph") setGraphFocusNodeId(null);
+    const destination: JackView = next === "radar" ? "dashboard" : next;
+    if (destination === "graph") setGraphFocusNodeId(null);
     const feature = {
       orientation: null,
       graph: "memory_graph",
@@ -589,12 +590,12 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       competencies: null,
       insights: null,
     } as const;
-    if (feature[next]) {
-      feedbackRef.current?.markFeature(feature[next]);
-      void trackTestEvent("feature_viewed", { feature: feature[next] });
+    if (feature[destination]) {
+      feedbackRef.current?.markFeature(feature[destination]);
+      void trackTestEvent("feature_viewed", { feature: feature[destination] });
     }
     setFieldNotePreload(undefined);
-    navigateToLocation({ view: next, selectedVideoId: null });
+    navigateToLocation({ view: destination, selectedVideoId: null });
   };
 
   useEffect(() => {
@@ -1229,7 +1230,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               markOrientationSeen();
               handleOpenChat(prompt);
             }}
-            onOpenRadar={() => finishOrientation("radar")}
+            onOpenDashboard={() => finishOrientation("dashboard")}
             onOpenCloseout={() => finishOrientation("closeout")}
             onFinish={() => finishOrientation("graph")}
             canOpenCloseout={canViewCloseout}
@@ -1273,6 +1274,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                   ? "error"
                   : "ready"
             }
+            siteHudUserId={isSignedIn ? me?.userId : undefined}
+            onOpenCompetencies={() => handleNavigate("competencies")}
+            onOpenInsights={() => handleNavigate("insights")}
           />
         ) : view === "competencies" ? (
           <CompetenciesView
@@ -1475,7 +1479,6 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                 ["graph", "Living Memory"],
                 ["orientation", "Start here"],
                 ["library", "Library"],
-                ...(isSignedIn ? [["radar", "Site radar"]] : []),
                 ["dashboard", "Dashboard"],
                 ["competencies", "Competencies"],
                 ["insights", "Insights"],

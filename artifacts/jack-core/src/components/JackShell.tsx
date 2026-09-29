@@ -4,8 +4,6 @@ import {
   Network,
   LayoutGrid,
   LayoutDashboard,
-  GraduationCap,
-  Lightbulb,
   Mic,
   Settings,
   Menu,
@@ -263,15 +261,6 @@ export function JackShell({
             active={active === "library"}
             onClick={() => go("library")}
           />
-          {hudEnabled && (
-            <NavItem
-              icon={<Radio className="h-4 w-4" />}
-              label="Site radar"
-              action="radar"
-              active={active === "radar"}
-              onClick={() => go("radar")}
-            />
-          )}
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
@@ -308,22 +297,13 @@ export function JackShell({
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
             action="dashboard"
-            active={active === "dashboard"}
+            active={
+              active === "dashboard" ||
+              active === "radar" ||
+              active === "competencies" ||
+              active === "insights"
+            }
             onClick={() => go("dashboard")}
-          />
-          <NavItem
-            icon={<GraduationCap className="h-4 w-4" />}
-            label="Competencies"
-            action="competencies"
-            active={active === "competencies"}
-            onClick={() => go("competencies")}
-          />
-          <NavItem
-            icon={<Lightbulb className="h-4 w-4" />}
-            label="Insights"
-            action="insights"
-            active={active === "insights"}
-            onClick={() => go("insights")}
           />
           <NavItem
             icon={<Settings className="h-4 w-4" />}
@@ -418,30 +398,20 @@ export function JackShell({
             "calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
         }}
       >
-        {hudEnabled && (
-          <div
-            className={
-              active === "radar"
-                ? "relative flex min-h-0 flex-1 flex-col bg-background"
-                : "relative shrink-0 bg-background"
-            }
-          >
+        {hudEnabled && active !== "dashboard" && (
+          <div className="relative shrink-0 bg-background">
             <SiteHudLive
               key={siteHudUserId}
-              expanded={active === "radar"}
-              onOpenRadar={() => go("radar")}
+              expanded={false}
+              onOpenRadar={() => go("dashboard")}
             />
           </div>
         )}
         <div
-          className={
-            active === "radar"
-              ? "sr-only"
-              : "relative flex min-h-0 flex-1 overflow-hidden"
-          }
+          className="relative flex min-h-0 flex-1 overflow-hidden"
           data-jack-surface={surfaceLabel[active]}
         >
-          {active !== "radar" && children}
+          {children}
         </div>
         {/* These app-owned targets give Jack a bounded page/video history. The
             controls stay out of the visual layout; graph and video surfaces
@@ -451,6 +421,29 @@ export function JackShell({
           data-jack-command-index
           className="sr-only"
         >
+          {hudEnabled && (
+            <button
+              type="button"
+              data-jack-action="radar"
+              onClick={() => go("dashboard")}
+            >
+              Site radar in Dashboard
+            </button>
+          )}
+          <button
+            type="button"
+            data-jack-action="competencies"
+            onClick={() => go("competencies")}
+          >
+            Dashboard competencies
+          </button>
+          <button
+            type="button"
+            data-jack-action="insights"
+            onClick={() => go("insights")}
+          >
+            Dashboard insights
+          </button>
           <button
             type="button"
             data-jack-action="account"

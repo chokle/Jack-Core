@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 interface PilotOrientationProps {
   userId?: string;
   onAskJack: (prompt: string) => void;
-  onOpenRadar: () => void;
+  onOpenDashboard: () => void;
   onOpenCloseout: () => void;
   onFinish: () => void;
   canOpenCloseout: boolean;
@@ -13,7 +13,7 @@ interface PilotOrientationProps {
 export function PilotOrientation({
   userId,
   onAskJack,
-  onOpenRadar,
+  onOpenDashboard,
   onOpenCloseout,
   onFinish,
   canOpenCloseout,
@@ -52,13 +52,13 @@ export function PilotOrientation({
     {
       title: "Get familiar with the site",
       description:
-        "Site Radar shows your connected site and recent scans when your account has access. If no site is connected, it says so.",
+        "Dashboard brings your connected site, recent scans, and field context into one workspace when your account has access. If no site is connected, it says so.",
       guidance:
-        "This is Site Radar. It only shows sites and scans your account is allowed to see. If nothing is connected yet, I'll tell you clearly.",
+        "This is your site workspace in Dashboard. It only shows sites and scans your account is allowed to see. If nothing is connected yet, I'll tell you clearly.",
       action: (
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="outline" onClick={onOpenRadar}>
-            Open Site Radar
+          <Button variant="outline" onClick={onOpenDashboard}>
+            Open Dashboard
           </Button>
           <Button
             variant="ghost"
