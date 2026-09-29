@@ -74,12 +74,17 @@ export function PilotOrientation({
     },
   ];
   const totalSteps = canOpenCloseout ? steps.length : steps.length - 1;
-  const step = steps[Math.min(activeStep, totalSteps - 1)];
+  const currentStepIndex = Math.min(activeStep, totalSteps - 1);
+  const step = steps[currentStepIndex];
   const atDestination = activeView === step.destination;
 
   useEffect(() => {
-    onStepChange?.(activeStep);
-  }, [activeStep, onStepChange]);
+    if (activeStep >= totalSteps) setActiveStep(totalSteps - 1);
+  }, [activeStep, totalSteps]);
+
+  useEffect(() => {
+    onStepChange?.(currentStepIndex);
+  }, [currentStepIndex, onStepChange]);
 
   useEffect(() => {
     if (!progressKey || !tourActive) return;
@@ -116,11 +121,11 @@ export function PilotOrientation({
   };
 
   const advance = () => {
-    if (activeStep === 0) {
+    if (currentStepIndex === 0) {
       navigateToStep(1);
       return;
     }
-    if (activeStep === 1 && canOpenCloseout) {
+    if (currentStepIndex === 1 && canOpenCloseout) {
       navigateToStep(2);
       return;
     }
@@ -128,15 +133,15 @@ export function PilotOrientation({
   };
 
   const goBack = () => {
-    if (activeStep === 2) {
+    if (currentStepIndex === 2) {
       navigateToStep(1);
       return;
     }
-    if (activeStep === 1) navigateToStep(0);
+    if (currentStepIndex === 1) navigateToStep(0);
   };
 
   if (!tourActive) return null;
-  if (activeStep === 0 && activeView !== "orientation") return null;
+  if (currentStepIndex === 0 && activeView !== "orientation") return null;
 
   const stepCount = (stepIndex: number) => (
     <div
@@ -172,7 +177,7 @@ export function PilotOrientation({
         />
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">
-            Step {activeStep + 1} · {step.destinationName}
+            Step {currentStepIndex + 1} · {step.destinationName}
           </p>
           <h2 className="mt-1 font-semibold">{step.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -182,21 +187,16 @@ export function PilotOrientation({
           </p>
         </div>
       </div>
-      <div className="mt-4">{stepCount(activeStep)}</div>
+      <div className="mt-4">{stepCount(currentStepIndex)}</div>
       <div className="mt-4 flex justify-end gap-3">
-        {activeStep > 0 && (
+        {currentStepIndex > 0 && (
           <Button variant="ghost" onClick={goBack}>
             Back
           </Button>
         )}
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={finishGuide}>
-            Skip guide
-          </Button>
-          <Button onClick={advance}>
-            {atDestination ? step.nextLabel : `Go to ${step.destinationName}`}
-          </Button>
-        </div>
+        <Button onClick={advance}>
+          {atDestination ? step.nextLabel : `Go to ${step.destinationName}`}
+        </Button>
       </div>
     </section>
   );
@@ -224,11 +224,8 @@ export function PilotOrientation({
             Jack will take you into the real workspace and show you where the
             next actions happen.
           </p>
-          <Button className="px-0" variant="link" onClick={finishGuide}>
-            Skip guide
-          </Button>
         </header>
-        {stepCount(activeStep)}
+        {stepCount(currentStepIndex)}
         <section
           className="rounded-xl border border-cyan-400 bg-primary/10 p-4"
           data-tour-step={step.key}
@@ -249,7 +246,7 @@ export function PilotOrientation({
               <p className="text-sm leading-relaxed">{step.guidance}</p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              {activeStep > 0 && (
+              {currentStepIndex > 0 && (
                 <Button onClick={goBack} variant="ghost">
                   Back
                 </Button>

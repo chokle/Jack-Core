@@ -26,6 +26,7 @@ describe("PilotOrientation", () => {
     const { rerender } = render(<PilotOrientation {...props} />);
     expect(screen.getByRole("img", { name: "Jack" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByLabelText(/pointing hand/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Ask Jack" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -64,5 +65,20 @@ describe("PilotOrientation", () => {
     first.unmount();
     render(<PilotOrientation {...baseProps} activeView="dashboard" />);
     expect(screen.getByText(/Dashboard is your site workspace/)).toBeTruthy();
+  });
+
+  it("clamps a saved Closeout step when participant access is unavailable", () => {
+    window.sessionStorage.setItem("jack-orientation-step-v2:worker-1", "2");
+    render(
+      <PilotOrientation
+        {...baseProps}
+        activeView="dashboard"
+        canOpenCloseout={false}
+      />,
+    );
+
+    expect(screen.getByText("Step 2 · Dashboard")).toBeTruthy();
+    expect(screen.getByLabelText("Step 2 of 2")).toBeTruthy();
+    expect(screen.queryByText("Step 3 · Closeout")).toBeNull();
   });
 });
