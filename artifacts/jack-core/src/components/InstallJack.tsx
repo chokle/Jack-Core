@@ -6,6 +6,16 @@ type InstallPrompt = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+// The browser can offer installation before signed-in screens finish loading.
+// Retain that one-shot event until a visible install action can use it.
+let deferredPrompt: InstallPrompt | null = null;
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredPrompt = event as InstallPrompt;
+  });
+}
+
 function isInstalled(): boolean {
   return (
     window.matchMedia?.("(display-mode: standalone)").matches === true ||
@@ -15,7 +25,7 @@ function isInstalled(): boolean {
 
 /** Browser install prompt where supported; plain phone instructions elsewhere. */
 export function InstallJack() {
-  const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
+  const [prompt, setPrompt] = useState<InstallPrompt | null>(deferredPrompt);
   const [installed, setInstalled] = useState(isInstalled);
   const [showInstructions, setShowInstructions] = useState(false);
 
@@ -46,8 +56,10 @@ export function InstallJack() {
     try {
       await prompt.prompt();
       await prompt.userChoice;
+      deferredPrompt = null;
       setPrompt(null);
     } catch {
+      deferredPrompt = null;
       setPrompt(null);
       setShowInstructions(true);
     }
@@ -56,7 +68,7 @@ export function InstallJack() {
   const isApplePhone = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   return (
-    <div className="mt-5 text-center sm:hidden">
+    <div className="mt-5 text-center md:hidden">
       <button
         type="button"
         onClick={() => void onInstall()}
