@@ -26,7 +26,8 @@ describe("PilotOrientation", () => {
     const { rerender } = render(<PilotOrientation {...props} />);
     expect(screen.getByRole("img", { name: "Jack" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Skip guide" })).toBeTruthy();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByLabelText(/pointing hand/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Ask Jack" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
