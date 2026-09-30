@@ -2,13 +2,17 @@ import type { ReactNode } from "react";
 import { Activity, BookOpen, Compass, Radio, RadioTower } from "lucide-react";
 import { JackPet } from "./JackPet";
 
-export type JackPresenceStatus = "ONLINE" | "LISTENING" | "THINKING";
+export type JackPresenceStatus =
+  | "ONLINE"
+  | "LISTENING"
+  | "THINKING"
+  | "ERROR";
 
 export interface JackPresenceState {
   status: JackPresenceStatus;
   activity: string;
   context: string;
-  memoryState: "AVAILABLE" | "LOADING";
+  memoryState: "AVAILABLE" | "LOADING" | "UNAVAILABLE";
   /** Pass only when supplied by Radio Jack's owning session. */
   radioState?: "READY" | "LISTENING" | "SPEAKING";
   /** Pass only when supplied by the canonical Radar session. */
@@ -21,19 +25,30 @@ export interface JackPresenceState {
 export function buildJackPresenceState(input: {
   workspace: string;
   memoryLoading: boolean;
+  memoryError: boolean;
   askJackOpen: boolean;
   sourceCount?: number;
 }): JackPresenceState {
-  const status = input.memoryLoading ? "THINKING" : "ONLINE";
+  const status = input.memoryError
+    ? "ERROR"
+    : input.memoryLoading
+      ? "THINKING"
+      : "ONLINE";
   return {
     status,
-    activity: input.memoryLoading
-      ? "LOADING LIVING MEMORY"
-      : input.askJackOpen
-        ? "ASK JACK · OPEN"
-        : "FIELD INTELLIGENCE",
+    activity: input.memoryError
+      ? "LIVING MEMORY UNAVAILABLE"
+      : input.memoryLoading
+        ? "LOADING LIVING MEMORY"
+        : input.askJackOpen
+          ? "ASK JACK · OPEN"
+          : "FIELD INTELLIGENCE",
     context: input.workspace,
-    memoryState: input.memoryLoading ? "LOADING" : "AVAILABLE",
+    memoryState: input.memoryError
+      ? "UNAVAILABLE"
+      : input.memoryLoading
+        ? "LOADING"
+        : "AVAILABLE",
     ...(input.sourceCount === undefined
       ? {}
       : { sourceCount: input.sourceCount }),
@@ -44,6 +59,7 @@ const statusTone: Record<JackPresenceStatus, string> = {
   ONLINE: "bg-emerald-400",
   LISTENING: "bg-primary animate-pulse",
   THINKING: "bg-amber-400 animate-pulse",
+  ERROR: "bg-destructive",
 };
 
 export function JackPresence({ state }: { state: JackPresenceState }) {
@@ -55,7 +71,7 @@ export function JackPresence({ state }: { state: JackPresenceState }) {
     >
       <div className="flex items-center gap-3">
         <JackPet
-          activity={state.status}
+          activity={state.status === "ERROR" ? "ALERT" : state.status}
           size={40}
           label="Jack, field intelligence"
         />
@@ -84,7 +100,11 @@ export function JackPresence({ state }: { state: JackPresenceState }) {
           icon={<BookOpen className="h-3 w-3" />}
           label="MEMORY"
           value={
-            state.memoryState === "LOADING" ? "Loading" : "Living · available"
+            state.memoryState === "LOADING"
+              ? "Loading"
+              : state.memoryState === "UNAVAILABLE"
+                ? "Unavailable"
+                : "Living · available"
           }
         />
         <PresenceFact
