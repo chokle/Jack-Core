@@ -2,11 +2,7 @@ import type { ReactNode } from "react";
 import { Activity, BookOpen, Compass, Radio, RadioTower } from "lucide-react";
 import { JackPet } from "./JackPet";
 
-export type JackPresenceStatus =
-  | "ONLINE"
-  | "LISTENING"
-  | "THINKING"
-  | "ERROR";
+export type JackPresenceStatus = "ONLINE" | "LISTENING" | "THINKING" | "ERROR";
 
 export interface JackPresenceState {
   status: JackPresenceStatus;
