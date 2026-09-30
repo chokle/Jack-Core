@@ -10,6 +10,7 @@ describe("Jack presence", () => {
     const state = buildJackPresenceState({
       workspace: "Living Memory",
       memoryLoading: false,
+      memoryError: false,
       askJackOpen: false,
     });
 
@@ -26,6 +27,7 @@ describe("Jack presence", () => {
       buildJackPresenceState({
         workspace: "Living Memory",
         memoryLoading: false,
+        memoryError: false,
         askJackOpen: true,
       }).status,
     ).toBe("ONLINE");
@@ -33,15 +35,33 @@ describe("Jack presence", () => {
       buildJackPresenceState({
         workspace: "Living Memory",
         memoryLoading: true,
+        memoryError: false,
         askJackOpen: false,
       }).status,
     ).toBe("THINKING");
+  });
+
+  it("reports Living Memory failures instead of false availability", () => {
+    const state = buildJackPresenceState({
+      workspace: "Living Memory",
+      memoryLoading: false,
+      memoryError: true,
+      askJackOpen: false,
+    });
+
+    render(<JackPresence state={state} />);
+    expect(
+      screen.getByLabelText("Jack presence").getAttribute("data-status"),
+    ).toBe("error");
+    expect(screen.getByText("Unavailable")).toBeTruthy();
+    expect(screen.queryByText("Living · available")).toBeNull();
   });
 
   it("only displays a source count when the caller has verified one", () => {
     const state = buildJackPresenceState({
       workspace: "Library",
       memoryLoading: false,
+      memoryError: false,
       askJackOpen: false,
       sourceCount: 2,
     });
@@ -53,6 +73,7 @@ describe("Jack presence", () => {
     const state = buildJackPresenceState({
       workspace: "Site radar",
       memoryLoading: false,
+      memoryError: false,
       askJackOpen: false,
     });
     render(<JackPresence state={state} />);
