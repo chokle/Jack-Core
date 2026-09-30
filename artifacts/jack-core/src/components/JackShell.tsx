@@ -19,6 +19,7 @@ import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
+import { InstallJack } from "./InstallJack";
 import { JackPresence, buildJackPresenceState } from "./JackPresence";
 
 export type JackView =
@@ -361,6 +362,8 @@ export function JackShell({
             />
           )}
         </nav>
+
+        <InstallJack />
 
         <JackPresence
           state={buildJackPresenceState({

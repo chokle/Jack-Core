@@ -79,6 +79,13 @@ async function start(): Promise<void> {
       <FloatingJack />
     </StartupErrorBoundary>,
   );
+
+  // Cache only the public offline screen and icons, never authenticated data.
+  if ("serviceWorker" in navigator) {
+    void navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.warn("Jack offline screen could not be enabled", error);
+    });
+  }
 }
 
 void start().catch((error) => {
