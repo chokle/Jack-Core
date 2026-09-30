@@ -55,6 +55,7 @@ interface JackShellProps {
   canUseParticipantCloseout?: boolean;
   isAskJackOpen?: boolean;
   memoryLoading?: boolean;
+  memoryError?: boolean;
   tourTarget?: "ask-jack" | "radar" | "closeout";
   canHistoryBack?: boolean;
   canHistoryForward?: boolean;
@@ -102,6 +103,7 @@ export function JackShell({
   canUseParticipantCloseout,
   isAskJackOpen = false,
   memoryLoading = false,
+  memoryError = false,
   tourTarget,
   canHistoryBack = false,
   canHistoryForward = false,
@@ -130,6 +132,20 @@ export function JackShell({
     if (tourTarget && tourTarget !== "ask-jack" && window.innerWidth < 768) {
       setIsPanelOpen(true);
     }
+  }, [tourTarget]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (tourTarget) {
+      root.setAttribute("data-jack-guided-tour-target", tourTarget);
+    } else {
+      root.removeAttribute("data-jack-guided-tour-target");
+    }
+    return () => {
+      if (root.getAttribute("data-jack-guided-tour-target") === tourTarget) {
+        root.removeAttribute("data-jack-guided-tour-target");
+      }
+    };
   }, [tourTarget]);
 
   useEffect(() => {
@@ -350,6 +366,7 @@ export function JackShell({
           state={buildJackPresenceState({
             workspace: surfaceLabel[active],
             memoryLoading,
+            memoryError,
             askJackOpen: isAskJackOpen,
           })}
         />
