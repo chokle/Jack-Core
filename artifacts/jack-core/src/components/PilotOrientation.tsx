@@ -246,6 +246,11 @@ export function PilotOrientation({
               <p className="text-sm leading-relaxed">{step.guidance}</p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
+              {currentStepIndex === 0 && (
+                <Button onClick={finishGuide} variant="ghost">
+                  Skip guide
+                </Button>
+              )}
               {currentStepIndex > 0 && (
                 <Button onClick={goBack} variant="ghost">
                   Back
