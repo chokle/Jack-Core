@@ -79,7 +79,13 @@ export function Landing() {
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <Link
+            href="/sign-in"
+            className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground sm:hidden"
+          >
+            Open Jack
+          </Link>
+          <div className="hidden items-center gap-2 sm:flex">
             <Link
               href="/sign-in"
               className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
