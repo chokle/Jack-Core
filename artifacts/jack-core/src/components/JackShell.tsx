@@ -19,6 +19,7 @@ import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
+import { InstallJack } from "./InstallJack";
 
 export type JackView =
   | "orientation"
@@ -327,6 +328,8 @@ export function JackShell({
             />
           )}
         </nav>
+
+        <InstallJack />
 
         {/* Graph stats */}
         <div className="mx-4 mt-4 rounded-xl border border-sidebar-border/80 bg-card/40 p-4">
