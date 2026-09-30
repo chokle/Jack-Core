@@ -45,9 +45,8 @@ export function InstallJack() {
     }
     try {
       await prompt.prompt();
-      const choice = await prompt.userChoice;
+      await prompt.userChoice;
       setPrompt(null);
-      if (choice.outcome === "accepted") setInstalled(true);
     } catch {
       setPrompt(null);
       setShowInstructions(true);
@@ -69,7 +68,7 @@ export function InstallJack() {
       {showInstructions && (
         <p className="mx-auto mt-3 max-w-sm text-sm text-muted-foreground">
           {isApplePhone
-            ? "In Safari, tap Share, then Add to Home Screen."
+            ? "In Safari, tap Share, then Add to Home Screen. Turn on Open as Web App."
             : "In your browser menu, tap Install app or Add to Home screen."}
         </p>
       )}
