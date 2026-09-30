@@ -100,7 +100,7 @@
   }
 }
 
-[data-guided-tour-target="ask-jack"] [data-tour-target="ask-jack"] {
+html[data-jack-guided-tour-target="ask-jack"] [data-tour-target="ask-jack"] {
   position: relative;
   z-index: 90;
   outline: 3px solid #22d3ee;
@@ -120,7 +120,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-guided-tour-target="ask-jack"] [data-tour-target="ask-jack"] {
+  html[data-jack-guided-tour-target="ask-jack"] [data-tour-target="ask-jack"] {
     animation: none;
   }
 }
