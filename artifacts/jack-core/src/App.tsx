@@ -1209,6 +1209,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         canUseParticipantCloseout={canViewCloseout}
         isAskJackOpen={isChatOpen}
         memoryLoading={graph.isLoading}
+        memoryError={graph.hasError && !graph.model.counts.nodes}
         tourTarget={
           orientationStep === 0 && view === "orientation"
             ? "ask-jack"
@@ -1300,6 +1301,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           <Library onSelectVideo={handleSelectVideo} />
         )}
         <PilotOrientation
+          key={`pilot-orientation:${me?.userId ?? "signed-out"}`}
           userId={me?.userId}
           activeView={view}
           onOpenOrientation={() => handleNavigate("orientation")}
