@@ -538,6 +538,45 @@ export const AskJackResponse = zod.object({
 
 
 /**
+ * Requires the existing signed-in pilot access gate. The file is read for this answer only; it is not added to Library or Living Memory. Video contributions use the existing authenticated /videos/ingest pipeline.
+ * @summary Analyze one photo or document for this turn without retaining it
+ */
+export const AnalyzeJackAttachmentResponse = zod.object({
+  "answer": zod.string(),
+  "citations": zod.array(zod.object({
+  "videoId": zod.string(),
+  "videoTitle": zod.string(),
+  "startTime": zod.number(),
+  "endTime": zod.number(),
+  "text": zod.string(),
+  "thumbnailUrl": zod.string().nullish(),
+  "sourceType": zod.enum(['video', 'knowledge', 'authority']).optional().describe('Origin of the citation. \"video\" (the default when omitted) cites a transcript segment. \"knowledge\" cites a non-video Knowledge Entry — for these, videoTitle carries the entry title, text carries a snippet, thumbnailUrl carries the entry image, startTime\/endTime are 0, entryId identifies the entry, and videoId is empty (there is no clip to jump to).'),
+  "entryId": zod.string().nullish().describe('Knowledge Entry id when sourceType is \"knowledge\".'),
+  "verified": zod.boolean().optional().describe('True when this citation is mentor-verified. For \"video\" citations that means retrieval tied the segment to a reviewer-verified concept; for \"knowledge\" citations it means the field note itself records a verifier (its metadata `verifiedBy`). Absent\/false when nothing has confirmed it.'),
+  "sourceCount": zod.number().optional().describe('How many independent sources corroborate this citation. For \"video\" citations it is the distinct source videos of the covering concept; for \"knowledge\" citations it is the field note\'s own evidence count (metadata `evidenceCount`). Drives a \"confirmed across N videos\" trust badge; values below 2 are not corroboration and are not badged. Absent when there is no corroboration signal.'),
+  "jurisdiction": zod.string().optional(),
+  "authority": zod.string().optional(),
+  "documentTitle": zod.string().optional(),
+  "edition": zod.string().nullish(),
+  "revision": zod.string().nullish(),
+  "section": zod.string().nullish(),
+  "subsection": zod.string().nullish(),
+  "effectiveDateBasis": zod.string().nullish(),
+  "sourceStatus": zod.enum(['current', 'superseded', 'requires_review']).optional(),
+  "officialSourceUrl": zod.string().url().optional(),
+  "amendmentIndicator": zod.enum(['bc_amendment', 'vancouver_specific', 'none']).optional(),
+  "contentAvailability": zod.enum(['metadata_only', 'licensed_section']).optional()
+})),
+  "usedInternalKnowledge": zod.literal(false),
+  "attachment": zod.object({
+  "kind": zod.enum(['photo', 'document']),
+  "retained": zod.literal(false),
+  "truncated": zod.boolean()
+})
+})
+
+
+/**
  * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
 export const GetChatHistoryResponseItem = zod.object({
