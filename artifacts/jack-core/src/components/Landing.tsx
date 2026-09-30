@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { InstallJack } from "./InstallJack";
 import {
   ArrowRight,
   Clock,
@@ -143,6 +144,8 @@ export function Landing() {
               <ExternalLink className="h-4 w-4" />
             </a>
           </div>
+
+          <InstallJack />
 
           {/* Feature grid */}
           <div className="mt-20 grid w-full grid-cols-1 gap-4 text-left sm:grid-cols-2">
