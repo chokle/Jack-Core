@@ -20,6 +20,7 @@ import {
 } from "../lib/jack-local-command";
 import { JackSpeechPlayer, type JackVoiceState } from "../lib/jack-speech";
 import { resolveJackVideoDestination } from "../lib/jack-video-destination";
+import { JackPet } from "./JackPet";
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }>;
@@ -448,6 +449,7 @@ export function FloatingJack() {
     <div
       ref={pillRef}
       data-floating-jack
+      data-tour-target="ask-jack"
       className={
         dialogHost
           ? "relative z-[70] flex justify-center"
@@ -579,6 +581,21 @@ export function FloatingJack() {
           }}
           className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/95 p-1.5 pl-4 shadow-2xl backdrop-blur-xl"
         >
+          <JackPet
+            activity={
+              listening
+                ? "LISTENING"
+                : pending
+                  ? "THINKING"
+                  : voiceState === "playing"
+                    ? "SPEAKING"
+                    : answer
+                      ? "SUCCESS"
+                      : "ONLINE"
+            }
+            size={34}
+            label="Jack"
+          />
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}

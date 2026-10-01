@@ -20,6 +20,7 @@ import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
 import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
 import { InstallJack } from "./InstallJack";
+import { JackPresence, buildJackPresenceState } from "./JackPresence";
 
 export type JackView =
   | "orientation"
@@ -53,6 +54,10 @@ interface JackShellProps {
   userTestStarting?: boolean;
   canViewPilotReports?: boolean;
   canUseParticipantCloseout?: boolean;
+  isAskJackOpen?: boolean;
+  memoryLoading?: boolean;
+  memoryError?: boolean;
+  tourTarget?: "ask-jack" | "radar" | "closeout";
   canHistoryBack?: boolean;
   canHistoryForward?: boolean;
   onHistoryBack?: () => void;
@@ -97,6 +102,10 @@ export function JackShell({
   userTestStarting,
   canViewPilotReports,
   canUseParticipantCloseout,
+  isAskJackOpen = false,
+  memoryLoading = false,
+  memoryError = false,
+  tourTarget,
   canHistoryBack = false,
   canHistoryForward = false,
   onHistoryBack,
@@ -119,6 +128,26 @@ export function JackShell({
     insights: "Insights",
   };
   const hudEnabled = !!siteHudUserId;
+
+  useEffect(() => {
+    if (tourTarget && tourTarget !== "ask-jack" && window.innerWidth < 768) {
+      setIsPanelOpen(true);
+    }
+  }, [tourTarget]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (tourTarget) {
+      root.setAttribute("data-jack-guided-tour-target", tourTarget);
+    } else {
+      root.removeAttribute("data-jack-guided-tour-target");
+    }
+    return () => {
+      if (root.getAttribute("data-jack-guided-tour-target") === tourTarget) {
+        root.removeAttribute("data-jack-guided-tour-target");
+      }
+    };
+  }, [tourTarget]);
 
   useEffect(() => {
     const sync = () => syncAskJackComposerState();
@@ -166,7 +195,10 @@ export function JackShell({
   ];
 
   const shell = (
-    <div className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row">
+    <div
+      className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row"
+      data-guided-tour-target={tourTarget}
+    >
       <header className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar/85 px-4 py-3 backdrop-blur-md md:hidden">
         <button
           onClick={() => go("graph")}
@@ -291,6 +323,7 @@ export function JackShell({
               label="Closeout"
               action="closeout"
               active={active === "closeout"}
+              tourTarget="closeout"
               onClick={() => go("closeout")}
             />
           )}
@@ -298,6 +331,7 @@ export function JackShell({
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
             action="dashboard"
+            tourTarget="radar"
             active={
               active === "dashboard" ||
               active === "radar" ||
@@ -330,6 +364,15 @@ export function JackShell({
         </nav>
 
         <InstallJack />
+
+        <JackPresence
+          state={buildJackPresenceState({
+            workspace: surfaceLabel[active],
+            memoryLoading,
+            memoryError,
+            askJackOpen: isAskJackOpen,
+          })}
+        />
 
         {/* Graph stats */}
         <div className="mx-4 mt-4 rounded-xl border border-sidebar-border/80 bg-card/40 p-4">
@@ -498,6 +541,7 @@ function NavItem({
   action,
   onClick,
   testId,
+  tourTarget,
 }: {
   icon: ReactNode;
   label: string;
@@ -506,6 +550,7 @@ function NavItem({
   action?: JackUiActionName;
   onClick?: () => void;
   testId?: string;
+  tourTarget?: string;
 }) {
   if (soon) {
     return (
@@ -527,6 +572,7 @@ function NavItem({
     <button
       onClick={onClick}
       data-testid={testId}
+      data-tour-target={tourTarget}
       data-jack-action={action}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${

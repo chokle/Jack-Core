@@ -315,7 +315,7 @@ export function EndOfShiftCloseout({
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading closeout…</p>
         ) : (
-          <section className="space-y-4">
+          <section className="space-y-4" data-tour-target="closeout-form">
             <div className="flex flex-wrap gap-2">
               {state === "submitted" && !correcting && (
                 <Button

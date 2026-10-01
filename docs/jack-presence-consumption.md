@@ -1,0 +1,7 @@
+# Jack Presence
+
+`artifacts/jack-core/src/components/JackPresence.tsx` is a compact, presentation-only identity card. The shared `JackShell` proof builds its view model from the app's existing active workspace, Living Memory loading state, and Ask Jack panel state. `JackPet` supplies the shared character asset and reduced-motion-safe animation. No separate store or route is introduced.
+
+Future surfaces can consume `JackPresence` by passing a `JackPresenceState` assembled from their existing canonical state. Keep unavailable values omitted; provide `sourceCount` only from citations attached to the current answer. Radio, Radar, job, and location states must be connected to their owners before displaying active/online claims. Visual state is intentionally kept small enough for a sidebar and can be placed in other existing surfaces without changing navigation.
+
+`PilotOrientation` is kept mounted by the existing `App` shell while its `activeView` changes. It calls the app's existing navigation handler for Site Radar and participant Closeout, so the user lands on the actual surfaces. `JackShell` marks the existing menu buttons and `EndOfShiftCloseout` marks the real form as tour targets; cyan focus is applied only while the corresponding guide step is active. The step index is lifted to `App` only for that focus binding, not as a competing Radar, memory, radio, or session store. Accounts without participant closeout access never receive the Closeout step.

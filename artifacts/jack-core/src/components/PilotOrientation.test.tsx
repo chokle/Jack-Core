@@ -1,66 +1,85 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { PilotOrientation } from "./PilotOrientation";
 
 afterEach(cleanup);
+beforeEach(() => window.sessionStorage.clear());
+
+const baseProps = {
+  userId: "worker-1",
+  activeView: "orientation" as const,
+  onOpenOrientation: vi.fn(),
+  onOpenRadar: vi.fn(),
+  onOpenCloseout: vi.fn(),
+  onFinish: vi.fn(),
+  canOpenCloseout: true,
+};
 
 describe("PilotOrientation", () => {
-  it("opens Ask Jack with a question and links to live site and closeout", () => {
-    const onAskJack = vi.fn();
-    const onOpenDashboard = vi.fn();
-    const onOpenCloseout = vi.fn();
-    render(
-      <PilotOrientation
-        onAskJack={onAskJack}
-        onOpenDashboard={onOpenDashboard}
-        onOpenCloseout={onOpenCloseout}
-        onFinish={vi.fn()}
-        canOpenCloseout
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Ask Jack" }));
-    expect(screen.queryByRole("button", { name: "Open Dashboard" })).toBeNull();
+  it("uses Jack and routes the tour through Dashboard and closeout", () => {
+    const props = {
+      ...baseProps,
+      onOpenRadar: vi.fn(),
+      onOpenCloseout: vi.fn(),
+    };
+    const { rerender } = render(<PilotOrientation {...props} />);
+    expect(screen.getByRole("img", { name: "Jack" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Skip guide" })).toBeTruthy();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    expect(screen.queryByLabelText(/pointing hand/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask Jack" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Dashboard" }));
+    expect(props.onOpenRadar).toHaveBeenCalledOnce();
+    rerender(<PilotOrientation {...props} activeView="dashboard" />);
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    expect(screen.getByText(/Dashboard is your site workspace/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Closeout" }));
+    expect(props.onOpenCloseout).toHaveBeenCalledOnce();
+
+    rerender(<PilotOrientation {...props} activeView="closeout" />);
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+    expect(
+      screen.getByText(/where you leave your shift handover/),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
-    expect(onAskJack).toHaveBeenCalledWith(
-      expect.stringContaining("What is Torch"),
-    );
-    expect(onOpenDashboard).toHaveBeenCalledOnce();
-    expect(onOpenCloseout).toHaveBeenCalledOnce();
+    expect(props.onFinish).toHaveBeenCalledOnce();
   });
 
-  it("does not offer closeout to an administrator", () => {
+  it("keeps closeout out of the route for accounts without participant access", () => {
+    const props = {
+      ...baseProps,
+      canOpenCloseout: false,
+      onOpenRadar: vi.fn(),
+    };
+    const { rerender } = render(<PilotOrientation {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    rerender(<PilotOrientation {...props} activeView="dashboard" />);
+    fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
+    expect(props.onOpenCloseout).not.toHaveBeenCalled();
+  });
+
+  it("restores the current step for the same signed-in user", () => {
+    const first = render(<PilotOrientation {...baseProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    first.unmount();
+    render(<PilotOrientation {...baseProps} activeView="dashboard" />);
+    expect(screen.getByText(/Dashboard is your site workspace/)).toBeTruthy();
+  });
+
+  it("clamps a saved Closeout step when participant access is unavailable", () => {
+    window.sessionStorage.setItem("jack-orientation-step-v2:worker-1", "2");
     render(
       <PilotOrientation
-        onAskJack={vi.fn()}
-        onOpenDashboard={vi.fn()}
-        onOpenCloseout={vi.fn()}
-        onFinish={vi.fn()}
+        {...baseProps}
+        activeView="dashboard"
         canOpenCloseout={false}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Open Closeout" })).toBeNull();
-  });
 
-  it("resumes the same signed-in user's step after leaving and returning", () => {
-    const props = {
-      userId: "worker-1",
-      onAskJack: vi.fn(),
-      onOpenDashboard: vi.fn(),
-      onOpenCloseout: vi.fn(),
-      onFinish: vi.fn(),
-      canOpenCloseout: true,
-    };
-    const firstVisit = render(<PilotOrientation {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByRole("button", { name: "Open Dashboard" })).toBeTruthy();
-    firstVisit.unmount();
-
-    render(<PilotOrientation {...props} />);
-    expect(screen.getByRole("button", { name: "Open Dashboard" })).toBeTruthy();
+    expect(screen.getByText("Step 2 · Dashboard")).toBeTruthy();
+    expect(screen.getByLabelText("Step 2 of 2")).toBeTruthy();
+    expect(screen.queryByText("Step 3 · Closeout")).toBeNull();
   });
 });

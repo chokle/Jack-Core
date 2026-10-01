@@ -380,6 +380,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     canForward: false,
   });
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [orientationStep, setOrientationStep] = useState(0);
   const [chatContext, setChatContext] = useState<string | undefined>();
   const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
   const [accountDeleteOpen, setAccountDeleteOpen] = useState(false);
@@ -1206,6 +1207,18 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         userTestStarting={testStartPending}
         canViewPilotReports={me?.canViewPilotReports === true}
         canUseParticipantCloseout={canViewCloseout}
+        isAskJackOpen={isChatOpen}
+        memoryLoading={graph.isLoading}
+        memoryError={graph.hasError && !graph.model.counts.nodes}
+        tourTarget={
+          orientationStep === 0 && view === "orientation"
+            ? "ask-jack"
+            : orientationStep === 1
+              ? "radar"
+              : orientationStep === 2 && canViewCloseout
+                ? "closeout"
+                : undefined
+        }
         canHistoryBack={navigationAvailability.canBack}
         canHistoryForward={navigationAvailability.canForward}
         onHistoryBack={handleHistoryBack}
@@ -1223,19 +1236,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
             onOpenChat={handleOpenChat}
             seek={seek}
           />
-        ) : view === "orientation" ? (
-          <PilotOrientation
-            userId={me?.userId}
-            onAskJack={(prompt) => {
-              markOrientationSeen();
-              handleOpenChat(prompt);
-            }}
-            onOpenDashboard={() => finishOrientation("dashboard")}
-            onOpenCloseout={() => finishOrientation("closeout")}
-            onFinish={() => finishOrientation("graph")}
-            canOpenCloseout={canViewCloseout}
-          />
-        ) : view === "graph" ? (
+        ) : view === "orientation" ? null : view === "graph" ? (
           <MemoryGraphView
             data={graph}
             focusNodeId={graphFocusNodeId}
@@ -1299,6 +1300,19 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         ) : (
           <Library onSelectVideo={handleSelectVideo} />
         )}
+        <PilotOrientation
+          key={`pilot-orientation:${me?.userId ?? "signed-out"}`}
+          userId={me?.userId}
+          activeView={view}
+          onOpenOrientation={() => handleNavigate("orientation")}
+          onOpenRadar={() => handleNavigate("radar")}
+          onOpenCloseout={() => handleNavigate("closeout")}
+          onFinish={() =>
+            finishOrientation(view === "orientation" ? "graph" : view)
+          }
+          onStepChange={setOrientationStep}
+          canOpenCloseout={canViewCloseout}
+        />
       </JackShell>
 
       <TelemetryConsentModal
