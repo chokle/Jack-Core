@@ -126,13 +126,16 @@ describe("native transient transcription", () => {
     expect(providerBuffer?.every((value) => value === 0)).toBe(true);
     expect(mocks.from).not.toHaveBeenCalled();
   });
-  it.each(["application/octet-stream", "text/plain", "image/png", "video/mp4"])(
-    "rejects MIME %s before provider work",
-    async (mime) => {
-      expect((await audio(app(), mime)).status).toBe(400);
-      expect(mocks.transcribe).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    "application/octet-stream",
+    "text/plain",
+    "image/png",
+    "video/mp4",
+    "audio/aac",
+  ])("rejects MIME %s before provider work", async (mime) => {
+    expect((await audio(app(), mime)).status).toBe(400);
+    expect(mocks.transcribe).not.toHaveBeenCalled();
+  });
   it("rejects oversized audio before provider work", async () => {
     expect(
       (await audio(app(), "audio/mp4", Buffer.alloc(8 * 1024 * 1024 + 1)))
