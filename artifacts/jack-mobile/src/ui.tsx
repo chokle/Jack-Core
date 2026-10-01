@@ -30,21 +30,6 @@ export function BrandLockup() {
   );
 }
 
-export function JackIdentity({ compact = false }: { compact?: boolean }) {
-  return (
-    <Image
-      source={require("../assets/jack-mascot.webp")}
-      resizeMode="contain"
-      style={{
-        width: compact ? 72 : 132,
-        height: compact ? 88 : 164,
-        alignSelf: "center",
-      }}
-      accessibilityLabel="Jack, Torch's field assistant"
-    />
-  );
-}
-
 export function Action({
   title,
   onPress,
