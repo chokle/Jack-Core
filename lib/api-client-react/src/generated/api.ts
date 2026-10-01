@@ -39,6 +39,10 @@ import type {
   InterviewSession,
   InterviewSessionDetail,
   InterviewTurnResult,
+  JackAudioInput,
+  JackSource,
+  JackSpeechInput,
+  JackTranscription,
   JobStatus,
   KnowledgeCandidate,
   KnowledgeCandidateList,
@@ -1745,6 +1749,232 @@ export const useAskJack = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getAskJackMutationOptions(options));
     }
+
+export const getTranscribeJackAudioUrl = () => {
+
+
+
+
+  return `/api/jack/transcribe`
+}
+
+/**
+ * Requires authenticated pilot access. Audio is not ingested into knowledge. Maximum one 8 MiB audio clip; bounded provider timeout and no automatic retries.
+ * @summary Transcribe a transient microphone clip for Ask Jack
+ */
+export const transcribeJackAudio = async (jackAudioInput: JackAudioInput, options?: RequestInit): Promise<JackTranscription> => {
+    const formData = new FormData();
+formData.append(`audio`, jackAudioInput.audio);
+
+  return customFetch<JackTranscription>(getTranscribeJackAudioUrl(),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+);}
+
+
+
+
+export const getTranscribeJackAudioMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeJackAudio>>, TError,{data: BodyType<JackAudioInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof transcribeJackAudio>>, TError,{data: BodyType<JackAudioInput>}, TContext> => {
+
+const mutationKey = ['transcribeJackAudio'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof transcribeJackAudio>>, {data: BodyType<JackAudioInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  transcribeJackAudio(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TranscribeJackAudioMutationResult = NonNullable<Awaited<ReturnType<typeof transcribeJackAudio>>>
+    export type TranscribeJackAudioMutationBody = BodyType<JackAudioInput>
+    export type TranscribeJackAudioMutationError = ErrorType<void>
+
+    /**
+ * @summary Transcribe a transient microphone clip for Ask Jack
+ */
+export const useTranscribeJackAudio = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeJackAudio>>, TError,{data: BodyType<JackAudioInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof transcribeJackAudio>>,
+        TError,
+        {data: BodyType<JackAudioInput>},
+        TContext
+      > => {
+      return useMutation(getTranscribeJackAudioMutationOptions(options));
+    }
+
+export const getSynthesizeJackSpeechUrl = () => {
+
+
+
+
+  return `/api/jack/speech`
+}
+
+/**
+ * @summary Replay an answer using Jack's canonical server-configured voice
+ */
+export const synthesizeJackSpeech = async (jackSpeechInput: JackSpeechInput, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getSynthesizeJackSpeechUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(jackSpeechInput)
+  }
+);}
+
+
+
+
+export const getSynthesizeJackSpeechMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof synthesizeJackSpeech>>, TError,{data: BodyType<JackSpeechInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof synthesizeJackSpeech>>, TError,{data: BodyType<JackSpeechInput>}, TContext> => {
+
+const mutationKey = ['synthesizeJackSpeech'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof synthesizeJackSpeech>>, {data: BodyType<JackSpeechInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  synthesizeJackSpeech(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SynthesizeJackSpeechMutationResult = NonNullable<Awaited<ReturnType<typeof synthesizeJackSpeech>>>
+    export type SynthesizeJackSpeechMutationBody = BodyType<JackSpeechInput>
+    export type SynthesizeJackSpeechMutationError = ErrorType<void>
+
+    /**
+ * @summary Replay an answer using Jack's canonical server-configured voice
+ */
+export const useSynthesizeJackSpeech = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof synthesizeJackSpeech>>, TError,{data: BodyType<JackSpeechInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof synthesizeJackSpeech>>,
+        TError,
+        {data: BodyType<JackSpeechInput>},
+        TContext
+      > => {
+      return useMutation(getSynthesizeJackSpeechMutationOptions(options));
+    }
+
+export const getGetJackSourceUrl = (kind: 'video' | 'knowledge',
+    id: string,) => {
+
+
+
+
+  return `/api/jack/sources/${kind}/${id}`
+}
+
+/**
+ * Reuses Library video and Ask Jack knowledge-entry read policies. No storage URLs or private metadata are returned. Living Memory node IDs fail closed until a canonical viewer authorization policy exists.
+ * @summary Read an authorized canonical citation source
+ */
+export const getJackSource = async (kind: 'video' | 'knowledge',
+    id: string, options?: RequestInit): Promise<JackSource> => {
+
+  return customFetch<JackSource>(getGetJackSourceUrl(kind,id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetJackSourceQueryKey = (kind: 'video' | 'knowledge',
+    id: string,) => {
+    return [
+    `/api/jack/sources/${kind}/${id}`
+    ] as const;
+    }
+
+
+export const getGetJackSourceQueryOptions = <TData = Awaited<ReturnType<typeof getJackSource>>, TError = ErrorType<void>>(kind: 'video' | 'knowledge',
+    id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackSource>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetJackSourceQueryKey(kind,id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getJackSource>>> = ({ signal }) => getJackSource(kind,id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: kind !== null && kind !== undefined && id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getJackSource>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetJackSourceQueryResult = NonNullable<Awaited<ReturnType<typeof getJackSource>>>
+export type GetJackSourceQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read an authorized canonical citation source
+ */
+
+export function useGetJackSource<TData = Awaited<ReturnType<typeof getJackSource>>, TError = ErrorType<void>>(
+ kind: 'video' | 'knowledge',
+    id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackSource>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetJackSourceQueryOptions(kind,id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetChatHistoryUrl = () => {
 

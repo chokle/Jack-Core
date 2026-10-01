@@ -5,6 +5,29 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface JackAudioInput {
+  audio: Blob;
+}
+
+export interface JackSpeechInput {
+  /**
+     * @minLength 1
+     * @maxLength 5000
+     */
+  text: string;
+}
+
+export interface JackTranscription {
+  text: string;
+}
+
+export interface JackSource {
+  title: string;
+  text: string;
+  /** Relative authenticated /api/videos/{id}/play route; never a storage URL */
+  videoUrl?: string;
+}
+
 export interface SiteMappingOrganization {
   id: string;
   name: string;

@@ -41,6 +41,10 @@ import {
 } from "../lib/code-authority.js";
 import { createRevisionFeedFingerprintObserver } from "../lib/revision-feed-observer.js";
 import { loadLibraryContext } from "../lib/library-context.js";
+import {
+  knowledgeEntryScopeAllowed,
+  resolveKnowledgeScope,
+} from "../lib/knowledge-read-policy.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_VIDEO_CONTEXT_SEGMENTS = 6;
@@ -83,46 +87,6 @@ interface ChatCitation {
   officialSourceUrl?: string;
   amendmentIndicator?: string;
   contentAvailability?: string;
-}
-
-interface KnowledgeScope {
-  organizationId: string;
-  pilotId: string;
-}
-
-function knowledgeEntryScopeAllowed(
-  metadata: KnowledgeObjectMeta | undefined,
-  scope: KnowledgeScope | null,
-): boolean {
-  if (!metadata) return false;
-  const metadataPilotId = metadata.pilotId;
-  const metadataOrganizationId = metadata.organizationId;
-  const hasPilotId = typeof metadataPilotId === "string" && !!metadataPilotId;
-  const hasOrganizationId =
-    typeof metadataOrganizationId === "string" && !!metadataOrganizationId;
-  if (!hasPilotId && !hasOrganizationId) return true;
-  // Scoped knowledge must carry the complete canonical scope. A legacy name,
-  // short code, or half-populated scope is unknown and therefore excluded.
-  if (!hasPilotId || !hasOrganizationId || !scope) return false;
-  return (
-    metadataPilotId === scope.pilotId &&
-    metadataOrganizationId === scope.organizationId
-  );
-}
-
-async function resolveKnowledgeScope(
-  userId: string,
-): Promise<KnowledgeScope | null> {
-  try {
-    const membership = await resolveActiveTesterScope(userId);
-    if (!membership.scope) return null;
-    return {
-      organizationId: membership.scope.organizationId,
-      pilotId: membership.scope.pilotId,
-    };
-  } catch (_error) {
-    return null;
-  }
 }
 
 router.post("/chat", aiQueryLimiter, async (req, res) => {

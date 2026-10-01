@@ -538,6 +538,49 @@ export const AskJackResponse = zod.object({
 
 
 /**
+ * Requires authenticated pilot access. Audio is not ingested into knowledge. Maximum one 8 MiB audio clip; bounded provider timeout and no automatic retries.
+ * @summary Transcribe a transient microphone clip for Ask Jack
+ */
+export const TranscribeJackAudioBody = zod.object({
+  "audio": zod.instanceof(File)
+})
+
+export const TranscribeJackAudioResponse = zod.object({
+  "text": zod.string()
+})
+
+
+/**
+ * @summary Replay an answer using Jack's canonical server-configured voice
+ */
+export const synthesizeJackSpeechBodyTextMax = 5000;
+
+
+
+export const SynthesizeJackSpeechBody = zod.object({
+  "text": zod.string().min(1).max(synthesizeJackSpeechBodyTextMax)
+})
+
+export const SynthesizeJackSpeechResponse = zod.unknown()
+
+
+/**
+ * Reuses Library video and Ask Jack knowledge-entry read policies. No storage URLs or private metadata are returned. Living Memory node IDs fail closed until a canonical viewer authorization policy exists.
+ * @summary Read an authorized canonical citation source
+ */
+export const GetJackSourceParams = zod.object({
+  "kind": zod.enum(['video', 'knowledge']),
+  "id": zod.coerce.string().uuid()
+})
+
+export const GetJackSourceResponse = zod.object({
+  "title": zod.string(),
+  "text": zod.string(),
+  "videoUrl": zod.string().optional().describe('Relative authenticated \/api\/videos\/{id}\/play route; never a storage URL')
+})
+
+
+/**
  * @summary Get chat history for the caller's session (identified by HttpOnly cookie)
  */
 export const GetChatHistoryResponseItem = zod.object({
