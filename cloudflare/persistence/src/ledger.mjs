@@ -46,9 +46,11 @@ export class RuntimeTaskState extends DurableObject {
         this.sql.exec("UPDATE state SET status='running', attempts=attempts+1, fence=fence+1, owner=?, expires=?, operation=?, version=version+1, updated=? WHERE singleton=1", input.owner, now + input.leaseMs, input.operation, now);
         return { ok: true, state: this.read() };
       }
-      if (input.action === 'finish') {
+      if (input.action === 'finish' || input.action === 'reconcile') {
         const old = this.sql.exec('SELECT * FROM receipts WHERE operation=?', input.operation).toArray()[0];
         if (old) return old.result === input.result && old.reference === input.reference ? { ok: true, alreadyRecorded: true, state: row } : reject('receipt_conflict');
+      }
+      if (input.action === 'finish') {
         if (row.status !== 'running' || row.owner !== input.owner || row.fence !== input.fence || row.operation !== input.operation) return reject('stale_owner');
       } else if (input.action === 'reconcile') {
         // Only the privileged operator API may submit checked provider evidence.

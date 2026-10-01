@@ -60,7 +60,19 @@ test('real SQLite DO survives killed workerd; unknown outcomes require reconcili
     assert.equal(reconciled.body.state.status, 'completed');
     host.child.send('stop'); await once(host.child, 'exit');
     host = await start();
-    assert.equal((await request(host, 'GET', undefined, readToken)).body.receipts[0].reference, 'checked-provider-receipt1');
+    const persisted = await request(host, 'GET', undefined, readToken);
+    assert.equal(persisted.body.receipts[0].reference, 'checked-provider-receipt1');
+    // A caller that lost the committed reconciliation response can retry after restart.
+    const reconciliationRetry = await request(host, 'POST', { action: 'reconcile', operation: 'provider-op1', fence: 1, result: 'succeeded', reference: 'checked-provider-receipt1' });
+    assert.equal(reconciliationRetry.status, 200);
+    assert.equal(reconciliationRetry.body.alreadyRecorded, true);
+    assert.deepEqual(reconciliationRetry.body.state, persisted.body.state);
+    for (const conflict of [{ result: 'verified_failed', reference: 'checked-provider-receipt1' }, { result: 'succeeded', reference: 'different-provider-receipt' }]) {
+      const denied = await request(host, 'POST', { action: 'reconcile', operation: 'provider-op1', fence: 1, ...conflict });
+      assert.equal(denied.status, 409);
+      assert.equal(denied.body.error, 'receipt_conflict');
+    }
+    assert.deepEqual((await request(host, 'GET', undefined, readToken)).body, persisted.body);
     await request(host, 'POST', { action: 'create' }, writeToken, 'budget');
     for (let attempt = 1; attempt <= 3; attempt++) {
       const operation = `failed-op${attempt}`;
@@ -73,7 +85,7 @@ test('real SQLite DO survives killed workerd; unknown outcomes require reconcili
     const duplicate = await request(host, 'POST', { action: 'finish', owner: 'executor', operation: 'failed-op3', fence: 3, result: 'verified_failed', reference: 'verified-failure3' }, writeToken, 'budget');
     assert.equal(duplicate.body.alreadyRecorded, true);
     assert.equal((await request(host, 'POST', { action: 'finish', owner: 'executor', operation: 'failed-op3', fence: 3, result: 'succeeded', reference: 'different-receipt' }, writeToken, 'budget')).body.error, 'receipt_conflict');
-    await writeFile(resolve(persistPath, 'receipt.json'), JSON.stringify({ acceptedAt: new Date().toISOString(), environment: 'local Miniflare 4.20260730.0 / workerd SQLite', actualProcessTreeKilled: true, recovery: 'unknown operation blocked until reconciled', receiptRestartPersistence: true, staleOwnerRejected: true, maxAttempts: 3, readWriteAuthorization: true, scopeIsolation: true, hostedAcceptance: false }, null, 2));
+    await writeFile(resolve(persistPath, 'receipt.json'), JSON.stringify({ acceptedAt: new Date().toISOString(), environment: 'local Miniflare 4.20260730.0 / workerd SQLite', actualProcessTreeKilled: true, recovery: 'unknown operation blocked until reconciled', receiptRestartPersistence: true, reconciliationRetryIdempotentAfterRestart: true, reconciliationConflictsRejectedWithoutMutation: true, staleOwnerRejected: true, maxAttempts: 3, readWriteAuthorization: true, scopeIsolation: true, hostedAcceptance: false }, null, 2));
     console.log(`LOCAL_WORKERD_SQLITE_KILL_RECOVERY_PASS persist=${persistPath}; no hosted deployment acceptance`);
   } finally {
     for (const child of children) { if (child.exitCode === null) { try { killTree(child); } catch {} } }
