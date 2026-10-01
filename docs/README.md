@@ -6,6 +6,8 @@ Read order for a new agent: **`../VISION.md` (why + priorities) → `../JACK_CON
 
 ## Contents
 
+- [native-android-migration.md](./native-android-migration.md) — issue 209 native Android architecture, shared backend boundaries, migration sequence and physical-device acceptance gates.
+
 - [agent-context.md](./agent-context.md) — required source reading, Daz's responsibility to Derek, and evidence-preserving handoffs.
 
 - [architecture.md](./architecture.md) — stack and core architecture decisions (single-page model, persistence, video job pipeline lifecycle, strict knowledge-write verification, RAG-first answering, competency mapping).
