@@ -8,6 +8,7 @@ import {
   type CloseoutRecord,
   type CloseoutShift,
   type CloseoutState,
+  correctCloseout,
   loadCloseout,
   saveCloseout,
   type GetCloseoutResponse,
@@ -69,6 +70,8 @@ export function EndOfShiftCloseout({
   const [saving, setSaving] = useState(false);
   const [closeout, setCloseout] = useState<CloseoutRecord | null>(null);
   const [closeoutLoaded, setCloseoutLoaded] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState("");
 
   const sortedAnswers = useMemo(() => {
     const next: Record<string, string> = {};
@@ -86,7 +89,7 @@ export function EndOfShiftCloseout({
       ),
     [questions, sortedAnswers],
   );
-  const readOnly = state === "submitted";
+  const readOnly = state === "submitted" && !correcting;
   const canResumeDraft = closeout?.status === "draft" && closeoutLoaded;
 
   const label =
@@ -112,6 +115,8 @@ export function EndOfShiftCloseout({
     setScope(body.scope);
     setCloseout(body.closeout);
     setCloseoutLoaded(true);
+    setCorrecting(false);
+    setCorrectionReason("");
   };
 
   const load = async () => {
@@ -167,6 +172,36 @@ export function EndOfShiftCloseout({
     setAnswers(savedAnswers);
   };
 
+  const saveCorrection = async () => {
+    if (!closeout || !correctionReason.trim() || !complete) return;
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await correctCloseout({
+        workDate,
+        shift,
+        answers,
+        reason: correctionReason.trim(),
+        expectedUpdatedAt: closeout.updatedAt,
+      });
+      setCloseout(result.closeout);
+      setSavedAnswers(result.closeout.answers);
+      setAnswers(result.closeout.answers);
+      setCorrecting(false);
+      setCorrectionReason("");
+      setMessage(
+        "Correction saved. The original submission remains in the history.",
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not save correction.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <main className="h-full overflow-y-auto p-4 sm:p-6 print:bg-white print:text-black">
       <div className="mx-auto grid max-w-3xl gap-4">
@@ -176,8 +211,8 @@ export function EndOfShiftCloseout({
           </p>
           <h1 className="text-xl font-bold">End-of-Shift Closeout</h1>
           <p className="text-sm text-muted-foreground">
-            Structured mobile-ready workflow: save a draft, resume it later,
-            then submit once complete.
+            Save a draft, submit your shift notes, and add a dated correction
+            whenever you need to fix a submitted answer.
           </p>
         </header>
 
@@ -257,10 +292,12 @@ export function EndOfShiftCloseout({
           <AlertTitle>{`Closeout status: ${label}`}</AlertTitle>
           <AlertDescription>
             {readOnly
-              ? "This closeout is submitted. It cannot be edited."
-              : state === "draft"
-                ? "A draft was loaded. Resume to continue or resubmit once updated."
-                : "No closeout exists yet. Complete all questions to submit."}
+              ? "This closeout is submitted. You can add a dated correction if something was missed."
+              : correcting
+                ? "Correct the answers below and explain what changed. Jack keeps the original submission."
+                : state === "draft"
+                  ? "A draft was loaded. Resume to continue or resubmit once updated."
+                  : "No closeout exists yet. Complete all questions to submit."}
           </AlertDescription>
         </Alert>
 
@@ -280,6 +317,38 @@ export function EndOfShiftCloseout({
         ) : (
           <section className="space-y-4">
             <div className="flex flex-wrap gap-2">
+              {state === "submitted" && !correcting && (
+                <Button
+                  variant="outline"
+                  onClick={() => setCorrecting(true)}
+                  type="button"
+                >
+                  Correct submitted closeout
+                </Button>
+              )}
+              {correcting && (
+                <>
+                  <Button
+                    disabled={saving || !complete || !correctionReason.trim()}
+                    onClick={() => void saveCorrection()}
+                    type="button"
+                  >
+                    {saving ? "Saving correction…" : "Save correction"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => {
+                      setAnswers(savedAnswers);
+                      setCorrecting(false);
+                      setCorrectionReason("");
+                    }}
+                    type="button"
+                  >
+                    Cancel correction
+                  </Button>
+                </>
+              )}
               {canResumeDraft && (
                 <Button
                   variant="outline"
@@ -290,20 +359,85 @@ export function EndOfShiftCloseout({
                 </Button>
               )}
               <Button
-                disabled={saving || readOnly}
+                disabled={saving || state === "submitted"}
                 onClick={() => void save("draft")}
                 type="button"
               >
                 {saving ? "Saving…" : "Save draft"}
               </Button>
               <Button
-                disabled={saving || readOnly || !complete}
+                disabled={saving || state === "submitted" || !complete}
                 onClick={() => void save("submitted")}
                 type="button"
               >
                 {saving ? "Submitting…" : "Submit closeout"}
               </Button>
             </div>
+
+            {correcting && (
+              <label className="block space-y-1 text-sm">
+                <span className="font-semibold">Reason for correction</span>
+                <Textarea
+                  value={correctionReason}
+                  maxLength={500}
+                  onChange={(event) => setCorrectionReason(event.target.value)}
+                  placeholder="What was missed or entered incorrectly?"
+                />
+              </label>
+            )}
+
+            {closeout?.status === "submitted" && (
+              <details className="rounded-lg border border-border p-3 text-sm">
+                <summary>
+                  Submission history ({1 + (closeout.corrections?.length ?? 0)})
+                </summary>
+                <details className="mt-2 rounded-md border border-border p-2">
+                  <summary>
+                    Original submission:{" "}
+                    {new Date(
+                      closeout.submittedAt ?? closeout.createdAt,
+                    ).toLocaleString()}
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {Object.entries(closeout.originalAnswers ?? {}).map(
+                      ([question, answer]) => (
+                        <li key={question}>
+                          <strong>
+                            {QUESTION_LABELS[question] ?? question}
+                          </strong>{" "}
+                          {answer}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </details>
+                <ul className="mt-2 space-y-2">
+                  {(closeout.corrections ?? []).map((correction, index) => (
+                    <li key={`${correction.at}-${index}`}>
+                      <details className="rounded-md border border-border p-2">
+                        <summary>
+                          Correction {index + 1}:{" "}
+                          {new Date(correction.at).toLocaleString()} —{" "}
+                          {correction.reason}
+                        </summary>
+                        <ul className="mt-2 space-y-1">
+                          {Object.entries(correction.answers).map(
+                            ([question, answer]) => (
+                              <li key={question}>
+                                <strong>
+                                  {QUESTION_LABELS[question] ?? question}
+                                </strong>{" "}
+                                {answer}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
 
             <div className="space-y-3">
               {questions.map((question) => {

@@ -8,27 +8,45 @@ import {
   screen,
 } from "@testing-library/react";
 import { JackShell, type JackView } from "./JackShell";
+import { Dashboard } from "./Dashboard";
 import { SiteHudDemo } from "./SiteHudDemo";
 import type { GraphModel } from "../lib/memory-graph";
 import { collectJackUiContext } from "../lib/jack-ui-context";
 
 vi.mock("./SystemHealthWidget", () => ({ SystemHealthWidget: () => null }));
-const model = {
-  counts: { nodes: 0, connections: 0, knowledge: 0, topics: 0 },
-} as GraphModel;
+const model: GraphModel = {
+  topics: [],
+  nodes: [],
+  edges: [],
+  degree: {},
+  counts: { nodes: 0, connections: 0, knowledge: 0, topics: 0, videos: 0 },
+};
 
-function shell(userId?: string, active: JackView = "graph") {
+function shell(
+  userId?: string,
+  active: JackView = "graph",
+  onNavigate = vi.fn(),
+) {
   return (
     <JackShell
       active={active}
-      onNavigate={vi.fn()}
+      onNavigate={onNavigate}
       onOpenChat={vi.fn()}
       model={model}
       readyCount={0}
       lastUpdatedLabel="now"
       siteHudUserId={userId}
     >
-      <div>{active} content</div>
+      {active === "dashboard" ? (
+        <Dashboard
+          model={model}
+          readyCount={0}
+          lastUpdatedLabel="now"
+          siteHudUserId={userId}
+        />
+      ) : (
+        <div>{active} content</div>
+      )}
     </JackShell>
   );
 }
@@ -40,25 +58,26 @@ afterEach(() => {
 });
 
 describe("site radar release gate", () => {
-  it("exposes the empty live radar to a resolved account regardless of demo flag", () => {
+  it("routes the signed-in HUD entry into Dashboard regardless of demo flag", () => {
     vi.stubEnv("VITE_SITE_HUD_DEMO_ENABLED", "true");
-    const { rerender } = render(shell("account-a"));
+    const onNavigate = vi.fn();
+    const { rerender } = render(shell("account-a", "graph", onNavigate));
     expect(screen.getByRole("button", { name: "Open radar" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open demo site" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open radar" }));
-    rerender(shell("account-a", "radar"));
-    expect(collectJackUiContext().surface).toBe("Site radar");
-    expect(
-      screen.getByRole("region", { name: "Shared site mapping" }),
-    ).toBeTruthy();
-    expect(screen.queryByText("radar content")).toBeNull();
+    expect(onNavigate).toHaveBeenCalledWith("dashboard");
+
+    rerender(shell("account-a", "dashboard", onNavigate));
+    expect(collectJackUiContext().surface).toBe("Dashboard");
+    expect(screen.queryByRole("button", { name: "Open radar" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Jack dashboard" })).toBeTruthy();
   });
 
   it("hides radar without an account and clears location on account change", () => {
     const getCurrentPosition = vi.fn();
     vi.stubGlobal("isSecureContext", true);
     vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
-    const { rerender } = render(shell("account-a", "radar"));
+    const { rerender } = render(shell("account-a", "dashboard"));
     fireEvent.click(screen.getByRole("button", { name: "Use my location" }));
     act(() =>
       getCurrentPosition.mock.calls[0][0]({
@@ -66,7 +85,7 @@ describe("site radar release gate", () => {
       }),
     );
     expect(screen.getByText(/1\.000000, 2\.000000/)).toBeTruthy();
-    rerender(shell("account-b", "radar"));
+    rerender(shell("account-b", "dashboard"));
     expect(screen.getByText("Location off")).toBeTruthy();
     rerender(shell(undefined, "graph"));
     expect(screen.queryByRole("button", { name: "Open radar" })).toBeNull();

@@ -294,15 +294,28 @@ export async function transcribeFromUrl(videoUrl: string): Promise<Transcription
  * Whisper infers the container/codec from the file extension, so `filename`
  * MUST carry the real extension (e.g. `answer.webm`, `answer.mp4`).
  */
-export async function transcribeAudioBuffer(buffer: Buffer, filename: string): Promise<string> {
+export interface AudioTranscriptionOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  maxRetries?: number;
+}
+
+export async function transcribeAudioBuffer(
+  buffer: Buffer,
+  filename: string,
+  options?: AudioTranscriptionOptions,
+): Promise<string> {
   if (buffer.length === 0) {
     throw new Error("Audio clip is empty");
   }
-  const result = await openai.audio.transcriptions.create({
-    file: await toFile(buffer, filename),
-    model: MODELS.transcription,
-    response_format: "text",
-  });
+  const result = await openai.audio.transcriptions.create(
+    {
+      file: await toFile(buffer, filename),
+      model: MODELS.transcription,
+      response_format: "text",
+    },
+    options,
+  );
   // With response_format: "text" the SDK resolves to a plain string.
   return (typeof result === "string" ? result : String(result)).trim();
 }

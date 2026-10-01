@@ -569,6 +569,107 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatResponse"
 
+  /jack/transcribe:
+    post:
+      operationId: transcribeJackAudio
+      tags: [chat]
+      summary: Transcribe a transient microphone clip for Ask Jack
+      description: Requires authenticated pilot access. Audio is not ingested into knowledge. Maximum one 8 MiB audio clip; bounded provider timeout and no automatic retries.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/JackAudioInput"
+      responses:
+        "200":
+          description: Transcribed text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JackTranscription"
+        "400":
+          description: Missing, empty or unsupported audio
+        "401":
+          description: Sign-in required
+        "403":
+          description: Pilot membership required
+        "413":
+          description: Audio exceeds 8 MiB
+        "422":
+          description: No speech detected
+        "429":
+          description: Transcription rate limit reached
+        "503":
+          description: Transcription unavailable
+
+  /jack/speech:
+    post:
+      operationId: synthesizeJackSpeech
+      tags: [chat]
+      summary: Replay an answer using Jack's canonical server-configured voice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JackSpeechInput"
+      responses:
+        "200":
+          description: Private bounded MP3 voice response
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid speech text
+        "401":
+          description: Sign-in required
+        "403":
+          description: Pilot membership required
+        "429":
+          description: Speech rate limit reached
+        "503":
+          description: Canonical voice unavailable
+
+  /jack/sources/{kind}/{id}:
+    get:
+      operationId: getJackSource
+      tags: [chat]
+      summary: Read an authorized canonical citation source
+      description: Reuses Library video and Ask Jack knowledge-entry read policies. No storage URLs or private metadata are returned. Living Memory node IDs fail closed until a canonical viewer authorization policy exists.
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [video, knowledge]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Canonical source text and private playback route
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JackSource"
+        "400":
+          description: Invalid source identifier
+        "401":
+          description: Sign-in required
+        "403":
+          description: Pilot membership required
+        "404":
+          description: Source absent or outside caller scope
+        "503":
+          description: Source unavailable
+
   /chat/history:
     get:
       operationId: getChatHistory
@@ -1481,6 +1582,38 @@ components:
         status: { type: string, enum: [pending, accepted, revoked] }
         deliveryStatus: { type: string, enum: [pending, sent, unknown] }
         expiresAt: { type: string }
+    JackAudioInput:
+      type: object
+      required: [audio]
+      properties:
+        audio:
+          type: string
+          format: binary
+    JackSpeechInput:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+    JackTranscription:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    JackSource:
+      type: object
+      required: [title, text]
+      properties:
+        title:
+          type: string
+        text:
+          type: string
+        videoUrl:
+          type: string
+          description: Relative authenticated /api/videos/{id}/play route; never a storage URL
     SiteMappingOrganization:
       type: object
       required: [id, name]

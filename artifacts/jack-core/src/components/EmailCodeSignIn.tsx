@@ -23,6 +23,10 @@ function messageFrom(error: unknown): string {
 }
 
 export function EmailCodeSignIn() {
+  const phoneSignInUrl =
+    window.location.hostname === "jack.torchlabs.ca"
+      ? `https://accounts.torchlabs.ca/sign-in?redirect_url=${encodeURIComponent(`${window.location.origin}${appPath}`)}`
+      : null;
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { isLoaded: signInLoaded, signIn, setActive } = useSignIn();
   const [, setLocation] = useLocation();
@@ -165,6 +169,14 @@ export function EmailCodeSignIn() {
                 : "Use your email address. We'll send you a sign-in code."}
           </p>
         </div>
+        {step === "email" && phoneSignInUrl && (
+          <a
+            href={phoneSignInUrl}
+            className="block rounded-lg bg-primary px-4 py-3 text-center text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            Sign in with a phone code
+          </a>
+        )}
         {step === "email" ? (
           <form onSubmit={start} className="space-y-4">
             <label className="block space-y-2 text-sm font-medium">

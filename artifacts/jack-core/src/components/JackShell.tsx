@@ -4,8 +4,6 @@ import {
   Network,
   LayoutGrid,
   LayoutDashboard,
-  GraduationCap,
-  Lightbulb,
   Mic,
   Settings,
   Menu,
@@ -14,13 +12,17 @@ import {
   LogOut,
   Radio,
   ClipboardList,
+  Compass,
 } from "lucide-react";
 import type { GraphModel } from "../lib/memory-graph";
 import type { JackUiActionName } from "../lib/jack-ui-context";
 import { SystemHealthWidget } from "./SystemHealthWidget";
 import { SiteHudLive } from "./SiteHudLive";
+import { SiteMappingSelectionProvider } from "./SiteMappingSelection";
+import { InstallJack } from "./InstallJack";
 
 export type JackView =
+  | "orientation"
   | "graph"
   | "library"
   | "interview"
@@ -106,6 +108,7 @@ export function JackShell({
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const avatarInitial = (userLabel?.trim()?.charAt(0) || "J").toUpperCase();
   const surfaceLabel: Record<JackView, string> = {
+    orientation: "Start here",
     graph: "Living Memory",
     library: "Library",
     interview: "Interview",
@@ -164,7 +167,7 @@ export function JackShell({
     { label: "Videos Processed", value: fmt(readyCount) },
   ];
 
-  return (
+  const shell = (
     <div className="relative z-10 flex h-screen w-full flex-col overflow-hidden text-foreground selection:bg-primary/30 md:flex-row">
       <header className="flex shrink-0 items-center justify-between border-b border-sidebar-border bg-sidebar/85 px-4 py-3 backdrop-blur-md md:hidden">
         <button
@@ -235,6 +238,13 @@ export function JackShell({
         {/* Nav */}
         <nav className="flex flex-col gap-1 px-3 py-2">
           <NavItem
+            icon={<Compass className="h-4 w-4" />}
+            label="Start here"
+            action="orientation"
+            active={active === "orientation"}
+            onClick={() => go("orientation")}
+          />
+          <NavItem
             icon={<Bot className="h-4 w-4" />}
             label="Ask Jack"
             onClick={openChat}
@@ -254,14 +264,6 @@ export function JackShell({
             active={active === "library"}
             onClick={() => go("library")}
           />
-          {hudEnabled && (
-            <NavItem
-              icon={<Radio className="h-4 w-4" />}
-              label="Site radar"
-              active={active === "radar"}
-              onClick={() => go("radar")}
-            />
-          )}
           <NavItem
             icon={<Mic className="h-4 w-4" />}
             label="Interview"
@@ -297,20 +299,14 @@ export function JackShell({
           <NavItem
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="Dashboard"
-            active={active === "dashboard"}
+            action="dashboard"
+            active={
+              active === "dashboard" ||
+              active === "radar" ||
+              active === "competencies" ||
+              active === "insights"
+            }
             onClick={() => go("dashboard")}
-          />
-          <NavItem
-            icon={<GraduationCap className="h-4 w-4" />}
-            label="Competencies"
-            active={active === "competencies"}
-            onClick={() => go("competencies")}
-          />
-          <NavItem
-            icon={<Lightbulb className="h-4 w-4" />}
-            label="Insights"
-            active={active === "insights"}
-            onClick={() => go("insights")}
           />
           {onInviteUsers && (
             <NavItem
@@ -345,6 +341,8 @@ export function JackShell({
             />
           )}
         </nav>
+
+        <InstallJack />
 
         {/* Graph stats */}
         <div className="mx-4 mt-4 rounded-xl border border-sidebar-border/80 bg-card/40 p-4">
@@ -416,30 +414,20 @@ export function JackShell({
             "calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)))",
         }}
       >
-        {hudEnabled && (
-          <div
-            className={
-              active === "radar"
-                ? "relative flex min-h-0 flex-1 flex-col bg-background"
-                : "relative shrink-0 bg-background"
-            }
-          >
+        {hudEnabled && active !== "dashboard" && (
+          <div className="relative shrink-0 bg-background">
             <SiteHudLive
               key={siteHudUserId}
-              expanded={active === "radar"}
-              onOpenRadar={() => go("radar")}
+              expanded={false}
+              onOpenRadar={() => go("dashboard")}
             />
           </div>
         )}
         <div
-          className={
-            active === "radar"
-              ? "sr-only"
-              : "relative flex min-h-0 flex-1 overflow-hidden"
-          }
+          className="relative flex min-h-0 flex-1 overflow-hidden"
           data-jack-surface={surfaceLabel[active]}
         >
-          {active !== "radar" && children}
+          {children}
         </div>
         {/* These app-owned targets give Jack a bounded page/video history. The
             controls stay out of the visual layout; graph and video surfaces
@@ -449,6 +437,29 @@ export function JackShell({
           data-jack-command-index
           className="sr-only"
         >
+          {hudEnabled && (
+            <button
+              type="button"
+              data-jack-action="radar"
+              onClick={() => go("dashboard")}
+            >
+              Site radar in Dashboard
+            </button>
+          )}
+          <button
+            type="button"
+            data-jack-action="competencies"
+            onClick={() => go("competencies")}
+          >
+            Dashboard competencies
+          </button>
+          <button
+            type="button"
+            data-jack-action="insights"
+            onClick={() => go("insights")}
+          >
+            Dashboard insights
+          </button>
           <button
             type="button"
             data-jack-action="account"
@@ -481,6 +492,14 @@ export function JackShell({
         </nav>
       </main>
     </div>
+  );
+  return (
+    <SiteMappingSelectionProvider
+      key={siteHudUserId ?? "signed-out"}
+      actorId={siteHudUserId ?? "signed-out"}
+    >
+      {shell}
+    </SiteMappingSelectionProvider>
   );
 }
 

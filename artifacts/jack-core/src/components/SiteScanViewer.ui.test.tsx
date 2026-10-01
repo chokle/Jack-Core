@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SiteScanViewer } from "./SiteScanViewer";
 import type { SiteMappingScan } from "@workspace/api-client-react";
 
@@ -67,6 +67,42 @@ describe("authorized 3D scan", () => {
     expect(screen.getByRole("status").textContent).toContain("Loading 3D scan");
     expect(await screen.findByTestId("scan-canvas")).toBeTruthy();
     expect(screen.getByText(/1 of 1 measured points shown/)).toBeTruthy();
+  });
+
+  it("opens the same private scan full screen and closes without another download", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(ply() as BodyInit, {
+          headers: { "content-type": "application/octet-stream" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<SiteScanViewer siteId="site-1" scan={scan} />);
+    const open = await screen.findByRole("button", {
+      name: "Open 3D scan full screen",
+    });
+    fireEvent.click(open);
+    expect(
+      screen.getByRole("dialog", { name: /Full-screen 3D scan/ }),
+    ).toBeTruthy();
+    const close = screen.getByRole("button", {
+      name: "Close full-screen 3D view",
+    });
+    expect(view.container.inert).toBe(true);
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+    expect(screen.getByTestId("scan-canvas")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(view.container.inert).toBeFalsy();
+    expect(
+      screen.getByRole("button", { name: "Open 3D scan full screen" }),
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Open 3D scan full screen" }),
+    );
   });
 
   it("shows a clear error when the private file cannot be read", async () => {

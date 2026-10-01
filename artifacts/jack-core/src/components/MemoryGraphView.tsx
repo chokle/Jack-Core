@@ -766,7 +766,7 @@ export function MemoryGraphView({
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-1 overflow-hidden bg-[rgb(7,10,20)]"
+      className="relative flex flex-1 overflow-hidden bg-black"
       data-jack-surface="Living Memory"
       data-jack-path={contextPath}
       data-graph-id={CORE_ID}

@@ -517,6 +517,14 @@ function resetServiceState() {
 }
 
 describe("user-testing gate transition", () => {
+  it("offers a skippable first-run guide and remembers the choice for this account", async () => {
+    await renderAuthenticatedApp("/app");
+    expect(screen.getByRole("heading", { name: "Welcome to Jack" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip guide" }));
+    expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
+    expect(localStorage.getItem(`jack-orientation-v1:${identity.userId}`)).toBe("seen");
+  });
+
   it.each([
     ["library", "library-page"],
     ["interview", "interview-page"],
@@ -718,13 +726,10 @@ describe("user-testing gate transition", () => {
 
     await renderAuthenticatedApp("/app");
 
-    await waitFor(
-      () => expect(mockedStartTestSession).toHaveBeenCalledTimes(2),
-      {
-        timeout: 3_000,
-      },
-    );
-    expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
+    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2), {
+      timeout: 3_000,
+    });
+    expect(screen.getByRole("heading", { name: "Welcome to Jack" })).toBeTruthy();
     expect(userConsented()).toBe("false");
 
     openFromAnyEntry();
