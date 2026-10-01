@@ -5,10 +5,14 @@ import request from "supertest";
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
 const resolveIdentity = vi.hoisted(() => vi.fn());
+const resolveJackOrganizations = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({ getAuth }));
-vi.mock("../../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
+vi.mock("../../lib/activity-telemetry.js", () => ({
+  resolveActiveTesterScope,
+}));
 vi.mock("../../lib/admin-auth.js", () => ({ resolveIdentity }));
+vi.mock("../../lib/jack-access.js", () => ({ resolveJackOrganizations }));
 
 import { requireAuth } from "../requireAuth.js";
 import { requirePilotAccess } from "../requirePilotAccess.js";
@@ -16,9 +20,11 @@ import { requirePilotAccess } from "../requirePilotAccess.js";
 function makeApp(): Express {
   const app = express();
   app.use((req, _res, next) => {
-    (req as unknown as {
-      log: { warn: () => void; error: () => void };
-    }).log = { warn: () => {}, error: () => {} };
+    (
+      req as unknown as {
+        log: { warn: () => void; error: () => void };
+      }
+    ).log = { warn: () => {}, error: () => {} };
     next();
   });
   app.use("/api", requireAuth);
@@ -35,6 +41,7 @@ beforeEach(() => {
   getAuth.mockReset();
   resolveActiveTesterScope.mockReset();
   resolveIdentity.mockReset();
+  resolveJackOrganizations.mockReset().mockResolvedValue([]);
   delete process.env["PILOT_AUTH_BYPASS"];
 });
 
@@ -69,7 +76,10 @@ describe("requirePilotAccess", () => {
 
   it("allows a trusted admin even without a tester membership", async () => {
     getAuth.mockReturnValue({ userId: "user_admin" });
-    resolveActiveTesterScope.mockResolvedValue({ scope: null, reason: "not_enrolled" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
     resolveIdentity.mockResolvedValue({
       userId: "user_admin",
       email: "admin@torchlabs.ca",
@@ -84,9 +94,12 @@ describe("requirePilotAccess", () => {
     expect(res.status).toBe(200);
   });
 
-  it("rejects a signed-in Clerk user without active pilot membership", async () => {
+  it("rejects a signed-in user without any authorized Jack membership", async () => {
     getAuth.mockReturnValue({ userId: "user_unapproved" });
-    resolveActiveTesterScope.mockResolvedValue({ scope: null, reason: "not_enrolled" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
     resolveIdentity.mockResolvedValue({
       userId: "user_unapproved",
       email: "visitor@example.com",
@@ -100,11 +113,11 @@ describe("requirePilotAccess", () => {
 
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({
-      error: expect.stringContaining("active Torch pilot membership"),
+      error: expect.stringContaining("authorized organization invitation"),
     });
   });
 
-  it("fails closed when a caller has ambiguous active pilot membership", async () => {
+  it("fails closed when neither pilot scope nor general membership is resolved", async () => {
     getAuth.mockReturnValue({ userId: "user_ambiguous" });
     resolveActiveTesterScope.mockResolvedValue({
       scope: null,
@@ -126,7 +139,9 @@ describe("requirePilotAccess", () => {
 
   it("returns 500 rather than opening access when membership verification fails", async () => {
     getAuth.mockReturnValue({ userId: "user_error" });
-    resolveActiveTesterScope.mockRejectedValue(new Error("database unavailable"));
+    resolveActiveTesterScope.mockRejectedValue(
+      new Error("database unavailable"),
+    );
 
     const res = await request(app).get("/api/videos");
 
@@ -202,7 +217,9 @@ describe("requirePilotAccess", () => {
           : await request(app).get(path);
 
       expect(res.status).toBe(403);
-      expect(resolveActiveTesterScope).toHaveBeenCalledWith("user_former_pilot");
+      expect(resolveActiveTesterScope).toHaveBeenCalledWith(
+        "user_former_pilot",
+      );
     },
   );
 

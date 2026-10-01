@@ -9,6 +9,7 @@ import { clerkMiddleware } from "@clerk/express";
 import { requireAuth } from "./middlewares/requireAuth";
 import { requirePilotAccess } from "./middlewares/requirePilotAccess";
 import pilotDirectAccessRouter from "./routes/pilot-direct-access.js";
+import accessRouter from "./routes/access.js";
 import siteMappingRouter, {
   siteMappingCleanupRouter,
 } from "./routes/site-mapping.js";
@@ -114,15 +115,8 @@ app.get("/api/auth/reset-session", (_req, res) => {
   res.redirect(302, `/sign-in?session_reset=${Date.now()}`);
 });
 
-// The production pilot is invite-only. Direct navigation to Clerk's historical
-// self-service sign-up path is redirected before the SPA can mount it.
-app.get(/^\/sign-up(?:\/.*)?$/, (_req, res) => {
-  res.setHeader("Cache-Control", "no-store, max-age=0");
-  res.redirect(302, "/sign-in");
-});
-
-// Direct pilot entry is intentionally outside the auth gate so the token endpoint
-// can issue a valid Clerk session URL before the standard authorization boundary.
+// Retired clients must upgrade to verified-email sign-in; this no longer mints
+// sessions from an email address alone.
 app.use("/api/pilot-direct-access", pilotDirectAccessRouter);
 
 // The scheduled Worker has no Clerk session. These two maintenance routes
@@ -134,6 +128,8 @@ app.use("/api", siteMappingCleanupRouter);
 // anonymous requests never register as load, and before the router so a
 // direct-URL / incognito hit is rejected with 401 regardless of the frontend.
 app.use("/api", requireAuth);
+// Invitation acceptance verifies the authenticated email before granting access.
+app.use("/api", accessRouter);
 
 // Report meaningful (non-GET) API activity to the Vitality Engine so the
 // heartbeat widget reflects real request load. GET/HEAD/OPTIONS (browsing,
@@ -163,9 +159,7 @@ app.use((req, res, next) => {
 // checks. Mount it here so an organization admin need not also be a pilot tester.
 app.use("/api", siteMappingRouter);
 
-// Authentication alone does not authorize the controlled production pilot.
-// Require a current tester membership, or explicit server-resolved admin role,
-// before any protected API route can read or write real Jack data.
+// Authorized Jack membership is required; pilot participation is not.
 app.use("/api", requirePilotAccess);
 
 app.use("/api", router);

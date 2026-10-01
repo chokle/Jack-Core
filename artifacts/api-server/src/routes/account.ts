@@ -231,6 +231,11 @@ router.delete("/account", async (req, res) => {
       { p_actor_user_id: userId },
     );
     if (telemetryFinishError) throw telemetryFinishError;
+    const { error: jackAccessDeleteError } = await supabase.rpc(
+      "delete_jack_access_account",
+      { p_user_id: userId },
+    );
+    if (jackAccessDeleteError) throw jackAccessDeleteError;
     const { error: membershipCreatorScrubError } = await supabase
       .from("pilot_memberships")
       .update({ created_by_user_id: null })

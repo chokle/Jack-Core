@@ -220,6 +220,10 @@ describe("account deletion telemetry coverage", () => {
         name: "finish_telemetry_account_deletion",
         params: { p_actor_user_id: "user-1" },
       },
+      {
+        name: "delete_jack_access_account",
+        params: { p_user_id: "user-1" },
+      },
     ]);
     expect(operationOrder[0]).toBe("rpc:begin_telemetry_account_deletion");
     expect(
@@ -382,6 +386,7 @@ describe("account deletion telemetry coverage", () => {
       "begin_telemetry_account_deletion",
       "begin_telemetry_account_deletion",
       "finish_telemetry_account_deletion",
+      "delete_jack_access_account",
     ]);
   });
 });

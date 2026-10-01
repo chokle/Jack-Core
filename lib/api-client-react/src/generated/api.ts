@@ -34,17 +34,23 @@ import type {
   CurrentUser,
   DazTaskEnvelope,
   DazTaskInput,
+  GetJackInviteOrganizations200,
   GraphHealthReport,
   HealthStatus,
   InterviewSession,
   InterviewSessionDetail,
   InterviewTurnResult,
+  JackAccessContext,
+  JackInvitation,
+  JackInvitationInput,
   JobStatus,
   KnowledgeCandidate,
   KnowledgeCandidateList,
   KnowledgeGraph,
   KnowledgeNode,
   KnowledgeStats,
+  ListJackInvitations200,
+  ListJackInvitationsParams,
   ListKnowledgeCandidatesParams,
   ListParkedThoughtsParams,
   ListVideosParams,
@@ -117,6 +123,454 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetJackAccessUrl = () => {
+
+
+
+
+  return `/api/access`
+}
+
+/**
+ * @summary Current authorized Jack organizations and roles
+ */
+export const getJackAccess = async ( options?: RequestInit): Promise<JackAccessContext> => {
+
+  return customFetch<JackAccessContext>(getGetJackAccessUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetJackAccessQueryKey = () => {
+    return [
+    `/api/access`
+    ] as const;
+    }
+
+
+export const getGetJackAccessQueryOptions = <TData = Awaited<ReturnType<typeof getJackAccess>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetJackAccessQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getJackAccess>>> = ({ signal }) => getJackAccess({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getJackAccess>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetJackAccessQueryResult = NonNullable<Awaited<ReturnType<typeof getJackAccess>>>
+export type GetJackAccessQueryError = ErrorType<void>
+
+
+/**
+ * @summary Current authorized Jack organizations and roles
+ */
+
+export function useGetJackAccess<TData = Awaited<ReturnType<typeof getJackAccess>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackAccess>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetJackAccessQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAcceptJackInvitationsUrl = () => {
+
+
+
+
+  return `/api/access/accept`
+}
+
+/**
+ * @summary Claim invitations for the authenticated verified primary email
+ */
+export const acceptJackInvitations = async ( options?: RequestInit): Promise<JackAccessContext> => {
+
+  return customFetch<JackAccessContext>(getAcceptJackInvitationsUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getAcceptJackInvitationsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptJackInvitations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptJackInvitations>>, TError,void, TContext> => {
+
+const mutationKey = ['acceptJackInvitations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptJackInvitations>>, void> = () => {
+
+
+          return  acceptJackInvitations(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptJackInvitationsMutationResult = NonNullable<Awaited<ReturnType<typeof acceptJackInvitations>>>
+
+    export type AcceptJackInvitationsMutationError = ErrorType<void>
+
+    /**
+ * @summary Claim invitations for the authenticated verified primary email
+ */
+export const useAcceptJackInvitations = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptJackInvitations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof acceptJackInvitations>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getAcceptJackInvitationsMutationOptions(options));
+    }
+
+export const getGetJackInviteOrganizationsUrl = () => {
+
+
+
+
+  return `/api/access/organizations`
+}
+
+/**
+ * @summary Active organizations this caller can invite into
+ */
+export const getJackInviteOrganizations = async ( options?: RequestInit): Promise<GetJackInviteOrganizations200> => {
+
+  return customFetch<GetJackInviteOrganizations200>(getGetJackInviteOrganizationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetJackInviteOrganizationsQueryKey = () => {
+    return [
+    `/api/access/organizations`
+    ] as const;
+    }
+
+
+export const getGetJackInviteOrganizationsQueryOptions = <TData = Awaited<ReturnType<typeof getJackInviteOrganizations>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackInviteOrganizations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetJackInviteOrganizationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getJackInviteOrganizations>>> = ({ signal }) => getJackInviteOrganizations({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getJackInviteOrganizations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetJackInviteOrganizationsQueryResult = NonNullable<Awaited<ReturnType<typeof getJackInviteOrganizations>>>
+export type GetJackInviteOrganizationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Active organizations this caller can invite into
+ */
+
+export function useGetJackInviteOrganizations<TData = Awaited<ReturnType<typeof getJackInviteOrganizations>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getJackInviteOrganizations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetJackInviteOrganizationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListJackInvitationsUrl = (params: ListJackInvitationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/access/invitations?${stringifiedParams}` : `/api/access/invitations`
+}
+
+/**
+ * @summary Review invitations in an administered organization
+ */
+export const listJackInvitations = async (params: ListJackInvitationsParams, options?: RequestInit): Promise<ListJackInvitations200> => {
+
+  return customFetch<ListJackInvitations200>(getListJackInvitationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListJackInvitationsQueryKey = (params?: ListJackInvitationsParams,) => {
+    return [
+    `/api/access/invitations`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListJackInvitationsQueryOptions = <TData = Awaited<ReturnType<typeof listJackInvitations>>, TError = ErrorType<void>>(params: ListJackInvitationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listJackInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListJackInvitationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listJackInvitations>>> = ({ signal }) => listJackInvitations(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listJackInvitations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListJackInvitationsQueryResult = NonNullable<Awaited<ReturnType<typeof listJackInvitations>>>
+export type ListJackInvitationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Review invitations in an administered organization
+ */
+
+export function useListJackInvitations<TData = Awaited<ReturnType<typeof listJackInvitations>>, TError = ErrorType<void>>(
+ params: ListJackInvitationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listJackInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListJackInvitationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateJackInvitationUrl = () => {
+
+
+
+
+  return `/api/access/invitations`
+}
+
+/**
+ * @summary Authorize tenant access and email an invitation with a durable request ID
+ */
+export const createJackInvitation = async (jackInvitationInput: JackInvitationInput, options?: RequestInit): Promise<JackInvitation> => {
+
+  return customFetch<JackInvitation>(getCreateJackInvitationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(jackInvitationInput)
+  }
+);}
+
+
+
+
+export const getCreateJackInvitationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJackInvitation>>, TError,{data: BodyType<JackInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createJackInvitation>>, TError,{data: BodyType<JackInvitationInput>}, TContext> => {
+
+const mutationKey = ['createJackInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createJackInvitation>>, {data: BodyType<JackInvitationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createJackInvitation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateJackInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof createJackInvitation>>>
+    export type CreateJackInvitationMutationBody = BodyType<JackInvitationInput>
+    export type CreateJackInvitationMutationError = ErrorType<void>
+
+    /**
+ * @summary Authorize tenant access and email an invitation with a durable request ID
+ */
+export const useCreateJackInvitation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJackInvitation>>, TError,{data: BodyType<JackInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createJackInvitation>>,
+        TError,
+        {data: BodyType<JackInvitationInput>},
+        TContext
+      > => {
+      return useMutation(getCreateJackInvitationMutationOptions(options));
+    }
+
+export const getRevokeJackInvitationUrl = (id: string,) => {
+
+
+
+
+  return `/api/access/invitations/${id}`
+}
+
+/**
+ * @summary Revoke invitation and current access granted by that invitation
+ */
+export const revokeJackInvitation = async (id: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRevokeJackInvitationUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getRevokeJackInvitationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeJackInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeJackInvitation>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['revokeJackInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeJackInvitation>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  revokeJackInvitation(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeJackInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeJackInvitation>>>
+
+    export type RevokeJackInvitationMutationError = ErrorType<void>
+
+    /**
+ * @summary Revoke invitation and current access granted by that invitation
+ */
+export const useRevokeJackInvitation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeJackInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokeJackInvitation>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getRevokeJackInvitationMutationOptions(options));
+    }
 
 export const getCreateDazTaskUrl = () => {
 

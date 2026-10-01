@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AuthenticateWithRedirectCallback,
-  SignUp,
   Show,
   useAuth,
   useClerk,
@@ -35,6 +34,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { EmailCodeSignIn } from "@/components/EmailCodeSignIn";
+import { JackAccess, useJackAccess } from "./components/JackAccess";
+import { InviteUsers } from "./components/InviteUsers";
 import { Library } from "./components/Library";
 import { VideoDetail } from "./components/VideoDetail";
 import {
@@ -59,7 +60,6 @@ import {
   type TestingOverlayEvent,
   type TestingOverlayHandle,
 } from "./components/testing/TestingOverlay";
-import { UserTestingGate } from "./components/testing/UserTestingGate";
 import {
   TelemetryConsentModal,
   type TelemetryConsentChoices,
@@ -349,6 +349,8 @@ const clerkAppearance = {
 };
 
 function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
+  const access = useJackAccess();
+  const [, setLocation] = useLocation();
   const [interviewPreload, setInterviewPreload] = useState<
     TorchInterviewPreload | undefined
   >(readTorchInterviewPreload);
@@ -1155,6 +1157,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           window.location.assign(`${basePath}/sign-in`);
         }}
         onSignOut={isSignedIn && onSignOut ? handleSignOut : undefined}
+        onInviteUsers={
+          access?.canInvite ? () => setLocation("/admin/access") : undefined
+        }
         onStartUserTest={
           me?.isAdmin === false ? handleStartUserTest : undefined
         }
@@ -1248,15 +1253,6 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         onSave={(choices) => void handleTelemetryConsent(choices)}
         onClose={() => setTelemetryConsentOpen(false)}
       />
-      <UserTestingGate
-        key={`user-testing-gate:${me?.userId ?? "signed-out"}`}
-        open={
-          me?.isAdmin === false &&
-          ownedTestingGate.restricted &&
-          !ownedTestingGate.accepted
-        }
-        onStart={handleStartUserTest}
-      />
 
       {/* Chat Drawer overlay */}
       <AskJack
@@ -1302,6 +1298,14 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
               as product history separately from optional activity telemetry.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {access?.canInvite && (
+            <Button
+              variant="outline"
+              onClick={() => setLocation("/admin/access")}
+            >
+              Invite people
+            </Button>
+          )}
           {ownedTelemetryPrivacyScopes.length > 0 && (
             <div
               className="rounded-lg border border-border p-4"
@@ -1509,9 +1513,11 @@ function AppSurface({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 function AuthenticatedAppSurface() {
   const { signOut } = useClerk();
   return (
-    <AppSurface
-      onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })}
-    />
+    <JackAccess>
+      <AppSurface
+        onSignOut={() => signOut({ redirectUrl: `${basePath}/sign-in` })}
+      />
+    </JackAccess>
   );
 }
 
@@ -1538,16 +1544,7 @@ function SignUpPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
       <StartupReady />
-      <SignUp
-        routing="path"
-        path={`${basePath}/sign-up`}
-        signInUrl={`${basePath}/sign-in`}
-        forceRedirectUrl={
-          useDirectClerkAssets
-            ? `${window.location.origin}${basePath}/app`
-            : undefined
-        }
-      />
+      <EmailCodeSignIn />
     </div>
   );
 }
@@ -1598,6 +1595,21 @@ function ProtectedDazRuntimeCheck() {
 
 // Clears the React Query cache when the signed-in user changes, so one user's
 // data never bleeds into the next session on the same device.
+function ProtectedInviteUsers() {
+  return (
+    <>
+      <Show when="signed-in">
+        <JackAccess>
+          <InviteUsers />
+        </JackAccess>
+      </Show>
+      <Show when="signed-out">
+        <Redirect to="/sign-in" />
+      </Show>
+    </>
+  );
+}
+
 function ClerkQueryClientCacheInvalidator() {
   const { addListener } = useClerk();
   const qc = useQueryClient();
@@ -1634,6 +1646,7 @@ function AuthBridge({ onReady }: { onReady: () => void }) {
 
 function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
   const [, setLocation] = useLocation();
+  const [bridgeReady, setBridgeReady] = useState(false);
 
   return (
     <ClerkProvider
@@ -1662,24 +1675,32 @@ function ClerkProviderWithRoutes({ onReady }: { onReady: () => void }) {
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
       <QueryClientProvider client={queryClient}>
-        <AuthBridge onReady={onReady} />
+        <AuthBridge
+          onReady={() => {
+            setBridgeReady(true);
+            onReady();
+          }}
+        />
         <ClerkQueryClientCacheInvalidator />
-        <Switch>
-          <Route path="/" component={HomeRedirect} />
-          <Route
-            path="/admin/daz-runtime"
-            component={ProtectedDazRuntimeCheck}
-          />
-          <Route path="/app" component={ProtectedApp} />
-          {/* REQUIRED — copy "/sign-in/*?" and "/sign-up/*?" verbatim. The /*?
+        {bridgeReady && (
+          <Switch>
+            <Route path="/" component={HomeRedirect} />
+            <Route
+              path="/admin/daz-runtime"
+              component={ProtectedDazRuntimeCheck}
+            />
+            <Route path="/app" component={ProtectedApp} />
+            <Route path="/admin/access" component={ProtectedInviteUsers} />
+            {/* REQUIRED — copy "/sign-in/*?" and "/sign-up/*?" verbatim. The /*?
               optional wildcard is the only wouter syntax that matches both the
               bare URL and Clerk's OAuth sub-paths. */}
-          <Route path="/sign-in/*?" component={SignInPage} />
-          <Route path="/sign-up/*?" component={SignUpPage} />
-          <Route>
-            <Redirect to="/" />
-          </Route>
-        </Switch>
+            <Route path="/sign-in/*?" component={SignInPage} />
+            <Route path="/sign-up/*?" component={SignUpPage} />
+            <Route>
+              <Redirect to="/" />
+            </Route>
+          </Switch>
+        )}
       </QueryClientProvider>
     </ClerkProvider>
   );

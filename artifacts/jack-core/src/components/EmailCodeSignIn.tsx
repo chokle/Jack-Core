@@ -1,288 +1,252 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useAuth } from "@clerk/react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { SignIn, useAuth } from "@clerk/react";
 import { useSignIn } from "@clerk/react/legacy";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-const publicDemoUrl =
-  import.meta.env.VITE_PUBLIC_DEMO_URL?.trim() ||
-  "https://jack-core-demo-ycf4yh.v2.appdeploy.ai/";
-const appPath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/app`;
-
-type ClerkError = {
-  errors?: Array<{ longMessage?: string; message?: string }>;
-};
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const appPath = `${basePath}/app`;
+type Attempt = { status: string | null; createdSessionId: string | null };
 
 function messageFrom(error: unknown): string {
-  const clerkError = error as ClerkError;
-  return clerkError.errors?.[0]?.longMessage
-    ?? clerkError.errors?.[0]?.message
-    ?? (error instanceof Error ? error.message : null)
-    ?? "Sign-in could not continue. Please try again.";
+  const clerkError = error as {
+    errors?: Array<{ longMessage?: string; message?: string }>;
+  };
+  return (
+    clerkError?.errors?.[0]?.longMessage ??
+    clerkError?.errors?.[0]?.message ??
+    (error instanceof Error
+      ? error.message
+      : "Sign-in could not continue. Please try again.")
+  );
 }
 
 export function EmailCodeSignIn() {
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { isLoaded: signInLoaded, signIn, setActive } = useSignIn();
   const [, setLocation] = useLocation();
-  const [mode, setMode] = useState<"pilot" | "admin">("pilot");
-  const [adminStep, setAdminStep] = useState<"email" | "code">("email");
+  const [invited] = useState(() =>
+    new URLSearchParams(window.location.search).has("__clerk_ticket"),
+  );
+  const [step, setStep] = useState<"email" | "code" | "security">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   useEffect(() => {
-    if (authLoaded && isSignedIn) {
-      setLocation(appPath, { replace: true });
+    if (!invited) return;
+    // Accounts are provisioned by the invitation service. The ticket is never
+    // consumed as signup proof: email OTP verifies the account before the server
+    // accepts its current, unexpired Jack membership invitation.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("__clerk_ticket");
+      url.searchParams.delete("__clerk_status");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    } catch {
+      // Restricted browser history must not block verified email sign-in.
     }
+  }, [invited]);
+
+  useEffect(() => {
+    if (authLoaded && isSignedIn) setLocation("/app", { replace: true });
   }, [authLoaded, isSignedIn, setLocation]);
 
-  const startPilotDirectSignIn = async (event: FormEvent) => {
-    event.preventDefault();
-    if (busy) return;
-    const nextEmail = email.trim().toLowerCase();
-    if (!nextEmail) {
-      setError("Please provide your pilot email address.");
-      return;
-    }
+  async function run(action: () => Promise<void>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/pilot-direct-access", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ identifier: nextEmail }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(
-          payload?.error || `Sign-in for ${nextEmail} could not be started.`,
-        );
-      }
-      if (!payload.url || typeof payload.url !== "string") {
-        throw new Error("Sign-in URL was not returned.");
-      }
-      window.location.assign(payload.url);
+      await action();
     } catch (caught) {
-      setError(
-        caught instanceof Error && !((caught as ClerkError).errors?.length)
-          ? caught.message
-          : messageFrom(caught),
-      );
+      setError(messageFrom(caught));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
-  };
+  }
 
-  const startAdminEmailCode = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!signInLoaded || !signIn || busy) return;
-    const nextEmail = email.trim().toLowerCase();
-    if (!nextEmail) {
-      setError("Please provide your Torch account email address.");
-      return;
+  async function finish(attempt: Attempt) {
+    if (attempt.status === "complete" && attempt.createdSessionId) {
+      if (!setActive)
+        throw new Error(
+          "Your secure session is still loading. Please try again.",
+        );
+      await setActive({ session: attempt.createdSessionId });
+      window.location.assign(appPath);
+    } else if (
+      [
+        "needs_second_factor",
+        "needs_client_trust",
+        "needs_new_password",
+      ].includes(attempt.status ?? "")
+    ) {
+      // Resume actual sign-in challenges in Clerk's supported security UI.
+      setStep("security");
+    } else {
+      throw new Error(
+        "Sign-in is incomplete. Check your code or request a new one.",
+      );
     }
-    setBusy(true);
-    setError(null);
-    try {
-      const attempt = await signIn.create({ identifier: nextEmail });
+  }
+
+  function start(event: FormEvent) {
+    event.preventDefault();
+    if (!signInLoaded || !signIn) return;
+    void run(async () => {
+      const attempt = await signIn.create({
+        identifier: email.trim().toLowerCase(),
+      });
       const factor = attempt.supportedFirstFactors?.find(
         (candidate) => candidate.strategy === "email_code",
       );
       if (!factor || !("emailAddressId" in factor)) {
-        throw new Error("Email verification is not available for this account.");
+        setStep("security");
+        return;
       }
       await attempt.prepareFirstFactor({
         strategy: "email_code",
         emailAddressId: factor.emailAddressId,
       });
-      setAdminStep("code");
-    } catch (caught) {
-      setError(
-        caught instanceof Error && !((caught as ClerkError).errors?.length)
-          ? caught.message
-          : messageFrom(caught),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
+      setCode("");
+      setStep("code");
+    });
+  }
 
-  const verifyAdminEmailCode = async (event: FormEvent) => {
+  function verify(event: FormEvent) {
     event.preventDefault();
-    if (!signInLoaded || !signIn || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const attempt = await signIn.attemptFirstFactor({
-        strategy: "email_code",
-        code: code.trim(),
-      });
-      if (attempt.status !== "complete" || !attempt.createdSessionId) {
-        throw new Error(
-          "That code could not complete sign-in. Please request a new code.",
-        );
-      }
-      await setActive({ session: attempt.createdSessionId });
-      window.location.assign(appPath);
-    } catch (caught) {
-      setError(
-        caught instanceof Error && !((caught as ClerkError).errors?.length)
-          ? caught.message
-          : messageFrom(caught),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
+    if (!signIn) return;
+    void run(async () =>
+      finish(
+        await signIn.attemptFirstFactor({
+          strategy: "email_code",
+          code: code.trim(),
+        }),
+      ),
+    );
+  }
 
   if (!authLoaded || isSignedIn) return null;
+  if (step === "security")
+    return (
+      <SignIn
+        routing="hash"
+        initialValues={{ emailAddress: email.trim() }}
+        forceRedirectUrl={appPath}
+        signUpUrl={`${basePath}/sign-up`}
+      />
+    );
 
   return (
     <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
       <div className="space-y-6 p-7 sm:p-9">
         <div className="text-center">
-          <img src="/logo.svg" alt="" className="mx-auto mb-4 h-10 w-10" />
+          <img
+            src={`${basePath}/logo.svg`}
+            alt=""
+            className="mx-auto mb-4 h-10 w-10"
+          />
           <h1 className="text-xl font-semibold text-foreground">
-            {mode === "pilot" ? "Pilot participant access" : "Torch admin access"}
+            {invited ? "You're invited to Jack" : "Sign in to Jack"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "pilot"
-              ? "Sign in with the account assigned to you for the controlled field pilot."
-              : "Use your real Torch account and verify it through Clerk."}
+          <p className="mt-2 text-sm text-muted-foreground">
+            {step === "code"
+              ? "Enter the code from your email to open Jack."
+              : invited
+                ? "Enter the email address that received your invitation. We'll send you a code to open Jack."
+                : "Use your email address. We'll send you a sign-in code."}
           </p>
         </div>
-
-        {mode === "pilot" ? (
-          <>
-            <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm leading-6 text-muted-foreground">
-              <p className="font-semibold text-foreground">Not part of the pilot?</p>
-              <p>
-                The real Jack environment is restricted to approved participants.
-                You can still try the public demo with sample trade knowledge.
-              </p>
-              <a
-                href={publicDemoUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 inline-flex font-semibold text-primary hover:underline"
-              >
-                Try Jack demo
-              </a>
-            </div>
-            <form onSubmit={startPilotDirectSignIn} className="space-y-4">
-              <label className="block space-y-2 text-sm font-medium text-foreground">
-                <span>Email address</span>
-                <Input
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                  autoFocus
-                />
-              </label>
-              <Button type="submit" className="w-full" disabled={busy || !email.trim()}>
-                {busy ? "Connecting…" : "Continue"}
-              </Button>
-            </form>
-            <button
-              type="button"
-              className="w-full text-sm font-medium text-primary hover:underline"
-              onClick={() => {
-                setMode("admin");
-                setAdminStep("email");
-                setCode("");
-                setError(null);
-              }}
-              disabled={busy}
-            >
-              Torch admin / founder sign in
-            </button>
-          </>
-        ) : adminStep === "email" ? (
-          <form onSubmit={startAdminEmailCode} className="space-y-4">
-            <label className="block space-y-2 text-sm font-medium text-foreground">
-              <span>Torch account email</span>
+        {step === "email" ? (
+          <form onSubmit={start} className="space-y-4">
+            <label className="block space-y-2 text-sm font-medium">
+              <span>Email address</span>
               <Input
                 type="email"
                 autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
                 autoFocus
+                disabled={busy}
               />
             </label>
             <Button
               type="submit"
               className="w-full"
-              disabled={!signInLoaded || busy || !email.trim()}
+              disabled={busy || !signInLoaded || !email.trim()}
             >
-              {busy ? "Sending code…" : "Send verification code"}
+              {busy ? "Sending..." : "Send verification code"}
             </Button>
-            <button
-              type="button"
-              className="w-full text-sm text-primary hover:underline"
-              onClick={() => {
-                setMode("pilot");
-                setError(null);
-              }}
-              disabled={busy}
-            >
-              Back to pilot access
-            </button>
+            {!invited && (
+              <p className="text-sm text-muted-foreground">
+                New to Jack? Open the invitation sent to your email.
+              </p>
+            )}
           </form>
         ) : (
-          <form onSubmit={verifyAdminEmailCode} className="space-y-4">
-            <div className="text-center">
-              <h2 className="font-semibold text-foreground">Check your email</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Enter the verification code sent to {email.trim().toLowerCase()}.
-              </p>
-            </div>
-            <label className="block space-y-2 text-sm font-medium text-foreground">
+          <form onSubmit={verify} className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Check your email at{" "}
+              <span className="break-all font-medium text-foreground">
+                {email}
+              </span>
+              .
+            </p>
+            <label className="block space-y-2 text-sm font-medium">
               <span>Verification code</span>
               <Input
+                type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
                 value={code}
-                onChange={(event) => setCode(event.target.value)}
+                onChange={(event) =>
+                  setCode(event.target.value.replace(/\D/g, ""))
+                }
                 required
                 autoFocus
+                disabled={busy}
               />
             </label>
-            <Button type="submit" className="w-full" disabled={busy || !code.trim()}>
-              {busy ? "Verifying…" : "Sign in"}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={busy || code.length !== 6}
+            >
+              {busy ? "Verifying..." : "Sign in"}
             </Button>
-            <button
+            <Button
               type="button"
-              className="w-full text-sm text-primary hover:underline"
+              variant="ghost"
+              className="w-full"
+              disabled={busy}
               onClick={() => {
-                setAdminStep("email");
+                setStep("email");
                 setCode("");
                 setError(null);
               }}
-              disabled={busy}
             >
-              Use another email
-            </button>
+              Change email or request a new code
+            </Button>
           </form>
         )}
-
         {error && (
-          <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
-      </div>
-      <div className="border-t border-border bg-muted/20 px-6 py-4 text-center text-sm text-muted-foreground">
-        {mode === "pilot"
-          ? "Need a pilot account? Contact your Torch pilot lead for an assigned access link."
-          : "Admin access still requires a real Clerk session; pilot direct access is not used."}
       </div>
     </div>
   );

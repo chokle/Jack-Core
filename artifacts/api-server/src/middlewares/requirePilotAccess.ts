@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { resolveActiveTesterScope } from "../lib/activity-telemetry.js";
 import { isPublicApiPath } from "./requireAuth.js";
+import { resolveJackOrganizations } from "../lib/jack-access.js";
 
 function usesRouteScopedAuthorization(req: Request): boolean {
   const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
@@ -21,9 +22,9 @@ function usesRouteScopedAuthorization(req: Request): boolean {
 }
 
 /**
- * Server-enforced authorization boundary for the controlled pilot environment.
- * Authentication alone is insufficient: callers must have a current active
- * tester membership, or be an explicitly trusted platform admin.
+ * Compatibility filename for Jack's authorization boundary. Invited tenant
+ * members and champions do not require pilot enrollment. Existing active
+ * testers and server-resolved admins retain access.
  */
 export function requirePilotAccess(
   req: Request,
@@ -67,16 +68,27 @@ export function requirePilotAccess(
       return;
     }
 
+    if (
+      identity?.classification === "resolved" &&
+      !identity.isPresentation &&
+      (await resolveJackOrganizations(userId)).length > 0
+    ) {
+      next();
+      return;
+    }
+
     req.log?.warn(
       { userId, reason: membership.reason, path: req.path },
       "pilot access denied",
     );
     res.status(403).json({
-      error:
-        "Forbidden — an active Torch pilot membership is required for this environment.",
+      error: "An authorized organization invitation is required to use Jack.",
     });
   })().catch((err) => {
-    req.log?.error({ err, userId, path: req.path }, "pilot access verification failed");
+    req.log?.error(
+      { err, userId, path: req.path },
+      "pilot access verification failed",
+    );
     res.status(500).json({ error: "Failed to verify pilot access." });
   });
 }

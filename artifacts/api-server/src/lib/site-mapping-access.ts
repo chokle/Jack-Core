@@ -113,7 +113,7 @@ export async function resolveSiteScope(
   };
 }
 
-/** Members must already belong to an active pilot in the same organization. */
+/** A current invitation grant or existing pilot membership in this tenant. */
 export async function isEligibleSiteMember(
   userId: string,
   organizationId: string,
@@ -127,6 +127,16 @@ export async function isEligibleSiteMember(
   if (result.error) throw result.error;
   const current = (result.data ?? []).filter(currentMembership);
   if (current.some((row) => row.role === "organization_admin" && !row.pilot_id))
+    return true;
+  const invited = await supabase
+    .from("jack_memberships")
+    .select("role")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .eq("active", true)
+    .maybeSingle();
+  if (invited.error) throw invited.error;
+  if (invited.data && ["member", "champion"].includes(invited.data.role))
     return true;
   const pilotIds = current
     .map((row) => row.pilot_id)
