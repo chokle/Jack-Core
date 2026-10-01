@@ -15,7 +15,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { createSecureTokenCache } from "./core/secure-token-cache";
 import { FieldClient } from "./FieldClient";
 import { purgePrivateMedia } from "./media-store";
-import { Action, BrandLockup, JackIdentity, styles, theme } from "./ui";
+import { Action, BrandLockup, styles, theme } from "./ui";
 
 const tokenCache = createSecureTokenCache(SecureStore);
 const publicKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -88,7 +88,6 @@ function SignIn() {
         ]}
       >
         <BrandLockup />
-        <JackIdentity />
         <Text style={styles.title}>Your knowledge. In the field.</Text>
         <Text style={styles.body}>
           Sign in with your existing Jack account.
