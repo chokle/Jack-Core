@@ -87,6 +87,11 @@ jobs:
           sha256sum android-artifact/jack-android-internal.apk > android-artifact/SHA256SUMS
           printf '%s\n' "$GITHUB_SHA" > android-artifact/source-sha.txt
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android-artifact/jack-android-internal.apk > android-artifact/signature.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions android-artifact/jack-android-internal.apk > android-artifact/permissions.txt
+          if grep -E 'android.permission.(SYSTEM_ALERT_WINDOW|VIBRATE|CAMERA|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|READ_MEDIA_AUDIO|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE)' android-artifact/permissions.txt; then
+            echo 'Unexpected device permission in first field slice'
+            exit 1
+          fi
           printf '%s\n' 'Internal development-key APK. Build verification only; physical authenticated acceptance and Play signing remain separate gates.' > android-artifact/ACCEPTANCE.txt
       - uses: actions/upload-artifact@v4
         with:

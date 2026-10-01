@@ -17,6 +17,8 @@ const config: ExpoConfig = {
     versionCode: 1,
     permissions: ["RECORD_AUDIO"],
     blockedPermissions: [
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.VIBRATE",
       "android.permission.READ_MEDIA_AUDIO",
       "android.permission.READ_EXTERNAL_STORAGE",
       "android.permission.WRITE_EXTERNAL_STORAGE",
