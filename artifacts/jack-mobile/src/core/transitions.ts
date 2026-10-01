@@ -11,3 +11,24 @@ export class SerialTransitions {
 export function isOwnedRecordingName(name: string) {
   return /^recording-[a-f0-9-]{36}\.m4a$/i.test(name);
 }
+
+/**
+ * Tracks ownership of the native recorder independently from React's polled
+ * isRecording state. A recorder can hold Android MediaRecorder resources after
+ * prepareToRecordAsync() but before the next status poll sees "recording".
+ */
+export class NativeRecorderLease {
+  private held = false;
+
+  markPrepared() {
+    this.held = true;
+  }
+
+  markStopped() {
+    this.held = false;
+  }
+
+  get shouldStop() {
+    return this.held;
+  }
+}
