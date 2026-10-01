@@ -22,17 +22,14 @@ import { useAuth, useClerk } from "@clerk/clerk-expo";
 import NetInfo from "@react-native-community/netinfo";
 import {
   AudioModule,
-  RecordingPresets,
   setAudioModeAsync,
-  useAudioPlayer,
-  useAudioPlayerStatus,
-  useAudioRecorder,
-  useAudioRecorderState,
+  createAudioPlayer,
+  type AudioPlayer,
 } from "expo-audio";
 import { File } from "expo-file-system";
 import { randomUUID } from "expo-crypto";
 import { useVideoPlayer, VideoView, type VideoPlayer } from "expo-video";
-import { Action, styles } from "./App";
+import { Action, BrandLockup, JackIdentity, styles, theme } from "./ui";
 import {
   JackApi,
   authorizedMediaUrl,
@@ -44,8 +41,12 @@ import {
 import { encodeContext, type Surface } from "./core/context";
 import { CapabilityBus } from "./core/capabilities";
 import { RequestScope } from "./core/request-scope";
-import { SerialTransitions } from "./core/transitions";
 import { audioDirectory } from "./media-store";
+import {
+  createNativeRecorderOwner,
+  useRecorderStatus,
+} from "./native-recorder";
+import { disposePlayback } from "./core/playback-owner";
 
 type OpenSource = SourceDetail & {
   id: string;
@@ -86,8 +87,16 @@ function SourceVideo({
       onPlayback(event.isPlaying),
     );
     return () => {
-      listener.remove();
-      playing.remove();
+      try {
+        listener.remove();
+      } catch {
+        /* The SDK still owns release when its player unmounts. */
+      }
+      try {
+        playing.remove();
+      } catch {
+        /* An already-detached listener cannot retain the bound player. */
+      }
       bindPlayer(null);
     };
   }, [player, bindPlayer, onPlayback]);
@@ -120,26 +129,18 @@ export function FieldClient() {
   );
   const scope = useRef(new RequestScope()).current;
   const speechScope = useRef(new RequestScope()).current;
-  const microphoneTransitions = useRef(new SerialTransitions()).current;
   const bus = useRef(new CapabilityBus()).current;
-  const player = useAudioPlayer(null);
-  const playback = useAudioPlayerStatus(player);
-  const recorder = useAudioRecorder(
-    { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true },
-    (event) => {
-      if (event.hasError) {
-        void invalidate(
-          "Radio interrupted. Start it again when ready.",
-          false,
-          true,
-        );
-        setError(
-          "The microphone was interrupted or its permission changed. Check Android permissions and retry.",
-        );
-      }
-    },
+  const player = useRef<AudioPlayer | null>(null);
+  const playerListener = useRef<{ remove(): void } | null>(null);
+  const [playback, setPlayback] = useState({
+    playing: false,
+    didJustFinish: false,
+  });
+  const recorderError = useRef<() => void>(() => {});
+  const [recorder] = useState(() =>
+    createNativeRecorderOwner(() => recorderError.current()),
   );
-  const recording = useAudioRecorderState(recorder, 100);
+  const recording = useRecorderStatus(recorder);
   const [surface, setSurface] = useState<Surface>("ask");
   const [source, setSource] = useState<OpenSource | null>(null);
   const [question, setQuestion] = useState("");
@@ -162,7 +163,6 @@ export function FieldClient() {
   const busyRef = useRef(false);
   const stopping = useRef(false);
   const audioFile = useRef<File | null>(null);
-  const recordingFile = useRef<string | null>(null);
   const sourcePlayer = useRef<VideoPlayer | null>(null);
   const videoPlaying = useRef(false);
   const heardSpeech = useRef(false);
@@ -208,21 +208,43 @@ export function FieldClient() {
 
   const stopAudio = useCallback(async () => {
     speechScope.invalidate();
-    player.pause();
-    player.replace(null);
-    if (audioFile.current?.exists) audioFile.current.delete();
-    audioFile.current = null;
+    const active = player.current;
+    const listener = playerListener.current;
+    playerListener.current = null;
+    // Never replace(null): SDK55 Android requires a non-null source. Dispose each utterance instead.
+    try {
+      if (active) {
+        disposePlayback({
+          disconnect: () => listener?.remove(),
+          pause: () => active.pause(),
+          remove: () => active.remove(),
+          release: () => active.release(),
+        });
+        // Keep ownership if release throws, so a new capture cannot bypass an unknown live player.
+        player.current = null;
+      }
+    } finally {
+      if (mounted.current)
+        setPlayback({ playing: false, didJustFinish: false });
+      const file = audioFile.current;
+      audioFile.current = null;
+      if (file?.exists) file.delete();
+    }
   }, [player, speechScope]);
 
-  const stopMicrophone = useCallback(
-    () =>
-      microphoneTransitions.run(async () => {
-        if (recorder.isRecording) await recorder.stop();
-        deleteFile(recordingFile.current ?? recorder.uri);
-        recordingFile.current = null;
-      }),
-    [recorder, microphoneTransitions],
-  );
+  const stopMicrophone = useCallback(() => recorder.discard(), [recorder]);
+
+  const pauseSource = useCallback(() => {
+    try {
+      sourcePlayer.current?.pause();
+      videoPlaying.current = false;
+      return true;
+    } catch {
+      // Keep capture blocked until this source is stopped or released.
+      videoPlaying.current = true;
+      return false;
+    }
+  }, []);
 
   const invalidate = useCallback(
     (message = "", preserveRadio = false, preserveSource = false) => {
@@ -234,24 +256,43 @@ export function FieldClient() {
       busyRef.current = false;
       setBusy(false);
       setStatus(message);
-      sourcePlayer.current?.pause();
-      videoPlaying.current = false;
+      const sourcePaused = pauseSource();
       const stop = preserveSource
         ? Promise.all([bus.get("microphone")?.stop(), bus.get("audio")?.stop()])
         : bus.stopAll();
       return stop
-        .then(() => true)
+        .then(() => {
+          if (sourcePaused) return true;
+          radioRef.current = false;
+          setRadio(false);
+          setError(
+            "Source playback could not pause. Stop or close the video before starting Radio. You can still type your question.",
+          );
+          return false;
+        })
         .catch(() => {
           setError(
-            "A device capability could not stop. Close Jack before starting another recording.",
+            "Microphone recovery could not finish. You can still type your question.",
           );
           radioRef.current = false;
           setRadio(false);
           return false;
         });
     },
-    [scope, bus],
+    [scope, bus, pauseSource],
   );
+
+  recorderError.current = () => {
+    if (!mounted.current) return;
+    void invalidate(
+      "Radio interrupted. Tap the microphone to try again.",
+      false,
+      true,
+    );
+    setError(
+      "This recording was interrupted. Try the microphone again or type your question.",
+    );
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -278,6 +319,7 @@ export function FieldClient() {
     return () => {
       mounted.current = false;
       scope.invalidate();
+      void recorder.dispose().catch(() => {});
       // No unhandled native release errors or updates to an unmounted private UI. Cold-start purge covers leftovers.
       void bus.detach("microphone").catch(() => {});
       void bus.detach("audio").catch(() => {});
@@ -363,9 +405,16 @@ export function FieldClient() {
 
   async function speak(text: string) {
     const request = scope.begin(40_000);
-    await stopAudio();
-    sourcePlayer.current?.pause();
-    videoPlaying.current = false;
+    try {
+      await stopAudio();
+      if (!pauseSource())
+        throw new Error(
+          "Source playback could not pause. Stop or close the video before playing Jack's answer.",
+        );
+    } catch (cause) {
+      request.finish();
+      throw cause;
+    }
     if (!request.current()) {
       request.finish();
       return;
@@ -390,14 +439,27 @@ export function FieldClient() {
         audioDirectory(),
         `jack-speech-${randomUUID()}.mp3`,
       );
+      audioFile.current = file;
       file.create();
       file.write(bytes);
-      audioFile.current = file;
-      player.replace(file.uri);
-      player.play();
+      const active = createAudioPlayer(file.uri);
+      player.current = active;
+      playerListener.current = active.addListener(
+        "playbackStatusUpdate",
+        (event) => {
+          if (mounted.current && player.current === active)
+            setPlayback({
+              playing: event.playing,
+              didJustFinish: event.didJustFinish,
+            });
+        },
+      );
+      active.play();
       setStatus("Jack is speaking. Replay is available below the answer.");
     } catch (cause) {
       if (!request.owns() || !speechRequest.owns()) return;
+      // A native player/listener/play failure must dispose this utterance immediately.
+      await stopAudio().catch(() => {});
       throw cause;
     } finally {
       if (
@@ -437,20 +499,28 @@ export function FieldClient() {
   async function ask(text: string) {
     if (
       busyRef.current ||
-      recorder.isRecording ||
       access !== "granted" ||
       online === false ||
       !foregroundRef.current
     )
       return;
-    sourcePlayer.current?.pause();
-    videoPlaying.current = false;
+    if (!pauseSource()) {
+      radioRef.current = false;
+      setRadio(false);
+    }
     busyRef.current = true;
     setBusy(true);
     setError("");
     setStatus("Jack is finding a grounded answer…");
     const request = scope.begin();
     try {
+      // Keyboard/text is always usable: stop our own capture before sending, rather than silently rejecting the tap.
+      const stopped = await Promise.allSettled([stopMicrophone(), stopAudio()]);
+      if (stopped.some((result) => result.status === "rejected")) {
+        radioRef.current = false;
+        setRadio(false);
+      }
+      if (!request.current()) return;
       const result = await api.ask(text, contextHeader(), request.signal);
       if (!request.current()) return;
       setAnswer(result);
@@ -458,6 +528,10 @@ export function FieldClient() {
       setStatus("Answer received.");
       request.finish();
       try {
+        if (!recorder.available)
+          throw new Error(
+            "Audio is unavailable. Your answer is still readable.",
+          );
         await speak(result.answer);
       } catch (cause) {
         if (request.owns()) {
@@ -521,37 +595,27 @@ export function FieldClient() {
         shouldPlayInBackground: false,
       });
       if (!request.current()) return;
-      await microphoneTransitions.run(async () => {
-        if (
-          !request.current() ||
-          !mounted.current ||
-          !foregroundRef.current ||
-          recorder.isRecording ||
-          !radioRef.current
-        )
-          return;
-        await recorder.prepareToRecordAsync();
-        if (!request.current()) {
-          await recorder.stop();
-          deleteFile(recorder.uri);
-          return;
-        }
+      const started = await recorder.start(
+        () =>
+          request.current() &&
+          mounted.current &&
+          foregroundRef.current &&
+          radioRef.current,
+      );
+      if (started) {
         heardSpeech.current = false;
         lastSpeechAt.current = Date.now();
-        recorder.record();
-        recordingFile.current = recorder.uri;
         setStatus(
           "Listening. Pause after your question, or tap Send voice now. Stop Radio ends the conversation.",
         );
-      });
+      }
     } catch (cause) {
       if (request.owns()) {
+        await recorder.discard().catch(() => {});
         radioRef.current = false;
         setRadio(false);
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "Microphone interrupted. Try again.",
+          "Jack couldn't start the microphone. Tap Radio to try again, or type your question.",
         );
       }
     } finally {
@@ -578,9 +642,7 @@ export function FieldClient() {
     const request = scope.begin(45_000);
     let uri: string | null = null;
     try {
-      await microphoneTransitions.run(() => recorder.stop());
-      uri = recorder.uri;
-      recordingFile.current = uri;
+      uri = await recorder.finish();
       if (!request.current() || !uri) return;
       setStatus("Transcribing your question…");
       busyRef.current = true;
@@ -610,14 +672,24 @@ export function FieldClient() {
         );
       }
     } finally {
-      deleteFile(uri);
-      recordingFile.current = null;
-      stopping.current = false;
-      if (request.owns()) {
-        busyRef.current = false;
-        setBusy(false);
+      try {
+        deleteFile(uri);
+      } catch {
+        if (request.owns()) {
+          radioRef.current = false;
+          setRadio(false);
+          setError(
+            "Temporary recording cleanup failed. Radio is paused; you can still type your question.",
+          );
+        }
+      } finally {
+        stopping.current = false;
+        if (request.owns()) {
+          busyRef.current = false;
+          setBusy(false);
+        }
+        request.finish();
       }
-      request.finish();
     }
   }
 
@@ -646,9 +718,25 @@ export function FieldClient() {
 
   useEffect(() => {
     if (!playback.didJustFinish) return;
-    void stopAudio().then(() => {
-      if (radioRef.current && foregroundRef.current) void beginRecording();
-    });
+    const current = scope.capture();
+    void stopAudio()
+      .then(() => {
+        if (
+          current() &&
+          mounted.current &&
+          radioRef.current &&
+          foregroundRef.current
+        )
+          void beginRecording();
+      })
+      .catch(() => {
+        if (!current() || !mounted.current) return;
+        radioRef.current = false;
+        setRadio(false);
+        setError(
+          "Voice playback could not stop. Radio is paused; you can still type your question.",
+        );
+      });
   }, [playback.didJustFinish]);
 
   const bindSourcePlayer = useCallback((video: VideoPlayer | null) => {
@@ -765,8 +853,9 @@ export function FieldClient() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={local.header}>
-        <Text style={styles.title}>Jack</Text>
+        <BrandLockup />
         <Action
+          variant="secondary"
           title={surface === "ask" ? "Settings" : "Back to Ask"}
           onPress={() => navigate(surface === "ask" ? "settings" : "ask")}
         />
@@ -837,6 +926,7 @@ export function FieldClient() {
                   </Text>
                 )}
                 <Action
+                  variant="secondary"
                   title="Replay Jack's answer"
                   disabled={busy || radio || online === false}
                   onPress={() => void replay()}
@@ -880,6 +970,7 @@ export function FieldClient() {
                         </Text>
                       )}
                       <Action
+                        variant="secondary"
                         title="Open source"
                         onPress={() => void openCitation(citation)}
                         disabled={online === false}
@@ -891,10 +982,11 @@ export function FieldClient() {
             ) : (
               surface === "ask" && (
                 <View style={local.card}>
-                  <Text style={local.heading}>Ask Jack</Text>
+                  <JackIdentity />
+                  <Text style={styles.title}>What do you need to know?</Text>
                   <Text style={styles.body}>
-                    Ask a field question. Jack searches the shared knowledge and
-                    shows the sources behind his answer.
+                    Ask by voice or text. Jack brings back the knowledge and the
+                    sources behind it.
                   </Text>
                 </View>
               )
@@ -926,27 +1018,39 @@ export function FieldClient() {
         <TextInput
           accessibilityLabel="Ask Jack a question"
           placeholder="Ask Jack…"
-          placeholderTextColor="#92a4ac"
+          placeholderTextColor={theme.muted}
           style={styles.input}
           value={question}
           onChangeText={setQuestion}
           multiline
           maxLength={2000}
-          editable={!busy && !recording.isRecording}
+          editable={!busy}
+          onFocus={() => {
+            if (radioRef.current || recorder.isRecording || playback.playing)
+              void invalidate("Type your question.", false, true);
+          }}
         />
         <View style={local.actions}>
           <View style={{ flex: 1 }}>
             <Action
+              variant="secondary"
               title={busy ? "Working…" : "Ask Jack"}
               disabled={
                 busy ||
-                radio ||
                 access !== "granted" ||
                 !question.trim() ||
                 online === false ||
                 !foreground
               }
-              onPress={() => void ask(question)}
+              onPress={() => {
+                // Cancel a pending voice turn even if Radio started while this keyboard was already focused.
+                const text = question;
+                const stopped = invalidate("", false, true);
+                const current = scope.capture();
+                void stopped.then(() => {
+                  if (mounted.current && current()) void ask(text);
+                });
+              }}
             />
           </View>
           <View style={{ flex: 1 }}>
@@ -1008,7 +1112,19 @@ export function FieldClient() {
           <Action
             title="Interrupt Jack"
             onPress={() => {
-              void stopAudio().then(() => beginRecording());
+              const current = scope.capture();
+              void stopAudio()
+                .then(() => {
+                  if (current() && mounted.current) void beginRecording();
+                })
+                .catch(() => {
+                  if (!current() || !mounted.current) return;
+                  radioRef.current = false;
+                  setRadio(false);
+                  setError(
+                    "Voice playback could not stop. Radio is paused; you can still type your question.",
+                  );
+                });
             }}
           />
         )}
@@ -1024,27 +1140,34 @@ const local = StyleSheet.create({
     justifyContent: "space-between",
     padding: 16,
   },
-  heading: { color: "#f1f7f8", fontSize: 20, fontWeight: "700" },
+  heading: { color: theme.text, fontSize: 20, fontWeight: "700" },
   signal: {
-    color: "#a5c4ce",
+    color: theme.muted,
     fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 4,
   },
   content: { padding: 16, gap: 16 },
-  card: { padding: 16, gap: 14, borderRadius: 16, backgroundColor: "#1a2a32" },
+  card: {
+    padding: 20,
+    gap: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panel,
+  },
   citation: {
     gap: 10,
     paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: "#49616b",
+    borderTopColor: theme.border,
   },
   composer: {
     padding: 12,
     gap: 10,
     borderTopWidth: 1,
-    borderTopColor: "#49616b",
-    backgroundColor: "#10191e",
+    borderTopColor: theme.border,
+    backgroundColor: theme.background,
   },
   actions: { flexDirection: "row", gap: 10 },
 });

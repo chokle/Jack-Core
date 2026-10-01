@@ -12,7 +12,7 @@ const config: ExpoConfig = {
     package: "ca.torchlabs.jack",
     adaptiveIcon: {
       foregroundImage: "./assets/icon.png",
-      backgroundColor: "#050914",
+      backgroundColor: "#09090B",
     },
     versionCode: 1,
     permissions: ["RECORD_AUDIO"],
@@ -27,6 +27,7 @@ const config: ExpoConfig = {
       "android.permission.WRITE_EXTERNAL_STORAGE",
     ],
     allowBackup: false,
+    softwareKeyboardLayoutMode: "resize",
   },
   plugins: [
     [

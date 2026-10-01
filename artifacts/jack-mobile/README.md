@@ -39,6 +39,10 @@ Source-video playback pauses/discards microphone capture and Jack audio while re
 
 The capability bus exposes only attached microphone/audio/source modules. Native microphone prepare/stop operations serialize; network/speech epochs suppress stale results after navigation, organization/session changes, backgrounding or interruption. Hardware permission errors produce an actionable paused state and a link to Android permissions.
 
+After the October1 device rejection, native recording uses one disposable recorder per voice turn. Preparation/start failures, cancellation and revoked permissions still call stop and native release; preparation has a 12-second deadline and stop a 3-second deadline. Each Jack utterance disconnects its listener and removes/releases its native player before another capture. Expo55 Android's non-null playback-source contract is respected: no `replace(null)` cleanup is used. Focusing the typed composer stops Radio, and typed Ask awaits capture cleanup before sending instead of silently ignoring an active-microphone tap. Android uses keyboard resize and a bounded composer; the email-code form scrolls with the keyboard.
+
+The shared UI uses Torch black/charcoal and the existing Jack orange (`--primary: 24 100% 50%`), the unchanged Torch icon, and the existing supplied Jack mascot. Device/founder walkthrough is required to accept the visual result; a Metro export does not establish that acceptance.
+
 ## Local data and offline
 
 Clerk's cache uses SecureStore only, with no plaintext fallback. Answers, questions, citations and source detail remain in memory; backgrounding, sign-out, organization change or session replacement clears sensitive state. There are no offline answers, background recordings, or queued writes in this slice. Network status is visible and reconnect does not automatically replay a prior request.

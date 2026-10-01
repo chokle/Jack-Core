@@ -3,8 +3,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
-  StyleSheet,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -16,30 +15,10 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { createSecureTokenCache } from "./core/secure-token-cache";
 import { FieldClient } from "./FieldClient";
 import { purgePrivateMedia } from "./media-store";
+import { Action, BrandLockup, JackIdentity, styles, theme } from "./ui";
 
 const tokenCache = createSecureTokenCache(SecureStore);
 const publicKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-export function Action({
-  title,
-  onPress,
-  disabled = false,
-}: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.button, disabled && { opacity: 0.45 }]}
-    >
-      <Text style={styles.buttonText}>{title}</Text>
-    </Pressable>
-  );
-}
 
 function SignIn() {
   const { isLoaded, signIn, setActive } = useSignIn();
@@ -100,8 +79,17 @@ function SignIn() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={styles.fill}
     >
-      <View key={generation} style={styles.signIn}>
-        <Text style={styles.title}>Jack</Text>
+      <ScrollView
+        key={generation}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[
+          styles.signIn,
+          { flexGrow: 1, flex: undefined },
+        ]}
+      >
+        <BrandLockup />
+        <JackIdentity />
+        <Text style={styles.title}>Your knowledge. In the field.</Text>
         <Text style={styles.body}>
           Sign in with your existing Jack account.
         </Text>
@@ -110,7 +98,7 @@ function SignIn() {
             sent ? "Email verification code" : "Email address"
           }
           placeholder={sent ? "Email code" : "Email address"}
-          placeholderTextColor="#92a4ac"
+          placeholderTextColor={theme.muted}
           value={sent ? code : email}
           onChangeText={sent ? setCode : setEmail}
           keyboardType={sent ? "number-pad" : "email-address"}
@@ -137,6 +125,7 @@ function SignIn() {
         {sent && (
           <Action
             title="Use another email / resend"
+            variant="secondary"
             disabled={busy}
             onPress={() => {
               setSent(false);
@@ -146,7 +135,7 @@ function SignIn() {
             }}
           />
         )}
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -157,7 +146,7 @@ function Session() {
     return (
       <ActivityIndicator
         accessibilityLabel="Restoring secure session"
-        color="#64dae5"
+        color={theme.orange}
       />
     );
   // Remount all private state across users AND sessions. No answer/history persisted on device.
@@ -185,6 +174,7 @@ export default function App() {
         <StatusBar style="light" />
         {mediaError ? (
           <View style={styles.signIn}>
+            <BrandLockup />
             <Text style={styles.title}>Private audio cleanup failed</Text>
             <Text style={styles.body}>
               Restart Jack before signing in. If this continues, clear Jack's
@@ -192,9 +182,10 @@ export default function App() {
             </Text>
           </View>
         ) : !mediaReady ? (
-          <ActivityIndicator color="#64dae5" />
+          <ActivityIndicator color={theme.orange} />
         ) : !publicKey ? (
           <View style={styles.signIn}>
+            <BrandLockup />
             <Text style={styles.title}>Jack configuration required</Text>
             <Text style={styles.body}>
               This build needs the existing Jack Clerk public key. Ask the
@@ -210,31 +201,3 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-
-export const styles = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: "#10191e" },
-  signIn: { flex: 1, justifyContent: "center", gap: 16, padding: 24 },
-  title: { color: "#f1f7f8", fontSize: 28, fontWeight: "700" },
-  body: { color: "#c7d6dc", fontSize: 16, lineHeight: 23 },
-  input: {
-    backgroundColor: "#203139",
-    color: "#f1f7f8",
-    borderColor: "#49616b",
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 17,
-    minHeight: 54,
-  },
-  button: {
-    minHeight: 52,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: "#64dae5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonText: { color: "#092126", fontSize: 16, fontWeight: "700" },
-  error: { color: "#ffb6ad", fontSize: 16, lineHeight: 23 },
-});
