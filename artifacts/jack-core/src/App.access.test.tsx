@@ -123,6 +123,8 @@ afterEach(() => {
 });
 describe("authenticated app access integration", () => {
   it("installs authentication and accepts access before graph data mounts, without a test-enrollment gate", async () => {
+    // Exercise direct graph access; first-run /app opens the optional guide.
+    window.history.replaceState({}, "", "/app?view=graph");
     let finish!: (value: unknown) => void;
     h.fetch.mockImplementationOnce(() => {
       expect(h.tokenReady).toBe(true);
