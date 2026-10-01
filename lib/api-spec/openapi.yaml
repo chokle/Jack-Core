@@ -28,6 +28,124 @@ tags:
     description: Private site-scoped Radar captures and membership
 
 paths:
+  /access:
+    get:
+      operationId: getJackAccess
+      tags: [auth]
+      summary: Current authorized Jack organizations and roles
+      responses:
+        "200":
+          description: Server-resolved access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JackAccessContext" }
+        "401": { description: Sign in required }
+        "503": { description: Access temporarily unavailable }
+  /access/accept:
+    post:
+      operationId: acceptJackInvitations
+      tags: [auth]
+      summary: Claim invitations for the authenticated user's verified email addresses
+      responses:
+        "200":
+          description: Idempotent acceptance and current access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JackAccessContext" }
+        "401": { description: Sign in required }
+        "429": { description: Retry later }
+        "503": { description: Access temporarily unavailable }
+  /access/organizations:
+    get:
+      operationId: getJackInviteOrganizations
+      tags: [auth]
+      summary: Active organizations this caller can invite into
+      responses:
+        "200":
+          description: Authorized organizations only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [organizations]
+                properties:
+                  organizations:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+        "401": { description: Sign in required }
+        "403": { description: Resolved invitation administrator required }
+  /access/invitations:
+    get:
+      operationId: listJackInvitations
+      tags: [auth]
+      summary: Review invitations in an administered organization
+      parameters:
+        - in: query
+          name: organizationId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Invitation receipts without authentication tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitations]
+                properties:
+                  invitations:
+                    type: array
+                    items: { $ref: "#/components/schemas/JackInvitation" }
+        "403": { description: Organization admin required }
+    post:
+      operationId: createJackInvitation
+      tags: [auth]
+      summary: Authorize tenant access and email an invitation with a durable request ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JackInvitationInput" }
+      responses:
+        "200":
+          description: Existing receipt without another email
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JackInvitation" }
+        "201":
+          description: Invitation email submitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JackInvitation" }
+        "202":
+          description: Email delivery unconfirmed; reuse the request ID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JackInvitation" }
+        "400": { description: Invalid email or role }
+        "403": { description: Organization admin required }
+        "409": { description: Request conflict or already pending invitation }
+        "429": { description: Invitation rate limit }
+  /access/invitations/{id}:
+    delete:
+      operationId: revokeJackInvitation
+      tags: [auth]
+      summary: Revoke invitation and current access granted by that invitation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Revoked idempotently }
+        "404":
+          { description: Invitation not found in an administered organization }
+        "429": { description: Invitation rate limit }
   /daz-runtime/tasks:
     post:
       operationId: createDazTask
@@ -1423,6 +1541,47 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    JackAccessContext:
+      type: object
+      required: [allowed, organizations, canInvite]
+      properties:
+        allowed: { type: boolean }
+        canInvite: { type: boolean }
+        organizations:
+          type: array
+          items:
+            type: object
+            required: [id, name, role]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              role:
+                {
+                  type: string,
+                  enum:
+                    [member, champion, organization_admin, tester, pilot_admin],
+                }
+    JackInvitationInput:
+      type: object
+      additionalProperties: false
+      required: [requestId, organizationId, email, role]
+      properties:
+        requestId: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        email: { type: string, format: email, maxLength: 254 }
+        role: { type: string, enum: [member, champion] }
+    JackInvitation:
+      type: object
+      required:
+        [id, organizationId, email, role, status, deliveryStatus, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        email: { type: string }
+        role: { type: string, enum: [member, champion] }
+        status: { type: string, enum: [pending, accepted, revoked] }
+        deliveryStatus: { type: string, enum: [pending, sent, unknown] }
+        expiresAt: { type: string }
     JackAudioInput:
       type: object
       required: [audio]

@@ -108,6 +108,27 @@ router.delete("/account", async (req, res) => {
         .status(401)
         .json({ error: "Sign in is required to delete an account." });
 
+    const { error: jackFenceError } = await supabase.rpc(
+      "begin_jack_access_account_deletion",
+      { p_user_id: userId },
+    );
+    if (jackFenceError) throw jackFenceError;
+    // Retrieve only server-verified identifiers while Clerk is still intact.
+    // A failed lookup keeps the fence and identity available for a safe retry.
+    const account = await clerkClient.users.getUser(userId);
+    const verifiedEmails = [
+      ...new Set(
+        account.emailAddresses
+          .filter((email) => email.verification?.status === "verified")
+          .map((email) => email.emailAddress.trim().toLowerCase()),
+      ),
+    ];
+    const { error: jackAccessDeleteError } = await supabase.rpc(
+      "delete_jack_access_account",
+      { p_user_id: userId, p_verified_emails: verifiedEmails },
+    );
+    if (jackAccessDeleteError) throw jackAccessDeleteError;
+
     // Establish a permanent hashed write fence before any cleanup. This
     // serializes account deletion with stale consent/activity requests while
     // leaving Clerk intact until all data cleanup succeeds.

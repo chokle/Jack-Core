@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
 const resolveIdentity = vi.hoisted(() => vi.fn());
+const resolveJackOrganizations = vi.hoisted(() => vi.fn());
 const publish = vi.hoisted(() => vi.fn());
 const clerkMiddleware = vi.hoisted(() =>
   vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()),
@@ -16,6 +17,13 @@ vi.mock("@clerk/express", () => ({
 }));
 vi.mock("../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
 vi.mock("../lib/admin-auth.js", () => ({ resolveIdentity }));
+vi.mock("../lib/jack-access.js", () => ({
+  resolveJackOrganizations,
+  isJackAccountDeleted: async () => false,
+}));
+vi.mock("../routes/access.js", async () => ({
+  default: (await import("express")).Router(),
+}));
 vi.mock("pino-http", () => ({
   default: () => (req: { log?: unknown }, _res: unknown, next: () => void) => {
     req.log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -63,6 +71,7 @@ beforeEach(() => {
   getAuth.mockReset();
   resolveActiveTesterScope.mockReset();
   resolveIdentity.mockReset();
+  resolveJackOrganizations.mockReset().mockResolvedValue([]);
   publish.mockReset();
   resolveActiveTesterScope.mockResolvedValue({
     scope: {
@@ -129,7 +138,9 @@ describe("app-wide authentication composition", () => {
 
     const unrelated = await request(app).get("/api/private");
     expect(unrelated.status).toBe(403);
-    expect(unrelated.body.error).toContain("active Torch pilot membership");
+    expect(unrelated.body.error).toContain(
+      "authorized organization invitation",
+    );
   });
 
   it("lets a signed-in organization admin reach only the separately authorized site routes", async () => {
@@ -173,12 +184,42 @@ describe("app-wide authentication composition", () => {
     expect(resolveActiveTesterScope).not.toHaveBeenCalled();
   });
 
-  it("redirects the historical self-service sign-up route to pilot sign-in", async () => {
+  it("does not intercept invitation sign-up with the former pilot redirect", async () => {
     const response = await request(app).get("/sign-up");
 
-    expect(response.status).toBe(302);
-    expect(response.headers.location).toBe("/sign-in");
-    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(response.status).not.toBe(302);
+    expect(response.headers.location).toBeUndefined();
+  });
+
+  it("admits an invited champion without requiring a pilot cohort", async () => {
+    getAuth.mockReturnValue({ userId: "user_champion" });
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: null,
+      reason: "not_enrolled",
+    });
+    resolveIdentity.mockResolvedValue({
+      userId: "user_champion",
+      isAdmin: false,
+      isPresentation: false,
+      classification: "resolved",
+    });
+    resolveJackOrganizations.mockResolvedValue([
+      { id: "org-a", name: "Team", role: "champion" },
+    ]);
+    expect((await request(app).get("/api/private")).status).toBe(200);
+    expect(resolveJackOrganizations).toHaveBeenCalledWith("user_champion");
+  });
+
+  it("fails closed if current invitation membership cannot be verified", async () => {
+    getAuth.mockReturnValue({ userId: "user_champion" });
+    resolveActiveTesterScope.mockResolvedValue({ scope: null });
+    resolveIdentity.mockResolvedValue({
+      isAdmin: false,
+      isPresentation: false,
+      classification: "resolved",
+    });
+    resolveJackOrganizations.mockRejectedValue(new Error("unavailable"));
+    expect((await request(app).get("/api/private")).status).toBe(500);
   });
 
   it("sets Jack's enforced HTTP Content-Security-Policy on successful responses", async () => {

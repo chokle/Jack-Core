@@ -20,6 +20,10 @@ import {
 import { loadCloseout } from "./lib/user-testing/end-of-shift-closeout-service";
 
 vi.hoisted(() => vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_jack_ci"));
+vi.mock("./components/JackAccess", () => ({
+  JackAccess: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useJackAccess: () => ({ allowed: true, canInvite: false, organizations: [] }),
+}));
 vi.mock("@clerk/react", () => ({
   AuthenticateWithRedirectCallback: () => null,
   SignUp: () => null,

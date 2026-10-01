@@ -1,110 +1,88 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { EmailCodeSignIn } from "./EmailCodeSignIn";
 
-type FetchMockResponse = {
-  ok: boolean;
-  json: () => Promise<unknown>;
-};
-
 const h = vi.hoisted(() => ({
-  fetch: vi.fn(),
-  assign: vi.fn(),
   create: vi.fn(),
   prepare: vi.fn(),
   attempt: vi.fn(),
   setActive: vi.fn(),
   setLocation: vi.fn(),
-  auth: {
-    isLoaded: true,
-    isSignedIn: false,
-  },
+  assign: vi.fn(),
+  auth: { isLoaded: true, isSignedIn: false },
 }));
-
 vi.mock("@clerk/react", () => ({
   useAuth: () => h.auth,
+  SignIn: () => (
+    <div data-testid="clerk-security">Complete account security</div>
+  ),
 }));
-
 vi.mock("@clerk/react/legacy", () => ({
   useSignIn: () => ({
     isLoaded: true,
-    signIn: {
-      create: h.create,
-      attemptFirstFactor: h.attempt,
-    },
+    signIn: { create: h.create, attemptFirstFactor: h.attempt },
     setActive: h.setActive,
   }),
 }));
-
-vi.mock("wouter", () => ({
-  useLocation: () => ["/sign-in", h.setLocation],
-}));
-
-let originalLocation: Location;
-
+vi.mock("wouter", () => ({ useLocation: () => ["/sign-in", h.setLocation] }));
+const originalLocation = window.location;
+function location(search = "") {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      search,
+      href: `http://localhost/sign-in${search}`,
+      assign: h.assign,
+    },
+  });
+}
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   h.auth.isLoaded = true;
   h.auth.isSignedIn = false;
-  originalLocation = window.location;
-  h.fetch.mockReset();
-  h.assign.mockReset();
-  h.fetch.mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      url: "/app?connected=1",
-    }),
-  } as FetchMockResponse);
-  h.prepare.mockResolvedValue({});
+  location();
   h.create.mockResolvedValue({
     supportedFirstFactors: [
-      { strategy: "email_code", emailAddressId: "email_admin" },
+      { strategy: "email_code", emailAddressId: "email-1" },
     ],
     prepareFirstFactor: h.prepare,
   });
   h.attempt.mockResolvedValue({
     status: "complete",
-    createdSessionId: "sess_admin",
-  });
-  h.setActive.mockResolvedValue({});
-  vi.spyOn(window, "fetch").mockImplementation(h.fetch);
-  Object.defineProperty(window, "location", {
-    value: {
-      ...window.location,
-      assign: h.assign,
-    },
-    configurable: true,
+    createdSessionId: "session-1",
   });
 });
-
 afterEach(() => {
   cleanup();
-  Object.defineProperty(window, "location", {
-    value: originalLocation,
-    configurable: true,
-  });
   vi.restoreAllMocks();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: originalLocation,
+  });
 });
-
-function startAdminSignIn(email = "derek@torchlabs.ca") {
-  fireEvent.click(
-    screen.getByRole("button", { name: "Torch admin / founder sign in" }),
-  );
-  fireEvent.change(screen.getByLabelText("Torch account email"), {
-    target: { value: email },
+async function start() {
+  fireEvent.change(screen.getByLabelText("Email address"), {
+    target: { value: "ROB@example.test" },
   });
   fireEvent.click(
     screen.getByRole("button", { name: "Send verification code" }),
   );
+  await screen.findByLabelText("Verification code");
 }
-
-async function reachAdminCodeStep() {
-  startAdminSignIn();
-  await screen.findByText("Check your email");
+function verify() {
+  fireEvent.change(screen.getByLabelText("Verification code"), {
+    target: { value: "123456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 }
-
-describe("EmailCodeSignIn", () => {
+describe("email-code and invitation sign-in", () => {
   it("offers production phone sign-in through Clerk and returns to Jack", () => {
     Object.defineProperty(window, "location", {
       value: {
@@ -125,204 +103,144 @@ describe("EmailCodeSignIn", () => {
     ).toBe(
       "https://accounts.torchlabs.ca/sign-in?redirect_url=https%3A%2F%2Fjack.torchlabs.ca%2Fapp",
     );
-    expect(h.fetch).not.toHaveBeenCalled();
-  });
-
-  it("starts direct pilot sign-in from email and redirects to Clerk session URL", async () => {
-    render(<EmailCodeSignIn />);
-
-    fireEvent.change(screen.getByLabelText("Email address"), {
-      target: { value: "NICK@torchlabs.ca" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(1));
-
-    expect(h.fetch).toHaveBeenCalledWith(
-      "/api/pilot-direct-access",
-      expect.objectContaining({
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ identifier: "nick@torchlabs.ca" }),
-      }),
-    );
-    expect(h.assign).toHaveBeenCalledWith("/app?connected=1");
     expect(h.create).not.toHaveBeenCalled();
   });
 
-  it("surfaces pilot endpoint errors instead of leaving the form idle", async () => {
-    h.fetch.mockResolvedValue({
-      ok: false,
-      json: async () => ({ error: "Not configured for direct pilot sign-in." }),
-    } as FetchMockResponse);
-
+  it("uses Clerk email verification for every user and enables mobile OTP autofill", async () => {
     render(<EmailCodeSignIn />);
-
-    fireEvent.change(screen.getByLabelText("Email address"), {
-      target: { value: "missing@torchlabs.ca" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-
-    await waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("alert").textContent).toContain(
-      "Not configured for direct pilot sign-in.",
-    );
-    expect(h.assign).not.toHaveBeenCalled();
-  });
-
-  it("keeps founder/admin sign-in on Clerk email verification instead of pilot direct access", async () => {
-    render(<EmailCodeSignIn />);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Torch admin / founder sign in" }),
-    );
-    expect(
-      screen.getByRole("heading", { name: "Torch admin access" }),
-    ).toBeTruthy();
-
-    fireEvent.change(screen.getByLabelText("Torch account email"), {
-      target: { value: "DEREK@torchlabs.ca" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Send verification code" }),
-    );
-
-    await screen.findByText("Check your email");
-    expect(h.create).toHaveBeenCalledWith({ identifier: "derek@torchlabs.ca" });
+    await start();
+    expect(h.create).toHaveBeenCalledWith({ identifier: "rob@example.test" });
     expect(h.prepare).toHaveBeenCalledWith({
       strategy: "email_code",
-      emailAddressId: "email_admin",
+      emailAddressId: "email-1",
     });
-    expect(h.fetch).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText("Verification code"), {
-      target: { value: "123456" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    await waitFor(() => expect(h.attempt).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByLabelText("Verification code").getAttribute("autocomplete"),
+    ).toBe("one-time-code");
+    verify();
+    await waitFor(() => expect(h.assign).toHaveBeenCalledWith("/app"));
     expect(h.attempt).toHaveBeenCalledWith({
       strategy: "email_code",
       code: "123456",
     });
-    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_admin" });
-    expect(h.assign).toHaveBeenCalledWith("/app");
+    expect(h.setActive).toHaveBeenCalledWith({ session: "session-1" });
   });
-
-  it("contains a rejected Clerk signIn.create without falling back to pilot access", async () => {
-    h.create.mockRejectedValueOnce(new Error("Unable to start admin sign-in."));
-    render(<EmailCodeSignIn />);
-
-    startAdminSignIn();
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Unable to start admin sign-in.",
-      ),
-    );
-    expect(h.prepare).not.toHaveBeenCalled();
-    expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.assign).not.toHaveBeenCalled();
-    expect(h.fetch).not.toHaveBeenCalled();
-  });
-
-  it("contains a rejected Clerk prepareFirstFactor without activating or using pilot access", async () => {
-    h.prepare.mockRejectedValueOnce(new Error("Unable to send verification code."));
-    render(<EmailCodeSignIn />);
-
-    startAdminSignIn();
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Unable to send verification code.",
-      ),
-    );
-    expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.assign).not.toHaveBeenCalled();
-    expect(h.fetch).not.toHaveBeenCalled();
-  });
-
-  it("contains a rejected Clerk attemptFirstFactor without activating or using pilot access", async () => {
-    render(<EmailCodeSignIn />);
-    await reachAdminCodeStep();
-    h.attempt.mockRejectedValueOnce(new Error("Verification failed."));
-
-    fireEvent.change(screen.getByLabelText("Verification code"), {
-      target: { value: "123456" },
+  it.each(["needs_second_factor", "needs_client_trust", "needs_new_password"])(
+    "continues %s using Clerk without activating an incomplete session",
+    async (status) => {
+      h.attempt.mockResolvedValue({ status, createdSessionId: null });
+      render(<EmailCodeSignIn />);
+      await start();
+      verify();
+      await screen.findByTestId("clerk-security");
+      expect(h.setActive).not.toHaveBeenCalled();
+      expect(h.assign).not.toHaveBeenCalled();
+    },
+  );
+  it("leaves security-enabled existing accounts a supported fallback when email code is unavailable", async () => {
+    h.create.mockResolvedValue({
+      supportedFirstFactors: [{ strategy: "password" }],
     });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Verification failed.",
-      ),
-    );
-    expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.assign).not.toHaveBeenCalled();
-    expect(h.fetch).not.toHaveBeenCalled();
-  });
-
-  it("rejects a non-complete Clerk attempt without activating or using pilot access", async () => {
     render(<EmailCodeSignIn />);
-    await reachAdminCodeStep();
-    h.attempt.mockResolvedValueOnce({
-      status: "needs_first_factor",
-      createdSessionId: null,
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "member@example.test" },
     });
-
-    fireEvent.change(screen.getByLabelText("Verification code"), {
-      target: { value: "123456" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "That code could not complete sign-in. Please request a new code.",
-      ),
+    fireEvent.click(
+      screen.getByRole("button", { name: "Send verification code" }),
     );
+    await screen.findByTestId("clerk-security");
     expect(h.setActive).not.toHaveBeenCalled();
-    expect(h.assign).not.toHaveBeenCalled();
-    expect(h.fetch).not.toHaveBeenCalled();
   });
-
-  it("contains a rejected Clerk setActive without redirecting or using pilot access", async () => {
-    render(<EmailCodeSignIn />);
-    await reachAdminCodeStep();
-    h.setActive.mockRejectedValueOnce(new Error("Session activation failed."));
-
-    fireEvent.change(screen.getByLabelText("Verification code"), {
-      target: { value: "123456" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Session activation failed.",
-      ),
+  it.each(["", "&__clerk_status=sign_up", "&__clerk_status=sign_in"])(
+    "takes an invited/preprovisioned user through email OTP regardless of ticket status %s",
+    async (status) => {
+      location(`?__clerk_ticket=invitation-token${status}`);
+      render(<EmailCodeSignIn />);
+      expect(
+        screen.getByRole("heading", { name: "You're invited to Jack" }),
+      ).toBeTruthy();
+      expect(h.create).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText(/password/i)).toBeNull();
+      await start();
+      expect(h.create).toHaveBeenCalledExactlyOnceWith({
+        identifier: "rob@example.test",
+      });
+      expect(h.prepare).toHaveBeenCalledExactlyOnceWith({
+        strategy: "email_code",
+        emailAddressId: "email-1",
+      });
+      verify();
+      await waitFor(() => expect(h.assign).toHaveBeenCalledWith("/app"));
+      expect(h.setActive).toHaveBeenCalledWith({ session: "session-1" });
+    },
+  );
+  it("removes sensitive ticket/status parameters while preserving unrelated URL and history state", () => {
+    location(
+      "?view=interview&__clerk_ticket=secret&__clerk_status=sign_up#note",
     );
-    expect(h.setActive).toHaveBeenCalledWith({ session: "sess_admin" });
-    expect(h.assign).not.toHaveBeenCalled();
-    expect(h.fetch).not.toHaveBeenCalled();
+    const replace = vi.spyOn(window.history, "replaceState");
+    const previousState = window.history.state;
+    render(<EmailCodeSignIn />);
+    expect(replace).toHaveBeenCalledWith(
+      previousState,
+      "",
+      "/sign-in?view=interview#note",
+    );
+    expect(h.create).not.toHaveBeenCalled();
   });
-
-  it("recovers an already-authenticated user to the app instead of showing sign-in again", async () => {
+  it("still permits email OTP if browser history replacement is unavailable", async () => {
+    location("?__clerk_ticket=invite");
+    vi.spyOn(window.history, "replaceState").mockImplementation(() => {
+      throw new Error("restricted");
+    });
+    render(<EmailCodeSignIn />);
+    await start();
+    verify();
+    await waitFor(() => expect(h.assign).toHaveBeenCalledWith("/app"));
+  });
+  it("uses OTP rather than trusting a stale invitation as membership authority", async () => {
+    location("?__clerk_ticket=stale-or-revoked");
+    render(<EmailCodeSignIn />);
+    await start();
+    verify();
+    await waitFor(() =>
+      expect(h.setActive).toHaveBeenCalledWith({ session: "session-1" }),
+    );
+    expect(h.create).toHaveBeenCalledExactlyOnceWith({
+      identifier: "rob@example.test",
+    });
+    // JackAccess subsequently accepts or denies membership using the server response.
+  });
+  it.each(["create", "prepare", "attempt", "setActive"] as const)(
+    "contains %s failures without redirecting",
+    async (operation) => {
+      h[operation].mockRejectedValueOnce(new Error("Try again safely."));
+      render(<EmailCodeSignIn />);
+      if (operation === "create" || operation === "prepare") {
+        fireEvent.change(screen.getByLabelText("Email address"), {
+          target: { value: "member@example.test" },
+        });
+        fireEvent.click(
+          screen.getByRole("button", { name: "Send verification code" }),
+        );
+      } else {
+        await start();
+        verify();
+      }
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Try again safely.",
+      );
+      expect(h.assign).not.toHaveBeenCalled();
+    },
+  );
+  it("keeps a valid existing session even when an invitation link is opened", async () => {
     h.auth.isSignedIn = true;
+    location("?__clerk_ticket=invite&__clerk_status=sign_up");
     render(<EmailCodeSignIn />);
-
     await waitFor(() =>
       expect(h.setLocation).toHaveBeenCalledWith("/app", { replace: true }),
     );
-    expect(
-      screen.queryByRole("heading", { name: /pilot participant access/i }),
-    ).toBeNull();
-    expect(h.fetch).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
-  });
-
-  it("does not offer disabled social providers", () => {
-    render(<EmailCodeSignIn />);
-
-    expect(screen.queryByRole("button", { name: "Continue with Google" })).toBeNull();
-    expect(screen.queryByText("or use an email code")).toBeNull();
+    expect(h.prepare).not.toHaveBeenCalled();
   });
 });

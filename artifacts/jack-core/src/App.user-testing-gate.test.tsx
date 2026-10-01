@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import React from "react";
 import { jackUiAction } from "./lib/jack-ui-context";
 import * as testSessionService from "@/lib/user-testing/test-session-service";
@@ -43,7 +51,10 @@ const startFailuresRemaining = { value: 0 };
 const modalStartSpy = vi.fn();
 const recordingServiceCtorSpy = vi.fn();
 const recordingServiceStartSpy = vi.fn();
-const uploadRecordingSpy = vi.fn(async () => ({ status: "uploaded" as const, filename: "fallback.webm" }));
+const uploadRecordingSpy = vi.fn(async () => ({
+  status: "uploaded" as const,
+  filename: "fallback.webm",
+}));
 let lastConsented: boolean | null = null;
 
 const testSessionServiceState = {
@@ -137,7 +148,9 @@ function cloneStartedSession() {
   return JSON.parse(JSON.stringify(testSessionServiceState.startedSession));
 }
 
-function setCachedActiveSession(overrides: Partial<typeof testSessionServiceState.startedSession> = {}) {
+function setCachedActiveSession(
+  overrides: Partial<typeof testSessionServiceState.startedSession> = {},
+) {
   const session = {
     ...testSessionServiceState.startedSession,
     ...overrides,
@@ -148,15 +161,28 @@ function setCachedActiveSession(overrides: Partial<typeof testSessionServiceStat
 
 // Ensure Clerk and app env are available in the test runtime.
 vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_jack_ci");
+vi.mock("./components/JackAccess", () => ({
+  JackAccess: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useJackAccess: () => ({ allowed: true, canInvite: false, organizations: [] }),
+}));
 
 vi.mock("@clerk/react", () => ({
   AuthenticateWithRedirectCallback: () => null,
   SignUp: () => null,
-  Show: ({ when, children }: { when: "signed-in" | "signed-out"; children: React.ReactNode }) => {
+  Show: ({
+    when,
+    children,
+  }: {
+    when: "signed-in" | "signed-out";
+    children: React.ReactNode;
+  }) => {
     if (when === "signed-in") return <>{children}</>;
     return null;
   },
-  useAuth: () => ({ isLoaded: true, getToken: vi.fn(async () => "test-token") }),
+  useAuth: () => ({
+    isLoaded: true,
+    getToken: vi.fn(async () => "test-token"),
+  }),
   useClerk: () => ({
     addListener: () => () => {},
     signOut: vi.fn(),
@@ -164,13 +190,15 @@ vi.mock("@clerk/react", () => ({
 }));
 
 vi.mock("@clerk/react/internal", () => ({
-  InternalClerkProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  InternalClerkProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 vi.mock("@workspace/api-client-react", async () => {
-  const actual = await vi.importActual<typeof import("@workspace/api-client-react")>(
-    "@workspace/api-client-react",
-  );
+  const actual = await vi.importActual<
+    typeof import("@workspace/api-client-react")
+  >("@workspace/api-client-react");
   return {
     ...actual,
     useGetMe: () => ({ data: identity }),
@@ -178,12 +206,24 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-vi.mock("./components/Landing", () => ({ Landing: () => <div data-testid="landing-page" /> }));
-vi.mock("./components/KnowledgeGraph", () => ({ KnowledgeGraph: () => <div data-testid="knowledge-graph" /> }));
-vi.mock("./components/MemoryGraphView", () => ({ MemoryGraphView: () => <div data-testid="memory-graph-view" /> }));
-vi.mock("./components/Library", () => ({ Library: () => <div data-testid="library-page" /> }));
-vi.mock("./components/InterviewMode", () => ({ InterviewMode: () => <div data-testid="interview-page" /> }));
-vi.mock("./components/KnowledgeReview", () => ({ KnowledgeReview: () => <div data-testid="knowledge-review-page" /> }));
+vi.mock("./components/Landing", () => ({
+  Landing: () => <div data-testid="landing-page" />,
+}));
+vi.mock("./components/KnowledgeGraph", () => ({
+  KnowledgeGraph: () => <div data-testid="knowledge-graph" />,
+}));
+vi.mock("./components/MemoryGraphView", () => ({
+  MemoryGraphView: () => <div data-testid="memory-graph-view" />,
+}));
+vi.mock("./components/Library", () => ({
+  Library: () => <div data-testid="library-page" />,
+}));
+vi.mock("./components/InterviewMode", () => ({
+  InterviewMode: () => <div data-testid="interview-page" />,
+}));
+vi.mock("./components/KnowledgeReview", () => ({
+  KnowledgeReview: () => <div data-testid="knowledge-review-page" />,
+}));
 vi.mock("./components/VideoDetail", () => ({
   VideoDetail: () => <div data-testid="video-detail-page" />,
 }));
@@ -197,7 +237,12 @@ vi.mock("./components/SystemHealthWidget", () => ({
 vi.mock("./components/testing/UserTestFeedback", () => ({
   UserTestFeedback: ({ consented }: { consented: boolean }) => {
     lastConsented = consented;
-    return <div data-testid="user-test-feedback" data-consented={String(consented)} />;
+    return (
+      <div
+        data-testid="user-test-feedback"
+        data-consented={String(consented)}
+      />
+    );
   },
 }));
 
@@ -227,7 +272,11 @@ vi.mock("./components/testing/UserTestingModal", () => ({
         >
           Start Test
         </button>
-        <button type="button" data-testid="user-testing-cancel" onClick={onCancel}>
+        <button
+          type="button"
+          data-testid="user-testing-cancel"
+          onClick={onCancel}
+        >
           Continue Without Recording
         </button>
       </div>
@@ -304,9 +353,9 @@ vi.mock("@/lib/user-testing/upload-service", () => ({
 }));
 
 vi.mock("@/lib/user-testing/test-session-service", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/user-testing/test-session-service")>(
-    "@/lib/user-testing/test-session-service",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/lib/user-testing/test-session-service")
+  >("@/lib/user-testing/test-session-service");
   return {
     ...actual,
     initializeTelemetryRetry: vi.fn(() => vi.fn()),
@@ -317,7 +366,9 @@ vi.mock("@/lib/user-testing/test-session-service", async () => {
       return cloneTelemetryContext();
     }),
     saveTelemetryConsents: vi.fn(async () => {
-      return JSON.parse(JSON.stringify(testSessionServiceState.saveTelemetryResult));
+      return JSON.parse(
+        JSON.stringify(testSessionServiceState.saveTelemetryResult),
+      );
     }),
     startTestSession: vi.fn(async () => {
       if (startFailuresRemaining.value > 0) {
@@ -330,7 +381,9 @@ vi.mock("@/lib/user-testing/test-session-service", async () => {
     }),
     loadCurrentTestSession: vi.fn(async () =>
       testSessionServiceState.currentSession
-        ? (JSON.parse(JSON.stringify(testSessionServiceState.currentSession)) as unknown)
+        ? (JSON.parse(
+            JSON.stringify(testSessionServiceState.currentSession),
+          ) as unknown)
         : null,
     ),
     trackTestEvent: vi.fn(),
@@ -344,12 +397,20 @@ vi.mock("@/lib/user-testing/test-session-service", async () => {
 
 vi.mock("@/components/ui/toaster", () => ({ Toaster: () => null }));
 vi.mock("@/components/ui/tooltip", () => ({
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
-const mockedLoadCurrentSession = vi.mocked(testSessionService.loadCurrentTestSession);
-const mockedLoadTelemetryContext = vi.mocked(testSessionService.loadTelemetryContext);
-const mockedSaveTelemetryConsents = vi.mocked(testSessionService.saveTelemetryConsents);
+const mockedLoadCurrentSession = vi.mocked(
+  testSessionService.loadCurrentTestSession,
+);
+const mockedLoadTelemetryContext = vi.mocked(
+  testSessionService.loadTelemetryContext,
+);
+const mockedSaveTelemetryConsents = vi.mocked(
+  testSessionService.saveTelemetryConsents,
+);
 const mockedStartTestSession = vi.mocked(testSessionService.startTestSession);
 const mockedTrackTestEvent = vi.mocked(testSessionService.trackTestEvent);
 const mockedWithdrawTelemetry = vi.mocked(testSessionService.withdrawTelemetry);
@@ -362,7 +423,9 @@ async function renderAuthenticatedApp(path = "/app?test=true") {
 }
 
 function userConsented() {
-  return screen.getByTestId("user-test-feedback").getAttribute("data-consented");
+  return screen
+    .getByTestId("user-test-feedback")
+    .getAttribute("data-consented");
 }
 
 async function renderAndOpenInitialModal() {
@@ -374,7 +437,9 @@ async function renderAndOpenInitialModal() {
 async function declineWithoutRecording() {
   const cancel = await renderAndOpenInitialModal();
   fireEvent.click(cancel);
-  await waitFor(() => expect(screen.queryByTestId("user-testing-modal")).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByTestId("user-testing-modal")).toBeNull(),
+  );
   await waitFor(() => {
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
   });
@@ -391,23 +456,25 @@ function openFromAnyEntry() {
 
 function storageWriteFailureForUserScope() {
   const originalSetItem = Storage.prototype.setItem;
-  const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
-    this: Storage,
-    key: string,
-    value: string,
-  ) {
-    if (typeof key === "string" && key.startsWith(DECLINED_PREFIX_KEY)) {
-      throw new Error("storage blocked");
-    }
-    return originalSetItem.call(this, key, value);
-  });
+  const setItemSpy = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(function (this: Storage, key: string, value: string) {
+      if (typeof key === "string" && key.startsWith(DECLINED_PREFIX_KEY)) {
+        throw new Error("storage blocked");
+      }
+      return originalSetItem.call(this, key, value);
+    });
   return { setItemSpy };
 }
 
 function resetServiceState() {
   testSessionServiceState.contextError = null;
   testSessionServiceState.currentSession = null;
-  const mutableContext = testSessionServiceState.telemetryContext as unknown as Record<string, unknown>;
+  const mutableContext =
+    testSessionServiceState.telemetryContext as unknown as Record<
+      string,
+      unknown
+    >;
   delete mutableContext["privacyScopes"];
   Object.assign(mutableContext, {
     enrolled: true,
@@ -462,24 +529,31 @@ describe("user-testing gate transition", () => {
     ["library", "library-page"],
     ["interview", "interview-page"],
     ["graph", "memory-graph-view"],
-  ] as const)("lets Jack leave account settings for %s", async (destination, page) => {
-    await renderAuthenticatedApp("/app");
-    fireEvent.click(screen.getByTestId("account-settings"));
-    const dialog = await screen.findByRole("alertdialog");
-    const action = jackUiAction(destination);
-    expect(action).not.toBeNull();
-    expect(dialog.contains(action)).toBe(true);
-    expect(dialog.querySelector('[data-jack-action="reports"]')).toBeNull();
-    fireEvent.click(action!);
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    expect(screen.getByTestId(page)).toBeTruthy();
-  });
+  ] as const)(
+    "lets Jack leave account settings for %s",
+    async (destination, page) => {
+      await renderAuthenticatedApp("/app");
+      fireEvent.click(screen.getByTestId("account-settings"));
+      const dialog = await screen.findByRole("alertdialog");
+      const action = jackUiAction(destination);
+      expect(action).not.toBeNull();
+      expect(dialog.contains(action)).toBe(true);
+      expect(dialog.querySelector('[data-jack-action="reports"]')).toBeNull();
+      fireEvent.click(action!);
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect(screen.getByTestId(page)).toBeTruthy();
+    },
+  );
 
   it("does not offer page navigation from the destructive confirmation", async () => {
     await renderAuthenticatedApp("/app");
     fireEvent.click(screen.getByTestId("account-settings"));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Permanently delete your account?" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete my account" }),
+    );
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Permanently delete your account?",
+    });
     expect(dialog.querySelector('[data-jack-action="library"]')).toBeNull();
     expect(jackUiAction("library")).toBeNull();
     expect(jackUiAction("back")?.textContent).toBe("Cancel");
@@ -564,7 +638,9 @@ describe("user-testing gate transition", () => {
     await declineWithoutRecording();
 
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
-    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+    expect(
+      localStorage.getItem(declinedStorageKey(identity.userId)),
+    ).toBeNull();
     setItemSpy.mockRestore();
   });
 
@@ -591,7 +667,9 @@ describe("user-testing gate transition", () => {
     testSessionServiceState.currentSession = null;
 
     await renderAndOpenInitialModal();
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1),
+    );
     expect(userConsented()).toBe("false");
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
 
@@ -612,13 +690,21 @@ describe("user-testing gate transition", () => {
     await renderAuthenticatedApp("/app");
     const modal = await screen.findByTestId("telemetry-consent-modal");
     fireEvent.click(within(modal).getAllByRole("checkbox")[0]);
-    fireEvent.click(within(modal).getByRole("button", { name: "Save choices" }));
+    fireEvent.click(
+      within(modal).getByRole("button", { name: "Save choices" }),
+    );
 
-    await waitFor(() => expect(mockedSaveTelemetryConsents).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedSaveTelemetryConsents).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1),
+    );
 
     expect(userConsented()).toBe("false");
-    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
+    expect(
+      localStorage.getItem(acceptedStorageKey(identity.userId)),
+    ).toBeNull();
     expect(recordingServiceCtorSpy).not.toHaveBeenCalled();
     expect(recordingServiceStartSpy).not.toHaveBeenCalled();
   });
@@ -628,7 +714,9 @@ describe("user-testing gate transition", () => {
       "/app?view=interview&source=torch-command-centre&starvingPointId=sp-1&title=Boiler+check&trade=Plumbing",
     );
 
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1),
+    );
     expect(screen.getByTestId("interview-page")).toBeTruthy();
     expect(screen.queryByTestId("memory-graph-view")).toBeNull();
   });
@@ -667,7 +755,9 @@ describe("user-testing gate transition", () => {
       expect(mockedStartTestSession).toHaveBeenCalledTimes(index + 2);
     }
 
-    expect(mockedStartTestSession.mock.calls[6]?.[1]?.requestKey).toBe(identity.userId);
+    expect(mockedStartTestSession.mock.calls[6]?.[1]?.requestKey).toBe(
+      identity.userId,
+    );
     vi.useRealTimers();
   });
 
@@ -686,7 +776,9 @@ describe("user-testing gate transition", () => {
     );
 
     const rendered = await renderAuthenticatedApp("/app");
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1),
+    );
     expect(mockedStartTestSession.mock.calls[0]?.[1]?.requestKey).toBe(
       identityBase.userId,
     );
@@ -702,7 +794,9 @@ describe("user-testing gate transition", () => {
     rendered.rerender(<module.default />);
 
     await waitFor(() => expect(firstSignal?.aborted).toBe(true));
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(2),
+    );
     expect(mockedStartTestSession.mock.calls[1]?.[1]?.requestKey).toBe(
       nextIdentity.userId,
     );
@@ -723,7 +817,9 @@ describe("user-testing gate transition", () => {
     );
 
     await renderAuthenticatedApp("/app");
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedStartTestSession).toHaveBeenCalledTimes(1),
+    );
     expect(bootstrapSignal?.aborted).toBe(false);
 
     setCachedActiveSession();
@@ -779,14 +875,19 @@ describe("user-testing gate transition", () => {
 
     await waitFor(() => {
       expect(userConsented()).toBe("false");
-      expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
+      expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
-    expect(localStorage.getItem(acceptedStorageKey(nextIdentity.userId))).toBeNull();
+    expect(
+      localStorage.getItem(acceptedStorageKey(nextIdentity.userId)),
+    ).toBeNull();
   });
 
   it("keeps export and withdrawal controls for a former tester without prior gate storage", async () => {
     Object.assign(
-      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      testSessionServiceState.telemetryContext as unknown as Record<
+        string,
+        unknown
+      >,
       {
         enrolled: false,
         requiresPilotSelection: false,
@@ -822,18 +923,26 @@ describe("user-testing gate transition", () => {
     );
 
     await renderAuthenticatedApp("/app");
-    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1),
+    );
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
     });
-    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBeNull();
-    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+    expect(
+      localStorage.getItem(acceptedStorageKey(identity.userId)),
+    ).toBeNull();
+    expect(
+      localStorage.getItem(declinedStorageKey(identity.userId)),
+    ).toBeNull();
     fireEvent.click(screen.getByTestId("account-settings"));
 
     const controls = await screen.findByTestId("telemetry-privacy-controls");
     expect(within(controls).getByText("Completed Pilot")).toBeTruthy();
     expect(within(controls).getByText("Former Org")).toBeTruthy();
-    fireEvent.click(within(controls).getByRole("button", { name: "Export telemetry" }));
+    fireEvent.click(
+      within(controls).getByRole("button", { name: "Export telemetry" }),
+    );
     expect(mockedExportTelemetry).toHaveBeenCalledTimes(1);
 
     const historicalScope = within(
@@ -844,10 +953,9 @@ describe("user-testing gate transition", () => {
     );
 
     await waitFor(() => {
-      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
-        "pilot-history-1",
-        ["telemetry"],
-      );
+      expect(mockedWithdrawTelemetry).toHaveBeenCalledWith("pilot-history-1", [
+        "telemetry",
+      ]);
     });
     expect(mockedLoadTelemetryContext.mock.calls.at(-1)?.[0]).toBeUndefined();
   });
@@ -855,7 +963,10 @@ describe("user-testing gate transition", () => {
   it("keeps owned historical privacy controls after promotion without enabling collection", async () => {
     setIdentity({ ...identityBase, isAdmin: true });
     Object.assign(
-      testSessionServiceState.telemetryContext as unknown as Record<string, unknown>,
+      testSessionServiceState.telemetryContext as unknown as Record<
+        string,
+        unknown
+      >,
       {
         enrolled: false,
         requiresPilotSelection: false,
@@ -883,7 +994,9 @@ describe("user-testing gate transition", () => {
     );
 
     await renderAuthenticatedApp("/app");
-    await waitFor(() => expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockedLoadTelemetryContext).toHaveBeenCalledTimes(1),
+    );
     expect(mockedStartTestSession).not.toHaveBeenCalled();
     expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
 
@@ -891,10 +1004,9 @@ describe("user-testing gate transition", () => {
     const controls = await screen.findByTestId("telemetry-privacy-controls");
     expect(within(controls).getByText("Admin History")).toBeTruthy();
     fireEvent.click(
-      within(screen.getByTestId("telemetry-privacy-scope-pilot-history-admin")).getByRole(
-        "button",
-        { name: "Withdraw telemetry" },
-      ),
+      within(
+        screen.getByTestId("telemetry-privacy-scope-pilot-history-admin"),
+      ).getByRole("button", { name: "Withdraw telemetry" }),
     );
     await waitFor(() => {
       expect(mockedWithdrawTelemetry).toHaveBeenCalledWith(
@@ -916,12 +1028,18 @@ describe("user-testing gate transition", () => {
     await waitFor(() => {
       expect(userConsented()).toBe("true");
     });
-    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBe("true");
-    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+    expect(localStorage.getItem(acceptedStorageKey(identity.userId))).toBe(
+      "true",
+    );
+    expect(
+      localStorage.getItem(declinedStorageKey(identity.userId)),
+    ).toBeNull();
   });
 
   it("missing telemetry context does not trap user", async () => {
-    testSessionServiceState.contextError = new Error("telemetry context failed");
+    testSessionServiceState.contextError = new Error(
+      "telemetry context failed",
+    );
     await renderAuthenticatedApp("/app");
 
     fireEvent.click(screen.getByTestId("start-user-test"));
@@ -979,11 +1097,15 @@ describe("user-testing gate transition", () => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
       expect(userConsented()).toBe("true");
     });
-    expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBeNull();
+    expect(
+      localStorage.getItem(declinedStorageKey(identity.userId)),
+    ).toBeNull();
   });
 
   it("repeated continue actions remain idempotent", async () => {
-    testSessionServiceState.contextError = new Error("telemetry context unavailable");
+    testSessionServiceState.contextError = new Error(
+      "telemetry context unavailable",
+    );
     await declineWithoutRecording();
 
     fireEvent.click(screen.getByTestId("start-user-test"));
@@ -997,7 +1119,9 @@ describe("user-testing gate transition", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull();
       expect(userConsented()).toBe("false");
-      expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBe("true");
+      expect(localStorage.getItem(declinedStorageKey(identity.userId))).toBe(
+        "true",
+      );
     });
   });
 
@@ -1020,7 +1144,9 @@ describe("user-testing gate transition", () => {
   });
 });
 
-async function startFlowFromOpenOverlay(options: { expectRecording?: boolean } = {}) {
+async function startFlowFromOpenOverlay(
+  options: { expectRecording?: boolean } = {},
+) {
   const { expectRecording = false } = options;
   const start = await screen.findByTestId("user-testing-start");
   const prevCtorCalls = recordingServiceCtorSpy.mock.calls.length;

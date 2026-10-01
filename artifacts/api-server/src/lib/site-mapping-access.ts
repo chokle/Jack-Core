@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { resolveIdentity, type CallerIdentity } from "./admin-auth.js";
 import { supabase } from "./supabase.js";
+import { isJackAccountDeleted } from "./jack-access.js";
 
 export const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -17,7 +18,9 @@ export async function resolvedSiteCaller(
   req: Request,
 ): Promise<CallerIdentity | null> {
   const identity = await resolveIdentity(req);
-  return identity?.classification === "resolved" && !identity.isPresentation
+  return identity?.classification === "resolved" &&
+    !identity.isPresentation &&
+    !(await isJackAccountDeleted(identity.userId))
     ? identity
     : null;
 }
@@ -42,7 +45,8 @@ export async function hasOrganizationAuthority(
   userId: string,
   organizationId: string,
 ): Promise<boolean> {
-  if (!UUID_RE.test(organizationId)) return false;
+  if (!UUID_RE.test(organizationId) || (await isJackAccountDeleted(userId)))
+    return false;
   const organization = await supabase
     .from("organizations")
     .select("id,status")
@@ -68,7 +72,8 @@ export async function resolveSiteScope(
   userId: string,
   siteId: string,
 ): Promise<SiteScope | null> {
-  if (!UUID_RE.test(siteId)) return null;
+  if (!UUID_RE.test(siteId) || (await isJackAccountDeleted(userId)))
+    return null;
   const site = await supabase
     .from("site_workspaces")
     .select("id,organization_id,name,status")
@@ -113,11 +118,12 @@ export async function resolveSiteScope(
   };
 }
 
-/** Members must already belong to an active pilot in the same organization. */
+/** A current invitation grant or existing pilot membership in this tenant. */
 export async function isEligibleSiteMember(
   userId: string,
   organizationId: string,
 ): Promise<boolean> {
+  if (await isJackAccountDeleted(userId)) return false;
   const result = await supabase
     .from("pilot_memberships")
     .select("role,pilot_id,active,valid_from,valid_until")
@@ -127,6 +133,16 @@ export async function isEligibleSiteMember(
   if (result.error) throw result.error;
   const current = (result.data ?? []).filter(currentMembership);
   if (current.some((row) => row.role === "organization_admin" && !row.pilot_id))
+    return true;
+  const invited = await supabase
+    .from("jack_memberships")
+    .select("role")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .eq("active", true)
+    .maybeSingle();
+  if (invited.error) throw invited.error;
+  if (invited.data && ["member", "champion"].includes(invited.data.role))
     return true;
   const pilotIds = current
     .map((row) => row.pilot_id)

@@ -142,4 +142,29 @@ describe("JackShell account management", () => {
 
     expect(screen.queryByTestId("sign-out")).toBeNull();
   });
+
+  it("exposes invitation management only with a server-authorized handler", () => {
+    const invite = vi.fn();
+    const props = {
+      active: "graph" as const,
+      onNavigate: vi.fn(),
+      onOpenChat: vi.fn(),
+      model,
+      readyCount: 0,
+      lastUpdatedLabel: "now",
+    };
+    const result = render(
+      <JackShell {...props}>
+        <div />
+      </JackShell>,
+    );
+    expect(screen.queryByTestId("invite-users")).toBeNull();
+    result.rerender(
+      <JackShell {...props} onInviteUsers={invite}>
+        <div />
+      </JackShell>,
+    );
+    fireEvent.click(screen.getByTestId("invite-users"));
+    expect(invite).toHaveBeenCalledOnce();
+  });
 });

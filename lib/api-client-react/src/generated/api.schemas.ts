@@ -5,6 +5,81 @@
  * Jack — AI Trade Intelligence Engine API
  * OpenAPI spec version: 0.1.0
  */
+export type JackAccessContextOrganizationsItemRole = typeof JackAccessContextOrganizationsItemRole[keyof typeof JackAccessContextOrganizationsItemRole];
+
+
+export const JackAccessContextOrganizationsItemRole = {
+  member: 'member',
+  champion: 'champion',
+  organization_admin: 'organization_admin',
+  tester: 'tester',
+  pilot_admin: 'pilot_admin',
+} as const;
+
+export type JackAccessContextOrganizationsItem = {
+  id: string;
+  name: string;
+  role: JackAccessContextOrganizationsItemRole;
+};
+
+export interface JackAccessContext {
+  allowed: boolean;
+  canInvite: boolean;
+  organizations: JackAccessContextOrganizationsItem[];
+}
+
+export type JackInvitationInputRole = typeof JackInvitationInputRole[keyof typeof JackInvitationInputRole];
+
+
+export const JackInvitationInputRole = {
+  member: 'member',
+  champion: 'champion',
+} as const;
+
+export interface JackInvitationInput {
+  requestId: string;
+  organizationId: string;
+  /** @maxLength 254 */
+  email: string;
+  role: JackInvitationInputRole;
+}
+
+export type JackInvitationRole = typeof JackInvitationRole[keyof typeof JackInvitationRole];
+
+
+export const JackInvitationRole = {
+  member: 'member',
+  champion: 'champion',
+} as const;
+
+export type JackInvitationStatus = typeof JackInvitationStatus[keyof typeof JackInvitationStatus];
+
+
+export const JackInvitationStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  revoked: 'revoked',
+} as const;
+
+export type JackInvitationDeliveryStatus = typeof JackInvitationDeliveryStatus[keyof typeof JackInvitationDeliveryStatus];
+
+
+export const JackInvitationDeliveryStatus = {
+  pending: 'pending',
+  sent: 'sent',
+  unknown: 'unknown',
+} as const;
+
+export interface JackInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: JackInvitationRole;
+  status: JackInvitationStatus;
+  deliveryStatus: JackInvitationDeliveryStatus;
+  expiresAt: string;
+}
+
 export interface JackAudioInput {
   audio: Blob;
 }
@@ -1554,6 +1629,23 @@ export interface ParkedThought {
 export interface ParkedThoughtList {
   items: ParkedThought[];
 }
+
+export type GetJackInviteOrganizations200OrganizationsItem = {
+  id: string;
+  name: string;
+};
+
+export type GetJackInviteOrganizations200 = {
+  organizations: GetJackInviteOrganizations200OrganizationsItem[];
+};
+
+export type ListJackInvitationsParams = {
+organizationId: string;
+};
+
+export type ListJackInvitations200 = {
+  invitations: JackInvitation[];
+};
 
 export type ListVideosParams = {
 /**

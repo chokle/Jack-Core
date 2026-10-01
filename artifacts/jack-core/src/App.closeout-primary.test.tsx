@@ -16,6 +16,10 @@ import {
 import { loadCloseout } from "./lib/user-testing/end-of-shift-closeout-service";
 
 vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_jack_ci");
+vi.mock("./components/JackAccess", () => ({
+  JackAccess: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useJackAccess: () => ({ allowed: true, canInvite: false, organizations: [] }),
+}));
 vi.mock("@clerk/react", () => ({
   AuthenticateWithRedirectCallback: () => null,
   SignUp: () => null,
@@ -141,15 +145,7 @@ describe("participant Closeout navigation without telemetry", () => {
       render(<App />);
       await waitFor(() => expect(loadTelemetryContext).toHaveBeenCalled());
 
-      if (context === "unavailable") {
-        expect(screen.getByTestId("user-testing-restricted-gate")).toBeTruthy();
-        fireEvent.click(screen.getByTestId("user-testing-gate-start"));
-        const startRecording = await screen.findByTestId("user-testing-start");
-        fireEvent.click(startRecording);
-        await waitFor(() =>
-          expect(screen.queryByTestId("user-testing-modal")).toBeNull(),
-        );
-      }
+      expect(screen.queryByTestId("user-testing-modal")).toBeNull();
       await waitFor(() =>
         expect(screen.queryByTestId("user-testing-restricted-gate")).toBeNull(),
       );

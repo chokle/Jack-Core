@@ -48,6 +48,7 @@ interface JackShellProps {
   /** Opens Clerk's secure account profile for password, sessions, and deletion. */
   onOpenSettings?: () => void;
   onSignOut?: () => void;
+  onInviteUsers?: () => void;
   /** Opens the beta user-testing consent modal. Omit to hide the control entirely. */
   onStartUserTest?: () => void;
   userTestStarting?: boolean;
@@ -93,6 +94,7 @@ export function JackShell({
   siteHudUserId,
   onOpenSettings,
   onSignOut,
+  onInviteUsers,
   onStartUserTest,
   userTestStarting,
   canViewPilotReports,
@@ -306,6 +308,17 @@ export function JackShell({
             }
             onClick={() => go("dashboard")}
           />
+          {onInviteUsers && (
+            <NavItem
+              icon={<ShieldCheck className="h-4 w-4" />}
+              label="Invite people"
+              onClick={() => {
+                onInviteUsers();
+                setIsPanelOpen(false);
+              }}
+              testId="invite-users"
+            />
+          )}
           <NavItem
             icon={<Settings className="h-4 w-4" />}
             label="Account Settings"

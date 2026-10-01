@@ -9,6 +9,100 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Current authorized Jack organizations and roles
+ */
+export const GetJackAccessResponse = zod.object({
+  "allowed": zod.boolean(),
+  "canInvite": zod.boolean(),
+  "organizations": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "role": zod.enum(['member', 'champion', 'organization_admin', 'tester', 'pilot_admin'])
+}))
+})
+
+
+/**
+ * @summary Claim invitations for the authenticated verified primary email
+ */
+export const AcceptJackInvitationsResponse = zod.object({
+  "allowed": zod.boolean(),
+  "canInvite": zod.boolean(),
+  "organizations": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "role": zod.enum(['member', 'champion', 'organization_admin', 'tester', 'pilot_admin'])
+}))
+})
+
+
+/**
+ * @summary Active organizations this caller can invite into
+ */
+export const GetJackInviteOrganizationsResponse = zod.object({
+  "organizations": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string()
+}))
+})
+
+
+/**
+ * @summary Review invitations in an administered organization
+ */
+export const ListJackInvitationsQueryParams = zod.object({
+  "organizationId": zod.coerce.string().uuid()
+})
+
+export const ListJackInvitationsResponse = zod.object({
+  "invitations": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "organizationId": zod.string().uuid(),
+  "email": zod.string(),
+  "role": zod.enum(['member', 'champion']),
+  "status": zod.enum(['pending', 'accepted', 'revoked']),
+  "deliveryStatus": zod.enum(['pending', 'sent', 'unknown']),
+  "expiresAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Authorize tenant access and email an invitation with a durable request ID
+ */
+export const createJackInvitationBodyEmailMax = 254;
+
+
+
+export const CreateJackInvitationBody = zod.object({
+  "requestId": zod.string().uuid(),
+  "organizationId": zod.string().uuid(),
+  "email": zod.string().email().max(createJackInvitationBodyEmailMax),
+  "role": zod.enum(['member', 'champion'])
+})
+
+export const CreateJackInvitationResponse = zod.object({
+  "id": zod.string().uuid(),
+  "organizationId": zod.string().uuid(),
+  "email": zod.string(),
+  "role": zod.enum(['member', 'champion']),
+  "status": zod.enum(['pending', 'accepted', 'revoked']),
+  "deliveryStatus": zod.enum(['pending', 'sent', 'unknown']),
+  "expiresAt": zod.string()
+})
+
+
+/**
+ * @summary Revoke invitation and current access granted by that invitation
+ */
+export const RevokeJackInvitationParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const RevokeJackInvitationResponse = zod.void()
+
+
+/**
  * @summary Create an admin-owned Jack liveness report with a stable idempotency key
  */
 export const CreateDazTaskBody = zod.object({
