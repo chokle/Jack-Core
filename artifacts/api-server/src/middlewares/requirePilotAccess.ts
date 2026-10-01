@@ -2,7 +2,10 @@ import type { NextFunction, Request, Response } from "express";
 import { resolveIdentity } from "../lib/admin-auth.js";
 import { resolveActiveTesterScope } from "../lib/activity-telemetry.js";
 import { isPublicApiPath } from "./requireAuth.js";
-import { resolveJackOrganizations } from "../lib/jack-access.js";
+import {
+  isJackAccountDeleted,
+  resolveJackOrganizations,
+} from "../lib/jack-access.js";
 
 function usesRouteScopedAuthorization(req: Request): boolean {
   const path = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
@@ -54,6 +57,10 @@ export function requirePilotAccess(
   }
 
   void (async () => {
+    if (await isJackAccountDeleted(userId)) {
+      res.status(403).json({ error: "Account deletion is in progress." });
+      return;
+    }
     const membership = await resolveActiveTesterScope(userId);
     if (membership.scope) {
       next();

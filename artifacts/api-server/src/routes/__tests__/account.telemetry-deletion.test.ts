@@ -7,6 +7,7 @@ const rpcCalls = vi.hoisted(
   () => [] as Array<{ name: string; params: Record<string, unknown> }>,
 );
 const operationOrder = vi.hoisted(() => [] as string[]);
+const rpcFailure = vi.hoisted(() => ({ name: "" }));
 const deletions = vi.hoisted(
   () => [] as Array<{ table: string; column: string; value: unknown }>,
 );
@@ -18,6 +19,20 @@ const updates = vi.hoisted(
       column: string;
       value: unknown;
     }>,
+);
+const getUser = vi.hoisted(() =>
+  vi.fn(async () => ({
+    emailAddresses: [
+      {
+        emailAddress: "OWN@example.test",
+        verification: { status: "verified" },
+      },
+      {
+        emailAddress: "unverified@example.test",
+        verification: { status: "unverified" },
+      },
+    ],
+  })),
 );
 const deleteUser = vi.hoisted(() => vi.fn(async () => {}));
 const recordingRows = vi.hoisted(
@@ -44,7 +59,7 @@ const withdrawMentor = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("@clerk/express", () => ({
   getAuth: () => ({ userId: "user-1" }),
-  clerkClient: { users: { deleteUser } },
+  clerkClient: { users: { deleteUser, getUser } },
 }));
 vi.mock("../../lib/memory-graph.js", () => ({
   removeVideoGraph,
@@ -59,7 +74,11 @@ vi.mock("../../lib/supabase.js", () => ({
     rpc: async (name: string, params: Record<string, unknown>) => {
       rpcCalls.push({ name, params });
       operationOrder.push(`rpc:${name}`);
-      return { data: null, error: null };
+      return {
+        data: null,
+        error:
+          rpcFailure.name === name ? new Error("database unavailable") : null,
+      };
     },
     from: (table: string) => {
       operationOrder.push(`from:${table}`);
@@ -162,11 +181,13 @@ beforeEach(() => {
   deletedTables.length = 0;
   rpcCalls.length = 0;
   operationOrder.length = 0;
+  rpcFailure.name = "";
   deletions.length = 0;
   updates.length = 0;
   recordingRows.length = 0;
   siteScanRows.length = 0;
   deleteUser.mockClear();
+  getUser.mockClear();
   removeRecordingObjects.mockReset();
   removeRecordingObjects.mockResolvedValue({ error: null });
   removeVideoGraph.mockReset();
@@ -184,6 +205,23 @@ afterEach(() => {
 });
 
 describe("account deletion telemetry coverage", () => {
+  it("does not clean data or remove sign-in if the access fence cannot be established", async () => {
+    rpcFailure.name = "begin_jack_access_account_deletion";
+    expect((await request(app()).delete("/api/account")).status).toBe(500);
+    expect(getUser).not.toHaveBeenCalled();
+    expect(deletedTables).toEqual([]);
+    expect(deleteUser).not.toHaveBeenCalled();
+  });
+  it("establishes denial before a failed verified-identity lookup and preserves sign-in for retry", async () => {
+    getUser.mockRejectedValueOnce(new Error("identity lookup unavailable"));
+    expect((await request(app()).delete("/api/account")).status).toBe(500);
+    expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_jack_access_account_deletion",
+    ]);
+    expect(deletedTables).toEqual([]);
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect((await request(app()).delete("/api/account")).status).toBe(204);
+  });
   it("deletes all attributable pilot data before removing the identity", async () => {
     recordingRows.push({
       id: "recording-one",
@@ -213,6 +251,17 @@ describe("account deletion telemetry coverage", () => {
     );
     expect(rpcCalls).toEqual([
       {
+        name: "begin_jack_access_account_deletion",
+        params: { p_user_id: "user-1" },
+      },
+      {
+        name: "delete_jack_access_account",
+        params: {
+          p_user_id: "user-1",
+          p_verified_emails: ["own@example.test"],
+        },
+      },
+      {
         name: "begin_telemetry_account_deletion",
         params: { p_actor_user_id: "user-1" },
       },
@@ -220,12 +269,11 @@ describe("account deletion telemetry coverage", () => {
         name: "finish_telemetry_account_deletion",
         params: { p_actor_user_id: "user-1" },
       },
-      {
-        name: "delete_jack_access_account",
-        params: { p_user_id: "user-1" },
-      },
     ]);
-    expect(operationOrder[0]).toBe("rpc:begin_telemetry_account_deletion");
+    expect(operationOrder[0]).toBe("rpc:begin_jack_access_account_deletion");
+    expect(
+      operationOrder.indexOf("rpc:delete_jack_access_account"),
+    ).toBeLessThan(operationOrder.indexOf("from:site_scans"));
     expect(
       operationOrder.indexOf("rpc:finish_telemetry_account_deletion"),
     ).toBeGreaterThan(operationOrder.indexOf("from:test_sessions"));
@@ -333,6 +381,8 @@ describe("account deletion telemetry coverage", () => {
     expect(failed.status).toBe(500);
     expect(deleteUser).not.toHaveBeenCalled();
     expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_jack_access_account_deletion",
+      "delete_jack_access_account",
       "begin_telemetry_account_deletion",
     ]);
 
@@ -375,6 +425,8 @@ describe("account deletion telemetry coverage", () => {
     expect(recordingRows).toHaveLength(1);
     expect(deleteUser).not.toHaveBeenCalled();
     expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_jack_access_account_deletion",
+      "delete_jack_access_account",
       "begin_telemetry_account_deletion",
     ]);
 
@@ -383,10 +435,13 @@ describe("account deletion telemetry coverage", () => {
     expect(recordingRows).toHaveLength(0);
     expect(deleteUser).toHaveBeenCalledWith("user-1");
     expect(rpcCalls.map(({ name }) => name)).toEqual([
+      "begin_jack_access_account_deletion",
+      "delete_jack_access_account",
       "begin_telemetry_account_deletion",
+      "begin_jack_access_account_deletion",
+      "delete_jack_access_account",
       "begin_telemetry_account_deletion",
       "finish_telemetry_account_deletion",
-      "delete_jack_access_account",
     ]);
   });
 });

@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import { createHash } from "node:crypto";
 import { resolveIdentity, type CallerIdentity } from "./admin-auth.js";
 import { supabase } from "./supabase.js";
 
@@ -18,6 +19,16 @@ export interface JackAccessContext {
   organizations: JackOrganization[];
   canInvite: boolean;
 }
+/** Same SHA-256 subject fence as the trusted account-deletion RPC. */
+export async function isJackAccountDeleted(userId: string): Promise<boolean> {
+  const result = await supabase
+    .from("jack_access_deleted_accounts")
+    .select("subject_hash")
+    .eq("subject_hash", createHash("sha256").update(userId).digest("hex"))
+    .maybeSingle();
+  if (result.error) throw result.error;
+  return !!result.data;
+}
 function currentWindow(row: {
   active: boolean;
   valid_from?: string | null;
@@ -35,7 +46,8 @@ function currentWindow(row: {
 export async function resolveJackOrganizations(
   userId: string,
 ): Promise<JackOrganization[]> {
-  const [general, legacy, deleted] = await Promise.all([
+  if (await isJackAccountDeleted(userId)) return [];
+  const [general, legacy] = await Promise.all([
     supabase
       .from("jack_memberships")
       .select("organization_id,role,active")
@@ -46,16 +58,9 @@ export async function resolveJackOrganizations(
       .select("organization_id,pilot_id,role,active,valid_from,valid_until")
       .eq("user_id", userId)
       .eq("active", true),
-    supabase
-      .from("jack_access_deleted_accounts")
-      .select("user_id")
-      .eq("user_id", userId)
-      .maybeSingle(),
   ]);
   if (general.error) throw general.error;
   if (legacy.error) throw legacy.error;
-  if (deleted.error) throw deleted.error;
-  if (deleted.data) return [];
   const current = (legacy.data ?? []).filter(currentWindow);
   const pilotIds = current.flatMap((row) =>
     row.pilot_id ? [row.pilot_id as string] : [],
@@ -113,7 +118,12 @@ export async function jackAccessContext(
   req: Request,
 ): Promise<JackAccessContext> {
   const caller = await resolveIdentity(req);
-  if (!caller || caller.classification !== "resolved" || caller.isPresentation)
+  if (
+    !caller ||
+    caller.classification !== "resolved" ||
+    caller.isPresentation ||
+    (await isJackAccountDeleted(caller.userId))
+  )
     return { allowed: false, organizations: [], canInvite: false };
   const organizations = await resolveJackOrganizations(caller.userId);
   return {
@@ -129,6 +139,7 @@ export async function inviteOrganizations(
   caller: CallerIdentity,
 ): Promise<Array<{ id: string; name: string }>> {
   if (caller.classification !== "resolved" || caller.isPresentation) return [];
+  if (await isJackAccountDeleted(caller.userId)) return [];
   if (caller.isAdmin) {
     const result = await supabase
       .from("organizations")

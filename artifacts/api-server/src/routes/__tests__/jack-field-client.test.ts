@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   membership: vi.fn(),
   identity: vi.fn(),
   from: vi.fn(),
+  authorizationFrom: vi.fn(),
   videos: vi.fn(),
 }));
 vi.mock("../../lib/transcription.js", () => ({
@@ -16,7 +17,18 @@ vi.mock("../../lib/activity-telemetry.js", () => ({
   resolveActiveTesterScope: mocks.membership,
 }));
 vi.mock("../../lib/admin-auth.js", () => ({ resolveIdentity: mocks.identity }));
-vi.mock("../../lib/supabase.js", () => ({ supabase: { from: mocks.from } }));
+vi.mock("../../lib/supabase.js", () => ({
+  supabase: {
+    from: (table: string) =>
+      [
+        "jack_access_deleted_accounts",
+        "jack_memberships",
+        "pilot_memberships",
+      ].includes(table)
+        ? mocks.authorizationFrom(table)
+        : mocks.from(table),
+  },
+}));
 vi.mock("../../lib/library-read-policy.js", () => ({
   readableVideos: mocks.videos,
 }));
@@ -64,12 +76,35 @@ beforeEach(() => {
     classification: "resolved",
   });
   mocks.transcribe.mockResolvedValue("Turn off the supply first.");
+  // Authorization tables are independent of the source-record fixtures below.
+  // Existing no-resource-read assertions still cover knowledge/video reads.
+  mocks.authorizationFrom.mockImplementation(() => ({
+    ...query(null),
+    then: (resolve: (value: unknown) => unknown) =>
+      Promise.resolve(resolve({ data: [], error: null })),
+  }));
   mocks.from.mockReturnValue(query(null));
   mocks.videos.mockReturnValue(query(null));
 });
 afterEach(() => vi.unstubAllEnvs());
 
 describe("native transient transcription", () => {
+  it("denies a deleted tester before multipart, resource reads or provider work", async () => {
+    mocks.authorizationFrom.mockReturnValue(
+      query({ subject_hash: "deleted-subject" }),
+    );
+    const res = await request(app())
+      .post("/api/jack/transcribe")
+      .set("Content-Type", "multipart/form-data; boundary=broken")
+      .send("invalid");
+    expect(res.status).toBe(403);
+    expect(mocks.authorizationFrom).toHaveBeenCalledWith(
+      "jack_access_deleted_accounts",
+    );
+    expect(mocks.membership).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.transcribe).not.toHaveBeenCalled();
+  });
   it.each([
     "/api/jack/transcribe/",
     "/api/JACK/TRANSCRIBE",
@@ -91,6 +126,7 @@ describe("native transient transcription", () => {
       .set("Content-Type", "multipart/form-data; boundary=broken")
       .send("invalid");
     expect(res.status).toBe(401);
+    expect(mocks.authorizationFrom).not.toHaveBeenCalled();
     expect(mocks.membership).not.toHaveBeenCalled();
     expect(mocks.transcribe).not.toHaveBeenCalled();
   });

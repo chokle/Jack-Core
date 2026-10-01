@@ -5,6 +5,7 @@ import request from "supertest";
 const getAuth = vi.hoisted(() => vi.fn());
 const resolveActiveTesterScope = vi.hoisted(() => vi.fn());
 const resolveIdentity = vi.hoisted(() => vi.fn());
+const isJackAccountDeleted = vi.hoisted(() => vi.fn());
 const resolveJackOrganizations = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({ getAuth }));
@@ -12,7 +13,10 @@ vi.mock("../../lib/activity-telemetry.js", () => ({
   resolveActiveTesterScope,
 }));
 vi.mock("../../lib/admin-auth.js", () => ({ resolveIdentity }));
-vi.mock("../../lib/jack-access.js", () => ({ resolveJackOrganizations }));
+vi.mock("../../lib/jack-access.js", () => ({
+  resolveJackOrganizations,
+  isJackAccountDeleted,
+}));
 
 import { requireAuth } from "../requireAuth.js";
 import { requirePilotAccess } from "../requirePilotAccess.js";
@@ -38,6 +42,7 @@ function makeApp(): Express {
 const app = makeApp();
 
 beforeEach(() => {
+  isJackAccountDeleted.mockReset().mockResolvedValue(false);
   getAuth.mockReset();
   resolveActiveTesterScope.mockReset();
   resolveIdentity.mockReset();
@@ -46,6 +51,27 @@ beforeEach(() => {
 });
 
 describe("requirePilotAccess", () => {
+  it("denies a deleted subject before active tester or admin shortcuts", async () => {
+    getAuth.mockReturnValue({ userId: "deleted_admin" });
+    isJackAccountDeleted.mockResolvedValue(true);
+    resolveActiveTesterScope.mockResolvedValue({
+      scope: { organizationId: "org" },
+    });
+    resolveIdentity.mockResolvedValue({
+      classification: "resolved",
+      isAdmin: true,
+    });
+    expect((await request(app).get("/api/videos")).status).toBe(403);
+    expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+    expect(resolveIdentity).not.toHaveBeenCalled();
+    expect((await request(app).delete("/api/account")).status).toBe(200);
+  });
+  it("fails closed before shortcuts when the deletion fence cannot be read", async () => {
+    getAuth.mockReturnValue({ userId: "user_error" });
+    isJackAccountDeleted.mockRejectedValue(new Error("database unavailable"));
+    expect((await request(app).get("/api/videos")).status).toBe(500);
+    expect(resolveActiveTesterScope).not.toHaveBeenCalled();
+  });
   it.each(["/api/", "/api/healthz", "/api/system-health"])(
     "keeps public probe %s available without membership lookup",
     async (path) => {

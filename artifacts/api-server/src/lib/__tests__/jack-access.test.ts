@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Request } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
@@ -51,14 +52,12 @@ import { isEligibleSiteMember } from "../site-mapping-access.js";
 
 beforeEach(() => {
   h.error = false;
-  h.identity
-    .mockReset()
-    .mockResolvedValue({
-      userId: "user_a",
-      classification: "resolved",
-      isAdmin: false,
-      isPresentation: false,
-    });
+  h.identity.mockReset().mockResolvedValue({
+    userId: "user_a",
+    classification: "resolved",
+    isAdmin: false,
+    isPresentation: false,
+  });
   h.data = {
     organizations: [
       { id: "org_a", name: "Our tenant", status: "active" },
@@ -186,8 +185,28 @@ describe("Jack tenant membership", () => {
       "database unavailable",
     );
   });
+  it("denies a deleted platform admin before access or invitation shortcuts", async () => {
+    h.data.jack_access_deleted_accounts = [
+      { subject_hash: createHash("sha256").update("user_a").digest("hex") },
+    ];
+    h.identity.mockResolvedValue({
+      userId: "user_a",
+      classification: "resolved",
+      isAdmin: true,
+      isPresentation: false,
+    });
+    expect(await jackAccessContext({} as Request)).toEqual({
+      allowed: false,
+      organizations: [],
+      canInvite: false,
+    });
+    expect(await inviteOrganizations(await h.identity())).toEqual([]);
+    expect(await isEligibleSiteMember("user_a", "org_a")).toBe(false);
+  });
   it("honors the permanent account-deletion fence", async () => {
-    h.data.jack_access_deleted_accounts = [{ user_id: "user_a" }];
+    h.data.jack_access_deleted_accounts = [
+      { subject_hash: createHash("sha256").update("user_a").digest("hex") },
+    ];
     expect(await resolveJackOrganizations("user_a")).toEqual([]);
   });
 });

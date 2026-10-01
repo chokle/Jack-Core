@@ -17,7 +17,10 @@ vi.mock("@clerk/express", () => ({
 }));
 vi.mock("../lib/activity-telemetry.js", () => ({ resolveActiveTesterScope }));
 vi.mock("../lib/admin-auth.js", () => ({ resolveIdentity }));
-vi.mock("../lib/jack-access.js", () => ({ resolveJackOrganizations }));
+vi.mock("../lib/jack-access.js", () => ({
+  resolveJackOrganizations,
+  isJackAccountDeleted: async () => false,
+}));
 vi.mock("../routes/access.js", async () => ({
   default: (await import("express")).Router(),
 }));

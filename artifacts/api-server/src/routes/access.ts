@@ -3,7 +3,11 @@ import { clerkClient } from "@clerk/express";
 import { rateLimit } from "express-rate-limit";
 import { CreateJackInvitationBody } from "@workspace/api-zod";
 import { resolveIdentity } from "../lib/admin-auth.js";
-import { inviteOrganizations, jackAccessContext } from "../lib/jack-access.js";
+import {
+  inviteOrganizations,
+  isJackAccountDeleted,
+  jackAccessContext,
+} from "../lib/jack-access.js";
 import { supabase } from "../lib/supabase.js";
 
 const router = Router();
@@ -191,7 +195,6 @@ router.post("/access/invitations", inviteLimiter, async (req, res) => {
       });
     if (created.error || !created.data)
       throw created.error ?? new Error("Invitation not persisted");
-    const row = created.data as InvitationRow;
     // Persist intent before sending. A repeated request returns its receipt and
     // never duplicates an email whose delivery outcome is unknown.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -220,9 +223,21 @@ router.post("/access/invitations", inviteLimiter, async (req, res) => {
           if (timedOut) throw new Error("Account provisioning timed out");
           const bound = await supabase
             .from("jack_access_invitations")
-            .update({ clerk_user_id: user.id })
-            .eq("id", requestId);
-          if (bound.error) throw bound.error;
+            .update({
+              clerk_user_id: user.id,
+              invited_by_user_id: caller.userId,
+            })
+            .eq("id", requestId)
+            .eq("status", "pending")
+            .select("*")
+            .single();
+          if (bound.error || !bound.data)
+            throw bound.error ?? new Error("Invitation is no longer pending");
+          if (
+            (await isJackAccountDeleted(caller.userId)) ||
+            (await isJackAccountDeleted(user.id))
+          )
+            throw new Error("Account deletion prevents invitation delivery");
           if (timedOut) throw new Error("Account provisioning timed out");
           return clerkClient.invitations.createInvitation({
             emailAddress: email,
@@ -242,7 +257,11 @@ router.post("/access/invitations", inviteLimiter, async (req, res) => {
       ]);
       const delivered = await supabase
         .from("jack_access_invitations")
-        .update({ clerk_invitation_id: invitation.id, delivery_status: "sent" })
+        .update({
+          clerk_invitation_id: invitation.id,
+          delivery_status: "sent",
+          invited_by_user_id: caller.userId,
+        })
         .eq("id", requestId)
         .select("*")
         .single();
@@ -252,22 +271,20 @@ router.post("/access/invitations", inviteLimiter, async (req, res) => {
     } catch {
       const uncertain = await supabase
         .from("jack_access_invitations")
-        .update({ delivery_status: "unknown" })
+        .update({
+          delivery_status: "unknown",
+          invited_by_user_id: caller.userId,
+        })
         .eq("id", requestId)
         .select("*")
         .single();
+      if (uncertain.error || !uncertain.data)
+        throw uncertain.error ?? new Error("Invitation receipt unavailable");
       req.log?.warn(
         { invitationId: requestId },
         "Invitation email delivery is unconfirmed; do not resend this request",
       );
-      return res.status(202).json(
-        receipt(
-          (uncertain.data as InvitationRow | null) ?? {
-            ...row,
-            delivery_status: "unknown",
-          },
-        ),
-      );
+      return res.status(202).json(receipt(uncertain.data as InvitationRow));
     } finally {
       if (timer) clearTimeout(timer);
     }

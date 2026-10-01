@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   userId: "",
   counter: 0,
+  failWrites: false,
   rows: [] as Array<Record<string, unknown>>,
   identity: vi.fn(),
   organizations: vi.fn(),
+  deleted: vi.fn(),
   context: vi.fn(),
   getUser: vi.fn(),
   invite: vi.fn(),
@@ -26,6 +28,7 @@ vi.mock("../../lib/admin-auth.js", () => ({ resolveIdentity: h.identity }));
 vi.mock("../../lib/jack-access.js", () => ({
   inviteOrganizations: h.organizations,
   jackAccessContext: h.context,
+  isJackAccountDeleted: h.deleted,
 }));
 vi.mock("../../lib/supabase.js", () => ({
   supabase: { from: h.from, rpc: h.rpc },
@@ -50,7 +53,9 @@ app.use("/api", router);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.deleted.mockReset().mockResolvedValue(false);
   h.rows = [];
+  h.failWrites = false;
   h.userId = `user_${++h.counter}`;
   h.identity.mockResolvedValue({
     userId: h.userId,
@@ -113,6 +118,10 @@ beforeEach(() => {
         return query;
       },
       then: (resolve: (result: unknown) => unknown) => {
+        if (action === "update" && h.failWrites)
+          return Promise.resolve(
+            resolve({ data: null, error: { code: "42501" } }),
+          );
         let rows = h.rows.filter((row) =>
           filters.every(([key, value]) => row[key] === value),
         );
@@ -149,6 +158,30 @@ beforeEach(() => {
 });
 
 describe("tenant invitations", () => {
+  it("returns no stale email receipt if deletion rejects a late provider write", async () => {
+    h.invite.mockImplementation(async () => {
+      h.failWrites = true;
+      return { id: "provider_after_deletion" };
+    });
+    const result = await request(app)
+      .post("/api/access/invitations")
+      .send(input);
+    expect(result.status).toBe(503);
+    expect(JSON.stringify(result.body)).not.toContain("new@example.com");
+    expect(JSON.stringify(result.body)).not.toContain(
+      "provider_after_deletion",
+    );
+  });
+  it("does not send an invitation after bound recipient deletion is observed", async () => {
+    h.deleted.mockImplementation(
+      async (userId: string) => userId === "invited_user",
+    );
+    const result = await request(app)
+      .post("/api/access/invitations")
+      .send(input);
+    expect(result.status).toBe(202);
+    expect(h.invite).not.toHaveBeenCalled();
+  });
   it("requires authentication even before the general access gate", async () => {
     h.userId = "";
     expect((await request(app).post("/api/access/accept")).status).toBe(401);
