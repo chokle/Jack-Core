@@ -4,4 +4,8 @@ packages:
 autoInstallPeers: false
 strictPeerDependencies: false
 minimumReleaseAge: 1440
-allowBuilds: {}
+allowBuilds:
+  esbuild: true
+  "@clerk/shared": false
+  browser-tabs-lock: false
+  core-js: false
