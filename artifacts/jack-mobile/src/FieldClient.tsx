@@ -29,7 +29,7 @@ import {
 import { File } from "expo-file-system";
 import { randomUUID } from "expo-crypto";
 import { useVideoPlayer, VideoView, type VideoPlayer } from "expo-video";
-import { Action, BrandLockup, JackIdentity, styles, theme } from "./ui";
+import { Action, BrandLockup, styles, theme } from "./ui";
 import {
   JackApi,
   authorizedMediaUrl,
@@ -982,7 +982,6 @@ export function FieldClient() {
             ) : (
               surface === "ask" && (
                 <View style={local.card}>
-                  <JackIdentity />
                   <Text style={styles.title}>What do you need to know?</Text>
                   <Text style={styles.body}>
                     Ask by voice or text. Jack brings back the knowledge and the
