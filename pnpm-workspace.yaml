@@ -1,5 +1,7 @@
 packages:
   - artifacts/*
+  # Native SDK peers must not change the production web dependency graph.
+  - '!artifacts/jack-mobile'
   - lib/*
   - lib/integrations/*
   - scripts

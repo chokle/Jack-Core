@@ -1,0 +1,7 @@
+.expo/
+dist-android/
+android/
+ios/
+.env
+.env.local
+node_modules/

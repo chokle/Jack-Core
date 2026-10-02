@@ -1,0 +1,101 @@
+name: Native Android Verification
+
+on:
+  push:
+    branches: [feat/native-android-209]
+  pull_request:
+    branches: [main]
+    paths:
+      - "artifacts/jack-mobile/**"
+      - "artifacts/api-server/src/routes/jack-field-client.ts"
+      - "artifacts/api-server/src/routes/__tests__/jack-field-client.test.ts"
+      - "lib/api-spec/openapi.yaml"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "scripts/native-live-contract.mjs"
+      - ".github/workflows/native-android-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  internal-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPO_PUBLIC_JACK_API_URL: https://jack.torchlabs.ca
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install locked backend workspace
+        timeout-minutes: 8
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated native dependencies
+        working-directory: artifacts/jack-mobile
+        timeout-minutes: 8
+        run: pnpm install --frozen-lockfile
+      - name: Require real Clerk configuration
+        run: |
+          node -e 'if (!/^pk_(live|test)_/.test(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || "")) throw new Error("Existing Clerk publishable configuration unavailable; no APK acceptance")'
+      - name: Native typecheck and meaningful unit tests
+        working-directory: artifacts/jack-mobile
+        run: |
+          pnpm typecheck
+          pnpm test
+      - name: Backend adapter tests and compile
+        run: |
+          pnpm --filter @workspace/api-server exec vitest run src/routes/__tests__/jack-field-client.test.ts src/lib/__tests__/knowledge-read-policy.test.ts src/lib/__tests__/transcription-buffer.test.ts --maxWorkers=1
+          pnpm --filter @workspace/api-server typecheck
+          pnpm --filter @workspace/api-server build
+      - name: Anonymous production boundaries
+        run: node scripts/native-live-contract.mjs
+      - name: Android JS export
+        working-directory: artifacts/jack-mobile
+        timeout-minutes: 8
+        run: pnpm export:android
+      - name: Generate native Android project
+        working-directory: artifacts/jack-mobile
+        run: pnpm prebuild:android
+      - name: Build standalone internal APK with embedded JS
+        working-directory: artifacts/jack-mobile/android
+        timeout-minutes: 25
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+      - name: Record artifact identity
+        run: |
+          mkdir -p android-artifact
+          cp artifacts/jack-mobile/android/app/build/outputs/apk/release/app-release.apk android-artifact/jack-android-internal.apk
+          unzip -l android-artifact/jack-android-internal.apk | grep -q 'assets/index.android.bundle'
+          sha256sum android-artifact/jack-android-internal.apk > android-artifact/SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > android-artifact/source-sha.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android-artifact/jack-android-internal.apk > android-artifact/signature.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions android-artifact/jack-android-internal.apk > android-artifact/permissions.txt
+          if grep -E '(android.permission.(SYSTEM_ALERT_WINDOW|VIBRATE|USE_BIOMETRIC|USE_FINGERPRINT|CAMERA|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|READ_MEDIA_AUDIO|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE)|BIND_GET_INSTALL_REFERRER_SERVICE)' android-artifact/permissions.txt; then
+            echo 'Unexpected device permission in first field slice'
+            exit 1
+          fi
+          printf '%s\n' 'Internal development-key APK. Build verification only; physical authenticated acceptance and Play signing remain separate gates.' > android-artifact/ACCEPTANCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jack-android-internal-${{ github.sha }}
+          path: android-artifact/
+          if-no-files-found: error
+          retention-days: 14
