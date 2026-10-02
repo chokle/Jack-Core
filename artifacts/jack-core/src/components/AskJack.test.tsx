@@ -196,7 +196,15 @@ describe("AskJack UX", () => {
       { target: { value: "What is Torch?" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Send question" }));
-    expect(askJackState.pendingCalls[0].message).toBe("What is Torch?");
+    expect(askJackState.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: "What is Torch?" }),
+      }),
+      expect.any(Object),
+    );
+    expect(screen.getByTestId("assistant-message").textContent).toContain(
+      "What is Torch?",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Return to guide" }));
     expect(returnToGuide).toHaveBeenCalledOnce();
   });
