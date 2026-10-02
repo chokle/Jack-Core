@@ -378,6 +378,7 @@ export function EndOfShiftCloseout({
               <label className="block space-y-1 text-sm">
                 <span className="font-semibold">Reason for correction</span>
                 <Textarea
+                  data-tour-target="closeout-notes"
                   value={correctionReason}
                   maxLength={500}
                   onChange={(event) => setCorrectionReason(event.target.value)}
@@ -448,6 +449,7 @@ export function EndOfShiftCloseout({
                       {QUESTION_LABELS[question] ?? question}
                     </label>
                     <Textarea
+                      data-tour-target="closeout-notes"
                       id={inputId}
                       rows={3}
                       maxLength={1000}

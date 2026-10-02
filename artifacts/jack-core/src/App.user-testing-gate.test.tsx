@@ -228,7 +228,23 @@ vi.mock("./components/VideoDetail", () => ({
   VideoDetail: () => <div data-testid="video-detail-page" />,
 }));
 vi.mock("./components/AskJack", () => ({
-  AskJack: () => <div data-testid="ask-jack-page" />,
+  AskJack: ({
+    isOpen,
+    onClose,
+    onReturnToGuide,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onReturnToGuide?: () => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="ask-jack-page">
+        <button onClick={onClose}>Close Ask Jack</button>
+        {onReturnToGuide && (
+          <button onClick={onReturnToGuide}>Return to guide</button>
+        )}
+      </div>
+    ) : null,
 }));
 vi.mock("./components/SystemHealthWidget", () => ({
   SystemHealthWidget: () => <div data-testid="system-health" />,
@@ -517,12 +533,46 @@ function resetServiceState() {
 }
 
 describe("user-testing gate transition", () => {
-  it("offers a skippable first-run guide and remembers the choice for this account", async () => {
+  it("finishes the sequential first-run guide and remembers the choice for this account", async () => {
     await renderAuthenticatedApp("/app");
-    expect(screen.getByRole("heading", { name: "Welcome to Jack" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Skip guide" }));
+    expect(
+      screen.getByRole("heading", { name: "Welcome to Jack" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish guide" }));
     expect(screen.getByTestId("memory-graph-view")).toBeTruthy();
-    expect(localStorage.getItem(`jack-orientation-v1:${identity.userId}`)).toBe("seen");
+    expect(localStorage.getItem(`jack-orientation-v1:${identity.userId}`)).toBe(
+      "seen",
+    );
+  });
+
+  it("returns from Ask Jack to the same guide without completing it", async () => {
+    await renderAuthenticatedApp("/app");
+    fireEvent.click(
+      within(
+        screen.getByRole("list", { name: "Jack onboarding steps" }),
+      ).getByRole("button", { name: "Ask Jack" }),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Welcome to Jack" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Return to guide" }));
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "1",
+    );
+    expect(
+      localStorage.getItem(`jack-orientation-v1:${identity.userId}`),
+    ).toBeNull();
+    fireEvent.click(
+      within(
+        screen.getByRole("list", { name: "Jack onboarding steps" }),
+      ).getByRole("button", { name: "Ask Jack" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close Ask Jack" }));
+    expect(
+      screen.getByRole("heading", { name: "Welcome to Jack" }),
+    ).toBeTruthy();
   });
 
   it.each([
@@ -726,10 +776,15 @@ describe("user-testing gate transition", () => {
 
     await renderAuthenticatedApp("/app");
 
-    await waitFor(() => expect(mockedStartTestSession).toHaveBeenCalledTimes(2), {
-      timeout: 3_000,
-    });
-    expect(screen.getByRole("heading", { name: "Welcome to Jack" })).toBeTruthy();
+    await waitFor(
+      () => expect(mockedStartTestSession).toHaveBeenCalledTimes(2),
+      {
+        timeout: 3_000,
+      },
+    );
+    expect(
+      screen.getByRole("heading", { name: "Welcome to Jack" }),
+    ).toBeTruthy();
     expect(userConsented()).toBe("false");
 
     openFromAnyEntry();
