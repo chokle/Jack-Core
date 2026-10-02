@@ -1231,7 +1231,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                 ? "source"
                 : view === "dashboard" || view === "closeout"
                   ? view
-                  : "orientation"
+                  : view === "orientation"
+                    ? "orientation"
+                    : "source"
             }
             chatOpen={isChatOpen}
             onAskJack={handleOpenChat}
@@ -1252,11 +1254,18 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
           />
         )}
         <div
-          data-tour-source={selectedVideoId ? "" : undefined}
+          data-tour-source={
+            selectedVideoId ||
+            (view !== "orientation" &&
+              view !== "dashboard" &&
+              view !== "closeout")
+              ? ""
+              : undefined
+          }
           className={
             view === "orientation" && !selectedVideoId
               ? "hidden"
-              : "h-full min-h-0 min-w-0 flex-1"
+              : "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
           }
           style={
             orientationActive &&

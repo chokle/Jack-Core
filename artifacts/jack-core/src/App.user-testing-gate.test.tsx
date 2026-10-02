@@ -305,6 +305,10 @@ vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("./lib/use-memory-graph", () => ({
   useMemoryGraphData: () => ({
     model: {
+      topics: [],
+      nodes: [],
+      edges: [],
+      degree: {},
       counts: {
         nodes: 0,
         connections: 0,

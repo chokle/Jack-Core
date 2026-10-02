@@ -467,6 +467,7 @@ export function AskJack({
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            key="ask-jack-drawer"
             initial={{ x: "100%", opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0 }}
@@ -721,6 +722,7 @@ export function AskJack({
         )}
 
         <AlertDialog
+          key="clear-conversation"
           open={confirmingClear}
           onOpenChange={(open) => {
             if (!open && !clearHistory.isPending) setConfirmingClear(false);
