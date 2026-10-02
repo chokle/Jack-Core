@@ -142,7 +142,7 @@ function configureAskJackPending() {
   );
 }
 
-function renderAskJack() {
+function renderAskJack(onReturnToGuide?: () => void) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -154,6 +154,7 @@ function renderAskJack() {
         <button type="button">Outside</button>
         <AskJack
           isOpen
+          onReturnToGuide={onReturnToGuide}
           onClose={() => closeRef.current()}
           onCitationClick={vi.fn()}
           onFieldNoteClick={vi.fn()}
@@ -182,6 +183,30 @@ describe("AskJack UX", () => {
   afterEach(() => {
     cleanup();
     askJackState.mutate.mockReset();
+  });
+
+  it("guides sending and provides a return without clearing the conversation", () => {
+    const returnToGuide = vi.fn();
+    renderAskJack(returnToGuide);
+    expect(
+      screen.getByRole("note", { name: "Onboarding guidance" }).textContent,
+    ).toContain("orange Send button");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Ask Jack a question" }),
+      { target: { value: "What is Torch?" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    expect(askJackState.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ message: "What is Torch?" }),
+      }),
+      expect.any(Object),
+    );
+    expect(screen.getByTestId("assistant-message").textContent).toContain(
+      "What is Torch?",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Return to guide" }));
+    expect(returnToGuide).toHaveBeenCalledOnce();
   });
 
   it("sends fresh bounded UI context and the current telemetry session on each submission", async () => {

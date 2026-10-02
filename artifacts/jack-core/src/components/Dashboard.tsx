@@ -58,7 +58,10 @@ export function Dashboard({
           </p>
         </header>
 
-        <div className="rounded-2xl border border-border bg-card/70 p-5">
+        <div
+          data-tour-target="site-spatial-state"
+          className="rounded-2xl border border-border bg-card/70 p-5"
+        >
           <h2 className="text-lg font-bold">Site spatial state</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Live field awareness and private measured depth share one spatial

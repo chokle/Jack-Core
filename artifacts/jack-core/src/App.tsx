@@ -366,6 +366,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
     if (requested === "closeout") return "closeout";
     return "graph";
   });
+  const [orientationOwner, setOrientationOwner] = useState<string | null>(null);
   const orientationDecisionOwnerRef = useRef<string | null>(null);
   const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
@@ -452,6 +453,8 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
   // Signed-in identity (for the sidebar) + sign-out. Every user reaching this
   // component is authenticated; `isAdmin` only tunes which controls appear.
   const { data: me } = useGetMe();
+  const orientationActive =
+    view === "orientation" || (!!me?.userId && orientationOwner === me.userId);
   const isSignedIn = Boolean(me?.userId);
   const userLabel = me?.name ?? me?.email ?? "Account";
   const userSubLabel = me?.isAdmin ? "Administrator" : "Signed in";
@@ -578,6 +581,9 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
 
   const handleNavigate = (next: JackView) => {
     const destination: JackView = next === "radar" ? "dashboard" : next;
+    setOrientationOwner(
+      destination === "orientation" ? (me?.userId ?? null) : null,
+    );
     if (destination === "graph") setGraphFocusNodeId(null);
     const feature = {
       orientation: null,
@@ -1216,94 +1222,136 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
         onHistoryBack={handleHistoryBack}
         onHistoryForward={handleHistoryForward}
       >
-        {selectedVideoId ? (
-          <VideoDetail
-            videoId={selectedVideoId}
-            onBack={() => {
-              if (!moveNavigation(-1)) {
-                applyLocation({ view, selectedVideoId: null });
-              }
-            }}
-            originLabel={videoOriginLabel}
-            onOpenChat={handleOpenChat}
-            seek={seek}
-          />
-        ) : view === "orientation" ? (
+        {orientationActive && (
           <PilotOrientation
+            key={`orientation:${me?.userId}`}
             userId={me?.userId}
-            onAskJack={(prompt) => {
-              markOrientationSeen();
-              handleOpenChat(prompt);
+            surface={
+              selectedVideoId
+                ? "source"
+                : view === "dashboard" || view === "closeout"
+                  ? view
+                  : view === "orientation"
+                    ? "orientation"
+                    : "source"
+            }
+            chatOpen={isChatOpen}
+            onAskJack={handleOpenChat}
+            onOpenDashboard={() => {
+              setOrientationOwner(me?.userId ?? null);
+              navigateToLocation({ view: "dashboard", selectedVideoId: null });
             }}
-            onOpenDashboard={() => finishOrientation("dashboard")}
-            onOpenCloseout={() => finishOrientation("closeout")}
+            onOpenCloseout={() => {
+              setOrientationOwner(me?.userId ?? null);
+              if (canViewCloseout)
+                navigateToLocation({ view: "closeout", selectedVideoId: null });
+            }}
+            onReturnToGuide={() =>
+              navigateToLocation({ view: "orientation", selectedVideoId: null })
+            }
             onFinish={() => finishOrientation("graph")}
             canOpenCloseout={canViewCloseout}
           />
-        ) : view === "graph" ? (
-          <MemoryGraphView
-            data={graph}
-            focusNodeId={graphFocusNodeId}
-            onOpenVideo={handleSelectVideo}
-            onJumpToTimestamp={handleCitationClick}
-            onResumeInterview={handleResumeInterview}
-            onResumeChat={handleResumeChat}
-            onStartInterview={() => handleNavigate("interview")}
-          />
-        ) : view === "interview" ? (
-          <InterviewMode
-            key={
-              fieldNotePreload
-                ? `field-note-${fieldNoteHandoffToken.current}`
-                : "interview"
-            }
-            preload={interviewPreload}
-            fieldNote={fieldNotePreload}
-            onComplete={handleInterviewComplete}
-          />
-        ) : view === "review" ? (
-          <KnowledgeReview />
-        ) : view === "reports" ? (
-          <PilotActivityReports />
-        ) : view === "dashboard" ? (
-          <Dashboard
-            model={graph.model}
-            readyCount={graph.readyCount}
-            lastUpdatedLabel={
-              graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"
-            }
-            knowledgeState={
-              graph.isLoading
-                ? "loading"
-                : graph.hasError && !graph.model.counts.nodes
-                  ? "error"
-                  : "ready"
-            }
-            siteHudUserId={isSignedIn ? me?.userId : undefined}
-            onOpenCompetencies={() => handleNavigate("competencies")}
-            onOpenInsights={() => handleNavigate("insights")}
-          />
-        ) : view === "competencies" ? (
-          <CompetenciesView
-            data={graph}
-            onOpenVideo={handleSelectVideo}
-            onOpenGraph={handleOpenGraphNode}
-          />
-        ) : view === "insights" ? (
-          <InsightsView
-            data={graph}
-            onJumpToTimestamp={handleCitationClick}
-            onOpenGraph={handleOpenGraphNode}
-          />
-        ) : view === "closeout" && canViewCloseout ? (
-          <EndOfShiftCloseout
-            key={`closeout:${me?.userId ?? "signed-out"}`}
-            participantId={me?.userId ?? "participant"}
-            participantName={me?.name || me?.email}
-          />
-        ) : (
-          <Library onSelectVideo={handleSelectVideo} />
         )}
+        <div
+          data-tour-source={
+            selectedVideoId ||
+            (view !== "orientation" &&
+              view !== "dashboard" &&
+              view !== "closeout")
+              ? ""
+              : undefined
+          }
+          className={
+            view === "orientation" && !selectedVideoId
+              ? "hidden"
+              : "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          }
+          style={
+            orientationActive &&
+            (view !== "orientation" || !!selectedVideoId) &&
+            !isChatOpen
+              ? { paddingBottom: "var(--jack-tour-height, 260px)" }
+              : undefined
+          }
+        >
+          {selectedVideoId ? (
+            <VideoDetail
+              videoId={selectedVideoId}
+              onBack={() => {
+                if (!moveNavigation(-1)) {
+                  applyLocation({ view, selectedVideoId: null });
+                }
+              }}
+              originLabel={videoOriginLabel}
+              onOpenChat={handleOpenChat}
+              seek={seek}
+            />
+          ) : view === "orientation" ? null : view === "graph" ? (
+            <MemoryGraphView
+              data={graph}
+              focusNodeId={graphFocusNodeId}
+              onOpenVideo={handleSelectVideo}
+              onJumpToTimestamp={handleCitationClick}
+              onResumeInterview={handleResumeInterview}
+              onResumeChat={handleResumeChat}
+              onStartInterview={() => handleNavigate("interview")}
+            />
+          ) : view === "interview" ? (
+            <InterviewMode
+              key={
+                fieldNotePreload
+                  ? `field-note-${fieldNoteHandoffToken.current}`
+                  : "interview"
+              }
+              preload={interviewPreload}
+              fieldNote={fieldNotePreload}
+              onComplete={handleInterviewComplete}
+            />
+          ) : view === "review" ? (
+            <KnowledgeReview />
+          ) : view === "reports" ? (
+            <PilotActivityReports />
+          ) : view === "dashboard" ? (
+            <Dashboard
+              model={graph.model}
+              readyCount={graph.readyCount}
+              lastUpdatedLabel={
+                graph.lastUpdated ? timeAgo(graph.lastUpdated) : "—"
+              }
+              knowledgeState={
+                graph.isLoading
+                  ? "loading"
+                  : graph.hasError && !graph.model.counts.nodes
+                    ? "error"
+                    : "ready"
+              }
+              siteHudUserId={isSignedIn ? me?.userId : undefined}
+              onOpenCompetencies={() => handleNavigate("competencies")}
+              onOpenInsights={() => handleNavigate("insights")}
+            />
+          ) : view === "competencies" ? (
+            <CompetenciesView
+              data={graph}
+              onOpenVideo={handleSelectVideo}
+              onOpenGraph={handleOpenGraphNode}
+            />
+          ) : view === "insights" ? (
+            <InsightsView
+              data={graph}
+              onJumpToTimestamp={handleCitationClick}
+              onOpenGraph={handleOpenGraphNode}
+            />
+          ) : view === "closeout" && canViewCloseout ? (
+            <EndOfShiftCloseout
+              key={`closeout:${me?.userId ?? "signed-out"}`}
+              participantId={me?.userId ?? "participant"}
+              participantName={me?.name || me?.email}
+            />
+          ) : (
+            <Library onSelectVideo={handleSelectVideo} />
+          )}
+        </div>
       </JackShell>
 
       <TelemetryConsentModal
@@ -1317,6 +1365,18 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
       {/* Chat Drawer overlay */}
       <AskJack
         isOpen={isChatOpen}
+        onReturnToGuide={
+          orientationActive
+            ? () => {
+                setIsChatOpen(false);
+                setResumedThought(null);
+                navigateToLocation({
+                  view: "orientation",
+                  selectedVideoId: null,
+                });
+              }
+            : undefined
+        }
         onClose={() => {
           setIsChatOpen(false);
           setResumedThought(null);
