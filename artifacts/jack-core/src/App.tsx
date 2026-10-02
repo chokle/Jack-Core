@@ -1544,6 +1544,7 @@ function JackApp({ onSignOut }: { onSignOut?: () => void | Promise<void> }) {
                 ["orientation", "Start here"],
                 ["library", "Library"],
                 ["dashboard", "Dashboard"],
+                ...(isSignedIn ? [["radar", "Site radar"]] : []),
                 ["competencies", "Competencies"],
                 ["insights", "Insights"],
                 ["interview", "Interview"],
