@@ -112,13 +112,19 @@ export function FloatingJack() {
         `${Math.ceil(pill.getBoundingClientRect().height) + 12}px`,
       );
     reserveSpace();
+    let frame = 0;
+    const scheduleReserveSpace = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(reserveSpace);
+    };
     const observer =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(reserveSpace);
+        : new ResizeObserver(scheduleReserveSpace);
     observer?.observe(pill);
     return () => {
       observer?.disconnect();
+      cancelAnimationFrame(frame);
       document.documentElement.style.removeProperty("--jack-pill-height");
     };
   }, [authorized, cancelSpeech, dialogHost]);

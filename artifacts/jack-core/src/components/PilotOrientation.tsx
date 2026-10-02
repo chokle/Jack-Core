@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { TourSpotlight } from "./TourSpotlight";
 import { Button } from "@/components/ui/button";
 
@@ -45,12 +46,20 @@ export function PilotOrientation({
         `${coach.getBoundingClientRect().height + 32}px`,
       );
     update();
+    let frame = 0;
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    };
     const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(scheduleUpdate);
     observer?.observe(coach);
     window.addEventListener("resize", update);
     return () => {
       observer?.disconnect();
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);
       document.documentElement.style.removeProperty("--jack-tour-height");
     };
@@ -182,37 +191,48 @@ export function PilotOrientation({
                 : "[data-tour-source], [data-tour-coach]"
           }
         />
-        <aside
-          ref={coachRef}
-          data-tour-coach
-          aria-label="Jack onboarding guide"
-          className="fixed bottom-4 right-4 z-[70] max-h-[40dvh] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-cyan-400 bg-card p-4 shadow-xl"
-        >
-          <p className="text-xs font-semibold text-primary">
-            Step {activeStep + 1} of 3
-          </p>
-          <h2 className="mt-1 font-semibold">{steps[activeStep].title}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {steps[activeStep].guidance}
-          </p>
-          {surface === "closeout" && (
-            <p className="mt-2 text-sm">
-              Try the highlighted notes fields. You do not need to submit a
-              closeout to finish this guide.
-            </p>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {activeStep > 0 && (
-              <Button variant="ghost" onClick={goBack}>
-                Back
+        {createPortal(
+          <aside
+            ref={coachRef}
+            data-tour-coach
+            aria-label="Jack onboarding guide"
+            className="fixed right-4 z-[80] flex w-[calc(100%-2rem)] max-w-sm flex-col overflow-hidden rounded-xl border border-cyan-400 bg-card p-4 shadow-xl"
+            style={{
+              bottom:
+                "min(calc(var(--jack-pill-height, 0px) + max(0.75rem, env(safe-area-inset-bottom)) + 1rem), max(1rem, calc(100dvh - 13rem)))",
+              maxHeight:
+                "max(9rem, min(40dvh, calc(100dvh - var(--jack-pill-height, 0px) - max(0.75rem, env(safe-area-inset-bottom)) - 6rem)))",
+            }}
+          >
+            <div className="min-h-0 overflow-y-auto">
+              <p className="text-xs font-semibold text-primary">
+                Step {activeStep + 1} of 3
+              </p>
+              <h2 className="mt-1 font-semibold">{steps[activeStep].title}</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {steps[activeStep].guidance}
+              </p>
+              {surface === "closeout" && (
+                <p className="mt-2 text-sm">
+                  Try the highlighted notes fields. You do not need to submit a
+                  closeout to finish this guide.
+                </p>
+              )}
+            </div>
+            <div className="mt-3 flex shrink-0 flex-wrap gap-2">
+              {activeStep > 0 && (
+                <Button variant="ghost" onClick={goBack}>
+                  Back
+                </Button>
+              )}
+              <Button onClick={advance}>{steps[activeStep].nextLabel}</Button>
+              <Button variant="outline" onClick={onReturnToGuide}>
+                Return to guide
               </Button>
-            )}
-            <Button onClick={advance}>{steps[activeStep].nextLabel}</Button>
-            <Button variant="outline" onClick={onReturnToGuide}>
-              Return to guide
-            </Button>
-          </div>
-        </aside>
+            </div>
+          </aside>,
+          document.body,
+        )}
       </>
     );
   }
